@@ -1,0 +1,24 @@
+{
+  "name": "@overflow2026/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"shared: no tests (type-only module)\""
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

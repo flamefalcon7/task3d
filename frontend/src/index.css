@@ -1,0 +1,31 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+  color: #e7e6ea;
+  background: #0e1014;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  background: #1e2330;
+  color: inherit;
+  border: 1px solid #2e3340;
+  border-radius: 4px;
+}
+button:not(:disabled):hover {
+  background: #2a3140;
+}
+button:disabled {
+  opacity: 0.5;
+}
+
+select, input[type='range'] {
+  accent-color: #6b8eff;
+}

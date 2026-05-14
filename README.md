@@ -36,7 +36,8 @@ Not an NFT collection. `Model3D` is content — one creator publishes, many user
 - **Marketplace** (optional v1.1): Sui Kiosk + TransferPolicy — protocol-level royalty enforcement
 - **Frontend**: React + Vite, [Babylon.js](https://www.babylonjs.com/)
 - **Auth**: zkLogin via [Enoki](https://docs.enoki.mystenlabs.com/) — Google sign-in, no wallet required
-- **Backend**: Go, [`qmuntal/gltf`](https://github.com/qmuntal/gltf) — procedural mesh generation, zero AI API cost
+- **Backend**: Node 22 LTS + [Hono](https://hono.dev/) + [`@gltf-transform/core`](https://gltf-transform.dev/) — procedural mesh generation, zero AI API cost (per D-012)
+- **LLM router** (Phase 2): [Anthropic SDK](https://docs.anthropic.com/) — Claude Haiku as natural-language → generator-params router (D-011), ~$0.001/call
 
 ---
 
@@ -54,6 +55,29 @@ Detailed plan: [`docs/spec.md`](docs/spec.md) §6. Live progress: [`docs/phase-p
 
 ---
 
+## Run locally (Phase 1)
+
+The Phase 1 dev loop runs entirely on your machine — no Sui, no Walrus, no API keys.
+
+**Prerequisites**: Node 22 LTS (via [nvm](https://github.com/nvm-sh/nvm)) + pnpm 8.
+
+```bash
+nvm use            # picks up .nvmrc (22.22.3)
+pnpm install       # installs all workspaces
+pnpm dev           # starts backend (:3001) + frontend (:5173) in parallel
+```
+
+Open <http://localhost:5173>, pick a shape (box / chest / cylinder / sphere), drag the sliders, click **Generate**. The model previews in a Babylon canvas.
+
+Run tests:
+
+```bash
+pnpm test          # all workspaces (backend + frontend)
+pnpm typecheck     # all workspaces
+```
+
+---
+
 ## Repository structure
 
 ```
@@ -64,8 +88,9 @@ Detailed plan: [`docs/spec.md`](docs/spec.md) §6. Live progress: [`docs/phase-p
 │   ├── decisions.md           # Architecture Decision Records (ADR log)
 │   ├── phase-progress.md      # Current progress
 │   └── open-questions.md      # Unresolved questions
-├── backend/                   # Go (Phase 1+)
-├── frontend/                  # React + Vite + Babylon (Phase 1+)
+├── shared/                    # @overflow2026/shared — types shared by browser + backend
+├── backend/                   # Node 22 + Hono — procedural generators + LLM router (D-012)
+├── frontend/                  # React + Vite + Babylon (imperative wrapper per D-007)
 ├── contracts/                 # Sui Move (Phase 2+)
 ├── samples/                   # Sample game scene (Phase 3+)
 └── pitch/                     # Pitch deck + demo video assets (Phase 3+)
