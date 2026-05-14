@@ -54,5 +54,7 @@ See `docs/open-questions.md` for unverified assumptions. None block Phase 1 star
 - All 12 ADRs (D-001 ... D-012) in `docs/decisions.md` — do not reopen without prompting
 - D-011 is a **framing + architecture decision** — Phase 1 still ships procedural, just with the right interface seams + agent narrative ready
 - D-012 is a **language consolidation** — TS unified across browser + server. No Go anywhere. `@gltf-transform/core` replaces `qmuntal/gltf`.
+- **Backend runtime locked: Node 22 LTS** (not Bun). D-012 left Bun as an option; user picked Node 2026-05-14 at session close (rationale: Bun + `walrus-wasm` / `@anthropic-ai/sdk` debug risk too costly in a 38-day window).
 - LLM in this project is a **router**, not a geometry producer — user explicitly confirmed in office-hours that "LLM draws mesh" is unstable. Do not let scope creep there.
 - `/tmp/box-demo/` is a Go throwaway proof — D-012 says **do NOT port**, write fresh TS
+- Repo state at session close: 2 commits on `main` (`e061638` bootstrap, `51ca6db` D-012). Working tree clean.
