@@ -324,23 +324,26 @@ Demo 主路徑是 Browse(20% 時間)+ Generate(20% 時間)+ Buy Access 顯示 pr
 
 確認版本:**2026-05-08 train**,搭配 `@mysten/walrus-wasm@0.2.2`。
 
-**Setup**(Vite):
+**Setup**(Vite) — per D-019, `@mysten/sui@2.16.2` 已把 `SuiClient` 拆成 `SuiJsonRpcClient` + `SuiGrpcClient`,且 `walrus()` extension 不再吃 `network` option:
 
 ```ts
-import { SuiClient } from '@mysten/sui/client';  // 或 SuiGrpcClient,見 §5
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 import { walrus } from '@mysten/walrus';
 import walrusWasmUrl from '@mysten/walrus-wasm/web/walrus_wasm_bg.wasm?url';
 
-const client = new SuiClient({ url: 'https://fullnode.testnet.sui.io:443' })
-  .$extend(walrus({
-    network: 'testnet',
-    wasmUrl: walrusWasmUrl,
-    uploadRelay: {
-      host: 'https://upload-relay.testnet.walrus.space',
-      sendTip: { max: 1_000 },
-    },
-  }));
+const client = new SuiJsonRpcClient({
+  network: 'testnet',
+  url: getJsonRpcFullnodeUrl('testnet'),
+}).$extend(walrus({
+  wasmUrl: walrusWasmUrl,
+  uploadRelay: {
+    host: 'https://upload-relay.testnet.walrus.space',
+    sendTip: { max: 1_000 },
+  },
+}));
 ```
+
+JSON-RPC client deprecation 期限 July 2026(在 Phase 5 submission 之後),`SuiGrpcClient` 遷移留給 v1.1+。Phase 2 全程用 `SuiJsonRpcClient`。
 
 **一次性寫(後端用 keypair)**:
 

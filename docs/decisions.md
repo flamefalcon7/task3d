@@ -822,7 +822,73 @@ Add error constants:
 
 ---
 
+## D-019: `@mysten/sui@2.16.2` SDK split — `SuiClient` → `SuiJsonRpcClient` + `SuiGrpcClient`
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Phase 2 (Sui Integration) — surfaced during U3 implementation
+**Amends**: `docs/spec.md` §2.5 SDK example
+
+### Context
+
+Plan-002 U3 implementation (Walrus frontend wiring) hit a build error: spec.md §2.5 code sample imports `SuiClient` from `@mysten/sui/client`, but the D-008-pinned `@mysten/sui@2.16.2` no longer exports `SuiClient` from that subpath. The SDK has been split:
+
+- `SuiJsonRpcClient` from `@mysten/sui/jsonRpc` — JSON-RPC client (Phase 2 default)
+- `SuiGrpcClient` from `@mysten/sui/grpc` — gRPC client (faster; JSON-RPC client deprecated July 2026 per CLAUDE.md stack notes)
+
+Additionally, the `walrus()` extension factory no longer accepts a `network: 'testnet'` option in its config — it reads from `client.network` directly. Network selection now flows through `new SuiJsonRpcClient({ network: 'testnet', url: getJsonRpcFullnodeUrl('testnet') })`.
+
+### Decision
+
+For Phase 2 (testnet): use **`SuiJsonRpcClient`** from `@mysten/sui/jsonRpc`. Construction pattern:
+
+```ts
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
+import { walrus } from '@mysten/walrus';
+import walrusWasmUrl from '@mysten/walrus-wasm/web/walrus_wasm_bg.wasm?url';
+
+const client = new SuiJsonRpcClient({
+  network: 'testnet',
+  url: getJsonRpcFullnodeUrl('testnet'),
+}).$extend(walrus({
+  wasmUrl: walrusWasmUrl,
+  uploadRelay: {
+    host: 'https://upload-relay.testnet.walrus.space',
+    sendTip: { max: 1_000 },
+  },
+}));
+```
+
+Defer the `SuiGrpcClient` migration to a separate v1.1+ task (the deprecation deadline is July 2026 — after Phase 5 submission). Adopting gRPC pre-submission would invalidate every U3..U9 import path for marginal Phase 2 benefit.
+
+### Rationale
+
+- **Source-of-truth hierarchy** (CLAUDE.md): live primary sources (npm registry actual exports) outrank `docs/spec.md`. U3 was right to follow the SDK's actual API rather than the stale spec sample.
+- **JSON-RPC for Phase 2**: testnet GraphQL endpoint (P7) is the primary indexer path for U8 Browse; JSON-RPC client is what every other Sui ecosystem app currently uses; gRPC client adoption is a v1.1+ migration concern.
+- **Walrus extension network read**: the simpler API surface (network goes in one place — the SuiClient constructor — instead of being duplicated) is actually cleaner. spec.md §2.5's two-place network specification was the older 1.x SDK pattern.
+
+### Alternatives Considered
+
+- **Adopt `SuiGrpcClient` now**: rejected — touches every Sui SDK import path; no Phase 2 benefit; deprecation deadline (July 2026) is post-submission.
+- **Pin to older `@mysten/sui@1.x` that still exports `SuiClient` from `/client`**: rejected — would cascade-break the @mysten/walrus + dapp-kit + enoki + slush lock that D-008 establishes.
+
+### Consequences
+
+- ✅ U3 implementation pattern propagates cleanly to U4 (dApp Kit), U7 (creator PTB), U8 (Browse GraphQL), U9 (buyer PTB)
+- ✅ Spec.md §2.5 amended to match SDK reality
+- ⚠️ U7/U8/U9 plan-002 PTB pseudo-code still says `import { SuiClient } from '@mysten/sui/client'` — those samples are directional pseudo-code per the plan's "this illustrates the intended approach, not implementation specification" framing. Implementers should follow this ADR, not the plan pseudo-code, for actual imports.
+- 🔮 v1.1+: migrate to `SuiGrpcClient` ahead of the JSON-RPC deprecation deadline. Single ADR per migrated unit.
+
+### Related
+
+- spec.md §2.5 (amended to match)
+- D-008 (SDK version lock — D-019 doesn't break the lock; it's a refinement within the locked version)
+- Plan-002 U3 (initial surfacing); U4, U7, U8, U9 (downstream alignment)
+- CLAUDE.md "Stack at a Glance" stack notes mention `@mysten/sui/grpc` `SuiGrpcClient` — accurate but Phase 2 stays on JSON-RPC
+
+---
+
 # Reserved Decision Numbers
 
 D-017: React Router 7 adoption — to be captured before U7 starts.
-D-019 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-020 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
