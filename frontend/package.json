@@ -14,6 +14,9 @@
   "dependencies": {
     "@babylonjs/core": "^9.6.0",
     "@babylonjs/loaders": "^9.6.0",
+    "@mysten/sui": "2.16.2",
+    "@mysten/walrus": "1.1.7",
+    "@mysten/walrus-wasm": "0.2.2",
     "@overflow2026/shared": "workspace:*",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
