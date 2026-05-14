@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-14 (Phase 1 scaffold complete)
+## Last Updated: 2026-05-14 (Phase 1 scaffold complete + D-014 reframe accepted)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -38,21 +38,26 @@ See `docs/spec.md` §6 for full 5-phase plan.
 - Nothing — Phase 1 closed.
 
 ### Next Concrete Step
-**Start Phase 2: Sui Integration** (5/20 – 5/29, ~10 days).
+**Start Phase 2: Sui Integration** (5/20 – 5/29, ~10 days). **D-014 expanded scope** — now includes Tripo + Browse + tags.
 
 Sequencing per `docs/spec.md` §6 Phase 2:
-1. **Move contract** — `model3d::model3d` package in `contracts/`. Reference `SharedBlob` pattern from `@mysten/walrus`. Local `sui move test` for mint/extend/burn. Deploy to testnet, record `MODEL3D_PACKAGE_ID`
+1. **Move contract** — `model3d::model3d` package in `contracts/`. Reference `SharedBlob` pattern from `@mysten/walrus`. **D-014**: add `tags: vector<String>` field on `Model3D`. Local `sui move test` for mint/extend/burn. Deploy to testnet, record `MODEL3D_PACKAGE_ID`
 2. **Walrus** — wire `@mysten/walrus@1.1.7` + `@mysten/walrus-wasm@0.2.2` in frontend, Vite WASM config, upload relay endpoint in backend, `writeFilesFlow` upload from browser
 3. **Auth** — dApp Kit 1.0 + Enoki Google zkLogin + Slush wallet; backend verifies signed challenge → Sui address, JWT session
-4. **LLM router (D-011)** — replace `HardcodedRouter` with `AnthropicRouter` using `@anthropic-ai/sdk` + structured output + zod schema. Cost ~$0.001/call (Haiku). Keep `Router` interface unchanged so frontend code does not refactor
-5. **Lineage on Walrus (D-011)** — backend writes `lineage.json` blob alongside GLB per generation (prompt, LLM decision trace, params, generator source)
-6. **End-to-end** — type → LLM route → procedural generate → preview → Walrus upload → PTB `model3d::mint` → testnet wallet shows Model3D NFT
-7. **Generator catalog expansion** — add sword / hammer / platform generators (total 6+ shapes)
+4. **LLM router (D-011)** — replace `HardcodedRouter` with `AnthropicRouter` using `@anthropic-ai/sdk` + structured output + zod schema. Cost ~$0.001/call (Haiku). Keep `Router` interface unchanged so frontend code does not refactor. **D-014**: LLM also extracts tags from prompt
+5. **`TripoGenerator` (D-014, from D-011 Phase 3 → Phase 2)** — `backend/src/generators/tripo.ts` implements `Generator` interface. Async polling client. Fixed params: P1 model, `face_limit=5000`, `texture=false`. Used in seed phase only; demo观众不直接呼叫
+6. **Lineage on Walrus (D-011)** — backend writes `lineage.json` blob alongside GLB per generation (prompt, LLM decision trace, params, generator source)
+7. **End-to-end creator flow** — type → LLM route → procedural/Tripo generate → preview → Walrus upload → PTB `model3d::mint(tags)` → testnet wallet shows Model3D NFT
+8. **Browse marketplace (D-014)** — Sui indexer query for all `Model3D` on testnet; frontend `/` Browse page with grid + Walrus aggregator preview + Buy Access flow; frontend `/generate` becomes secondary route
+9. **End-to-end buyer flow (D-014)** — Browse → click card → Connect Wallet → Buy Access → wallet shows soulbound `Access`
+10. **Generator catalog expansion** — add sword / hammer / platform procedural generators (total 7 procedural shapes)
 
 ### Blockers / Open Questions
-See `docs/open-questions.md`. None block Phase 2 start. Open follow-ups carried from D-011:
+See `docs/open-questions.md`. None block Phase 2 start. Open follow-ups:
 - Anthropic API budget tracking (Haiku ~$0.001/call; demo budget ~$0.10 — not material)
-- Phase 3 Tripo decision (catalog adequacy review) — not blocking Phase 2
+- **D-014a Phase 3 game scene form factor** (G1/G2/G3) — decide at end of Phase 2 (~5/29) once catalog content is known. See OQ-011
+- **OQ-012 catalog search** — v1 ships browse + tag filter only; semantic search v1.1+
+- **Tripo free tier budget** — 300 credits/month × 2 months (May+June) = 6-10 P1 calls total. Reserve for Phase 3 seed catalog (5-8 hero models). Do not burn on Phase 2 testing — use `texture=false` (60 credits/call) or fewer test calls
 
 ### Notes for Next Session
 - **Phase 1 invariants to preserve in Phase 2**:
@@ -62,7 +67,7 @@ See `docs/open-questions.md`. None block Phase 2 start. Open follow-ups carried 
 - Backend GLB store is currently `backend/tmp/<uuid>.glb` (local disk). Phase 2 replaces with Walrus upload — `backend/tmp/` writes can be kept as a transient staging area before Walrus PUT, or dropped entirely if frontend uploads directly via upload relay
 - Per D-013: Kiosk + TransferPolicy is v1 must-have (Phase 4), L2 Derivative is v1.1 deferred (preserve `Derivative` / `DerivativeApproval` Move structs in `spec.md §2.8` but do not implement in v1)
 - User stated preference: **finish early, more time for pitch deck + demo video polish**. Bias toward compressing Phase 1–4, expanding Phase 5
-- All 13 ADRs (D-001 ... D-013) in `docs/decisions.md` — do not reopen without prompting
+- All 14 ADRs (D-001 ... D-014) in `docs/decisions.md` — do not reopen without prompting. **D-014 reframes Tripo to "creator's optional self-paid tool" + demo to "browse-first marketplace"** — the previous mental model of "every user types prompt → service generates" is wrong now
 - Frontend TS pin is `~5.8.0` (matches Vite scaffold's `erasableSyntaxOnly` requirement); backend + shared are on `~5.5.0`. Not unified yet — bump when convenient
 - `vite.config.ts` and `vitest.config.ts` are split intentionally — Vitest 2.x's bundled Vite 5 types conflict with Vite 8's `server.proxy`. Don't merge them back without a Vitest 3 upgrade
 - **Procedural mesh testing lesson (Phase 1 cylinder bug)**: vertex-count + triangle-count assertions are NOT enough. They pass while winding is inverted — only browser rendering reveals it. **For every new generator added in Phase 2+, write a normal-direction test for at least one representative triangle per face/cap.** See `backend/src/generators/cylinder.test.ts:triNormalY` for the helper pattern; Phase 2 generators (sword, hammer, platform) should each carry equivalents

@@ -501,6 +501,128 @@ D-001's "Composable Creator Economy / Programmable IP Layer" framing remains the
 
 ---
 
+## D-014: Tripo P1 接入 Phase 2 為 creator 自費上層,demo 主路徑改 browse-first marketplace
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Phase 2 (Sui Integration) — refines D-011 Tripo decision timing
+
+### Context
+
+D-011 把 Tripo 列為「Phase 3 才決定要不要接的 secondary generator」。Phase 1 完成後 2026-05-14 重新評估:
+
+1. **使用者觀察**:Phase 1 出貨的 4 個 procedural 形狀(box / chest / cylinder / sphere)demo 視覺說服力不足,單看一個 box 不像可以拿來賣的 game asset
+2. **Tripo API 研究**(`compound-engineering:ce-web-researcher`,2026-05-14):Tripo P1 model 原生 48-20,000 faces、native GLB、~2 秒生成、`face_limit` 參數可硬限 poly 數、`smart_low_poly` 旗標、`texture: false` 可關貼圖。三項之前的疑慮(無法控 poly / 不能拿純 GLB / 太慢)都被新 API 推翻
+3. **產品 reframe(本決定的關鍵 insight)**:用戶不是「每個人來打 prompt 燒 token」,而是 **大多數 buyer 來 browse 既有 catalog → 找到合適 → 買 Access**;只有少數 **creator** 在 catalog 找不到時才會 generate 自己的(procedural 免費,或自費 Tripo)。Tripo 的真實位置不是 service 的吃 token 工具,而是個別 creator 自願付費的 art tool
+4. **Free tier 受限**:300 credits / 月 ≈ 3-5 次 P1 呼叫。user 決定不訂閱 $12/mo。在 reframe 後這個限制變得無關緊要 — Tripo 只在 demo 前 seed 階段被 team-as-creators 用一次,不在 demo 時被觀眾呼叫
+5. **L2 Derivative 已於 D-013 deferred 到 v1.1**:之前 D-011 提到的「衍生創作 fork chest」demo scene 在 v1 不存在。需要新的 demo flow 主軸 — browse-first marketplace 自然填補這個位置
+
+### Decision
+
+#### 14.1 Tripo P1 接入 Phase 2(從 D-011 的 Phase 3 提前)
+
+實作 `TripoGenerator` 接 Phase 1 已穩定的 `Generator` interface(`shared/src/types.ts`),參數固定為:
+
+```ts
+{
+  model: "Tripo-P1",
+  face_limit: 5000,
+  smart_low_poly: false,  // P1 native low-poly,不需要
+  texture: false,         // 省 credit 也省 Walrus 儲存
+  output_format: "glb"
+}
+```
+
+`AnthropicRouter` Phase 2 決策邏輯改為:
+
+```
+prompt → LLM 抽 shape + params
+  ├─ shape ∈ procedural catalog (box/chest/cylinder/sphere/sword/hammer/platform)
+  │   → ProceduralGenerator(免費,~10ms)
+  └─ shape ∉ catalog
+      → TripoGenerator(async polling,~2s,creator 自費)
+```
+
+#### 14.2 Demo flow 主路徑改 browse-first
+
+Frontend 多一個 **Browse 頁**(`/`,demo 預設首頁):
+
+1. 連 Sui indexer(GraphQL 或自寫 events query)抓所有 testnet 上的 `Model3D` objects
+2. 渲染成 grid,每張卡片含 GLB preview(從 Walrus aggregator 抓)+ creator 地址 + 價格
+3. 點卡片 → preview 全頁 + Connect Wallet → Buy Access(testnet SUI)
+4. 「Generate New」是右上角次要 CTA,進到現有 generate 流程
+
+Demo 主路徑(80% 觀眾):browse → buy。Generate 是 secondary path(20%,「creator 角度」),demo 走 procedural 即時生成,**不在 demo 時呼叫 Tripo**。
+
+#### 14.3 Tripo seed-only operating mode
+
+Tripo 呼叫策略:
+
+- **Seed phase**(demo 拍片前 1 週):team-as-creators 用 free 300 credits 生 5-8 個英雄物件(複雜形狀:dragon、castle、ornate sword、phoenix、ancient_chest...),mint 為 Model3D 上 testnet,seed 進 Browse catalog
+- **Demo phase**:Browse 看得到這些 Tripo 生成物,但 demo 不會再呼叫 Tripo API
+- **Generate 路徑 demo 時**:LLM 即使 route 到 Tripo,前端遮蓋此分支或顯示「This shape is creator-only, contact creator」訊息
+
+#### 14.4 SearchExistingCatalog 機制 v1 不做
+
+理論上 Browse 應該 + 「搜尋既有 catalog 看有沒有合適的」功能(LLM 拿 prompt → 找最像的既有 Model3D)。**v1 不做**:
+
+- Move struct 上 `Model3D` 加 `tags: vector<String>` 欄位,creator publish 時帶 tag(由前端從 LLM 抽 prompt 自動填,或手填)
+- v1 frontend 只做純 Browse(list all + filter by tag),不做語意相似搜尋
+- v1.1+:加 LLM 語意搜尋(embed prompt vs embed model description),或 backend indexer 加 prompt search
+
+#### 14.5 Phase 3 demo scene 形態(G1/G2/G3)延遲決定
+
+Phase 3 sample game scene(spec.md §6 Phase 3)的具體形態 — Trophy Room(G1)、Dress-up Mannequin(G2)、Mini-Adventure(G3) — 取決於 Phase 2 結束時 catalog 實際長什麼樣:
+
+- 若 catalog 以靜態道具(sword / hammer / chest)為主 → G2 dress-up 自然
+- 若 catalog 有大型場景物(dragon / castle)→ G1 trophy room 自然
+- 若 catalog 多元 → G3 mini-adventure 串得起來但工作量最高
+
+**留下單獨的 ADR(D-014a)在 Phase 2 結束(預計 5/29)後決定**。對應 open-question 條目見 `docs/open-questions.md` OQ-011。
+
+### Rationale
+
+- **Browse-first 解掉「人人燒 token」假設**:大多數 demo 觀眾不需要打 prompt,自然壓低 LLM + Tripo 雙重 API 成本
+- **Tripo seed-only 解掉 free tier 限制**:5-8 次 / 月足夠 seed,demo 期間 Tripo 呼叫量為 0
+- **Generator interface seam 不變**:Phase 1 設計的 `Generator` interface 直接吃 Tripo 實作,無重構成本
+- **強化 Composable Creator Economy / Programmable IP Layer framing(D-001 vision)**:browse + buy Access + royalty 回 creator,這是真正在運作的 creator economy,不是 demo 假設
+- **強化 Walrus track「verifiable memory layer」框架**:catalog 本身就是 Walrus + Sui 共同維護的可驗證歷史,每個 Model3D 都有鏈上 timestamp + Walrus content hash
+- **tag 欄位 vs Search**:tag 欄位設計零成本(Move struct 多一個 field),保留未來 search 選項;v1 全部做完 search 是 over-scope,deferred 是務實
+- **Phase 3 game scene 延後決定**:model 類型 → 適合的 game 形態,順序合理。先衝 Phase 2 再決定
+
+### Alternatives Considered
+
+- **Tripo 維持 Phase 3 decision point(D-011 原規劃)**:rejected — Phase 2 已知 P1 是現成 async API,提前接入 marginal cost ~0.5-1 day,Phase 3 才接會擠掉 game scene 時間
+- **訂閱 Tripo $12/mo,Tripo 當主力 generator**:rejected — user 不採訂閱;且 user 即時打 prompt 燒 token 的 model 跟 browse-first reframe 衝突
+- **完全不接 Tripo,Phase 2 純 procedural**:rejected — 7 個 procedural 形狀 demo 視覺仍不足以證明「real-world game asset」;Tripo seed 物件補足 catalog 視覺豐富度
+- **Phase 2 直接做 SearchExistingCatalog**:rejected — LLM 語意搜尋複雜度高,v1 範圍應該先把 Browse + mint + buy 打通
+- **Phase 2 用 Meshy.ai 取代 Tripo**:暫不採。Meshy 強項是 Rigging API,但 dress-up scene 用 Mixamo 預 rig 角色 + Tripo 靜態道具就夠。Rigging 留 v1.1
+- **Phase 3 game scene 現在決定 G1/G2/G3**:rejected — 應該由 model 類型驅動 game 形態,順序不能反
+
+### Consequences
+
+- ✅ Phase 2 demo flow 從「打字 → 生成 → mint」升級為「browse → buy」+「creator 才需要 generate」雙路徑,符合真實 marketplace 行為
+- ✅ Tripo 接入但呼叫成本可控(seed-only,不在 user-facing 路徑)
+- ✅ `Model3D.tags: vector<String>` 欄位讓未來 search 可走 0 → indexer → semantic 三段升級,不會 schema migration
+- ✅ Generator interface 設計被 Tripo 實際接入驗證
+- ✅ Phase 3 game scene 推遲決定避免「先決定 game 再決定 model」的本末倒置
+- ⚠️ Frontend 變兩頁(Browse + Generate)— UI 工作量略增。Vite + React 已 scaffold,實作 ~1 天
+- ⚠️ Sui indexer query 是 Phase 2 新增工作項。GraphQL endpoint 或自寫 events query 都行
+- ⚠️ Tripo P1 async polling client(submit → poll task_id → download GLB)是新代碼,~0.5 天
+- ⚠️ Seed 物件 5-8 個的選題 + 命名 + tag + LicenseTerms 設定需要 day-0 規劃,寫進 Phase 3 任務清單
+- 🔮 v1.1:LLM 語意搜尋上線後,Tripo 從 seed-only 升級為 creator-on-demand,前端 unblock Tripo generate 分支
+- 🔮 v1.1:tag → 用戶可以 filter / search by tag,或加 collections 概念
+
+### Related
+
+- **spec.md** 改動:§1.7 agent layer 第 3 個 bullet(Generator selection)+ §6 Phase 2 任務清單 + §6 Phase 3 sample game scene 段
+- **open-questions.md**:OQ-011(Phase 3 game scene 形態,待 Phase 2 結束)+ OQ-012(catalog search 機制 v1.1+)
+- **Move struct**:`Model3D` 加 `tags: vector<String>` 欄位 — Phase 2 寫合約時加入
+- **Related decisions**:builds on D-001(creator economy framing 在 v1 真實落地)、D-011(Tripo 提前到 Phase 2)、D-013(v1 scope refocus — browse-first 跟 5 賣點 framing 完全一致)、D-006(GLB only — Tripo 也是 GLB native)
+- **research artifact**:Tripo API research 2026-05-14 by `ce-web-researcher` — 顯示 face_limit / smart_low_poly / texture=false 都可用,P1 ~2s
+
+---
+
 # Reserved Decision Numbers
 
-D-014 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-015 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

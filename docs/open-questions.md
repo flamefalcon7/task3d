@@ -86,13 +86,13 @@ Add new entries below as **OQ-XXX** in order. Move resolved questions to the bot
 
 ---
 
-## OQ-009: Sample game scene tech choice (Three.js vs Unity WebGL)
+## OQ-009: Sample game scene tech choice (Three.js vs Unity WebGL vs Babylon)
 
-**Why this matters**: Phase 3 deliverable. Three.js is web-native, lighter, easier to embed in demo. Unity WebGL is more "game dev legitimate" but larger setup overhead (bundle size, build pipeline).
+**Why this matters**: Phase 3 deliverable. Three.js / Babylon (we already have Babylon in `frontend/`) is web-native, lighter, easier to embed in demo. Unity WebGL is more "game dev legitimate" but larger setup overhead (bundle size, build pipeline).
 
-**To resolve**: User preference + time budget. Recommend Three.js for v1 (faster to ship, no build pipeline).
+**To resolve**: User preference + time budget. **Babylon makes most sense** given we already use it in frontend — same Engine instance can be reused, no second 3D library to learn. Three.js is the alternative if Babylon proves heavy for the chosen scene form (depends on OQ-011 G1/G2/G3 outcome).
 
-**Blocker level**: 🟡 Resolve before Phase 3 start (5/30).
+**Blocker level**: 🟡 Resolve together with OQ-011 before Phase 3 start (5/30).
 
 ---
 
@@ -103,6 +103,38 @@ Add new entries below as **OQ-XXX** in order. Move resolved questions to the bot
 **To resolve**: Check handbook + ask devrel@sui.io if shortlisted teams get specific deck requirements.
 
 **Blocker level**: 🟢 Not blocking; relevant if shortlisted (announced 7/8).
+
+---
+
+## OQ-011: Phase 3 sample game scene form factor (G1 / G2 / G3)
+
+**Why this matters**: D-014 deferred this decision until Phase 2 catalog is complete. The scene form (Trophy Room / Dress-up Mannequin / Mini-Adventure) should be driven by what kinds of Model3D we actually have, not chosen blind.
+
+**Three candidate forms**:
+- **G1 Trophy Room** — first-person walk-through showcase, no character, NFTs on pedestals. ~2-3 days. Fits well if catalog is large-prop heavy (castles, dragons).
+- **G2 Dress-up Mannequin** — single Mixamo-rigged character, equip slots for NFT weapons/armor/props from your Access inventory, 360° preview. ~3-4 days. Fits if catalog is weapon/equipment heavy. **Currently recommended fallback**.
+- **G3 Mini-Adventure** — top-down or 3rd-person character + walkable terrain + pickup items + equip. ~5-7 days. Highest production value but highest scope risk (character controller, animation blend, collision).
+
+**To resolve**: At end of Phase 2 (~5/29), review catalog composition + remaining Phase 3 budget → write **D-014a** ADR locking the choice. Pick the form that lets the chosen catalog shine while leaving Phase 5 buffer.
+
+**Constraint from D-014**: all meshes in the scene must come from our service (procedural + Tripo seed), not external free game assets. Mixamo character is the only external dependency allowed.
+
+**Blocker level**: 🟡 Decide by 5/29 (Phase 2 end).
+
+---
+
+## OQ-012: Catalog search / discovery beyond pure browse (v1.1+)
+
+**Why this matters**: D-014 chose pure browse + tag filter for v1, deferred semantic search to v1.1+. Need to decide approach when traction proves search is wanted.
+
+**Three approaches**:
+- **S1. LLM semantic search** — embed user prompt + each Model3D's description/tags → cosine top-K. Cost: embedding API per query. Best UX.
+- **S2. Tag-based filter only** — frontend filter chips by tag. Cost: 0. Lowest UX but functional.
+- **S3. Backend indexer with prompt search** — Phase 2 already builds a Sui indexer query for Browse. Extend with text search across `tags` and (future) `description` field. Mid-cost, mid-UX.
+
+**To resolve**: Don't resolve in v1. Watch v1 user behavior (do users complain "can't find what I want"?) → pick S1 or S3 in v1.1 based on signal. **S2 is v1 default and likely enough for ~20-30 catalog items.**
+
+**Blocker level**: 🟢 Not blocking v1. Revisit post-submission.
 
 ---
 

@@ -161,11 +161,20 @@ L1  Base Model3D + Kiosk — Creator A 上傳,Walrus 存 GLB + lineage,
 L3  Game Integration    — Game dev C 買 access(soulbound),在遊戲裡用
 ```
 
-**Agent layer(D-011 新增)的具體行為**:
+**Agent layer(D-011 新增,D-014 更新 Generator selection)的具體行為**:
 - **NL parse + catalog 路由**:用戶打「I want a small wooden chest, lid half open」→ LLM 輸出 `{generator: "chest", w: 0.6, h: 0.4, d: 0.4, lid_angle: 45, material: "wood"}`
-- **多步驟拆解**:用戶打「5 dungeon props: barrel, crate, torch, sign, chest」→ LLM 拆 5 個 subtask → 5 個 generator call → 自動命名 series → 一次 batch mint 5 個 `Derivative`
-- **Generator selection**:catalog 內 → `ProceduralGenerator`(Go,< 2s,manifold);catalog 外 → 若 Phase 3 接了 Tripo 走 `TripoGenerator`,否則告知用戶 catalog 不支援
+- **多步驟拆解**:用戶打「5 dungeon props: barrel, crate, torch, sign, chest」→ LLM 拆 5 個 subtask → 5 個 generator call → 自動命名 series → 一次 batch mint(L2 Derivative 在 v1.1,v1 batch 為 L1 多 Model3D mint)
+- **Generator selection(D-014 改)**:catalog 內 shape → `ProceduralGenerator`(TS + `@gltf-transform/core`,< 2s,manifold,$0/gen);catalog 外 shape → `TripoGenerator`(P1 model,`face_limit=5000`,`texture=false`,~2s,**creator 自費**)。Tripo demo 期間為 seed-only(team-as-creators 用 free tier 預生英雄物件,demo 觀眾只 browse 不 generate)
 - **Lineage on Walrus**:每個輸出附 `lineage.json` blob(prompt + 決策 trace + params + generator source + base 關係)— **這就是 handbook 講的 verifiable memory layer 的實作**
+
+**Browse-first marketplace flow(D-014 新增)**:
+
+| User type | 路徑 | 付費 |
+|---|---|---|
+| 🛍 Buyer(大多數人) | Browse catalog → 找到合適 Model3D → Connect wallet → Buy Access | 付 SUI(royalty 回 creator) |
+| 🎨 Creator(少數人) | Catalog 找不到 → Generate(procedural 免費 / Tripo 自費) → Mint Model3D | 付 Walrus 儲存 + 選擇性 Tripo |
+
+Demo 主路徑是 Browse(20% 時間)+ Generate(20% 時間)+ Buy Access 顯示 protocol-level royalty enforcement(60% 時間,連結 §1.7 賣點 1)。`Model3D.tags: vector<String>` 欄位 v1 用於 filter / list,v1.1+ 可升級到 LLM 語意搜尋(見 `docs/open-questions.md` OQ-012)。
 
 **Pitch story 一句**:**"Agentic 3D asset factory with on-chain IP composition, backed by Walrus as both asset storage AND agent memory."**
 
@@ -1130,31 +1139,42 @@ react-babylonjs:
 - Output:前端 → backend → preview GLB 渲染出來,end-to-end 但**不上鏈**
 - `/tmp/box-demo/` 的 Go proof 確認 procedural 概念後**不搬**(D-012),TS 版本從零寫
 
-### Phase 2:Sui Integration(5/20 – 5/29,~10 天)
-**目標**:Walrus + Move + Auth + LLM agent 全部接上,testnet 跑通 mint
+### Phase 2:Sui Integration(5/20 – 5/29,~10 天)— D-014 新增 Tripo + Browse + tags
+**目標**:Walrus + Move + Auth + LLM agent + Tripo + Browse marketplace 全接上,testnet 跑通 mint + buy Access
 
 - **Move 合約**:寫 `model3d::model3d` 參考 `SharedBlob` 模式,本地 `sui move test` 過 mint/extend/burn,部署 testnet,記 `MODEL3D_PACKAGE_ID`
+  - **D-014 新增**:`Model3D` 加 `tags: vector<String>` 欄位(creator publish 時帶,LLM 從 prompt 自動填或手填)
 - **Walrus**:`@mysten/walrus@1.1.7` + `walrus-wasm@0.2.2` + Vite WASM 設定 + upload relay,從瀏覽器跑 `writeFilesFlow` 上傳 GLB
 - **Auth**:dApp Kit 1.0 + Enoki Google zkLogin + Slush wallet,後端用 signed challenge 驗 Sui address,JWT session
-- **LLM agent router(D-011 新增,D-012 改 TS)**:後端 `backend/agent/router.ts` 接 `@anthropic-ai/sdk`(Claude Haiku 預設,`claude-haiku-4-5-20251001`),用 [structured output](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) + `zod` schema 把 NL → `{generator: "chest", params: {...}}`。Schema 來自 `shared/types.ts`,browser 也 import。Cost ~$0.001/call
-- **Lineage on Walrus(D-011 新增)**:每個 generation 附 `lineage.json` blob(prompt、LLM 決策、params、generator source、base 關係)。同一 Walrus write batch,加 1 個小 blob 不收額外 floor
-- **End-to-end**:打字 → LLM 路由 → procedural generate → Preview → Confirm → Walrus upload(GLB + lineage)→ PTB call `model3d::mint`,在 testnet wallet 看到 Model3D NFT
-- Sword / hammer / platform generators 加進來(共 6 個 shape)
-- 一週緩衝給 SDK 踩雷(WASM 載入、epoch retry、CORS、Move type 不合)
+- **LLM agent router(D-011 / D-014)**:後端 `backend/agent/router.ts` 接 `@anthropic-ai/sdk`(Claude Haiku 預設,`claude-haiku-4-5-20251001`),用 [structured output](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) + `zod` schema 把 NL → `{generator: "chest" | "tripo", params: {...}, tags: [...]}`。Schema 來自 `shared/types.ts`,browser 也 import。Cost ~$0.001/call
+- **`TripoGenerator`(D-014 新增,從 D-011 Phase 3 提前)**:`backend/generators/tripo.ts` 實作 `Generator` interface。Async polling client(submit → poll task_id → download GLB)。固定參數 `{model: "Tripo-P1", face_limit: 5000, texture: false, output_format: "glb"}`。Demo 期間 seed-only(team 用 free 300 credits/月生 5-8 個英雄物件預先 mint),不開放 demo 觀眾即時呼叫
+- **Lineage on Walrus(D-011)**:每個 generation 附 `lineage.json` blob(prompt、LLM 決策、params、generator source、base 關係)。同一 Walrus write batch,加 1 個小 blob 不收額外 floor
+- **Browse marketplace(D-014 新增)**:
+  - Sui indexer query(GraphQL 或自寫 events query)抓 testnet 上所有 `Model3D`
+  - Frontend `/`(Browse page)grid 列出,卡片含 GLB preview(Walrus aggregator 抓)+ creator 地址 + Access 價格 + tags
+  - 點卡片 → preview 全頁 + Connect Wallet → Buy Access(testnet SUI)
+  - Frontend `/generate`(原 Phase 1 generate 流程)變成 secondary route
+- **End-to-end(creator)**:打字 → LLM 路由 → procedural / Tripo generate → Preview → Confirm → Walrus upload(GLB + lineage)→ PTB call `model3d::mint(tags: [...])`,在 testnet wallet 看到 Model3D NFT
+- **End-to-end(buyer,D-014 新增)**:Browse → 點卡片 → Connect Wallet → Buy Access → wallet 顯示 `Access` 物件(soulbound)
+- Sword / hammer / platform procedural generators 加進來(共 7 個 procedural shape)
+- 一週緩衝給 SDK 踩雷(WASM 載入、epoch retry、CORS、Move type 不合、Tripo polling timeout)
 
 ### Phase 3:Real-World Application 證據(5/30 – 6/10,~12 天)— **這是 50% 評分**
 **目標**:把專案從「技術 demo」變成「產品」。**這 phase 跳掉 = 死在 Real-World Application 50%**
 
-- **🚦 D-011 Tripo decision point(這 phase 中段做)**:
-  - 評估目前 procedural catalog 視覺品質從 demo video 角度夠不夠
-  - 看 Phase 2 lineage 上 Walrus 跑得順不順
-  - **若夠** → 不接 Tripo,Phase 4 全力衝 derivative layer + mainnet
-  - **若不夠** → wire `TripoGenerator` 實作同一 `Generator` interface(~30 LoC + Tripo Pro tier API key),demo 從 hybrid agent 角度更強
-- **多步驟 agent demo(D-011 新增)**:除了單一 NL → 1 個 mesh,加一個「5 dungeon props batch」demo path — 用戶打一句話,agent 拆 5 步,Walrus 上 5 個 GLB + 5 個 lineage + 1 個 series manifest,Move 上 1 次 batch mint。**這是 agentic workflow 的具體實證**,直接打 Walrus track framing
-- **Sample game scene**(Three.js 或 Unity WebGL,任選一)
-  - 一個簡單 3D 場景(角色 + 地形)
-  - User 用 wallet 連線,把自己 mint 的 sword 裝備到角色身上
-  - **這就是 real-world 鐵證:NFT 真的能用在 game**
+- **🚦 D-011 Tripo decision point — D-014 已決定 Tripo 提前到 Phase 2**(下移到 Phase 2 任務清單;此 phase 不再處理)
+- **Seed catalog 建立(D-014 新增,Phase 3 day-1 任務)**:
+  - team-as-creators 用 free 300 credits/月 × 2 個月(May + June)= 6-10 次 Tripo P1 呼叫
+  - 預生 5-8 個複雜「英雄物件」(候選:ancient_dragon、stone_castle、phoenix、ornate_sword、wizard_staff、ancient_chest、demon_horns、crystal_orb)
+  - 配合 procedural 7 種基本物件(box / chest / cylinder / sphere / sword / hammer / platform),catalog 共 ~12-15 個 Model3D
+  - 每個 seed mint 帶完整 tags(`["fantasy", "weapon", "low-poly", "sword", ...]`)+ LicenseTerms + Kiosk listing
+- **多步驟 agent demo(D-011)**:除了單一 NL → 1 個 mesh,加一個「5 dungeon props batch」demo path — 用戶打一句話,agent 拆 5 步,Walrus 上 5 個 GLB + 5 個 lineage + 1 個 series manifest,Move 上 1 次 batch mint。**這是 agentic workflow 的具體實證**,直接打 Walrus track framing
+- **🚦 Phase 3 sample scene form factor(D-014 — D-014a ADR 將在 Phase 2 結束時新增)**:
+  - **待 Phase 2 catalog 實際內容決定**:G1 Trophy Room(walk-through showcase)/ G2 Dress-up Mannequin(equip 既有 NFT 道具)/ G3 Mini-Adventure(walkable + pickup)
+  - 對應 open-questions OQ-011
+  - 預設方向:G2 dress-up mannequin(成本 3-4 天,Mixamo 預 rig 角色 + 用 catalog 道具 equip)— 但**不寫死**,看 Phase 2 出貨後再 ADR 確認
+  - **目標**:這個 scene 必須**全部 mesh 都從我們 service 出貨**(procedural primitives 當場景 prop + Tripo seed 物件當英雄道具),不外掛免費商城 model — 這才是 real-world 鐵證
+  - User 用 wallet 連線,Browse 自己擁有的 Access → 把對應 NFT 道具 equip / 放進場景
 - **Pitch deck v1**:problem / solution / customer / use case / why now / why us / roadmap
 - **Traction signal**:
   - 開 Discord / Twitter,放 demo gif
