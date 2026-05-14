@@ -40,9 +40,9 @@ describe('PreviewCanvas', () => {
     const babylon = await import('@babylonjs/core');
     const spy = babylon.LoadAssetContainerAsync as unknown as ReturnType<typeof vi.fn>;
     spy.mockClear();
-    render(<PreviewCanvas glbUrl="/api/preview/abc" />);
+    render(<PreviewCanvas glbUrl="blob:http://localhost/abc" />);
     await Promise.resolve();
     await Promise.resolve();
-    expect(spy).toHaveBeenCalledWith('/api/preview/abc', expect.anything());
+    expect(spy).toHaveBeenCalledWith('blob:http://localhost/abc', expect.anything());
   });
 });

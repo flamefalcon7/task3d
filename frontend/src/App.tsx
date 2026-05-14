@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { GenerateParams } from '@overflow2026/shared';
-import { generate, previewUrl } from './lib/api';
+import { generate } from './lib/api';
 import { ShapePicker } from './components/ShapePicker';
 import { PreviewCanvas } from './babylon/PreviewCanvas';
 
@@ -10,13 +10,20 @@ function App() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!glbUrl) return;
+    return () => URL.revokeObjectURL(glbUrl);
+  }, [glbUrl]);
+
   const onGenerate = useCallback(async () => {
     if (!params) return;
     setStatus('loading');
     setErrMsg(null);
     try {
-      const { id } = await generate(params);
-      setGlbUrl(previewUrl(id));
+      const { glbBytes } = await generate(params);
+      const blob = new Blob([glbBytes as BlobPart], { type: 'model/gltf-binary' });
+      const url = URL.createObjectURL(blob);
+      setGlbUrl(url);
       setStatus('idle');
     } catch (e) {
       setStatus('error');

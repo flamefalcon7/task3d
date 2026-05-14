@@ -1,13 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { HardcodedRouter } from './agent/router.js';
 import { buildGenerateRoute } from './routes/generate.js';
-import { buildPreviewRoute } from './routes/preview.js';
 import { shapesRoute } from './routes/shapes.js';
-
-const tmpDir = join(fileURLToPath(new URL('../tmp', import.meta.url)));
 
 export function buildApp() {
   const app = new Hono();
@@ -16,10 +11,7 @@ export function buildApp() {
 
   const router = new HardcodedRouter();
   app.route('/api/shapes', shapesRoute);
-  app.route('/api/generate', buildGenerateRoute({ router, tmpDir }));
-  app.route('/api/preview', buildPreviewRoute({ tmpDir }));
+  app.route('/api/generate', buildGenerateRoute({ router }));
 
   return app;
 }
-
-export { tmpDir };

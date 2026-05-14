@@ -40,3 +40,11 @@ export const generateParamsSchema = z.discriminatedUnion('shape', [
 ]);
 
 export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;
+
+export const generateResponseSchema = z.object({
+  glbBytes: z.string(),
+  lineageJson: z.string(),
+  lineageStub: z.unknown(),
+});
+
+export type ValidatedGenerateResponse = z.infer<typeof generateResponseSchema>;

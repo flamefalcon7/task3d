@@ -1,13 +1,11 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { GenerateResponse, Router } from '@overflow2026/shared';
 import { generateParamsSchema } from '../lib/schema.js';
+import { buildLineageJson, buildLineageStub } from '../lib/lineage.js';
 
 export interface GenerateRouteDeps {
   router: Router;
-  tmpDir: string;
 }
 
 export function buildGenerateRoute(deps: GenerateRouteDeps) {
@@ -28,17 +26,24 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
     const { glbBytes, lineageStub: genStub } = await generator.generate(params);
 
     const id = randomUUID();
-    await writeFile(join(deps.tmpDir, `${id}.glb`), glbBytes);
+    const createdAt = new Date().toISOString();
+    const generatorSource = routeStub.generatorSource ?? genStub.generatorSource ?? 'procedural';
+
+    const lineageInput = {
+      id,
+      shape: params.shape,
+      params,
+      generatorSource,
+      createdAt,
+    };
 
     const response: GenerateResponse = {
-      id,
+      glbBytes: Buffer.from(glbBytes).toString('base64'),
+      lineageJson: buildLineageJson(lineageInput),
       lineageStub: {
         ...routeStub,
         ...genStub,
-        id,
-        shape: params.shape,
-        params,
-        createdAt: new Date().toISOString(),
+        ...buildLineageStub(lineageInput),
       },
     };
     return c.json(response);

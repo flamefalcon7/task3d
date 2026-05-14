@@ -1,27 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { Hono } from 'hono';
+import type { LineageRecord } from '@overflow2026/shared';
 import { HardcodedRouter } from '../agent/router.js';
 import { buildGenerateRoute } from './generate.js';
-import { buildPreviewRoute } from './preview.js';
 import { shapesRoute } from './shapes.js';
 
 let app: Hono;
-let tmpDir: string;
 
-beforeAll(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), 'overflow-test-'));
+beforeAll(() => {
   app = new Hono();
   const router = new HardcodedRouter();
   app.route('/api/shapes', shapesRoute);
-  app.route('/api/generate', buildGenerateRoute({ router, tmpDir }));
-  app.route('/api/preview', buildPreviewRoute({ tmpDir }));
-});
-
-afterAll(async () => {
-  await rm(tmpDir, { recursive: true, force: true });
+  app.route('/api/generate', buildGenerateRoute({ router }));
 });
 
 describe('GET /api/shapes', () => {
@@ -33,26 +23,45 @@ describe('GET /api/shapes', () => {
   });
 });
 
-describe('POST /api/generate + GET /api/preview/:id', () => {
-  it('round-trip box: valid params returns id, preview serves GLB bytes', async () => {
+describe('POST /api/generate', () => {
+  it('returns glbBytes (base64) + lineageJson + lineageStub for a valid box', async () => {
     const post = await app.request('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shape: 'box', width: 1, height: 1, depth: 1 }),
     });
     expect(post.status).toBe(200);
-    const { id } = (await post.json()) as { id: string };
-    expect(id).toMatch(/^[a-f0-9-]{36}$/);
+    const body = (await post.json()) as {
+      glbBytes: string;
+      lineageJson: string;
+      lineageStub: Partial<LineageRecord>;
+    };
+    expect(typeof body.glbBytes).toBe('string');
+    expect(typeof body.lineageJson).toBe('string');
+    expect(body.lineageStub.shape).toBe('box');
+    expect(body.lineageStub.generatorSource).toBe('procedural');
+    expect(body.lineageStub.id).toMatch(/^[a-f0-9-]{36}$/);
 
-    const get = await app.request(`/api/preview/${id}`);
-    expect(get.status).toBe(200);
-    expect(get.headers.get('Content-Type')).toBe('model/gltf-binary');
-    const buf = new Uint8Array(await get.arrayBuffer());
-    // GLB magic = "glTF" in little-endian
-    expect(buf[0]).toBe(0x67);
-    expect(buf[1]).toBe(0x6c);
-    expect(buf[2]).toBe(0x54);
-    expect(buf[3]).toBe(0x46);
+    const lineage = JSON.parse(body.lineageJson) as LineageRecord;
+    expect(lineage.id).toBe(body.lineageStub.id);
+    expect(lineage.shape).toBe('box');
+    expect(lineage.generatorSource).toBe('procedural');
+    expect(lineage.params).toEqual({ shape: 'box', width: 1, height: 1, depth: 1 });
+  });
+
+  it('base64 glbBytes decodes to a valid GLB starting with magic "glTF"', async () => {
+    const post = await app.request('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shape: 'box', width: 1, height: 1, depth: 1 }),
+    });
+    expect(post.status).toBe(200);
+    const { glbBytes } = (await post.json()) as { glbBytes: string };
+    const decoded = Buffer.from(glbBytes, 'base64');
+    expect(decoded[0]).toBe(0x67);
+    expect(decoded[1]).toBe(0x6c);
+    expect(decoded[2]).toBe(0x54);
+    expect(decoded[3]).toBe(0x46);
   });
 
   it('rejects invalid shape with 400', async () => {
@@ -81,14 +90,11 @@ describe('POST /api/generate + GET /api/preview/:id', () => {
     });
     expect(res.status).toBe(400);
   });
+});
 
-  it('missing preview id returns 404', async () => {
+describe('removed preview endpoint', () => {
+  it('GET /api/preview/:id returns 404 (route removed in U1)', async () => {
     const res = await app.request('/api/preview/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
     expect(res.status).toBe(404);
-  });
-
-  it('malformed preview id returns 400', async () => {
-    const res = await app.request('/api/preview/..%2Fetc%2Fpasswd');
-    expect(res.status).toBe(400);
   });
 });

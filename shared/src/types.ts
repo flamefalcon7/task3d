@@ -95,7 +95,12 @@ export interface ShapeSpec {
 export type ShapeCatalog = ShapeSpec[];
 
 // API response shapes.
+// `glbBytes` is base64-encoded GLB (~33% size overhead vs binary, accepted
+// for Phase 2 prototype simplicity over multipart).
+// `lineageJson` is the full LineageRecord stringified — frontend turns it into
+// bytes for Walrus upload alongside the GLB.
 export interface GenerateResponse {
-  id: string;
+  glbBytes: string;
+  lineageJson: string;
   lineageStub: Partial<LineageRecord>;
 }

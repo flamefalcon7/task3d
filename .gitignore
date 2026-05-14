@@ -25,7 +25,3 @@ contracts/**/build/
 
 # Throwaway sketches (kept outside repo, never commit by accident)
 /tmp/box-demo/
-
-# Backend runtime GLB scratch (Phase 1; replaced by Walrus in Phase 2)
-backend/tmp/*
-!backend/tmp/.gitkeep
