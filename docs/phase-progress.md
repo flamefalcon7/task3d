@@ -35,7 +35,23 @@ See `docs/spec.md` §6 for full 5-phase plan.
 - **Real-browser smoke** (D-007 / Plan Risk row 3 mitigation): opened `:5173` in browser, exercised all 4 shapes. **Found: cylinder appeared hollow.** Root cause: top + bottom cap fan winding was CW (faces pointing inward), back-face culled → user saw through the caps. Fix in `backend/src/generators/cylinder.ts:54-64` (swap last two indices on each cap fan) + 2 regression tests (`top cap triangles face +Y`, `bottom cap triangles face -Y`). Tests now catch any future cap-winding regression on cylinder. Other 3 shapes verified visually correct.
 
 ### In Progress
-- **Phase 2 plan committed** at `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` — 9 units, Deep depth, ~10 days estimate. 6-persona doc review (coherence, feasibility, design-lens, security-lens, scope-guardian, adversarial) returned 26 actionable findings; **6 P1 patches applied** to the plan directly: (1) lineage_blob_id field added to Model3D struct, (2) purchase_model_access renamed + duration_ms parameter retained, (3) signature scheme spec for /api/auth/verify (flag-byte dispatch), (4) name input + PromptInput components added to U7, (5) Move-level bound assertions on tags/params_json/name/lineage_blob_id with new error constants, (6) U1 reframed as plan-local refactor. Cross-persona escalations also patched (nonce-keyed-not-address storage, 3-popup mint UX copy, bundle size code-split, LLM range validation, MVR sanity check, UpgradeCap retention). ADRs D-015..D-018 to be captured by ce-work as U2/U7 start. OQ-013 + OQ-014 added.
+
+- **Branch**: `feat/phase-2-sui-integration` (all Phase 2 work lives here; merge to main at Phase 2 end)
+- **Plan**: `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` — 10 units, Deep depth. 6-persona doc review applied (6 P1 patches + cross-persona escalations landed before dispatch).
+- **ADRs landed**: D-015 (Model3D tags + lineage_blob_id), D-016 (publish_and_share + purchase_model_access + duration_ms + Phase 4 Kiosk caveat), D-018 (Move input bound assertions). D-017 reserved for U7 React Router 7. Spec §2.8 amended to reflect schema changes.
+- **OQ-013** (Phase 4 Kiosk coexistence) + **OQ-014** (writeFilesFlow popup count) added.
+- **Subagents dispatched in background (2026-05-14 ~8pm GMT+8)**:
+  - **U2** — Move contract `model3d::model3d` in `contracts/model3d/`. Builds + tests locally; deploy step deferred to orchestrator (needs gas + UpgradeCap handling). Zero overlap with U1.
+  - **U1** — API contract refactor: inline GLB bytes + lineage in `POST /api/generate` response; drop `/api/preview/:id` + `backend/tmp/`. Touches `backend/` + `frontend/` + `shared/`. Zero overlap with U2.
+- **Task tracker**: 11 tasks in TaskList (10 units + 1 pre-U2 ADR task completed). U2 + U1 in_progress.
+
+### Dispatch sequencing (for resume)
+
+After U1 + U2 land + are reviewed:
+1. **U10** (3 procedural generators) — touches `shared/src/types.ts` + `backend/src/lib/schema.ts` (overlaps U1; must run after).
+2. **Parallel batch**: U3 (Walrus frontend), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator). U3 is independent. U4+U5+U6 share `backend/src/lib/schema.ts` + `backend/package.json` + `shared/src/types.ts` — may need serial within this batch OR worktree isolation.
+3. **Sequential**: U7 (creator e2e, depends U1-U5), U8 (Browse, depends U1-U3), U9 (Buyer e2e, depends U2 + U4 + U8).
+4. **Manual orchestrator step before U2 deploy**: run `sui client switch --env testnet`, faucet test SUI, `sui client publish --gas-budget 100000000 contracts/model3d/`, capture `MODEL3D_PACKAGE_ID` + UpgradeCap object ID into `.env.testnet`.
 
 ### Next Concrete Step
 **Dispatch /ce-work on the Phase 2 plan.** The 9 units have meaningful parallelism: U1 (API refactor), U2 (Move contract), U3 (Walrus), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator), U10 (3 procedural generators) are mostly independent and can dispatch in parallel via worktree-isolated subagents. U7 (Creator e2e), U8 (Browse), U9 (Buyer e2e) are integration units and run sequentially after foundations land.
