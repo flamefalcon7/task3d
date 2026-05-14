@@ -1,0 +1,28 @@
+# Local tooling
+.gstack/
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Vite (frontend/, Phase 1+)
+node_modules/
+dist/
+.vite/
+*.log
+
+# Go (backend/, Phase 1+)
+backend/model3d
+backend/main
+*.test
+*.out
+
+# Sui Move (contracts/, Phase 2+)
+contracts/**/build/
+
+# Throwaway sketches (kept outside repo, never commit by accident)
+/tmp/box-demo/
