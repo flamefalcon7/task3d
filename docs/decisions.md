@@ -623,6 +623,206 @@ Phase 3 sample game scene(spec.md §6 Phase 3)的具體形態 — Trophy Room(G1
 
 ---
 
+## D-015: Model3D Move struct schema amendments — `tags` + `lineage_blob_id`
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Phase 2 (Sui Integration) — U2 precursor
+**Amends**: `docs/spec.md` §2.8 `Model3D` struct and `publish()` function signature
+
+### Context
+
+D-014 already specified that `Model3D` gains a `tags: vector<String>` field for the Browse marketplace tag-filter. But the 6-persona doc review of `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` surfaced a second schema gap: **the lineage Walrus blob has no on-chain reference back to the Model3D it describes** (Feasibility reviewer, anchor 100).
+
+The plan uploads `lineage.json` alongside the GLB in one Walrus write batch, but the publish PTB only passes the GLB Blob object to `publish_and_share`. The lineage blob ID is therefore orphan — judges (and the D-011 "verifiable memory layer" pitch claim) cannot prove which lineage record belongs to which Model3D from on-chain data alone.
+
+### Decision
+
+Amend `Model3D` struct to add two new fields beyond spec §2.8:
+
+- `tags: vector<String>` (already captured in D-014)
+- `lineage_blob_id: String` — Walrus blob ID (string form, not the Blob object) of the lineage.json companion blob
+
+Amend spec §2.8 `publish()` signature to accept both as parameters:
+
+```move
+public fun publish(
+    blob: Blob,
+    shape_type: String,
+    params_json: String,
+    name: String,
+    tags: vector<String>,            // new (D-014 + D-015)
+    lineage_blob_id: String,         // new (D-015)
+    direct_access_price: u64,
+    is_encrypted: bool,
+    license: LicenseTerms,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Model3D
+```
+
+### Rationale
+
+- **`lineage_blob_id: String` not `Blob`**: the lineage blob's storage commitment is short (Phase 2 hardcodes ~10 epochs; lineage is metadata not value content) and we do not need on-chain `Blob` lifecycle on it. Storing just the ID keeps gas low and avoids "lineage blob got burned but Model3D thinks it still exists" lifecycle confusion. Trade-off: if the lineage blob expires, the verifier sees a 404 from Walrus aggregator but the Model3D still works. Acceptable for v1.
+- **`tags: vector<String>` not `String` CSV**: native Sui type, queryable from GraphQL `objects(filter: { type, hasField: ... })` if needed, no client-side CSV parsing.
+- **Both as parameters to `publish()`, not derived**: creator supplies them; LLM router can pre-fill tags from prompt analysis (per D-014).
+
+### Alternatives Considered
+
+- **Lineage in `ModelPublished` event only** — rejected: events are not queryable on the object itself, only via event index. Browsers loading Model3D objects directly (Sui Explorer, custom indexers) wouldn't see lineage.
+- **Skip lineage upload entirely in v1** — rejected: defeats D-011 "verifiable memory layer" framing which is the Walrus track's stated ask.
+- **`lineage_blob: Blob` (full object wrapping)** — rejected: extra storage gas, extra burn/extend lifecycle complexity for metadata that's effectively read-only.
+
+### Consequences
+
+- ✅ Lineage blob is on-chain queryable: any holder of Model3D object ID can resolve `lineage_blob_id` and fetch from Walrus aggregator
+- ✅ Spec §2.8 needs amendment (one-line addition to `publish()` signature + 1 field on Model3D struct)
+- ⚠️ Lineage blob lifecycle is independent of Model3D — creator must keep its Walrus storage active if they want lineage to remain resolvable
+- 🔮 v1.1+ may add `lineage_blob_id` setter (e.g., creator updates lineage to amend metadata) — out of scope for v2
+
+### Related
+
+- spec.md §2.8 (amend Model3D struct + publish() signature)
+- D-014 (introduced tags field; this ADR adds lineage_blob_id alongside)
+- D-011 (verifiable memory layer framing — this ADR delivers the on-chain link)
+- Plan-002 U2 + U7 (implementation)
+
+---
+
+## D-016: `publish_and_share` entry pattern + `purchase_model_access` naming + `duration_ms` retention + Phase 4 Kiosk-coexistence caveat
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Phase 2 (Sui Integration) — U2 precursor
+
+### Context
+
+Three coupled Move design decisions surfaced by plan-002 + 6-persona doc review:
+
+1. **Model3D ownership model for Phase 2**: Buyers (Wallet B) need to call a public entry function against creator's (Wallet A) Model3D. Sui ownership rules require either shared-object (anyone can pass `&Model3D` to entry function) OR Kiosk-mediated access (Kiosk takes ownership, Phase 4). Phase 4's Kiosk integration is D-013 must-have but out of scope for Phase 2.
+
+2. **Entry function naming**: Earlier plan draft used `purchase_access`; spec §2.8 uses `purchase_model_access`. Discrepancy surfaced by Feasibility reviewer.
+
+3. **Subscription readiness**: Spec §2.8 `purchase_model_access` includes `duration_ms: u64` parameter (Access can expire). Earlier plan draft dropped this. Re-adding it after testnet deploy requires Move package redeploy.
+
+### Decision
+
+**16.1 — Entry function**: Public entry `publish_and_share(...)` wraps internal `publish() + transfer::share_object(model)`. Phase 2 `Model3D` is always shared. Buyer calls `purchase_model_access(&Model3D, Coin<SUI>, duration_ms, &Clock, ctx)` against the shared object.
+
+**16.2 — Naming**: Use `purchase_model_access` (spec §2.8) not `purchase_access`. Parallels future `purchase_derivative_access` in v1.1 (D-013 deferred).
+
+**16.3 — Signature**: Keep `duration_ms: u64` in `purchase_model_access`. Phase 2 frontend always passes `0n` (permanent Access). Phase 4 / v1.1 subscription support can use the existing signature without Move package redeploy.
+
+**16.4 — Phase 4 Kiosk coexistence caveat**: Sui Kiosk requires items to be owned (placed into a Kiosk that owns them). A shared-object Model3D cannot be retroactively placed in a Kiosk. Phase 4 will either:
+- (a) Accept a bifurcated catalog: Phase 2 mints stay shared + Phase 4 mints go through Kiosk; Browse must query both shapes
+- (b) Ship a migration helper that re-mints Phase 2 models inside Kiosks (loses original mint timestamp + creator tx hash)
+
+Decision deferred to Phase 4 ADR (open question OQ-013).
+
+### Rationale
+
+- **Shared-object for Phase 2 buyer flow**: simplest path; works with `&Model3D` immutable reference; allows parallel purchases (P2 in plan-002).
+- **`purchase_model_access` name parity**: prevents Phase 4 from having to rename or live with asymmetric L1/L2 entry-function naming when v1.1 Derivative ships.
+- **`duration_ms` retention**: trivial cost now (1 u64 param, frontend passes 0n); forward-compatible with subscription pricing without Move upgrade.
+- **Kiosk caveat documented now**: P1 decision is load-bearing for Phase 4; surfacing the trade-off prevents Phase 4 from rediscovering it under pressure.
+
+### Alternatives Considered
+
+- **`transfer::transfer(model, creator)` + creator-side Kiosk in Phase 2**: rejected — Phase 2 has no Kiosk infrastructure, would require Phase 4 work up front.
+- **Drop `duration_ms` in Phase 2, add in Phase 4**: rejected — Move package redeploy on testnet is allowed but loses Phase 2 catalog testnet objects.
+- **Rename `purchase_model_access` → shorter `purchase_access` for Phase 2 readability**: rejected — Feasibility reviewer correctly flagged that v1.1 L2 symmetry breaks.
+
+### Consequences
+
+- ✅ Phase 2 buyer flow trivially implementable (shared object + entry function)
+- ✅ `duration_ms` reserved in signature; Phase 4 subscription work unblocked without redeploy
+- ⚠️ Phase 4 Kiosk integration must explicitly address the shared-vs-kiosked bifurcation (OQ-013)
+- ⚠️ Phase 4 redesign may invalidate Phase 2 testnet objects if migration approach is taken; demo videos referencing Phase 2 testnet object IDs may break
+- 🔮 v1.1 Derivative entry functions inherit the `purchase_*_access` naming pattern
+
+### Related
+
+- spec.md §2.8 (`publish` + `purchase_model_access` signatures)
+- D-002 (3-tier architecture — L1+Access shipped, L2 deferred)
+- D-013 (Kiosk promoted to Phase 4 must-have; this ADR explicates the Phase 2/4 boundary)
+- OQ-013 (Phase 4 Kiosk coexistence — defer decision)
+- Plan-002 U2 + U7 + U9 (implementation)
+
+---
+
+## D-018: Move-level input bound assertions on `Model3D` publish fields
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Phase 2 (Sui Integration) — U2 precursor
+
+> Decision number jumps from D-016 → D-018 deliberately: D-017 is reserved for the React Router 7 ADR which will be captured before U7 starts.
+
+### Context
+
+Security reviewer + Adversarial reviewer + Feasibility reviewer all flagged that the plan's Move entry function `publish_and_share` accepts unbounded `tags: vector<String>`, `params_json: String`, `name: String`, and `lineage_blob_id: String` (the last per D-015). Frontend zod caps `tags` at 10 and `params_json` indirectly via discriminated-union shape, but any wallet can call `publish_and_share` directly via `sui client call` and pass arbitrary-size vectors / strings.
+
+Risks:
+- DoS via 1000-element tags vector (gas + on-chain object bloat)
+- Stored-XSS-ish via 10MB params_json (browser memory peak when ModelDetailPage renders it)
+- Browse page performance degradation from oversized objects
+
+### Decision
+
+Add Move-level assertions to `publish()` (called from `publish_and_share`):
+
+```move
+assert!(vector::length(&tags) <= 16, ETooManyTags);
+let i = 0;
+let n = vector::length(&tags);
+while (i < n) {
+    assert!(string::length(vector::borrow(&tags, i)) <= 32, ETagTooLong);
+    i = i + 1;
+};
+assert!(string::length(&params_json) <= 4096, EParamsJsonTooLong);
+assert!(string::length(&name) <= 128, ENameTooLong);
+assert!(string::length(&lineage_blob_id) <= 128, EBlobIdMalformed);
+```
+
+Add error constants:
+- `ETooManyTags = 10`
+- `ETagTooLong = 11`
+- `EParamsJsonTooLong = 12`
+- `ENameTooLong = 13`
+- `EBlobIdMalformed = 14`
+
+### Rationale
+
+- **Move enforces, frontend zod *re-enforces***: defense in depth. Frontend zod gives faster failure UX; Move backstop catches direct-call bypass.
+- **Numeric limits**:
+  - 16 tags: D-014 expected use is 3-8 tags per model; 16 leaves 2× headroom
+  - 32 chars/tag: typical short labels ("fantasy", "weapon", "low-poly"); arbitrary cap based on UX-reasonable length
+  - 4096 chars params_json: largest realistic param object (sword with 4 sub-meshes worth of float fields) is ~1KB; 4× headroom
+  - 128 chars name: enough for "Sir Galahad's Sword of the Eternal Phoenix" with room to spare
+  - 128 chars lineage_blob_id: Walrus blob IDs are ~50 chars (base58); 128 leaves headroom for future Walrus encoding changes
+
+### Alternatives Considered
+
+- **No Move-level cap, rely on zod only**: rejected per Security reviewer — direct `sui client call` bypass is trivial to construct.
+- **Tighter caps (e.g., 8 tags, 64-char name)**: rejected — Phase 2 UX caps may grow in Phase 3 polish; want headroom.
+- **Move-level cap on raw byte count not codepoint count**: rejected — `string::length` returns byte count for UTF-8 strings, which is what we want; the BCS-serialized Move String is byte-counted natively.
+
+### Consequences
+
+- ✅ Phase 2 contract is grief-resistant for the most obvious abuse paths
+- ✅ Test surface: 5 new error-path tests in `contracts/model3d/tests/model3d_tests.move`
+- ⚠️ Adjusting the limits later (e.g., extending tag cap to 20) requires Move package redeploy
+- 🔮 v1.1 may add a separate `update_metadata` entry that loosens caps if real usage warrants
+
+### Related
+
+- spec.md §2.8 (`publish` function — caller must respect these caps)
+- D-015 (introduced `lineage_blob_id` field; this ADR caps its length)
+- Plan-002 U2 (implementation)
+
+---
+
 # Reserved Decision Numbers
 
-D-015 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-017: React Router 7 adoption — to be captured before U7 starts.
+D-019 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

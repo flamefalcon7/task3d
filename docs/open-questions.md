@@ -138,6 +138,26 @@ Add new entries below as **OQ-XXX** in order. Move resolved questions to the bot
 
 ---
 
+## OQ-013: Phase 4 Sui Kiosk + Phase 2 share_object Model3D coexistence
+
+**Why this matters**: Plan-002 D-016 captures that Phase 2 uses `transfer::share_object(Model3D)` so `purchase_model_access` works without Kiosk. Sui Kiosk takes ownership of items, so a shared-object Model3D cannot be retroactively placed in a Kiosk. Phase 4's Kiosk integration must decide: (a) accept a bifurcated catalog where Phase 2 mints stay shared and Phase 4 mints go through Kiosk (Browse must query both), or (b) ship a migration helper that re-mints Phase 2 models into Kiosks (loses original mint timestamp + tx hash).
+
+**To resolve**: Phase 4 ADR (D-???) at start of Phase 4 (~6/11). For Phase 2 work, no action needed — `publish_and_share` ships as designed.
+
+**Blocker level**: 🟢 Not blocking Phase 2. Decide at Phase 4 start.
+
+---
+
+## OQ-014: `writeFilesFlow` with 2 files — 2 popups or 4?
+
+**Why this matters**: Plan-002 U7 assumes 2 files (GLB + lineage) in `writeFilesFlow({ files: [glb, lineage] })` produces a single 2-popup sequence (one register, one certify). If the SDK actually fires 2 register + 2 certify (4 popups), the creator UX gets significantly worse and `MintButton` copy needs to say "Step X of 5" instead of "Step X of 3".
+
+**To resolve**: U3 day-1 smoke test with a real Slush wallet against testnet relay. Document the actual popup count in U3 PR. Adjust U7's MintButton copy accordingly.
+
+**Blocker level**: 🟡 Resolve at U3 implementation; affects U7 UX spec.
+
+---
+
 # Resolved Questions
 
 (Move resolved items here with date + one-line resolution.)

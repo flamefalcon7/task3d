@@ -456,6 +456,12 @@ const EWrongModel:            u64 = 6;
 const ENotAccessHolder:       u64 = 7;
 const EExpired:               u64 = 8;
 const EDerivativeMustRestrict: u64 = 9;
+// D-018 — input bound assertions
+const ETooManyTags:           u64 = 10;
+const ETagTooLong:            u64 = 11;
+const EParamsJsonTooLong:     u64 = 12;
+const ENameTooLong:           u64 = 13;
+const EBlobIdMalformed:       u64 = 14;
 
 // === Types ===
 
@@ -476,6 +482,8 @@ public struct Model3D has key, store {
     shape_type: String,
     params_json: String,
     name: String,
+    tags: vector<String>,             // D-014 + D-015 — Browse marketplace tag filter
+    lineage_blob_id: String,          // D-015 — Walrus blob ID of lineage.json companion blob (on-chain link for D-011 verifiable memory layer)
     direct_access_price: u64,         // 0 = 免費;>0 = 付這筆才能 access
     is_encrypted: bool,               // 若 true,用 Seal 加密 → 需 Access 才能解
     license: LicenseTerms,            // 衍生規則
@@ -549,6 +557,8 @@ public fun publish(
     shape_type: String,
     params_json: String,
     name: String,
+    tags: vector<String>,            // D-014 + D-015
+    lineage_blob_id: String,         // D-015
     direct_access_price: u64,
     is_encrypted: bool,
     license: LicenseTerms,
@@ -556,11 +566,22 @@ public fun publish(
     ctx: &mut TxContext,
 ): Model3D {
     assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
+    // D-018: input bound assertions
+    assert!(vector::length(&tags) <= 16, ETooManyTags);
+    let i = 0;
+    while (i < vector::length(&tags)) {
+        assert!(string::length(vector::borrow(&tags, i)) <= 32, ETagTooLong);
+        i = i + 1;
+    };
+    assert!(string::length(&params_json) <= 4096, EParamsJsonTooLong);
+    assert!(string::length(&name) <= 128, ENameTooLong);
+    assert!(string::length(&lineage_blob_id) <= 128, EBlobIdMalformed);
+
     let model = Model3D {
         id: object::new(ctx),
         blob,
         creator: ctx.sender(),
-        shape_type, params_json, name,
+        shape_type, params_json, name, tags, lineage_blob_id,
         direct_access_price,
         is_encrypted,
         license,
@@ -573,6 +594,27 @@ public fun publish(
         policy: license.policy,
     });
     model
+}
+
+/// D-016 — Phase 2 entry function. Wraps publish() + share_object.
+public entry fun publish_and_share(
+    blob: Blob,
+    shape_type: String,
+    params_json: String,
+    name: String,
+    tags: vector<String>,
+    lineage_blob_id: String,
+    direct_access_price: u64,
+    is_encrypted: bool,
+    license: LicenseTerms,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let model = publish(
+        blob, shape_type, params_json, name, tags, lineage_blob_id,
+        direct_access_price, is_encrypted, license, clock, ctx,
+    );
+    transfer::share_object(model);
 }
 
 // === Allow-list 核發 / 撤銷 ===

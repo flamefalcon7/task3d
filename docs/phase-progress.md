@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-14 (Phase 1 scaffold complete + D-014 reframe accepted)
+## Last Updated: 2026-05-14 (Phase 2 plan written + 6-persona doc review applied + P1 patches landed; ready for ce-work dispatch)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -35,10 +35,12 @@ See `docs/spec.md` §6 for full 5-phase plan.
 - **Real-browser smoke** (D-007 / Plan Risk row 3 mitigation): opened `:5173` in browser, exercised all 4 shapes. **Found: cylinder appeared hollow.** Root cause: top + bottom cap fan winding was CW (faces pointing inward), back-face culled → user saw through the caps. Fix in `backend/src/generators/cylinder.ts:54-64` (swap last two indices on each cap fan) + 2 regression tests (`top cap triangles face +Y`, `bottom cap triangles face -Y`). Tests now catch any future cap-winding regression on cylinder. Other 3 shapes verified visually correct.
 
 ### In Progress
-- Nothing — Phase 1 closed.
+- **Phase 2 plan committed** at `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` — 9 units, Deep depth, ~10 days estimate. 6-persona doc review (coherence, feasibility, design-lens, security-lens, scope-guardian, adversarial) returned 26 actionable findings; **6 P1 patches applied** to the plan directly: (1) lineage_blob_id field added to Model3D struct, (2) purchase_model_access renamed + duration_ms parameter retained, (3) signature scheme spec for /api/auth/verify (flag-byte dispatch), (4) name input + PromptInput components added to U7, (5) Move-level bound assertions on tags/params_json/name/lineage_blob_id with new error constants, (6) U1 reframed as plan-local refactor. Cross-persona escalations also patched (nonce-keyed-not-address storage, 3-popup mint UX copy, bundle size code-split, LLM range validation, MVR sanity check, UpgradeCap retention). ADRs D-015..D-018 to be captured by ce-work as U2/U7 start. OQ-013 + OQ-014 added.
 
 ### Next Concrete Step
-**Start Phase 2: Sui Integration** (5/20 – 5/29, ~10 days). **D-014 expanded scope** — now includes Tripo + Browse + tags.
+**Dispatch /ce-work on the Phase 2 plan.** The 9 units have meaningful parallelism: U1 (API refactor), U2 (Move contract), U3 (Walrus), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator), U10 (3 procedural generators) are mostly independent and can dispatch in parallel via worktree-isolated subagents. U7 (Creator e2e), U8 (Browse), U9 (Buyer e2e) are integration units and run sequentially after foundations land.
+
+Original sequencing reference per `docs/spec.md §6 Phase 2`:
 
 Sequencing per `docs/spec.md` §6 Phase 2:
 1. **Move contract** — `model3d::model3d` package in `contracts/`. Reference `SharedBlob` pattern from `@mysten/walrus`. **D-014**: add `tags: vector<String>` field on `Model3D`. Local `sui move test` for mint/extend/burn. Deploy to testnet, record `MODEL3D_PACKAGE_ID`
