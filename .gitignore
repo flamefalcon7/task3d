@@ -9,17 +9,16 @@
 .env.*
 !.env.example
 
-# Node / Vite (frontend/, Phase 1+)
+# Node / Vite / TS unified (D-012, Phase 1+)
 node_modules/
 dist/
+build/
 .vite/
+.turbo/
+.next/
 *.log
-
-# Go (backend/, Phase 1+)
-backend/model3d
-backend/main
-*.test
-*.out
+*.tsbuildinfo
+coverage/
 
 # Sui Move (contracts/, Phase 2+)
 contracts/**/build/

@@ -231,7 +231,7 @@ L3  Game Integration   — Game dev C 買 access,在遊戲裡用
 | **商用 license** | Free 版 CC BY 4.0 **不能商用**;Pro $11.94/mo 才能 | **on-chain ownership 永久商用憑證** |
 | **持久性** | Tripo 倒了,你的 model URL 失效 | **Walrus + Sui 永久** |
 | **Royalty** | 無 | **Sui Kiosk protocol-level enforcement** |
-| **Per-gen 成本** | 20–40 credits / gen,$0.05+ surcharge | **Zero per-gen cost**(procedural,跑你自己的 server) |
+| **Per-gen 成本** | 20–40 credits / gen,$0.05+ surcharge | **Zero per-gen cost**(procedural 跑自家 Node server,~50ms CPU) |
 | **失敗率** | 用戶報「~1/10 不用清理就能直接用」 | 100%(constrained input → 保證合法 mesh) |
 | **Creator 抽成** | Tripo 拿 100% 訂閱費,creator 拿 0(訓練資料黑箱吃掉) | **Creator 自定價收 ~100%**(Sui gas + 可選 marketplace 抽成) |
 | **衍生 / IP layering** | 無概念 — 你做的衍生作 Tripo 跟你拆 0 | **L1 base → L2 derivative,protocol 自動分潤,有 cap、有 policy(restricted / allow_list / permissionless)** |
@@ -979,13 +979,21 @@ entry fun seal_approve(id: vector<u8>, wl: &Whitelist, ctx: &TxContext) {
 | `@mysten/seal`(若加) | **1.1.x** | 5/5(post-mainnet, beta tag 仍在) |
 | `@mysten/slush-wallet` | **1.0.5** | 5/5 |
 
-| 其他 | 版本 | 維護 |
+| Frontend | 版本 | 維護 |
 |---|---|---|
 | `@babylonjs/core` | 9.6.2(2026-05-08) | 5/5 |
 | `react-babylonjs` | 3.2.5-beta.2(**2025-05** 一年前) | **2/5 不要用** |
 | `@react-three/fiber`(alt) | 9.6.1 | 5/5 |
 | `three`(alt) | 0.184.0 | 5/5 |
-| `github.com/qmuntal/gltf` | tag v0.28.0(2024-11)/ master HEAD 2026-05-06 | 4/5(active master,慢 release) |
+
+| Backend(D-012:TS unified) | 版本 | 維護 / 用途 |
+|---|---|---|
+| Node.js | 22.x LTS(or Bun 1.2.x) | 5/5 — runtime |
+| `hono` | 4.6.x | 5/5 — HTTP framework,Vercel / Cloudflare / Node 都跑 |
+| `@gltf-transform/core` | 4.x | 5/5 — procedural GLB 構造,取代 `qmuntal/gltf` |
+| `@anthropic-ai/sdk` | 0.40.x+ | 5/5 — LLM router(Claude Haiku 預設) |
+| `@mysten/sui` | 同 frontend 鎖 | 5/5 — server 端 lineage 簽章用 |
+| `zod` | 3.x | 5/5 — Anthropic structured output schema |
 
 ### 4.1 dApp Kit 1.0 拆分
 
@@ -1035,18 +1043,21 @@ react-babylonjs:
 - `Move.toml` 設 `edition = "2024.beta"`
 - 舊 module 用 `sui move migrate` 自動升級
 
-### 4.6 Go 後端
+### 4.6 後端 runtime + framework(D-012 改:TS unified)
 
-- **10 個 endpoints 規模**:`chi`(要 CORS/middleware)或 `net/http` stdlib(Go 1.22+ ServeMux 已支援 method+path)
-- `gin`:OK 但 overkill
-- **`fiber`:避免** — fasthttp 不相容 `net/http` middleware ecosystem
+- **Runtime**:Node.js 22.x LTS(default)或 Bun 1.2.x(若你喜歡 cold start 更快、internal benchmark 約 2–3x)。Hono 兩個 runtime 都支援,Phase 1 scaffold 選一個就鎖
+- **HTTP framework**:**Hono**(~5KB,跑 Node / Bun / Vercel Functions / Cloudflare Workers 都可)
+  - Express 4 是 OK 但 ecosystem 老,middleware 雜
+  - Fastify 也 OK 但對 Bun 支援不如 Hono 完整
+  - **Hono 是 D-012 預設**
+- **Type sharing**:monorepo `shared/` workspace,`GenerateParams` / `LineageRecord` / `Generator` interface 一份,browser 跟 backend 都 `import` 它
 
-### 4.7 `qmuntal/gltf` 注意
+### 4.7 `@gltf-transform/core` 注意(取代 spec 舊版的 `qmuntal/gltf`)
 
-- **序列化函式庫,不是 mesh 處理函式庫**
-- 建構 manifold mesh(vertex dedup、winding、normals)**是你的工作**
-- 它會忠實序列化你給的 buffer
-- 不做 PBR validation、不做 Draco compression(寫端)
+- **mesh 構造函式庫**:`Document` / `Buffer` / `Accessor` / `Primitive` / `Mesh` / `Node` / `Scene` 一一對應 glTF 2.0 規格
+- **manifold mesh(vertex dedup、winding、normals)還是你的工作** — lib 只負責序列化跟 graph 操作
+- 內建 PBR material、`NodeIO` 寫 GLB binary、`prune()` / `weld()` / `dedup()` transform 可用
+- **建構 procedural 範例(20 LoC,等同 `/tmp/box-demo/box.go`)寫在 §6 Phase 1**
 
 ---
 
@@ -1085,14 +1096,22 @@ react-babylonjs:
 ### Phase 1:Scaffold(5/14 – 5/19,~6 天)
 **目標**:本地端跑通整個 loop,先用 mock,**不上鏈**
 
-- Go backend skeleton(chi 或 stdlib)+ `box` / `sphere` / `cylinder` 三個 generator(`qmuntal/gltf`)
-- **`backend/generators/generator.go`(D-011 新增)**:`Generator` interface(`Generate(params) → GLB bytes` + `Capabilities() → []string`),`ProceduralGenerator` 實作。`box.go` / `chest.go` 已在 `/tmp/box-demo/` 跑通(816 B / 1008 B,manifold ✅),搬進 `backend/generators/`
-- **`backend/agent/router.go`(D-011 新增,stub only)**:Phase 1 用 hardcoded mapping(shape name → generator),**Phase 2 才真接 LLM**。Interface 留好就好
-- API:`POST /api/generate`、`GET /api/preview/:id`、`GET /api/shapes`
-- React + Vite + Babylon(自己寫 40 行 imperative wrapper,**不用 react-babylonjs**)
-- Shape picker UI + slider + 即時預覽
-- 後端把 GLB 寫到本地 disk(Phase 1 不需要 S3 / CDN)
-- Output:前端→後端→preview GLB 渲染出來,end-to-end 但**不上鏈**
+- **Monorepo init(D-012)**:`pnpm init` + workspace,目錄 `frontend/` / `backend/` / `shared/` / `contracts/` / `samples/`
+- **`shared/`** — `GenerateParams`、`LineageRecord`、`Generator` interface 一份(browser + backend 共用)
+- **`backend/` (Node 22 + Hono + TypeScript,D-012)**:
+  - `backend/generators/generator.ts`(D-011)— `Generator` interface 實作
+  - `backend/generators/box.ts` — 用 `@gltf-transform/core` 寫 procedural,等同 `/tmp/box-demo/box.go` 約 20 LoC
+  - `backend/generators/chest.ts`(box + lid 旋轉)— 等同 `/tmp/box-demo/chest.go` 約 60 LoC
+  - 再加 `cylinder.ts` / `sphere.ts`
+  - `backend/agent/router.ts`(D-011 stub)— Phase 1 用 hardcoded mapping(shape name → generator),**Phase 2 才真接 Anthropic SDK**。Interface 留好
+  - Endpoints:`POST /api/generate`、`GET /api/preview/:id`、`GET /api/shapes`
+- **`frontend/` (Vite + React + Babylon,D-007 wrapper,D-012)**:
+  - 40 行 imperative React wrapper(`Engine` + `Scene` + `LoadAssetContainerAsync`)
+  - Shape picker UI + slider + 即時預覽
+  - Mock `fetch('/api/generate')` 拿 GLB → Babylon load
+- Backend 把 GLB 寫本地 disk(Phase 1 不需要 S3 / CDN / Walrus)
+- Output:前端 → backend → preview GLB 渲染出來,end-to-end 但**不上鏈**
+- `/tmp/box-demo/` 的 Go proof 確認 procedural 概念後**不搬**(D-012),TS 版本從零寫
 
 ### Phase 2:Sui Integration(5/20 – 5/29,~10 天)
 **目標**:Walrus + Move + Auth + LLM agent 全部接上,testnet 跑通 mint
@@ -1100,7 +1119,7 @@ react-babylonjs:
 - **Move 合約**:寫 `model3d::model3d` 參考 `SharedBlob` 模式,本地 `sui move test` 過 mint/extend/burn,部署 testnet,記 `MODEL3D_PACKAGE_ID`
 - **Walrus**:`@mysten/walrus@1.1.7` + `walrus-wasm@0.2.2` + Vite WASM 設定 + upload relay,從瀏覽器跑 `writeFilesFlow` 上傳 GLB
 - **Auth**:dApp Kit 1.0 + Enoki Google zkLogin + Slush wallet,後端用 signed challenge 驗 Sui address,JWT session
-- **LLM agent router(D-011 新增)**:接 Anthropic API(Claude Haiku 預設,`claude-haiku-4-5-20251001`),用 [structured output](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) 把 NL → `{generator: "chest", params: {...}}`。Cost ~$0.001/call
+- **LLM agent router(D-011 新增,D-012 改 TS)**:後端 `backend/agent/router.ts` 接 `@anthropic-ai/sdk`(Claude Haiku 預設,`claude-haiku-4-5-20251001`),用 [structured output](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) + `zod` schema 把 NL → `{generator: "chest", params: {...}}`。Schema 來自 `shared/types.ts`,browser 也 import。Cost ~$0.001/call
 - **Lineage on Walrus(D-011 新增)**:每個 generation 附 `lineage.json` blob(prompt、LLM 決策、params、generator source、base 關係)。同一 Walrus write batch,加 1 個小 blob 不收額外 floor
 - **End-to-end**:打字 → LLM 路由 → procedural generate → Preview → Confirm → Walrus upload(GLB + lineage)→ PTB call `model3d::mint`,在 testnet wallet 看到 Model3D NFT
 - Sword / hammer / platform generators 加進來(共 6 個 shape)
@@ -1280,7 +1299,7 @@ react-babylonjs:
 - **Sui Kiosk + TransferPolicy** = secondary market royalty 也走 protocol 強制
 - **Seal**(stretch) = 付費內容用 IBE 加密,`seal_approve` 檢查 Access 物件
 - **Enoki zkLogin + Sponsored tx** = users 不用懂 wallet 不用懂 gas
-- **BabylonJS + Go(qmuntal/gltf)** = procedural generation,zero per-gen 成本
+- **BabylonJS + TS Node (`@gltf-transform/core`)** = procedural generation,zero per-gen 成本(D-012)
 
 **4:30–5:00 Roadmap & Traction & Ask**
 - 已有: 3 個 indie game studio LOI / 30 個 Discord beta creator(或實際 traction 數字)

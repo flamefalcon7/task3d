@@ -140,8 +140,9 @@ project-root/
 │   ├── phase-progress.md       # Current progress / next step (updated every session)
 │   ├── open-questions.md       # Unresolved questions
 │   └── plans/                  # plan-mode outputs for substantial features
-├── backend/                    # Go backend (procedural generators + API)
+├── backend/                    # TS Node + Hono (procedural generators + LLM router, D-012)
 ├── frontend/                   # React + Vite + Babylon (imperative)
+├── shared/                     # types shared by browser + backend (Generator, GenerateParams, LineageRecord)
 ├── contracts/                  # Sui Move package model3d::model3d
 ├── samples/                    # Sample game scene (Phase 3 deliverable)
 └── pitch/                      # Pitch deck, demo video script, screenshots (Phase 3+)
@@ -155,8 +156,8 @@ Implementation directories (`backend/`, `frontend/`, etc.) will be created in Ph
 
 (Authoritative versions and gotchas in `docs/spec.md` §4. Pin all `@mysten/*` to **2026-05-08 release train**.)
 
-- **Backend**: Go, `github.com/qmuntal/gltf`, `chi` or `net/http` stdlib, Redis (24h preview cache)
-- **Frontend**: React + Vite, `@babylonjs/core` (imperative — **NOT `react-babylonjs`**, drop per D-007)
+- **Backend** (D-012): Node 22 LTS (or Bun 1.2.x) + Hono + `@gltf-transform/core` + `@anthropic-ai/sdk` + `@mysten/sui` + `zod`
+- **Frontend**: React + Vite + TypeScript, `@babylonjs/core` (imperative — **NOT `react-babylonjs`**, drop per D-007)
 - **Wallet / Auth**: `@mysten/dapp-kit` + `@mysten/enoki` (zkLogin) + `@mysten/slush-wallet`
 - **Storage**: `@mysten/walrus` + `@mysten/walrus-wasm`, **upload relay required for browser**
 - **Sui client**: `@mysten/sui/grpc` `SuiGrpcClient` (JSON-RPC client deprecated July 2026)

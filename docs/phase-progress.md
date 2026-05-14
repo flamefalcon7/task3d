@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-14 (post-office-hours, D-011 ratified)
+## Last Updated: 2026-05-14 (post-office-hours, D-011 + D-012 ratified)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -19,22 +19,28 @@ See `docs/spec.md` §6 for full 5-phase plan.
 - Strategy: testnet submission, mainnet by 8/27 (D-009)
 - Project structure + `CLAUDE.md` + `docs/` bootstrap
 - **Office-hours session (D-011)**: framing pivot to **agentic** (LLM router + procedural primary + Tripo pluggable). Pure procedural validated locally via `/tmp/box-demo/{box,chest}.go` (816 B / 1008 B, manifold ✓). spec.md §0/§1.7/§1.8/§1.9/§6 updated to reflect
+- **Office-hours session (D-012)**: stack consolidation — **drop Go backend, TS unified across browser + server**. 2-service split preserved (browser = Walrus/Sui, backend = generators + LLM router). spec.md §4 (`@gltf-transform/core` replaces `qmuntal/gltf`, Hono replaces chi), CLAUDE.md stack updated, repo gets `shared/` workspace
 
 ### In Progress
 - Nothing yet — about to start Phase 1 implementation with D-011 architecture
 
 ### Next Concrete Step
-**Start Phase 1 scaffold** (now including D-011 Generator interface + agent router stub):
+**Start Phase 1 scaffold** (D-011 Generator interface + D-012 TS unified monorepo):
 
-1. `mkdir backend frontend contracts samples pitch`
-2. Backend: `cd backend && go mod init github.com/<user>/model3d && touch main.go` — Go skeleton with `chi` router (or stdlib `net/http`)
-3. **`backend/generators/generator.go`** — `Generator` interface (`Generate(params) → GLB bytes`, `Capabilities() → []string`)
-4. **`backend/generators/box.go`** — port from `/tmp/box-demo/box.go`, implement `Generator` interface
-5. **`backend/agent/router.go`** — stub only (hardcoded `shape name → generator` map). Phase 2 wires real Anthropic API.
-6. Bring up frontend: `cd frontend && pnpm create vite . --template react-ts` — wire Babylon imperative wrapper (Engine + Scene + ArcRotateCamera + GLB loader in useEffect)
-7. Wire frontend ↔ backend with mock JSON first, **no Sui / Walrus / LLM yet** (defer all to Phase 2)
+1. `pnpm init` at repo root, add workspace config (`pnpm-workspace.yaml`): `frontend/` / `backend/` / `shared/`
+2. `mkdir frontend backend shared contracts samples pitch`
+3. **`shared/`** — `pnpm init`, create `shared/src/types.ts` with `GenerateParams`, `LineageRecord`, `Generator` interface
+4. **`backend/`** — `pnpm init`, install `hono @gltf-transform/core @anthropic-ai/sdk @mysten/sui zod`, dev deps `typescript tsx @types/node`. Files:
+   - `backend/src/generators/generator.ts` — implements `Generator` interface
+   - `backend/src/generators/box.ts` — `@gltf-transform/core` procedural (~20 LoC, equivalent to `/tmp/box-demo/box.go`)
+   - `backend/src/generators/chest.ts` — body + lid rotation (~60 LoC, equivalent to `/tmp/box-demo/chest.go`)
+   - `backend/src/agent/router.ts` — stub: hardcoded `shape name → generator` map (Phase 2 wires Anthropic)
+   - `backend/src/server.ts` — Hono server with `POST /api/generate`, `GET /api/preview/:id`, `GET /api/shapes`
+5. **`frontend/`** — `pnpm create vite . --template react-ts`, install `@babylonjs/core`, write 40-line imperative wrapper (`Engine` + `Scene` + `LoadAssetContainerAsync`)
+6. Frontend ↔ backend wired with mock fetch, **no Sui / Walrus / LLM yet** (defer all to Phase 2)
+7. **Skip**: do NOT port `/tmp/box-demo/box.go` — write fresh TS per D-012
 
-End-of-Phase-1 checkpoint: user picks "Box" + slider params → preview renders, all local. `Generator` interface in place so Phase 2 LLM router and (optional) Phase 3 `TripoGenerator` slot in without refactor.
+End-of-Phase-1 checkpoint: user picks "Box" + slider params → preview renders, all local. `Generator` interface in `shared/` is the contract; Phase 2 LLM router and (optional) Phase 3 `TripoGenerator` slot in without refactor.
 
 ### Blockers / Open Questions
 See `docs/open-questions.md` for unverified assumptions. None block Phase 1 start.
@@ -45,7 +51,8 @@ See `docs/open-questions.md` for unverified assumptions. None block Phase 1 star
 
 ### Notes for Next Session
 - User stated preference: **finish early, more time for pitch deck + demo video polish**. Bias toward compressing Phase 1–4, expanding Phase 5
-- All 11 ADRs (D-001 ... D-011) in `docs/decisions.md` — do not reopen without prompting
-- D-011 is a **framing + architecture decision**, not a code rewrite — Phase 1 still ships procedural, just with the right interface seams + agent narrative ready
+- All 12 ADRs (D-001 ... D-012) in `docs/decisions.md` — do not reopen without prompting
+- D-011 is a **framing + architecture decision** — Phase 1 still ships procedural, just with the right interface seams + agent narrative ready
+- D-012 is a **language consolidation** — TS unified across browser + server. No Go anywhere. `@gltf-transform/core` replaces `qmuntal/gltf`.
 - LLM in this project is a **router**, not a geometry producer — user explicitly confirmed in office-hours that "LLM draws mesh" is unstable. Do not let scope creep there.
-- `/tmp/box-demo/` is a throwaway proof — port to `backend/generators/` then delete
+- `/tmp/box-demo/` is a Go throwaway proof — D-012 says **do NOT port**, write fresh TS
