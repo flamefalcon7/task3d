@@ -1,0 +1,21 @@
+[package]
+name = "model3d"
+edition = "2024.beta"
+license = "Apache-2.0"
+authors = ["overflow2026 hackathon team"]
+
+[dependencies]
+# D-015 / D-016 / D-018 — Walrus testnet contracts.
+# Spec §2.6: walrus::blob::Blob is the on-chain Blob type we wrap inside Model3D.
+# Plan U2 calls for `mvr = "@walrus/core"`, but the MVR registry on testnet does
+# not yet expose that handle for sui 1.72.1; fall back to the canonical Walrus
+# repo pinned to `main`. README documents the MVR sanity check the orchestrator
+# must run after deploy.
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "contracts/walrus", rev = "main" }
+
+[addresses]
+model3d = "0x0"
+
+[dev-dependencies]
+
+[dev-addresses]
