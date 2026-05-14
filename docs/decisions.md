@@ -430,6 +430,77 @@ User's correct intuition: 2-service split is the right separation of concerns. W
 
 ---
 
+## D-013: v1 scope refocus — cut L2 Derivative, promote Kiosk, narrow framing to Sui-native 3D NFT economy
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Phase**: Pre-Phase-1 strategy (refines v1 scope from D-001 + D-002)
+**Relates to**: D-001 (v1 narrows framing; v2 vision unchanged), D-002 (L2 layer deferred to v1.1), D-003 (license policy unchanged at type level; not exposed in v1 UI), D-005 (snapshot immutability still applies when L2 ships in v1.1)
+
+### Context
+
+Post-D-011/D-012 review of `docs/product.md` exposed three coupled problems:
+
+1. **L2 Derivative has no real user.** 3D has no remix / derivative culture analog to 2D, music, or video. The Sarah persona in product.md was invented to demo the Derivative layer, not because anyone in the wild does "fork chest → 5-variant series". Pricing math for an individual L2 actor (paying 5 × `derivative_mint_fee` upfront, recouping at `derivative_price × (1 − base_royalty_bps)`) yields ~$5/variant net at SUI ≈ $2–3 — not enough to sustain her time.
+
+2. **"Composable Creator Economy / 3D Story Protocol" framing is risk-prone.** Story Protocol is reference for some judges, unknown to others. It does not immediately read as Sui-ecosystem differentiation. Without a visible L2 actor in demo, "composable" sounds aspirational, not concrete.
+
+3. **Sui Kiosk + TransferPolicy sits in Stretch A but is *the* mechanism by which Sui beats Ethereum NFT royalty enforcement.** Without Kiosk in v1, "protocol-level royalty enforcement" is half-hearted — only the direct `purchase_access` flow is enforced, secondary markets can still strip royalty (the OpenSea / Blur 2023 failure mode).
+
+### Decision
+
+Three coupled changes for v1 (submission 6/21):
+
+1. **L2 Derivative moves to v1.1.** `Derivative`, `DerivativeApproval`, `mint_derivative_*` Move code design stays in `spec.md` §2.8 (already designed) but is **not** shipped, tested on testnet, demoed, or wired into UI for v1. Annotate §2.8 to mark Derivative-related structs and entry functions as `(v1.1 deferred per D-013)`.
+
+2. **Sui Kiosk + TransferPolicy promoted from Stretch A to v1 must-have.** Both `Model3D` and `Access` (or whatever subset survives Phase 2 design) registered with Kiosk; royalty enforcement runs at the protocol layer, not in `purchase_access` logic alone. This makes the "protocol-level economy" claim concrete and verifiable on Sui Explorer.
+
+3. **Public framing for v1 narrows to "Sui-native 3D NFT economy"** — pitched as five Sui+Walrus exclusive primitives:
+
+   | # | Element | Mechanism | Why other chains / web2 can't match |
+   |---|---|---|---|
+   | 1 | Royalty enforced at protocol layer | Sui Kiosk + TransferPolicy | Ethereum NFTs failed at this — OpenSea/Blur 2023 royalty war |
+   | 2 | License written into Move struct, unchangeable | `Model3D.license: LicenseTerms` | Unity 2023 retroactively changed TOS; Move types can't be silently mutated |
+   | 3 | Access soulbound by Move type ability | `Access has key` (no `store`) | Soulbound by type system, not by enforcement code — bytecode-level guarantee |
+   | 4 | Storage persistent across platform death | Walrus blob | Sketchfab→Fab and Mixamo 2025-06 both lost user assets; Walrus survives operator failure |
+   | 5 | Provenance traceable from on-chain timestamp + Walrus content hash | Walrus lineage record + Sui object creation tx | AI training dataset disputes (Objaverse) need exactly this — chain-of-custody proof |
+
+D-001's "Composable Creator Economy / Programmable IP Layer" framing remains the v2+ vision; v1 stays in the narrower, demonstrably-Sui-unique territory.
+
+### Rationale
+
+- L2 cut frees ~5–8 days in Phase 4 (Move upgrade + UI + tests + demo middle act) — reallocated to Kiosk integration (now must-have) and Phase 5 polish / demo prep
+- Kiosk promotion makes "protocol-enforced royalty" verifiable on Sui Explorer (OpenSea/Blur royalty failure → Sui Kiosk fixes is a story Sui-savvy judges immediately recognize)
+- Narrow framing eliminates the artificial Sarah persona; the 2-act narrative (Tom creator + Marcus buyer) has both actors choosing Sui for specific Sui-exclusive reasons, not for unverified "composable IP" reasons
+- D-001 vision preserved for v2; not abandoned — just sequenced
+- Each of the 5 framing elements is implementable in v1 and verifiable by judges with Sui Explorer + Walrus aggregator
+
+### Alternatives Considered
+
+- **Keep L2 in v1, fix Sarah persona** (B2B studio art lead variant): rejected — even with stronger persona, 3D-remix-culture absence makes the L2 actor speculative for a 38-day demo. The persona fix doesn't address the underlying market gap.
+- **Cut L2 + reframe to "Asset Supply Chain"** (first cut of Level 3 in office-hours review): rejected by user — collapses positioning to "web3 asset marketplace," loses the Sui-ecosystem differentiation entirely.
+- **Cut L2 + keep "Composable Creator Economy" framing as-is**: rejected — "composable" without a visible L2 demo is hand-wave; the 5-element framing is structurally stronger and concretely verifiable.
+- **Keep Kiosk as Stretch A**: rejected — Kiosk is what concretely separates Sui NFT economy from Ethereum's failed royalty enforcement. Belongs in v1, not stretch. The freed L2 time pays for it.
+
+### Consequences
+
+- ✅ v1 narrative tightens to two real actors (Tom, Marcus), both with verifiable Sui-specific reasons
+- ✅ Kiosk integration turns a previously-aspirational claim (protocol-level royalty) into on-chain reality before submission
+- ✅ Phase 4 saves ~5–8 days of L2 work → goes to mainnet polish + demo video
+- ✅ 5-framing-reason structure makes pitch deck and README easier to write — one section per element
+- ⚠️ L2 Move code design in spec.md §2.8 is not removed; stays as v1.1 reference. Risk: future contributor implements without reading this ADR. **Mitigation**: section headers in §2.8 for Derivative-related structs annotated `(v1.1 deferred per D-013)`
+- ⚠️ "Composable" word in spec.md §1.9 tagline and elsewhere must be carefully scoped — current tagline "Agentic by orchestration, manifold by construction, commercial by chain, composable by design" gets `composable by design` replaced with a Sui-primitives-concrete phrase. New tagline: **"Agentic by orchestration, manifold by construction, enforced by Sui Move, persistent by Walrus."**
+- ⚠️ `LicenseTerms.policy` field (D-003: restricted / allow_list / permissionless) stays in Move type but **v1 UI does not expose it**. Default at publish: `POLICY_PERMISSIONLESS` (so v1-published models can be derived in v1.1 without needing a license migration). `derivative_mint_fee` and `derivative_royalty_bps` defaults left to Phase 2 design.
+- 🔮 Post-hackathon: if Phase 5 traction shows real demand for derivative creation (e.g., Discord users asking "can I fork this base?"), v1.1 ships L2 with validated PMF. If not, L2 stays deferred indefinitely without harming v1 narrative.
+
+### Related
+
+- spec.md §1.7 (framing pivot for v1), §1.8 (Tripo comparison: "composable IP layer" rows soften), §1.9 (tagline update), §6 Phase 4 (Kiosk to must-have, Derivative work moved out of v1), §2.8 (Move code annotated `v1.1 deferred per D-013`)
+- docs/product.md (rewrite: Sarah cut, 3-act → 2-act, 5-framing-reason section featured)
+- D-001 (v1 narrows; v2 vision unchanged), D-002 (L2 deferred to v1.1), D-003 (policy field stays; not exposed in v1 UI), D-005 (still applies when L2 ships in v1.1)
+
+---
+
 # Reserved Decision Numbers
 
-D-013 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-014 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

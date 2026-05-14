@@ -135,19 +135,30 @@
 
 舊 pitch「3D model generator + Walrus storage」要 reframe。最強的角度:
 
-**主推 framing(2026-05-14 升級):Composable Creator Economy for 3D — Programmable IP Layer**
+**v1 framing(D-013 收斂,2026-05-14)Sui-Native 3D NFT Economy — 5 個 Sui+Walrus 獨家賣點**:
 
-對標 **Story Protocol**(a16z 領投 $140M,做 2D / 音樂 / 漫畫 IP)— 但我們做 **3D / game asset vertical**,而且 **Walrus 給我們 native decentralized storage**(Story 還在外接 IPFS)。
+| # | 賣點 | 機制 | 對手做不到的原因 |
+|---|---|---|---|
+| 1 | Royalty 強制在 protocol 層 | Sui Kiosk + TransferPolicy | OpenSea / Blur 2023 royalty 戰 — Ethereum NFT 已死過一次 |
+| 2 | License 寫進 Move struct 不可改 | `Model3D.license: LicenseTerms` | Unity 2023 偷改 TOS;Move type 一旦 publish 公開且不可竄改 |
+| 3 | Access 是 soulbound | `Access has key` 沒 `store` | Sui ability system 是 bytecode 級保證,不是合約邏輯 |
+| 4 | Storage 公司倒了 bytes 還在 | Walrus blob | Sketchfab → Fab 2024-10、Mixamo 2025-06 都有 user 失資料案例 |
+| 5 | Provenance 鏈上可追 | Walrus lineage + Sui timestamp + content hash | Objaverse 80 萬 model 沒授權被抓 — 需要這種 chain-of-custody 證據 |
 
-**四層架構(2026-05-14 D-011 升級,最上面加 Agent layer)**:
+**這 5 條只有 Sui+Walrus 一起能交付**,任何一個元件換成 Ethereum / Solana / S3 / IPFS 就會缺一條。
+
+**v2+ vision(post-hackathon,L2 真實 PMF signal 後)**:升級到完整 **Composable Creator Economy for 3D — Programmable IP Layer**,對標 Story Protocol($140M a16z,2D / 音樂 / 漫畫)— 我們做 3D / game asset vertical + Walrus native storage(Story 還在外接 IPFS)。**v1 沒這個 framing 是 D-013 的刻意決定** — L2 衍生需求未驗證前不主推。
+
+**v1 三層架構(D-013:L2 deferred 到 v1.1)**:
 ```
 L0  Agent Orchestration — LLM 解析 NL → catalog 路由 → 多步驟拆解 → lineage commit
      ↓
-L1  Base Model3D       — Creator A 上傳,Walrus 存 GLB + lineage,LicenseTerms 決定衍生規則
+L1  Base Model3D + Kiosk — Creator A 上傳,Walrus 存 GLB + lineage,
+                            LicenseTerms 寫死,Kiosk + TransferPolicy 強制 royalty
      ↓
-L2  Derivative Series  — Creator B 拿 base 做變體系列,protocol-level 自動分潤
+(L2 Derivative)         — v1.1 deferred per D-013(Move 設計仍在 §2.8)
      ↓
-L3  Game Integration   — Game dev C 買 access,在遊戲裡用
+L3  Game Integration    — Game dev C 買 access(soulbound),在遊戲裡用
 ```
 
 **Agent layer(D-011 新增)的具體行為**:
@@ -245,14 +256,15 @@ L3  Game Integration   — Game dev C 買 access,在遊戲裡用
 
 ### 1.9 一句總結
 
-**「Agentic by orchestration, manifold by construction, commercial by chain, composable by design.」**
+**「Agentic by orchestration, manifold by construction, enforced by Sui Move, persistent by Walrus.」**
+(D-013 update:`commercial by chain` + `composable by design` → 收斂為 `enforced by Sui Move` + `persistent by Walrus`,直接對到 5 賣點機制)
 
-- **Agentic by orchestration**(D-011 新增):LLM router 解析 NL → 路由 generator → 拆解多步驟 → lineage 上 Walrus — 對打 Tripo 的「點 button 等」黑盒 UX
+- **Agentic by orchestration**(D-011):LLM router 解析 NL → 路由 generator → 拆解多步驟 → lineage 上 Walrus — 對打 Tripo 的「點 button 等」黑盒 UX
 - **Manifold by construction**:procedural primary,保證可放物理引擎 — 對打 Tripo 的 AI mesh 雷
-- **Commercial by chain**:license + ownership + royalty 全鏈上強制 — 對打 Sketchfab/Mixamo/Unity 的平台風險
-- **Composable by design**:base → derivative → game 三層 IP 結構,protocol-level 自動分潤 — 對打 Story Protocol 還沒做的 3D vertical
+- **Enforced by Sui Move**(D-013 升級):Sui Kiosk + TransferPolicy 強制 royalty(賣點 1)、LicenseTerms 寫死(賣點 2)、Access soulbound(賣點 3)— 對打 Ethereum NFT royalty enforcement 失敗、Unity 條款追溯改、Solana/ETH soulbound 只是合約邏輯
+- **Persistent by Walrus**(D-013 升級):去中心化 blob storage(賣點 4)+ lineage record(賣點 5)— 對打 Sketchfab/Mixamo 倒站、S3/IPFS 單點
 
-**Tripo 是 SaaS,Story 是 2D IP layer。我們是 3D 的 agentic programmable IP foundation + native storage + verifiable memory。**
+**Tripo 是 SaaS,Story 是 2D IP layer,Ethereum 做 royalty 失敗。我們是 3D 的 agentic factory + Sui 獨家 5 賣點 NFT economy + Walrus native storage。v2+ 升級到完整 Composable Creator Economy(L2 真實 PMF 後)。**
 
 ---
 
@@ -463,6 +475,9 @@ public struct Model3D has key, store {
 
 /// Capability token — base creator 核發給特定衍生者(allow_list 模式)
 /// Soulbound(沒寫 transfer entry)
+// === Below: L2 Derivative-related types — v1.1 deferred per D-013 ===
+// (Design preserved; not shipped, not on testnet, not in v1 UI.)
+
 public struct DerivativeApproval has key {
     id: UID,
     for_model_id: ID,
@@ -552,6 +567,8 @@ public fun publish(
 }
 
 // === Allow-list 核發 / 撤銷 ===
+
+// === Below: L2 Derivative entry functions — v1.1 deferred per D-013 ===
 
 public fun grant_derivative_approval(
     model: &Model3D,
@@ -1147,29 +1164,34 @@ react-babylonjs:
 - 部署 frontend 到 Vercel、backend 到 cloud VM($5/mo Fly.io 或類似)
 - **可考慮**:把整個 frontend 改部署成 Walrus Site → Walrus track 雙重加分
 
-### Phase 4:Derivative Layer + Mainnet 切換(6/11 – 6/20,~10 天)
-**目標**:把 Composable Creator Economy 三層架構接到 v1 ready 狀態 + mainnet deploy
+### Phase 4:Kiosk 整合 + Mainnet 切換(6/11 – 6/20,~10 天)— D-013 改:L2 砍、Kiosk 升必做
+**目標**:**Sui Kiosk + TransferPolicy 強制 royalty** 接通 + mainnet deploy + 全 e2e
 
-**必做(整合 §2.8 Design)**:
-- **Move 合約升級**:加 `LicenseTerms` / `Derivative` / `DerivativeApproval` / `Access` struct + 對應 `publish` / `grant_derivative_approval` / `mint_derivative_*` / `purchase_*_access` function。本地 `sui move test` 過 4 個情境:
-  - permissionless 衍生分潤
-  - allow_list 核發 + 消耗
-  - restricted 拒絕衍生
-  - royalty cap (>30% publish abort)
-- **前端加 UI**:creator 上架時選 license policy + 設 royalty bps;creator dashboard 看到自己 base / 核發的 approval / 收到的 royalty;creator B 視角看到 fork-able base + 「Fork this model」按鈕做 derivative 系列
+**必做(整合 §2.8 Design + D-013)**:
+- **Sui Kiosk + TransferPolicy 整合(D-013 從 Stretch 升 v1 必做)**:
+  - `Model3D` publish 時自動 list 到 Kiosk
+  - 設定 royalty TransferPolicy(creator 收 N% 的 secondary sale)
+  - 寫測試覆蓋:direct purchase / secondary trade / royalty 強制
+  - **這是賣點 1 的 on-chain 鐵證** — 沒這個 framing 站不住
+  - 參考 [Sui Kiosk docs](https://docs.sui.io/standards/kiosk)
+- **L2 Derivative 整段移到 v1.1**(D-013):
+  - `Derivative` / `DerivativeApproval` Move struct 仍留在 spec.md §2.8 但**不上 testnet**
+  - `mint_derivative_*` 函式不寫
+  - 衍生 UI 不做
+  - 4 種衍生情境測試(permissionless / allow_list / restricted / royalty cap)等 v1.1
 - **重新部署 Move 合約到 mainnet**,記新 `MODEL3D_PACKAGE_ID_MAINNET`
 - 前端加 network switcher,預設 mainnet
 - 買 real WAL(mainnet 沒 faucet)準備 demo 用
-- Mainnet 跑一次完整 3 場景 e2e,記錄 tx hash + Sui Explorer 截圖
+- Mainnet 跑一次完整 2 場景 e2e(Tom publish + Marcus buy + 模擬 secondary trade 看 Kiosk royalty 撥款),記錄 tx hash + Sui Explorer 截圖
 - 決定 sponsored tx:
   - **選 A**:付 Enoki Pro $120/mo,demo 看不到 gas(**強烈推薦**,Demo Day 殺手)
   - **選 B**:user 自己付 gas,要解釋為什麼第一次 mint 要先 faucet
 
-**Stretch A**:**Sui Kiosk + TransferPolicy 整合** — 把 `Model3D` 跟 `Derivative` 都註冊 Kiosk,讓 secondary market 也走 protocol-level royalty。比目前 `purchase_*_access` 內建拆分更強(覆蓋 marketplace 第三方交易)。參考 [Sui Kiosk docs](https://docs.sui.io/standards/kiosk)
+**節省的時間(D-013)**:L2 工作砍掉 ~5–8 天 → 分配給 Kiosk 整合 + Phase 5 提早開工
 
-**Stretch B**:**Seal 整合** — `is_encrypted=true` 的 model / derivative 用 Seal 加密上 Walrus,`seal_approve` 函式已寫在 §2.8(`access: &Access` + clock 檢查)。完成後就是 **Walrus + Seal + Move + Kiosk 四件套滿貫**
+**Stretch A**(從原 Stretch B 改名)**:Seal 整合** — `is_encrypted=true` 的 model 用 Seal 加密上 Walrus,`seal_approve` 函式已寫在 §2.8(`access: &Access` + clock 檢查)。完成後就是 **Walrus + Seal + Move + Kiosk 四件套滿貫**
 
-**Stretch C**:**Forensic watermark** — 解密時 inject user ID 進 mesh micro-perturbation,流出來反查得到。對 Real-World Application 加分(誠實面對 DRM 不完美 + 提供 forensic 補救)
+**Stretch B**(從原 Stretch C 改名)**:Forensic watermark** — 解密時 inject user ID 進 mesh micro-perturbation,流出來反查得到。對 Real-World Application 加分
 
 ### Phase 5:Submission + Demo Polish(6/21 – 7/8 shortlist)
 **目標**:提交 → 進 shortlist → 排練 Demo Day
