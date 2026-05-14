@@ -2,7 +2,9 @@
 // Per D-011: Generator interface so Phase 2 LLM router and Phase 3 Tripo
 // generator can slot in behind the same contract without caller refactor.
 
-export type ShapeId = 'box' | 'chest' | 'cylinder' | 'sphere';
+export type ShapeId = 'box' | 'chest' | 'cylinder' | 'sphere' | 'sword' | 'hammer' | 'platform';
+
+export type PlatformStyle = 'round' | 'square';
 
 export interface BoxParams {
   shape: 'box';
@@ -33,11 +35,38 @@ export interface SphereParams {
   lonSegments: number;
 }
 
+export interface SwordParams {
+  shape: 'sword';
+  bladeLength: number;
+  bladeWidth: number;
+  gripLength: number;
+  pommelSize: number;
+}
+
+export interface HammerParams {
+  shape: 'hammer';
+  headWidth: number;
+  headDepth: number;
+  headHeight: number;
+  handleLength: number;
+  handleRadius: number;
+}
+
+export interface PlatformParams {
+  shape: 'platform';
+  style: PlatformStyle;
+  size: number;
+  thickness: number;
+}
+
 export type GenerateParams =
   | BoxParams
   | ChestParams
   | CylinderParams
-  | SphereParams;
+  | SphereParams
+  | SwordParams
+  | HammerParams
+  | PlatformParams;
 
 export type GeneratorSource = 'procedural' | 'tripo';
 

@@ -40,4 +40,35 @@ export const SHAPE_CATALOG: ShapeCatalog = [
       { name: 'lonSegments', label: 'Longitude',  min: 3,   max: 48, step: 1, default: 20 },
     ],
   },
+  {
+    id: 'sword',
+    label: 'Sword',
+    fields: [
+      { name: 'bladeLength', label: 'Blade length', min: 0.2,  max: 2.0, step: 0.05, default: 1.0 },
+      { name: 'bladeWidth',  label: 'Blade width',  min: 0.02, max: 0.3, step: 0.01, default: 0.1 },
+      { name: 'gripLength',  label: 'Grip length',  min: 0.05, max: 0.5, step: 0.01, default: 0.2 },
+      { name: 'pommelSize',  label: 'Pommel size',  min: 0.02, max: 0.2, step: 0.01, default: 0.08 },
+    ],
+  },
+  {
+    id: 'hammer',
+    label: 'Hammer',
+    fields: [
+      { name: 'headWidth',    label: 'Head width',    min: 0.05, max: 1.0, step: 0.05, default: 0.3 },
+      { name: 'headDepth',    label: 'Head depth',    min: 0.05, max: 0.5, step: 0.05, default: 0.15 },
+      { name: 'headHeight',   label: 'Head height',   min: 0.05, max: 0.5, step: 0.05, default: 0.2 },
+      { name: 'handleLength', label: 'Handle length', min: 0.1,  max: 2.0, step: 0.05, default: 0.8 },
+      { name: 'handleRadius', label: 'Handle radius', min: 0.01, max: 0.15, step: 0.01, default: 0.04 },
+    ],
+  },
+  {
+    id: 'platform',
+    label: 'Platform',
+    fields: [
+      // `style` is a discriminator, not a slider — frontend renders it as a
+      // toggle. Catalog field still emitted so the UI knows the option exists.
+      { name: 'size',      label: 'Size',      min: 0.2, max: 5,   step: 0.1,  default: 1.0 },
+      { name: 'thickness', label: 'Thickness', min: 0.02, max: 1,  step: 0.01, default: 0.1 },
+    ],
+  },
 ];

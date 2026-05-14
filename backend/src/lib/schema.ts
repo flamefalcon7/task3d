@@ -32,11 +32,38 @@ const sphereSchema = z.object({
   lonSegments: z.number().int().min(3).max(48),
 });
 
+const swordSchema = z.object({
+  shape: z.literal('sword'),
+  bladeLength: z.number().min(0.2).max(2.0),
+  bladeWidth:  z.number().min(0.02).max(0.3),
+  gripLength:  z.number().min(0.05).max(0.5),
+  pommelSize:  z.number().min(0.02).max(0.2),
+});
+
+const hammerSchema = z.object({
+  shape: z.literal('hammer'),
+  headWidth:    z.number().min(0.05).max(1.0),
+  headDepth:    z.number().min(0.05).max(0.5),
+  headHeight:   z.number().min(0.05).max(0.5),
+  handleLength: z.number().min(0.1).max(2.0),
+  handleRadius: z.number().min(0.01).max(0.15),
+});
+
+const platformSchema = z.object({
+  shape: z.literal('platform'),
+  style: z.enum(['round', 'square']),
+  size:      z.number().min(0.2).max(5),
+  thickness: z.number().min(0.02).max(1),
+});
+
 export const generateParamsSchema = z.discriminatedUnion('shape', [
   boxSchema,
   chestSchema,
   cylinderSchema,
   sphereSchema,
+  swordSchema,
+  hammerSchema,
+  platformSchema,
 ]);
 
 export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;

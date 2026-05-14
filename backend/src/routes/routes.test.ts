@@ -15,11 +15,13 @@ beforeAll(() => {
 });
 
 describe('GET /api/shapes', () => {
-  it('returns all four shapes', async () => {
+  it('returns all seven shapes', async () => {
     const res = await app.request('/api/shapes');
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ id: string }>;
-    expect(body.map((s) => s.id).sort()).toEqual(['box', 'chest', 'cylinder', 'sphere']);
+    expect(body.map((s) => s.id).sort()).toEqual(
+      ['box', 'chest', 'cylinder', 'hammer', 'platform', 'sphere', 'sword'],
+    );
   });
 });
 
