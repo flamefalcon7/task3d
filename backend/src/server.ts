@@ -12,6 +12,8 @@ import {
   SphereGenerator,
   SwordGenerator,
 } from './generators/index.js';
+import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
+import { buildAuthRoute } from './routes/auth.js';
 
 export function buildRouter(env: NodeJS.ProcessEnv = process.env): Router {
   const apiKey = env.ANTHROPIC_API_KEY?.trim();
@@ -46,6 +48,21 @@ export function buildRouter(env: NodeJS.ProcessEnv = process.env): Router {
   return new AnthropicRouter(client, generators, tripoEnabled);
 }
 
+// Startup hard-fail: a weak or absent JWT secret silently degrades sign-in
+// security (per doc-review SEC-002). assertJwtSecret throws JwtConfigError
+// which propagates out of buildJwt and aborts before serve() binds a port.
+export function buildJwt(env: NodeJS.ProcessEnv = process.env): JwtSigner {
+  const secret = env.JWT_SECRET;
+  assertJwtSecret(secret);
+  return createJwtSigner(secret);
+}
+
+export function buildServerApp(env: NodeJS.ProcessEnv = process.env) {
+  const app = buildApp({ router: buildRouter(env) });
+  app.route('/api/auth', buildAuthRoute({ jwt: buildJwt(env) }));
+  return app;
+}
+
 const port = Number(process.env.PORT ?? 3001);
 
 // Only bind a port when run directly (e.g. `tsx src/server.ts`), not when
@@ -53,7 +70,7 @@ const port = Number(process.env.PORT ?? 3001);
 // against the dev server.
 const invokedDirectly = import.meta.url === `file://${process.argv[1]}`;
 if (invokedDirectly) {
-  serve({ fetch: buildApp({ router: buildRouter() }).fetch, port }, (info) => {
+  serve({ fetch: buildServerApp().fetch, port }, (info) => {
     // eslint-disable-next-line no-console
     console.log(`backend listening on http://localhost:${info.port}`);
   });

@@ -36,13 +36,9 @@ Add new entries below as **OQ-XXX** in order. Move resolved questions to the bot
 
 ---
 
-## OQ-004: @mysten/dapp-kit 1.0 actual import paths
+## OQ-004: @mysten/dapp-kit 1.0 actual import paths — RESOLVED
 
-**Why this matters**: 1.0 was split into `-core` + `-react`. Most sample apps online are pre-1.0. We may hit cryptic import errors during Phase 2.
-
-**To resolve**: Check current `sdk.mystenlabs.com/dapp-kit` starter; try imports in a minimal test app.
-
-**Blocker level**: 🟡 Resolve before Phase 2 dapp-kit integration.
+See Resolved Questions section below.
 
 ---
 
@@ -161,3 +157,41 @@ Add new entries below as **OQ-XXX** in order. Move resolved questions to the bot
 # Resolved Questions
 
 (Move resolved items here with date + one-line resolution.)
+
+## OQ-004: @mysten/dapp-kit 1.0 actual import paths
+
+**Resolved**: 2026-05-15 (U4 implementation).
+
+**Outcome**: No -core/-react split — `@mysten/dapp-kit@1.0.6` ships everything from a single package entry. Imports used by U4:
+
+```ts
+// dApp Kit (single package, no @mysten/dapp-kit-core / @mysten/dapp-kit-react)
+import {
+  SuiClientProvider,
+  WalletProvider,
+  createNetworkConfig,
+  useSuiClientContext,
+  useConnectWallet,
+  useCurrentAccount,
+  useDisconnectWallet,
+  useSignPersonalMessage,
+  useWallets,
+} from '@mysten/dapp-kit';
+import '@mysten/dapp-kit/dist/index.css';
+
+// SuiClient construction (per D-019 — JSON-RPC client lives in /jsonRpc)
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
+
+// Enoki (registerEnokiWallets is the 1.0 surface; EnokiFlowProvider et al. are deprecated)
+import { registerEnokiWallets, isEnokiNetwork, isEnokiWallet, isGoogleWallet } from '@mysten/enoki';
+
+// Slush (registerSlushWallet exists, but dapp-kit's WalletProvider now exposes a
+// built-in `slushWallet={...}` prop that auto-registers — preferred path)
+import { SLUSH_WALLET_NAME } from '@mysten/slush-wallet';
+```
+
+**Companion deps required**: `@tanstack/react-query` (peer of dapp-kit 1.0; `QueryClientProvider` must wrap `SuiClientProvider`).
+
+**Network config gotcha**: `createNetworkConfig` entries in 1.0 must include both `network` (typed `'testnet' | 'mainnet' | 'devnet' | 'localnet'`) AND `url`. Older sample code used `{ url }` only — that fails the `NetworkConfig` type, which now extends `SuiJsonRpcClientOptions` per the D-019 split.
+
+**Signature verification (backend)**: `verifyPersonalMessageSignature` lives at `@mysten/sui/verify` (not `@mysten/sui/cryptography/verify` as the plan stated). Returns a `PublicKey` and asserts address equality via `options.address` — throws on mismatch.

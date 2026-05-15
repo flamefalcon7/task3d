@@ -86,3 +86,25 @@ export const generateResponseSchema = z.object({
 });
 
 export type ValidatedGenerateResponse = z.infer<typeof generateResponseSchema>;
+
+// U4 — auth payloads.
+// Sui addresses are 0x + 64 hex chars; loose-validate the shape but defer
+// canonical-form checks to the verifier (publicKey-derived address compare).
+const suiAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{1,64}$/, 'invalid Sui address');
+
+export const challengeRequestSchema = z.object({
+  address: suiAddressSchema,
+});
+
+export type ValidatedChallengeRequest = z.infer<typeof challengeRequestSchema>;
+
+export const verifyRequestSchema = z.object({
+  address: suiAddressSchema,
+  nonce: z.string().min(1),
+  // signature is the flag-byte-prefixed signature returned by wallet
+  // `signPersonalMessage`, base64-encoded. verifyPersonalMessageSignature
+  // reads the flag byte to dispatch the scheme.
+  signature: z.string().min(1),
+});
+
+export type ValidatedVerifyRequest = z.infer<typeof verifyRequestSchema>;

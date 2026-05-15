@@ -14,10 +14,14 @@
   "dependencies": {
     "@babylonjs/core": "^9.6.0",
     "@babylonjs/loaders": "^9.6.0",
+    "@mysten/dapp-kit": "1.0.6",
+    "@mysten/enoki": "1.0.7",
+    "@mysten/slush-wallet": "1.0.5",
     "@mysten/sui": "2.16.2",
     "@mysten/walrus": "1.1.7",
     "@mysten/walrus-wasm": "0.2.2",
     "@overflow2026/shared": "workspace:*",
+    "@tanstack/react-query": "^5.100.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
