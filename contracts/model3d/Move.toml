@@ -4,39 +4,14 @@ edition = "2024.beta"
 license = "Apache-2.0"
 authors = ["overflow2026 hackathon team"]
 
-# ============================================================================
-# TESTNET DEPLOY BLOCKER — being researched separately (see README.md)
-# ============================================================================
-# `sui move build` passes with the `override-addresses` syntax below. But
-# `sui client publish` rejects with "unpublished dependencies: WAL, Walrus"
-# because the deps' own Move.toml files declare `walrus = "0x0"` / `wal = "0x0"`
-# (no `published-at`). Sui CLI 1.72.1 has no flag to tell publish "these deps
-# are already on-chain at these addresses".
-#
-# Confirmed testnet package addresses (queried via `sui client object` against
-# the Walrus system_object and a WAL coin objectType on 2026-05-14):
-#   - Walrus testnet pkg: 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66
-#   - WAL    testnet pkg: 0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a
-#
-# Three viable resolutions to investigate in a focused session:
-#   (a) Fork Walrus, add `[package] published-at = "0x..."` to forked Move.toml,
-#       use git dep against the fork (clean but requires fork maintenance).
-#   (b) Local-clone Walrus + WAL, patch local Move.toml files with `published-at`,
-#       use `local = "../walrus-fork/contracts/walrus"` deps (works for build
-#       + publish but the local path leaks into Move.lock — non-portable).
-#   (c) Find a Sui Move CLI override / config that's missing from our search.
-#       The MVR alias `@walrus/core` (D-008/OQ-005) was the original plan;
-#       check whether 1.72.1 registry now supports it or whether a newer
-#       sui CLI version fixes this entirely.
-#
-# Phase 2 code work (U4..U10) does not require the contract to be deployed.
-# Integration tests (U7+U8+U9) will need `MODEL3D_PACKAGE_ID` — defer those
-# units' testnet smoke until this resolves.
-# ============================================================================
-
+# Walrus testnet dep — uses the deployed-artifact subtree (D-021).
+# `testnet-contracts/walrus/Published.toml` on `main` carries `published-at`
+# metadata which Sui CLI 1.72.1 reads natively. The mistake to avoid:
+# `contracts/walrus@testnet` is the SOURCE tree (intentionally walrus = "0x0",
+# re-published on upgrades) — not the deployed artifact.
+# WAL flows transitively from the same subtree.
 [dependencies]
-Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "contracts/walrus", rev = "testnet", override = true, override-addresses = { walrus = "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66", wal = "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a" } }
-# WAL pulled in transitively by Walrus.
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
 
 [addresses]
 model3d = "0x0"

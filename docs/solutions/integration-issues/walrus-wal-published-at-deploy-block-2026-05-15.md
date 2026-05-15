@@ -1,6 +1,8 @@
 ---
-title: Sui CLI rejects model3d publish — Walrus + WAL deps have no `published-at`
+title: Sui CLI rejects model3d publish — Walrus + WAL deps have no `published-at` (RESOLVED)
 date: 2026-05-15
+last_updated: 2026-05-15
+status: resolved
 category: integration-issues
 module: model3d-contract
 problem_type: integration_issue
@@ -9,8 +11,8 @@ symptoms:
   - "`sui client publish` aborts with `unpublished dependencies: WAL, Walrus` even though the addresses are known and pinned in Move.toml"
   - "`sui move build` succeeds with the same Move.toml — only `publish` rejects"
   - "All testnet integration tests blocked: no `MODEL3D_PACKAGE_ID` to write into frontend `.env`"
-root_cause: config_error
-resolution_type: documentation_update
+root_cause: wrong_dep_subtree
+resolution_type: config_change
 severity: critical
 tags:
   - sui-move
@@ -19,11 +21,53 @@ tags:
   - deploy
   - testnet
   - dependencies
+  - resolved
+  - published-toml
 related_components:
   - contracts
+related_decisions:
+  - D-021
 ---
 
-# Sui CLI rejects model3d publish — Walrus + WAL deps have no `published-at`
+# Sui CLI rejects model3d publish — Walrus + WAL deps have no `published-at` (RESOLVED)
+
+## ✅ RESOLUTION (2026-05-15 PM)
+
+**Root cause was a wrong-subtree diagnosis**, not missing `published-at` upstream. The fix is a one-line `Move.toml` change — no fork, no local-clone, no CLI upgrade, no MVR registry adoption needed. The three resolution paths originally captured below (a/b/c) are all obsolete.
+
+**The mistake**: We pointed at `MystenLabs/walrus@testnet:contracts/walrus/`, which is the **source tree** (it intentionally declares `walrus = "0x0"` and has no `[package] published-at` because it gets re-published on upgrades). The **deployed-artifact metadata** lives at a different subtree on a different branch: `MystenLabs/walrus@main:testnet-contracts/walrus/`, where each package directory carries a `Published.toml` sibling next to `Move.toml`. Sui CLI 1.72.1 reads `Published.toml` natively.
+
+**The fix** — change the Walrus dep stanza in `contracts/model3d/Move.toml`:
+
+```toml
+# Before
+[dependencies]
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "contracts/walrus", rev = "testnet", override = true, override-addresses = { walrus = "0xd84704...", wal = "0x8270feb7..." } }
+```
+
+```toml
+# After
+[dependencies]
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
+```
+
+WAL flows transitively from the new subtree (its `Move.toml` declares `WAL = { local = "../wal" }`). Drop `override = true` and `override-addresses` — they were patching the symptom of pointing at the wrong subtree.
+
+**Mainnet equivalent**: same mechanism, swap `testnet-contracts` → `mainnet-contracts`, keep `rev = "main"`. Relevant for D-009 (mainnet by 8/27).
+
+**Verified end-to-end 2026-05-15 PM**:
+- `sui move build`: clean
+- `sui move test`: 21/21 pass
+- `sui client publish --dry-run --gas-budget 200000000`: `execution status: success`, estimated gas ~0.0285 SUI
+- Previously: `Error: unpublished dependencies: WAL, Walrus` (consistently, for ~24 hours)
+
+**Heuristic to remember for next time**: when an upstream package's `Move.toml` looks "broken" relative to expectations, ask whether you're reading the wrong subtree before assuming the upstream is missing metadata. Mysten's Walrus repo has at least 4 subtrees that look like the package you might want — the right one is `<network>-contracts/<pkg>/` on `main`, not `contracts/<pkg>/` on a per-network branch.
+
+**Captured as D-021** in `docs/decisions.md`.
+
+The historical investigation below is preserved as a record of how the problem was framed before the mod response; it does not reflect current best practice.
+
+---
 
 ## Problem
 

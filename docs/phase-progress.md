@@ -1,11 +1,11 @@
 # Phase Progress
 
-## Last Updated: 2026-05-15 late PM (Phase 2 code + 8 docs + 5 P1/P2 polish items all landed. Deploy path (c) investigated and ruled out — fork or local-clone required. Phase 3 unblocked and is the right next move.)
+## Last Updated: 2026-05-16 AM — Plan-003 written, doc-reviewed (headless), 9 P0+P1 fixes walkthrough applied. **Ready for `/ce-work`.** Plan file: `docs/plans/2026-05-15-003-feat-phase-3-collection-forge-plan.md`. 3 pre-flight spikes (A/B/C) documented in plan's Risks & Dependencies section — they run before U1. Branch `feat/phase-2-sui-integration` carries uncommitted docs (D-020, D-021, brainstorm, plan, Move.toml fix, phase-progress, solutions update) — recommend committing before `/ce-work` dispatches.
 
 ### Hackathon Tracker
-- Days to submission (6/21): **38 of 38**
-- Days to demo day (7/20–21): **67 of 67**
-- Days to winners (8/27): **105 of 105**
+- Days to submission (6/21): **37 of 38**
+- Days to demo day (7/20–21): **66 of 67**
+- Days to winners (8/27): **104 of 105**
 
 ### Current Phase
 **Phase 2: Sui Integration — CODE COMPLETE 2026-05-15.** 10 units shipped on `feat/phase-2-sui-integration` branch (17 commits since `main`); 104 backend + 91 frontend + 21 Move tests all green. Two operational blockers before merge to `main`:
@@ -106,83 +106,40 @@ Verdict: the deploy block is real and requires **path (a) fork** or **path (b) l
 
 ### 🚧 Blocking issues for `main` merge
 
-1. **Testnet deploy** — Walrus + WAL `published-at` linking unresolved. `sui move build` + `sui move test` work locally with `override-addresses` syntax; `sui client publish` rejects "unpublished dependencies". Three documented resolution paths in `contracts/model3d/Move.toml`:
-   - (a) Fork Walrus + WAL repos, add `[package] published-at = "0x..."` to forked Move.toml, depend on the fork
-   - (b) Local-clone Walrus + WAL, patch Move.toml in the clones, use `local = "../walrus-fork/contracts/walrus"` deps
-   - (c) Upgrade Sui CLI to a version that supports a proper override flag (1.72.1 doesn't)
-   - Testnet addresses confirmed: Walrus pkg `0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66`, WAL pkg `0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a`
-2. **Live e2e on testnet** — Once deploy works, run two-wallet smoke: Wallet A (active address `0x3116...91ed`) mints via `/generate`; Wallet B (new keypair, second user) browses + buys Access. Capture tx hashes + Sui Explorer screenshots for pitch deck.
+1. ~~**Testnet deploy**~~ — ✅ **RESOLVED 2026-05-15 PM (D-021)**. The block was a wrong-subtree diagnosis: `contracts/walrus@testnet` is the source tree, deployed artifact lives at `testnet-contracts/walrus@main` with `Published.toml`. `Move.toml` fixed; `sui client publish --dry-run` reports `execution status: success`. Real publish deferred until Phase 3's Move contract change is ready (avoids 2 redeploys). See D-021 + `docs/solutions/integration-issues/walrus-wal-published-at-deploy-block-2026-05-15.md` (resolution header).
+2. **Live e2e on testnet** — Once Phase 3 Move contract change lands and real publish executes, run two-wallet smoke: Wallet A (active address `0x3116...91ed`) mints a 16-variant car collection via `/forge`; Wallet B (new keypair) browses, buys variant Access, opens `/track` and drives it. Capture tx hashes + Sui Explorer screenshots for pitch deck.
 
 ### Next concrete step
 
-**Start Phase 3 — sample game scene** (the highest-leverage demo deliverable). Testnet deploy is now intentionally deferred to Phase 5 polish week (or whenever Mysten responds to the dev-channel outreach below) since Phase 3+ does not depend on it.
+**Phase 3 demo shape locked**: Collection Forge + Tiny Racetrack (Car + Racing). D-020 strategy + D-021 deploy unblocking both applied. Brainstorm doc final: `docs/brainstorms/2026-05-15-collection-forge-requirements.md`.
 
-Recommended order for next session:
+All 6 brainstorm OQs resolved 2026-05-15 PM:
 
-1. **(Parallel, zero cost)** Send the dev-channel message below to the Sui Discord / Telegram dev-channel mods. If Mysten responds with an upstream fix or hidden CLI flag, the 30-minute fork/clone work evaporates. If no response in 3-5 days, fall back to path (b) when we get to Phase 5.
-2. **(Main work)** Open `/ce-plan` for Phase 3 — sample game scene. Babylon scene that loads 3D models from Walrus aggregator, lets a user walk around / interact with them. This is the "Real-World Application" prize-track centerpiece and the first thing in the demo video.
-3. **(Phase 3 parallel)** Seed catalog: generate 5-8 hero models with the existing procedural generators, upload them to Walrus, so the Browse page has real content for the demo. Does not need the contract.
+| OQ | Decision |
+|---|---|
+| OQ-D1 | **Car** (Tripo: 1 base car + N paint variants via material swap, ~60-120 credits per collection — large headroom on free tier) |
+| OQ-D2 | Path A dead (SDK source read); quilt = 1 Sui Blob; Move change required |
+| OQ-D3 | Variant cap **16** |
+| OQ-D4 | **Texture + color** (8 curated textures bundled + RGB picker per variant) |
+| OQ-D5 | Tiny Racetrack **L2 driveable, minimum-viable scope** (WASD + Havok physics + bounded oval; no opponents, no timer, no SFX, no wheel spin) |
+| OQ-D6 | **B.ii** — Collection wrapper + N Model3D objects (each variant is its own NFT; Phase 2 frontend mostly reusable) |
 
-Phase 4 (Kiosk + TransferPolicy) and Phase 5 (pitch deck + demo video) are also unblocked and can proceed in parallel if desired.
+**→ Next action: run `/ce-plan`** with brainstorm doc as origin, depth = **Standard**, target ~6-8 build days. Plan-003 must cover:
 
-**Time budget:** 37 days to submission (6/21). Phase 2 shipped 8 days ahead of its 5/29 deadline. Plenty of buffer for Phase 3-5 polish.
+- Move contract change: new `Collection` struct + `publish_collection` entry + `mint_variant` entry. Move test additions ~10 new tests on top of existing 21.
+- Testnet redeploy via D-021 path (`sui client publish --gas-budget 200000000` — drop `--dry-run`), produces real `MODEL3D_PACKAGE_ID`.
+- Backend `POST /api/collection/build` — accepts base GLB + N variant specs, returns N GLBs via `@gltf-transform/core` material swap.
+- Frontend Collection Forge page (variant editor + curated 8-texture library + 3-popup mint flow).
+- Frontend Browse adjustment: group by collection.
+- Frontend Tiny Racetrack page (Babylon scene + Havok rigid-body + WASD + chase camera + procedural oval track mesh).
+- E2E smoke test on testnet with two wallets.
 
-### Pending Sui dev-channel outreach (drafted but not sent)
+Parallel tracks (don't gate on plan-003):
+- **(Phase 3 parallel)** Seed catalog: generate 5-8 hero collections (mix of car + sword/hammer for procedural-path coverage) for wider marketplace demo content.
+- **(Phase 4)** Kiosk + TransferPolicy ADR needed before plan-004 (resolves OQ-013, target ~6/11).
+- **(Phase 5)** Pitch deck + demo video — Forge + Racetrack 90-sec arc is the centerpiece.
 
-Drafted during this session to ask Mysten about the Walrus deploy block. User to copy-paste and send to Sui Discord / Telegram dev-channel mods. Zero cost if ignored; upstream fix avoids the fork/clone work if it lands.
-
-```
-Hey mods — looking for guidance on a Walrus testnet deploy block (Sui CLI 1.72.1).
-
-Issue. My Move package depends on Walrus (`walrus::blob::Blob`). `sui move build`
-and `sui move test` pass. But `sui client publish` aborts:
-
-    Error: unpublished dependencies: WAL, Walrus
-
-Diagnosis. Walrus's own `contracts/walrus/Move.toml` on the `testnet` branch
-declares `walrus = "0x0"` with no `[package] published-at` field. Same for the
-transitive `contracts/wal/Move.toml` (`wal = "0x0"`, no `published-at`). The Sui
-CLI's publish step reads each transitive dep's own Move.toml for `published-at`
-and rejects when missing — there's no consumer-side override flag.
-
-Confirmed testnet package addresses (queried 2026-05-14 via `sui client object`):
-- Walrus: 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66
-- WAL:    0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a
-
-What I tried:
-- `override-addresses` inline on the Walrus git dep → satisfies `sui move build`
-  but `sui client publish` still rejects
-- `[addresses]` block at the consumer level → same outcome
-- `Walrus = { mvr = "@walrus/core" }` syntax → CLI 1.72.1 rejects `mvr` key
-  (not wired in?)
-- `--with-unpublished-dependencies` flag → wrong direction (would publish my
-  own copy, not reference the deployed Walrus)
-- Checking CLI changelog for 1.72.2+ → 1.72.1 appears to be the latest
-
-Workaround I'm about to commit to (path-of-least-resistance for a hackathon
-deadline):
-1. Local-clone `MystenLabs/walrus@testnet`
-2. Patch `contracts/walrus/Move.toml` to add `published-at = "0xd847..."`
-3. Patch `contracts/wal/Move.toml` to add `published-at = "0x8270..."`
-4. Switch my Move.toml to `Walrus = { local = "../walrus-vendor/contracts/walrus" }`
-5. `sui client publish` from there
-
-Questions for a Mysten dev:
-1. Is there a CLI flag I missed that lets a consumer assert "this dep is
-   on-chain at X" without forking/cloning?
-2. Is MVR (`@walrus/core` alias) actually shipped in 1.72.1, or scheduled for a
-   future release? Can't find docs.
-3. Any plan to add `published-at` to `MystenLabs/walrus@testnet`'s Move.toml?
-   Happy to send a PR if the addresses above are authoritative.
-4. If a PR is welcome, should the WAL package's Move.toml get the same
-   treatment, or is WAL's address tracked differently?
-
-Context: I'm building for Sui Overflow 2026 / Walrus track, deadline 6/21.
-Hackathon scope is small — solo submission, single testnet deploy. Happy to
-share my Move.toml or the failing repro in a thread if useful.
-
-Thanks 🙏
-```
+**Time budget:** 37 days to submission (6/21). Phase 2 shipped 8 days ahead of its 5/29 deadline; Phase 3 brainstorm + 2 ADRs (D-020, D-021) all landed today. Healthy buffer for Phase 5 polish.
 
 ### Notes for next session
 

@@ -940,6 +940,155 @@ Routing infrastructure ships in U8 (`frontend/src/App.tsx` becomes a `<BrowserRo
 
 ---
 
+## D-020: Phase 3 demo pivot — Collection Forge + Tiny Racetrack (replaces "sample game scene")
+
+**Status**: Accepted
+**Date**: 2026-05-15
+**Phase**: Phase 3 (Real-World Application) — before plan-003 runs
+
+### Context
+
+`docs/spec.md` §6 Phase 3 lists the deliverable as "sample game scene that loads 3D models from Walrus." This framing is correct as a Walrus-track demo but thin as a creator-economy showcase — it demonstrates "Walrus serves 3D assets" but not "creators ship products buyers want." User ideation 2026-05-15 surfaced a stronger frame: a 3D-NFT-collection minting tool (Collection Forge) paired with an Access-gated game asset consumer (Tiny Racetrack), demoing the full L1→Walrus→L3 economic loop in 90 seconds.
+
+D-013 cut L2 Derivative for v1, so the "collection" concept must use **sibling L1 Model3Ds with shared collection-identifier tags**, not L2 Derivative.
+
+**OQ-D2 resolved 2026-05-15 by `@mysten/walrus@1.1.7` source read** (not testnet spike): `writeFilesFlow.listFiles()` returns N elements all sharing one `blobId` + `blobObject` — a quilt is **one** Sui Blob object with N internal byte-range patches. Path A (N independent Sui Blob objects per upload) does not exist. Collection Forge therefore requires a Move contract change. Two architecture variants (B.ii Collection wrapper + N Model3Ds vs B.iii single Model3D + variant-indexed Access) — see brainstorm OQ-D6.
+
+**Testnet deploy block resolved 2026-05-15** (Sui Overflow mod response): upstream `MystenLabs/walrus@testnet:contracts/walrus/` is the source tree, not the deployed artifact. Deployed-package metadata lives at `MystenLabs/walrus@main:testnet-contracts/walrus/Published.toml` (Sui CLI 1.72.1 reads it natively). One-line Move.toml fix unblocks `sui client publish`. Captured as D-021. So Phase 3's required redeploy (per OQ-D6) is no longer a hard blocker.
+
+### Decision
+
+Replace the spec.md §6 Phase 3 "sample game scene" deliverable with a two-app pair:
+
+1. **Collection Forge** (`/forge`) — creator-side tool that mints N (≤ 16) sibling Model3D NFTs from one base mesh + per-variant material specs, in a single Walrus quilt + a single Sui PTB.
+2. **Tiny Racetrack** (`/track`) — buyer-side arcade racing demo. Detects owned Access receipts, lets player pick a car variant, loads its GLB from Walrus, and drops it on a bounded oval track with Havok rigid-body physics + WASD controls + chase camera. v1 scope locked: no opponents, no lap timer, no leaderboard, no sound (per brainstorm OQ-D5).
+
+Full spec lives in `docs/brainstorms/2026-05-15-collection-forge-requirements.md`. Plan to be produced from that doc.
+
+### Rationale
+
+- **Demo punch**: the original "sample game scene" demos ~30 sec of read-side capability. Forge + Arena demos a 90-sec full economic loop (mint → browse → buy → use) with two wallets. This is the centerpiece pitch-video segment.
+- **Walrus track alignment**: showcases **writeFilesFlow quilt batching** (OQ-014 / docs/solutions) — N variants in one Walrus upload with 2 wallet popups regardless of N. This is a Walrus-specific feature; the original framing didn't surface it.
+- **Sui Move alignment**: showcases **PTB composability** — one PTB with N `publish_and_share` calls minting an entire collection atomically. This is a Sui-specific feature.
+- **D-013 compliance**: variants are L1 siblings via shared tags, not L2 Derivatives. Zero scope reopening.
+- **Move change is required, not assumed-away**: OQ-D2 resolution killed Path A. Phase 3 needs a Move contract change (B.ii or B.iii — see brainstorm OQ-D6). Mitigated by D-021 (deploy block resolved): the redeploy step is now mechanical rather than a fork-and-clone investigation.
+- **Real-world recognizability**: "16-variant NFT collection" is a pattern judges and audience already understand (BAYC, Azuki, Pudgy Penguins). "Sample game scene" is a hackathon-ism.
+
+### Alternatives Considered
+
+- **Keep the original "sample game scene"**: rejected — read-side-only demo doesn't justify the Phase 3 budget (~10 days) given Phase 2 already covers reads via `/browse`.
+- **Single-app pivot (Collection Forge only, no Tiny Racetrack)**: rejected — Forge alone doesn't demo L3 Access gating. The pair makes the L3 receipt visible in a tangible way (only owned variants appear in arena).
+- **Two unrelated demos (NFT shelf + racing game per user's original concept)**: rejected — splits the demo narrative; doesn't naturally show creator-economy loop in one continuous arc.
+- **Push to L2 Derivative composability via Collection Forge** (variants as derivatives, royalty to base): rejected — would reopen D-013 mid-hackathon. The "sibling tags" framing preserves all v1 scope and still produces a strong demo.
+
+### Consequences
+
+- ✅ Phase 3 deliverable now ships a complete creator-economy demo, not just a Walrus read-side capability sample.
+- ✅ Showcases two Sui/Walrus-specific features (PTB composability + quilt batching) that JSON-RPC NFT marketplaces can't replicate.
+- ✅ Tiny Racetrack retains the read-side Walrus demo angle the original framing wanted.
+- ⚠️ OQ-D6 resolved → **B.ii** (Collection wrapper + N Model3D objects). Plan-003 builds on this Move shape. Frontend churn is minor (existing Phase 2 Browse + ModelDetail + Buy components still apply).
+- ⚠️ OQ-D1 resolved → **Car** (Tripo). One Tripo call per collection (~60-120 credits); N paint variants are material-swaps with no additional Tripo cost. Tripo free-tier budget has large headroom.
+- ⚠️ Tiny Racetrack scope locked → **L2 driveable, minimum-viable**: WASD + Havok rigid body + bounded oval track + chase camera + hard-wall stop. Excluded: opponents, lap timer, leaderboard, multiplayer, drift, jump, damage, SFX, wheel-spin animation. ~3 day target; if it grows beyond 4 days, descope rather than slip Phase 3.
+- 🔮 Post-hackathon: Forge becomes the production "collection minter" creator tool. Arena becomes the reference "game integration" example for third parties.
+
+### Related
+
+- `docs/brainstorms/2026-05-15-collection-forge-requirements.md` — full spec, AE1-AE5, OQ-D1..D5
+- `docs/spec.md` §6 Phase 3 — to be amended once plan-003 exists
+- D-001, D-002, D-013 — composable creator economy framing; L2 Derivative deferred to v1.1+
+- D-006 — GLB-only constraint applies to Forge output
+- D-014 — LLM-extracted tags; Forge prepends collection-identifier tags before passing to `publish_and_share`
+- D-016 — `publish_and_share` is the Phase 3 mint entry; reused N times per PTB in F1
+- OQ-013 — Phase 4 Kiosk coexistence; Forge does NOT integrate with Kiosk in v1 (accepted tradeoff per D-016)
+- OQ-014 (resolved) — writeFilesFlow quilt batching; the underlying capability Forge depends on
+- D-021 (pending capture) — testnet Walrus dep subtree fix; unblocks Phase 3 redeploy
+
+---
+
+## D-021: Walrus testnet dep — switch to `testnet-contracts/walrus@main` subtree
+
+**Status**: Accepted
+**Date**: 2026-05-15
+**Phase**: cross-phase — resolves the parked Phase 2 testnet deploy block + unblocks Phase 3 redeploy required by D-020 / OQ-D6
+**Verified**: `sui client publish --dry-run` succeeded 2026-05-15 PM (was rejecting with "unpublished dependencies: WAL, Walrus" prior to this fix)
+
+### Context
+
+Phase 2 hit a testnet deploy block: `sui move build` + `sui move test` worked locally, but `sui client publish` aborted with `Error: unpublished dependencies: WAL, Walrus`. Initial diagnosis traced this to Walrus's upstream `Move.toml` at `MystenLabs/walrus@testnet:contracts/walrus/` declaring `walrus = "0x0"` with no `[package] published-at` field. Three resolution paths were captured in `docs/solutions/integration-issues/walrus-wal-published-at-deploy-block-2026-05-15.md` — all of them involved a fork or local-clone with a patched Move.toml.
+
+The diagnosis was wrong about the cause. Per Sui Overflow mod response 2026-05-15 AM, the upstream subtree `contracts/walrus@testnet` is the **source tree** (it intentionally has `walrus = "0x0"` because it gets re-published on upgrades). The **deployed-artifact metadata** lives at a different subtree: `MystenLabs/walrus@main:testnet-contracts/walrus/`. Each subdirectory there carries a `Published.toml` sibling next to `Move.toml` — the modern Sui Move split between "what is this package" (Move.toml) and "where is it published per chain" (Published.toml). Sui CLI 1.72.1 reads `Published.toml` natively. The fix is a one-line `subdir` + `rev` change in our `Move.toml`, no fork or local-clone needed.
+
+Verified externally before applying:
+- `https://raw.githubusercontent.com/MystenLabs/walrus/main/testnet-contracts/walrus/Published.toml` returns `chain-id = "4c78adac"`, `original-id = "0xd84704c1..."`, `published-at = "0x849e95d2..."`, `version = 3`
+- `https://raw.githubusercontent.com/MystenLabs/walrus/main/testnet-contracts/wal/Published.toml` returns the WAL package at `0x8270feb7...`, `version = 1`
+
+The mainnet equivalent subtree is `mainnet-contracts/walrus/` on the same `main` branch — relevant for D-009 (mainnet by 8/27 for 100% prize).
+
+### Decision
+
+In `contracts/model3d/Move.toml`, replace the Walrus dep stanza:
+
+```toml
+# Before — pointed at the source subtree on the testnet branch
+[dependencies]
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "contracts/walrus", rev = "testnet", override = true, override-addresses = { walrus = "0xd84704...", wal = "0x8270feb7..." } }
+```
+
+```toml
+# After — points at the deployed-artifact subtree on main
+[dependencies]
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
+```
+
+WAL flows transitively from the new subtree's Move.toml (`WAL = { local = "../wal" }`); no separate WAL entry needed in our `[dependencies]`. The `override = true` and `override-addresses` workarounds are removed — they were patching the symptom of pointing at the wrong subtree.
+
+When Phase 3 produces the actual deployed `MODEL3D_PACKAGE_ID`, run real publish (drop `--dry-run`):
+
+```bash
+cd contracts/model3d
+sui client publish --gas-budget 200000000
+```
+
+For mainnet (Phase 5, D-009), switch the subdir to `mainnet-contracts/walrus` and rev stays `main`.
+
+### Rationale
+
+- **Source-of-truth hierarchy** (CLAUDE.md): the mod is a primary source for Mysten's own deployment conventions, outranking our own reverse-engineering. The signal we missed: when an upstream package's `Move.toml` looks "broken" relative to expectations, it's worth asking whether we're reading the wrong subtree before assuming the upstream is missing metadata.
+- **Native CLI support**: Sui CLI 1.72.1 already understands `Published.toml`. No CLI upgrade, no MVR registry adoption, no fork, no local-clone. The fix is in our manifest, not in the toolchain.
+- **Portability**: `Move.lock` resolves cleanly to a public git tree. No local paths leak into the lockfile (which was a downside of the alternative `local = "..."` resolutions).
+- **Forward-compatible with mainnet**: same mechanism for both networks; only the subdir name changes (`testnet-contracts` ↔ `mainnet-contracts`). D-009's mainnet flip is a one-line swap.
+- **Verified end-to-end before commit**: `sui move build` clean, all 21 Move tests pass, `sui client publish --dry-run` reports `execution status: success` with an estimated gas cost of ~0.0285 SUI.
+
+### Alternatives Considered
+
+The three previously-investigated paths in `docs/solutions/integration-issues/walrus-wal-published-at-deploy-block-2026-05-15.md` — all rejected in favor of this fix:
+
+- **(a) Fork Walrus + WAL, patch Move.toml with `published-at` in the fork**: rejected — requires fork maintenance, drift risk on upgrades, no Mysten support for the fork.
+- **(b) Local-clone + patch + `local = "../walrus-fork/..."` deps**: rejected — `local` paths leak into `Move.lock`, breaking portability across machines/CI.
+- **(c) Wait for newer Sui CLI / MVR registry**: previously concluded as blocked because 1.72.1 was the latest and MVR alias syntax was rejected — this conclusion was correct but moot: the problem wasn't CLI version, it was wrong subtree.
+
+### Consequences
+
+- ✅ Testnet deploy block officially resolved. Dry-run publish succeeds with no warnings about unpublished dependencies.
+- ✅ Phase 3's required Move contract change (D-020 / OQ-D6 — Collection wrapper or Variant-indexed Access) can redeploy without re-investigation.
+- ✅ Mainnet deploy path (D-009) becomes a one-line change at flip time.
+- ✅ The dev-channel outreach drafted in `phase-progress.md` is unnecessary; can be deleted from that doc.
+- ⚠️ The previous `docs/solutions/integration-issues/walrus-wal-published-at-deploy-block-2026-05-15.md` is now a historical investigation record, not active guidance. Update with a "RESOLUTION 2026-05-15 PM" header so `ce-learnings-researcher` surfaces the fix, not the false starts.
+- ⚠️ The `contracts/model3d/README.md` deploy instructions need a small refresh (drop `override-addresses` from any sample, point at this ADR).
+- 🔮 Watch for upstream changes — if Walrus is upgraded again on testnet, `published-at` in the upstream Published.toml will update to the new version. Re-pull (`Move.lock` regen) will pick it up automatically; no Move.toml edit needed.
+
+### Related
+
+- `contracts/model3d/Move.toml` — the actual one-line change
+- `docs/solutions/integration-issues/walrus-wal-published-at-deploy-block-2026-05-15.md` — to be updated with resolution
+- `docs/phase-progress.md` — "Pending Sui dev-channel outreach" section to be removed
+- D-008 — SDK version lock (D-021 is consistent: same Walrus version, just correct subtree)
+- D-009 — testnet for 6/21, mainnet by 8/27. D-021's mechanism handles both networks symmetrically.
+- D-020 / OQ-D6 — Phase 3 Collection Forge requires a Move contract change + redeploy. D-021 makes that redeploy mechanical.
+- D-014 / `Model3D` indexer expectations — no impact; Walrus testnet package address `0x849e95d2...` (current version 3) is what the indexer should reference, not the `0xd84704c1...` (original-id, version 1) we'd been documenting. Update indexer config if any path references the old address.
+
+---
+
 # Reserved Decision Numbers
 
-D-020 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-022 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
