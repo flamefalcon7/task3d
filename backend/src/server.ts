@@ -11,7 +11,9 @@ import {
   PlatformGenerator,
   SphereGenerator,
   SwordGenerator,
+  TripoGenerator,
 } from './generators/index.js';
+import { TripoClient } from './lib/tripo-client.js';
 import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
 import { buildAuthRoute } from './routes/auth.js';
 
@@ -28,6 +30,15 @@ export function buildRouter(env: NodeJS.ProcessEnv = process.env): Router {
   }
 
   const client = new Anthropic({ apiKey });
+  const tripoApiKey = env.TRIPO_API_KEY?.trim();
+  const tripoGenerator: Generator = tripoEnabled && tripoApiKey
+    ? new TripoGenerator(new TripoClient(tripoApiKey))
+    // tripoEnabled=false: TripoDisabledError fires in router before generators.get('tripo') runs.
+    // tripoEnabled=true but no API key: throw on actual invocation (env-misconfig in seed phase).
+    : { async generate() { throw new Error(tripoEnabled
+        ? 'TRIPO_ENABLED=true but TRIPO_API_KEY missing — set the key in your env'
+        : 'TripoGenerator gated off (TRIPO_ENABLED=false)'); } };
+
   const generators = new Map<GeneratorId, Generator>([
     ['box', new BoxGenerator()],
     ['chest', new ChestGenerator()],
@@ -36,13 +47,7 @@ export function buildRouter(env: NodeJS.ProcessEnv = process.env): Router {
     ['sword', new SwordGenerator()],
     ['hammer', new HammerGenerator()],
     ['platform', new PlatformGenerator()],
-    // U6 will replace this throwing stub with TripoGenerator; until then the
-    // tripoEnabled gate is the safety net.
-    ['tripo', {
-      async generate() {
-        throw new Error('TripoGenerator not yet implemented (U6)');
-      },
-    }],
+    ['tripo', tripoGenerator],
   ]);
 
   return new AnthropicRouter(client, generators, tripoEnabled);
