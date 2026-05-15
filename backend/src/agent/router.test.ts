@@ -167,8 +167,21 @@ describe('server.buildRouter factory', () => {
   });
 });
 
+// Minimal JwtSigner double used to gate prompt-mode tests on auth (review P0 #2).
+// signSession returns a fixed token; verifySession resolves only for that token.
+const TEST_BEARER = 'test-bearer-token';
+const fakeJwt = {
+  async signSession() {
+    return TEST_BEARER;
+  },
+  async verifySession(token: string) {
+    if (token !== TEST_BEARER) throw new Error('invalid');
+    return { sub: '0xdeadbeef', iat: 0, exp: 9_999_999_999 };
+  },
+};
+
 describe('/api/generate integration with AnthropicRouter', () => {
-  it('POST { prompt: "box" } with mocked AnthropicRouter returns 200', async () => {
+  it('POST { prompt: "box" } with valid Authorization + mocked AnthropicRouter returns 200', async () => {
     const client = fakeClient([
       {
         type: 'tool_use',
@@ -183,11 +196,11 @@ describe('/api/generate integration with AnthropicRouter', () => {
     ]);
     const router = new AnthropicRouter(client, buildGeneratorMap(), false);
     const { buildApp } = await import('../app.js');
-    const app = buildApp({ router });
+    const app = buildApp({ router, jwt: fakeJwt });
 
     const res = await app.request('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
       body: JSON.stringify({ prompt: 'simple box' }),
     });
     expect(res.status).toBe(200);
@@ -196,7 +209,7 @@ describe('/api/generate integration with AnthropicRouter', () => {
     expect(body.lineageStub.prompt).toBe('simple box');
   });
 
-  it('POST { prompt: "dragon" } with TRIPO_ENABLED=false returns 400 tripo_disabled', async () => {
+  it('POST { prompt: "dragon" } with valid auth + TRIPO_ENABLED=false returns 400 tripo_disabled', async () => {
     const client = fakeClient([
       {
         type: 'tool_use',
@@ -211,15 +224,58 @@ describe('/api/generate integration with AnthropicRouter', () => {
     ]);
     const router = new AnthropicRouter(client, buildGeneratorMap(), false);
     const { buildApp } = await import('../app.js');
-    const app = buildApp({ router });
+    const app = buildApp({ router, jwt: fakeJwt });
 
     const res = await app.request('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
       body: JSON.stringify({ prompt: 'ornate dragon statue' }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('tripo_disabled');
+  });
+
+  it('POST { prompt: ... } without Authorization header returns 401', async () => {
+    const router = new HardcodedRouter();
+    const { buildApp } = await import('../app.js');
+    const app = buildApp({ router, jwt: fakeJwt });
+
+    const res = await app.request('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'simple box' }),
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('auth_required');
+  });
+
+  it('POST { prompt: ... } with invalid Bearer token returns 401 auth_invalid', async () => {
+    const router = new HardcodedRouter();
+    const { buildApp } = await import('../app.js');
+    const app = buildApp({ router, jwt: fakeJwt });
+
+    const res = await app.request('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer not-the-right-token' },
+      body: JSON.stringify({ prompt: 'simple box' }),
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('auth_invalid');
+  });
+
+  it('POST { shape, params } (slider mode) does NOT require auth — returns 200 anonymously', async () => {
+    const router = new HardcodedRouter();
+    const { buildApp } = await import('../app.js');
+    const app = buildApp({ router }); // no jwt — slider mode is open
+
+    const res = await app.request('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shape: 'box', width: 1, height: 1, depth: 1 }),
+    });
+    expect(res.status).toBe(200);
   });
 });

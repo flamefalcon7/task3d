@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+
+// setup.ts mocks SignInButton globally so consumer tests (BrowsePage, CreatorFlow,
+// ModelDetailPage) don't need the dapp-kit provider chain. This file IS the
+// canonical place that exercises the real component, so undo that mock for the
+// modules vitest may have aliased it under.
+vi.unmock('./SignInButton');
+vi.unmock('../auth/SignInButton');
+
+// eslint-disable-next-line import/first
 import { SignInButton } from './SignInButton';
 
 const ADDRESS = `0x${'a'.repeat(64)}`;

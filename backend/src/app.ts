@@ -4,9 +4,11 @@ import type { Router } from '@overflow2026/shared';
 import { HardcodedRouter } from './agent/router.js';
 import { buildGenerateRoute } from './routes/generate.js';
 import { shapesRoute } from './routes/shapes.js';
+import type { JwtSigner } from './lib/jwt.js';
 
 export interface BuildAppDeps {
   router?: Router;
+  jwt?: JwtSigner;
 }
 
 export function buildApp(deps: BuildAppDeps = {}) {
@@ -16,7 +18,7 @@ export function buildApp(deps: BuildAppDeps = {}) {
 
   const router = deps.router ?? new HardcodedRouter();
   app.route('/api/shapes', shapesRoute);
-  app.route('/api/generate', buildGenerateRoute({ router }));
+  app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt }));
 
   return app;
 }

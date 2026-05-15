@@ -10,6 +10,7 @@ import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { generate } from '../lib/api';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import { useSession } from '../auth/useSession';
+import { SignInButton } from '../auth/SignInButton';
 import { PromptInput } from './PromptInput';
 import { NameInput, suggestNameFromTags } from './NameInput';
 import { MintButton, type MintStatus } from './MintButton';
@@ -231,11 +232,11 @@ export function CreatorFlow() {
               }
             />
             {!session && (
-              <div
-                style={{ fontSize: 12, marginTop: 4 }}
-                data-testid="signin-hint"
-              >
-                Sign in to mint
+              <div data-testid="signin-hint" style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+                  Sign in to mint:
+                </div>
+                <SignInButton />
               </div>
             )}
           </div>

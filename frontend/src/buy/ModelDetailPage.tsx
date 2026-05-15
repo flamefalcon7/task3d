@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { useModelById, useOwnsAccess } from './hooks';
 import { BuyAccessButton } from './BuyAccessButton';
+import { SignInButton } from '../auth/SignInButton';
 
 export function ModelDetailPage() {
   const { objectId } = useParams<{ objectId: string }>();
@@ -122,8 +123,11 @@ export function ModelDetailPage() {
           alreadyOwned={ownsAccess}
         />
         {!account && (
-          <div style={{ fontSize: 12, marginTop: 4 }} data-testid="signin-hint">
-            Sign in to buy
+          <div data-testid="signin-hint" style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+              Sign in to buy:
+            </div>
+            <SignInButton />
           </div>
         )}
       </div>

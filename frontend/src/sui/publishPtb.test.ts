@@ -35,7 +35,7 @@ describe('encodeLicenseTerms', () => {
 });
 
 describe('buildPublishPtb', () => {
-  it('builds a Transaction with moveCall to publish_and_share', () => {
+  it('chains new_license_terms result into publish_and_share (per-review P0 fix)', () => {
     const tx = buildPublishPtb({
       blobObjectId: '0xabc',
       shapeType: 'box',
@@ -47,9 +47,11 @@ describe('buildPublishPtb', () => {
       isEncrypted: false,
       license: DEFAULT_LICENSE,
     });
-    // Transaction has internal data referencing the moveCall target — assert
-    // we can serialize without throwing and the target string is present.
+    // Both moveCalls must appear so the LicenseTerms struct is constructed
+    // on-chain and passed as a Result to publish_and_share (rather than as
+    // raw BCS bytes, which would fail Move type checking).
     const serialized = JSON.stringify(tx.getData());
+    expect(serialized).toContain('new_license_terms');
     expect(serialized).toContain('publish_and_share');
     expect(serialized).toContain('model3d');
   });

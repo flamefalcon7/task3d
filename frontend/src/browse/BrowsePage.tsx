@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useModelIndex } from './useModelIndex';
 import { ModelCard } from './ModelCard';
+import { SignInButton } from '../auth/SignInButton';
 
 export function BrowsePage() {
   const [tagFilter, setTagFilter] = useState<string>('');
@@ -32,10 +33,13 @@ export function BrowsePage() {
         }}
       >
         <h1 style={{ fontSize: 18, margin: 0 }}>overflow2026 — Browse</h1>
-        <nav style={{ display: 'flex', gap: 16, fontSize: 14 }}>
+        <nav style={{ display: 'flex', gap: 16, fontSize: 14, alignItems: 'center' }}>
           <Link to="/generate" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
             Create →
           </Link>
+          <div style={{ minWidth: 200 }}>
+            <SignInButton />
+          </div>
         </nav>
       </header>
 

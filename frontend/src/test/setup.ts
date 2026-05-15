@@ -9,4 +9,17 @@ vi.mock('@mysten/walrus-wasm/web/walrus_wasm_bg.wasm?url', () => ({
   default: 'mock://walrus-wasm.wasm',
 }));
 
+// SignInButton uses dapp-kit hooks (useWallets, useConnectWallet) and Enoki
+// helpers — its inner workings have their own dedicated test
+// (SignInButton.test.tsx). For every OTHER test that just needs the component
+// to render harmlessly inside BrowsePage / CreatorFlow / ModelDetailPage, stub
+// it to a small placeholder so we don't have to spin up the full dapp-kit
+// provider chain. Real-component coverage stays in SignInButton.test.tsx.
+vi.mock('../auth/SignInButton', () => ({
+  SignInButton: () => null,
+}));
+vi.mock('./auth/SignInButton', () => ({
+  SignInButton: () => null,
+}));
+
 export {};

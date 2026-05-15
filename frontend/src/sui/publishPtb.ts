@@ -56,7 +56,20 @@ export interface BuildPublishPtbInput {
 
 export function buildPublishPtb(input: BuildPublishPtbInput): Transaction {
   const tx = new Transaction();
-  const licenseBytes = encodeLicenseTerms(input.license);
+  // Sui PTB cannot pass pre-BCS-serialized struct bytes as a struct-typed
+  // argument; the Move VM type-checks each arg against the entry function's
+  // parameter type. Construct LicenseTerms on-chain via new_license_terms
+  // and chain the Result into publish_and_share.
+  const license = tx.moveCall({
+    target: `${MODEL3D_PACKAGE_ID}::model3d::new_license_terms`,
+    arguments: [
+      tx.pure.u8(input.license.policy),
+      tx.pure.u64(input.license.derivativeMintFee),
+      tx.pure.u16(input.license.derivativeRoyaltyBps),
+      tx.pure.bool(input.license.commercialUse),
+      tx.pure.bool(input.license.requireAttribution),
+    ],
+  });
   tx.moveCall({
     target: `${MODEL3D_PACKAGE_ID}::model3d::publish_and_share`,
     arguments: [
@@ -68,7 +81,7 @@ export function buildPublishPtb(input: BuildPublishPtbInput): Transaction {
       tx.pure.string(input.lineageBlobId),
       tx.pure.u64(input.directAccessPrice),
       tx.pure.bool(input.isEncrypted),
-      tx.pure.vector('u8', Array.from(licenseBytes)),
+      license,
       tx.object('0x6'),
     ],
   });

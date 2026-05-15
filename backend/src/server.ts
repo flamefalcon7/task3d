@@ -63,8 +63,9 @@ export function buildJwt(env: NodeJS.ProcessEnv = process.env): JwtSigner {
 }
 
 export function buildServerApp(env: NodeJS.ProcessEnv = process.env) {
-  const app = buildApp({ router: buildRouter(env) });
-  app.route('/api/auth', buildAuthRoute({ jwt: buildJwt(env) }));
+  const jwt = buildJwt(env);
+  const app = buildApp({ router: buildRouter(env), jwt });
+  app.route('/api/auth', buildAuthRoute({ jwt }));
   return app;
 }
 

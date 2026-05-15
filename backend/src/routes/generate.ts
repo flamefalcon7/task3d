@@ -4,9 +4,14 @@ import type { GenerateParams, GenerateResponse, Router, ShapeId } from '@overflo
 import { generateParamsSchema, promptRequestSchema } from '../lib/schema.js';
 import { buildLineageJson, buildLineageStub } from '../lib/lineage.js';
 import { RouterFormatError, RouterParseError, TripoDisabledError } from '../agent/router.js';
+import type { JwtSigner } from '../lib/jwt.js';
 
 export interface GenerateRouteDeps {
   router: Router;
+  // Optional so tests that don't exercise prompt-mode can omit. Prompt-mode
+  // requests are rejected with 401 when jwt is absent — protects the
+  // Anthropic budget from anonymous callers (review #2 P0).
+  jwt?: JwtSigner;
 }
 
 export function buildGenerateRoute(deps: GenerateRouteDeps) {
@@ -23,6 +28,25 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
 
     if (!promptParsed.success && !paramsParsed.success) {
       return c.json({ error: 'invalid params', issues: paramsParsed.error.issues }, 400);
+    }
+
+    // Auth gate (review #2): prompt-mode hits Anthropic, which costs the
+    // operator per call. Anonymous slider-mode (procedural compute) remains
+    // open since procedural generators run local + free.
+    if (promptParsed.success) {
+      if (!deps.jwt) {
+        return c.json({ error: 'auth_unavailable', message: 'Prompt-mode requires server-side JWT configuration' }, 503);
+      }
+      const authHeader = c.req.header('Authorization');
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : null;
+      if (!token) {
+        return c.json({ error: 'auth_required', message: 'Prompt-mode requires Authorization: Bearer <jwt>' }, 401);
+      }
+      try {
+        await deps.jwt.verifySession(token);
+      } catch {
+        return c.json({ error: 'auth_invalid', message: 'Invalid or expired session token' }, 401);
+      }
     }
 
     try {
