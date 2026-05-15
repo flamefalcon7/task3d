@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-14 (Phase 2 plan written + 6-persona doc review applied + P1 patches landed; ready for ce-work dispatch)
+## Last Updated: 2026-05-15 (Phase 2 code COMPLETE — all 10 units shipped on `feat/phase-2-sui-integration`. Testnet deploy still parked.)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -8,7 +8,11 @@
 - Days to winners (8/27): **105 of 105**
 
 ### Current Phase
-**Phase 1: Scaffold — DONE.** Next: **Phase 2: Sui Integration** (5/20 – 5/29, ~10 days).
+**Phase 2: Sui Integration — CODE COMPLETE 2026-05-15.** 10 units shipped on `feat/phase-2-sui-integration` branch (17 commits since `main`); 104 backend + 91 frontend + 21 Move tests all green. Two operational blockers before merge to `main`:
+1. **Testnet deploy** — Walrus + WAL `published-at` dep linking unresolved (3 paths documented in `contracts/model3d/Move.toml`). Phase 2 code is testnet-ready; just need the deploy step.
+2. **Live e2e smoke** — depends on deploy; will produce real `MODEL3D_PACKAGE_ID` and demo screenshots.
+
+Next: **Phase 3 — Real-World Application** (5/30 – 6/10 per `docs/spec.md` §6); see Notes.
 
 See `docs/spec.md` §6 for full 5-phase plan.
 
@@ -34,37 +38,50 @@ See `docs/spec.md` §6 for full 5-phase plan.
 - **Post-implementation review** (`/review` skill): scope clean, 7 findings. Applied 2 [P2] fixes: schema ranges aligned to catalog ranges (`backend/src/lib/schema.ts`) + 2 boundary tests added (`width: -1` → 400, `width: 99` → 400)
 - **Real-browser smoke** (D-007 / Plan Risk row 3 mitigation): opened `:5173` in browser, exercised all 4 shapes. **Found: cylinder appeared hollow.** Root cause: top + bottom cap fan winding was CW (faces pointing inward), back-face culled → user saw through the caps. Fix in `backend/src/generators/cylinder.ts:54-64` (swap last two indices on each cap fan) + 2 regression tests (`top cap triangles face +Y`, `bottom cap triangles face -Y`). Tests now catch any future cap-winding regression on cylinder. Other 3 shapes verified visually correct.
 
-### In Progress
+### Phase 2 Code Closeout (2026-05-15)
 
-- **Branch**: `feat/phase-2-sui-integration` (all Phase 2 work lives here; merge to main at Phase 2 end)
+- **Branch**: `feat/phase-2-sui-integration` (17 commits since `main`)
 - **Plan**: `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` — 10 units, Deep depth. 6-persona doc review applied (6 P1 patches + cross-persona escalations landed before dispatch).
-- **ADRs landed**: D-015 (Model3D tags + lineage_blob_id), D-016 (publish_and_share + purchase_model_access + duration_ms + Phase 4 Kiosk caveat), D-018 (Move input bound assertions), **D-019 (SuiClient → SuiJsonRpcClient + SuiGrpcClient split, surfaced by U3)**. D-017 reserved for U7 React Router 7. Spec §2.5 + §2.8 amended.
-- **OQ-013** (Phase 4 Kiosk coexistence) added; **OQ-014** (writeFilesFlow popup count) RESOLVED by U3 — 2 popups for 2 files (quilted into one blob).
-- **Units committed (6 commits on branch since main)**:
-  - `3fa0f1e` U1 — API refactor (inline bytes; 31 backend + 6 frontend tests)
-  - `fbea2d3` U2 — Move contract `model3d::model3d` (21 Move tests pass locally; deploy block — see below)
-  - `b832137` U10 — 3 procedural generators sword/hammer/platform (62 backend tests, +31 from U10)
-  - `3004f2a` U3 — Walrus frontend wiring with writeFilesFlow + upload relay (17 frontend tests, +11)
-  - `eac0c59` D-019 ADR + spec §2.5 amendment
-  - `8e5edc6` Move.toml deploy block research notes
-- **🚧 Deploy block (parked, well-researched)**:
-  - Walrus testnet pkg: `0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66` (queried via `sui client object` on Walrus system_object → `objType`)
-  - WAL testnet pkg: `0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a` (queried via WAL coin `objectType`)
-  - `sui move build` passes with `override-addresses` syntax in Move.toml; `sui client publish` rejects "unpublished dependencies" because Walrus + WAL upstream Move.toml lacks `[package] published-at`. Sui CLI 1.72.1 has no flag to satisfy this without `--with-unpublished-dependencies` (which republishes the deps — bad).
-  - Three resolutions documented in `contracts/model3d/Move.toml`: (a) fork Walrus with `published-at`, (b) local clone + patch + path dep, (c) newer Sui CLI version with proper override flag.
-  - Phase 2 U4–U10 don't need a deployed contract; U7–U9 integration smoke tests will need it. Deploy investigation deferred to a focused session before final integration.
-- **Subagent in flight (started 2026-05-15 ~01:30 GMT+8)**: U5 retry #2 — first attempt died on Read truncation, second on Anthropic API rate limit (now reset).
+- **ADRs landed**: D-015 (Model3D tags + lineage_blob_id), D-016 (publish_and_share + purchase_model_access + duration_ms + Phase 4 Kiosk caveat), D-017 (react-router-dom@7.5.x), D-018 (Move input bound assertions), D-019 (SuiClient → SuiJsonRpcClient split). Spec §2.5 + §2.8 amended.
+- **OQs**: OQ-004 RESOLVED by U4 (dapp-kit 1.0 is a single package, no -core/-react split; real import paths captured). OQ-013 (Phase 4 Kiosk coexistence) added — defer to Phase 4 ADR. OQ-014 RESOLVED by U3 (writeFilesFlow quilts N files into one blob → 2 popups regardless of file count).
 
-### Dispatch sequencing (for resume)
+#### Units shipped (commit hashes)
 
-1. **U5** (AnthropicRouter) — in flight. Touches `shared/src/types.ts`, `backend/src/agent/router.ts`, `backend/src/lib/schema.ts`, `backend/src/server.ts`, `backend/src/routes/generate.ts`.
-2. **After U5 lands**: dispatch **U4 + U6 in parallel** (zero file overlap):
-   - U4 (Auth): `frontend/package.json`, `frontend/src/main.tsx`, `frontend/src/auth/*`, `backend/src/routes/auth.ts`, `backend/src/server.ts`, `backend/src/lib/schema.ts`, `backend/src/lib/jwt.ts`
-   - U6 (Tripo): `shared/src/types.ts` (full TripoParams over U5 placeholder), `backend/src/generators/tripo.ts`, `backend/src/lib/tripo-client.ts`, `backend/src/generators/index.ts`
-   - **CAVEAT**: U4 + U6 both touch `backend/src/server.ts` if U6 needs server bootstrap changes; verify. U6 also touches `shared/src/types.ts` which U4 doesn't — safe.
-3. **After U6 lands**: dispatch **U8** (Browse marketplace) — adds `Model3DSummary` to `shared/src/types.ts`, creates `frontend/src/browse/*`, modifies `frontend/src/App.tsx`.
-4. **After U4 + U8 land**: dispatch **U7 + U9 in parallel** (mostly disjoint — U7 = `frontend/src/creator/*` + `frontend/src/sui/publishPtb.ts`; U9 = `frontend/src/buy/*` + `frontend/src/sui/purchaseAccessPtb.ts`).
-5. **Manual orchestrator step**: resolve testnet deploy block (one of the 3 options in `contracts/model3d/Move.toml`); capture `MODEL3D_PACKAGE_ID` + UpgradeCap into `.env.testnet`. Then run U7 + U9 e2e smoke against testnet.
+| Unit | Commit | Adds | Tests |
+|---|---|---|---|
+| U1 | `3fa0f1e` | API refactor — inline GLB bytes + lineage in `POST /api/generate` response; drop `/api/preview/:id` + `backend/tmp/` | backend 26 → 31, frontend 6 |
+| U2 | `fbea2d3` | Move contract `model3d::model3d` — L1 + Access + tags + lineage_blob_id + D-018 input assertions | Move 21 |
+| U10 | `b832137` | sword/hammer/platform procedural generators + normal-direction tests | backend 31 → 62 |
+| U3 | `3004f2a` | Walrus frontend — `getWalrusClient`, `useWalrusUpload` driving writeFilesFlow + relay | frontend 6 → 17 |
+| U5 | `7064f28` | AnthropicRouter — tool-use structured output + zod, `paramRanges` single-source-of-truth, `HardcodedRouter` fallback | backend 62 → 72 |
+| U4 | `ff73b01` | Auth — dApp Kit + Enoki + Slush + signed-challenge JWT (flag-byte scheme dispatch) | backend 72 → 89, frontend 17 → 29 |
+| U6 | `20b9c54` + `42d345d` | TripoGenerator — async polling client (Tripo P1 v2/openapi); env-gated; server.ts wiring | backend 89 → 104 |
+| U8 | `5a79d64` | Browse marketplace — Sui GraphQL indexer + grid + BrowserRouter shell; `Model3DSummary` type | frontend 29 → 42 |
+| U7 | `ed01a1b` | Creator e2e — CreatorFlow + PromptInput + NameInput + MintButton (Step X of 3) + publishPtb + BCS LicenseTerms snapshot | frontend 42 → 67 |
+| U9 | `ce626e1` | Buyer e2e — ModelDetailPage + BuyAccessButton + purchaseAccessPtb + useModelById + useOwnsAccess (DL-009 guard) | frontend 67 → 91 |
+
+**Final test counts: backend 104, frontend 91, Move 21 = 216 total tests, all green.**
+
+### 🚧 Blocking issues for `main` merge
+
+1. **Testnet deploy** — Walrus + WAL `published-at` linking unresolved. `sui move build` + `sui move test` work locally with `override-addresses` syntax; `sui client publish` rejects "unpublished dependencies". Three documented resolution paths in `contracts/model3d/Move.toml`:
+   - (a) Fork Walrus + WAL repos, add `[package] published-at = "0x..."` to forked Move.toml, depend on the fork
+   - (b) Local-clone Walrus + WAL, patch Move.toml in the clones, use `local = "../walrus-fork/contracts/walrus"` deps
+   - (c) Upgrade Sui CLI to a version that supports a proper override flag (1.72.1 doesn't)
+   - Testnet addresses confirmed: Walrus pkg `0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66`, WAL pkg `0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a`
+2. **Live e2e on testnet** — Once deploy works, run two-wallet smoke: Wallet A (active address `0x3116...91ed`) mints via `/generate`; Wallet B (new keypair, second user) browses + buys Access. Capture tx hashes + Sui Explorer screenshots for pitch deck.
+
+### Next concrete step
+
+**Resolve testnet deploy.** Recommended order: try option (b) local-clone + patch first (lowest commitment); if that works, capture `MODEL3D_PACKAGE_ID` + UpgradeCap object ID in `.env.testnet`; transfer UpgradeCap to a known team-controlled address; run live e2e; then merge `feat/phase-2-sui-integration` → `main`.
+
+### Notes for next session
+
+- Phase 2 was a 38-day-budget sprint; we shipped in **2 calendar days** (2026-05-14 → 2026-05-15). That's ~8 days ahead of the 5/29 Phase 2 deadline per spec §6. Buffer goes to Phase 5 pitch deck + demo video polish per user preference.
+- Subagent dispatch pattern that worked: **inline code skeletons + tight 3-6 file read list + explicit "don't touch X" lists**. The pattern that failed: broad "read whatever you need" prompts (3 subagents died at 40-50K tokens mid-investigation; one rate-limited on Anthropic API).
+- Phase 4 Kiosk decision (OQ-013) needs to happen before Phase 4 starts (~6/11). Phase 2 used `share_object(Model3D)` per D-016 which has the bifurcation caveat (shared Model3Ds can't be retroactively placed in Kiosks).
+- Backend has graceful fallback for missing `ANTHROPIC_API_KEY` (HardcodedRouter takes over). For Phase 5 demo, set the env var so prompt-mode works.
+- `useOwnsAccess` (U9) silently returns false on GraphQL errors — pessimistic default. Acceptable for v1 since Move-level doesn't prevent duplicate Access.
 
 ### Next Concrete Step
 **Dispatch /ce-work on the Phase 2 plan.** The 9 units have meaningful parallelism: U1 (API refactor), U2 (Move contract), U3 (Walrus), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator), U10 (3 procedural generators) are mostly independent and can dispatch in parallel via worktree-isolated subagents. U7 (Creator e2e), U8 (Browse), U9 (Buyer e2e) are integration units and run sequentially after foundations land.
