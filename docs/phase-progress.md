@@ -38,20 +38,33 @@ See `docs/spec.md` §6 for full 5-phase plan.
 
 - **Branch**: `feat/phase-2-sui-integration` (all Phase 2 work lives here; merge to main at Phase 2 end)
 - **Plan**: `docs/plans/2026-05-14-002-feat-phase-2-sui-integration-plan.md` — 10 units, Deep depth. 6-persona doc review applied (6 P1 patches + cross-persona escalations landed before dispatch).
-- **ADRs landed**: D-015 (Model3D tags + lineage_blob_id), D-016 (publish_and_share + purchase_model_access + duration_ms + Phase 4 Kiosk caveat), D-018 (Move input bound assertions). D-017 reserved for U7 React Router 7. Spec §2.8 amended to reflect schema changes.
-- **OQ-013** (Phase 4 Kiosk coexistence) + **OQ-014** (writeFilesFlow popup count) added.
-- **Subagents dispatched in background (2026-05-14 ~8pm GMT+8)**:
-  - **U2** — Move contract `model3d::model3d` in `contracts/model3d/`. Builds + tests locally; deploy step deferred to orchestrator (needs gas + UpgradeCap handling). Zero overlap with U1.
-  - **U1** — API contract refactor: inline GLB bytes + lineage in `POST /api/generate` response; drop `/api/preview/:id` + `backend/tmp/`. Touches `backend/` + `frontend/` + `shared/`. Zero overlap with U2.
-- **Task tracker**: 11 tasks in TaskList (10 units + 1 pre-U2 ADR task completed). U2 + U1 in_progress.
+- **ADRs landed**: D-015 (Model3D tags + lineage_blob_id), D-016 (publish_and_share + purchase_model_access + duration_ms + Phase 4 Kiosk caveat), D-018 (Move input bound assertions), **D-019 (SuiClient → SuiJsonRpcClient + SuiGrpcClient split, surfaced by U3)**. D-017 reserved for U7 React Router 7. Spec §2.5 + §2.8 amended.
+- **OQ-013** (Phase 4 Kiosk coexistence) added; **OQ-014** (writeFilesFlow popup count) RESOLVED by U3 — 2 popups for 2 files (quilted into one blob).
+- **Units committed (6 commits on branch since main)**:
+  - `3fa0f1e` U1 — API refactor (inline bytes; 31 backend + 6 frontend tests)
+  - `fbea2d3` U2 — Move contract `model3d::model3d` (21 Move tests pass locally; deploy block — see below)
+  - `b832137` U10 — 3 procedural generators sword/hammer/platform (62 backend tests, +31 from U10)
+  - `3004f2a` U3 — Walrus frontend wiring with writeFilesFlow + upload relay (17 frontend tests, +11)
+  - `eac0c59` D-019 ADR + spec §2.5 amendment
+  - `8e5edc6` Move.toml deploy block research notes
+- **🚧 Deploy block (parked, well-researched)**:
+  - Walrus testnet pkg: `0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66` (queried via `sui client object` on Walrus system_object → `objType`)
+  - WAL testnet pkg: `0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a` (queried via WAL coin `objectType`)
+  - `sui move build` passes with `override-addresses` syntax in Move.toml; `sui client publish` rejects "unpublished dependencies" because Walrus + WAL upstream Move.toml lacks `[package] published-at`. Sui CLI 1.72.1 has no flag to satisfy this without `--with-unpublished-dependencies` (which republishes the deps — bad).
+  - Three resolutions documented in `contracts/model3d/Move.toml`: (a) fork Walrus with `published-at`, (b) local clone + patch + path dep, (c) newer Sui CLI version with proper override flag.
+  - Phase 2 U4–U10 don't need a deployed contract; U7–U9 integration smoke tests will need it. Deploy investigation deferred to a focused session before final integration.
+- **Subagent in flight (started 2026-05-15 ~01:30 GMT+8)**: U5 retry #2 — first attempt died on Read truncation, second on Anthropic API rate limit (now reset).
 
 ### Dispatch sequencing (for resume)
 
-After U1 + U2 land + are reviewed:
-1. **U10** (3 procedural generators) — touches `shared/src/types.ts` + `backend/src/lib/schema.ts` (overlaps U1; must run after).
-2. **Parallel batch**: U3 (Walrus frontend), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator). U3 is independent. U4+U5+U6 share `backend/src/lib/schema.ts` + `backend/package.json` + `shared/src/types.ts` — may need serial within this batch OR worktree isolation.
-3. **Sequential**: U7 (creator e2e, depends U1-U5), U8 (Browse, depends U1-U3), U9 (Buyer e2e, depends U2 + U4 + U8).
-4. **Manual orchestrator step before U2 deploy**: run `sui client switch --env testnet`, faucet test SUI, `sui client publish --gas-budget 100000000 contracts/model3d/`, capture `MODEL3D_PACKAGE_ID` + UpgradeCap object ID into `.env.testnet`.
+1. **U5** (AnthropicRouter) — in flight. Touches `shared/src/types.ts`, `backend/src/agent/router.ts`, `backend/src/lib/schema.ts`, `backend/src/server.ts`, `backend/src/routes/generate.ts`.
+2. **After U5 lands**: dispatch **U4 + U6 in parallel** (zero file overlap):
+   - U4 (Auth): `frontend/package.json`, `frontend/src/main.tsx`, `frontend/src/auth/*`, `backend/src/routes/auth.ts`, `backend/src/server.ts`, `backend/src/lib/schema.ts`, `backend/src/lib/jwt.ts`
+   - U6 (Tripo): `shared/src/types.ts` (full TripoParams over U5 placeholder), `backend/src/generators/tripo.ts`, `backend/src/lib/tripo-client.ts`, `backend/src/generators/index.ts`
+   - **CAVEAT**: U4 + U6 both touch `backend/src/server.ts` if U6 needs server bootstrap changes; verify. U6 also touches `shared/src/types.ts` which U4 doesn't — safe.
+3. **After U6 lands**: dispatch **U8** (Browse marketplace) — adds `Model3DSummary` to `shared/src/types.ts`, creates `frontend/src/browse/*`, modifies `frontend/src/App.tsx`.
+4. **After U4 + U8 land**: dispatch **U7 + U9 in parallel** (mostly disjoint — U7 = `frontend/src/creator/*` + `frontend/src/sui/publishPtb.ts`; U9 = `frontend/src/buy/*` + `frontend/src/sui/purchaseAccessPtb.ts`).
+5. **Manual orchestrator step**: resolve testnet deploy block (one of the 3 options in `contracts/model3d/Move.toml`); capture `MODEL3D_PACKAGE_ID` + UpgradeCap into `.env.testnet`. Then run U7 + U9 e2e smoke against testnet.
 
 ### Next Concrete Step
 **Dispatch /ce-work on the Phase 2 plan.** The 9 units have meaningful parallelism: U1 (API refactor), U2 (Move contract), U3 (Walrus), U4 (Auth), U5 (AnthropicRouter), U6 (TripoGenerator), U10 (3 procedural generators) are mostly independent and can dispatch in parallel via worktree-isolated subagents. U7 (Creator e2e), U8 (Browse), U9 (Buyer e2e) are integration units and run sequentially after foundations land.
