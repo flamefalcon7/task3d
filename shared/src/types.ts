@@ -273,3 +273,18 @@ export const RouterDecisionSchema = z.object({
 });
 
 export type RouterDecision = z.infer<typeof RouterDecisionSchema>;
+
+// Summary view of a published Model3D Sui object, surfaced to the Browse UI.
+// u64 fields are kept as strings to avoid bigint-across-JSON pain (D-015).
+export interface Model3DSummary {
+  objectId: string;            // Sui object ID
+  blobId: string;              // Walrus blob ID (string form per D-015)
+  creator: string;             // Sui address
+  shapeType: string;           // 'box' | 'chest' | ... | 'tripo'
+  paramsJson: string;
+  name: string;
+  directAccessPrice: string;   // u64 as string
+  tags: string[];
+  createdAtMs: string;         // u64 timestamp as string
+  lineageBlobId: string;       // D-015
+}

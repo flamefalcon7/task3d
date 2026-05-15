@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import type { GenerateParams } from '@overflow2026/shared';
 import { generate } from './lib/api';
 import { ShapePicker } from './components/ShapePicker';
 import { PreviewCanvas } from './babylon/PreviewCanvas';
+import { BrowsePage } from './browse/BrowsePage';
 
-function App() {
+// Phase 1's inline ShapePicker + PreviewCanvas demo loop now lives at
+// /generate as a placeholder. U7 replaces this with the real CreatorFlow
+// (wallet sign + publish PTB). Keeping the loop intact preserves the local
+// procedural preview path while U7 is in flight.
+function CreatorFlowPlaceholder() {
   const [params, setParams] = useState<GenerateParams | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -34,7 +40,8 @@ function App() {
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui' }}>
       <aside style={{ width: 360, padding: 20, borderRight: '1px solid #222', overflowY: 'auto' }}>
-        <h1 style={{ fontSize: 18, marginTop: 0 }}>overflow2026 — Phase 1</h1>
+        <Link to="/" style={{ fontSize: 12, color: '#7aa2ff', textDecoration: 'none' }}>← Browse</Link>
+        <h1 style={{ fontSize: 18, marginTop: 12 }}>overflow2026 — Phase 1</h1>
         <p style={{ fontSize: 12, color: '#888' }}>Local procedural preview. No chain.</p>
         <ShapePicker onParamsChange={setParams} />
         <button
@@ -65,6 +72,21 @@ function App() {
         )}
       </main>
     </div>
+  );
+}
+
+// D-014 + D-013: / is the demo default homepage (Browse marketplace);
+// /generate is the secondary CTA used by creators. U9 will add
+// /model/:objectId for the buyer detail page.
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<BrowsePage />} />
+        <Route path="/generate" element={<CreatorFlowPlaceholder />} />
+        {/* U9 adds /model/:objectId */}
+      </Routes>
+    </BrowserRouter>
   );
 }
 
