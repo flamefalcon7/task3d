@@ -5,9 +5,11 @@ import { getWalrusClient, type WalrusEnhancedClient } from './walrusClient';
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
-// Internal finer-grained state; surface as 'uploading' to the consumer.
-// Tracked here so future debug UI / telemetry can read it via ref if needed.
-type InternalStage =
+// Finer-grained stage exposed reactively so consumers (MintButton) can label
+// each wallet popup correctly — generic counts are unreliable since the
+// underlying writeFilesFlow always uses exactly 2 popups regardless of file
+// count (see docs/solutions/architecture-patterns/walrus-writefilesflow-popup-batching).
+export type UploadStage =
   | 'idle'
   | 'encoding'
   | 'awaiting-register'
@@ -27,7 +29,7 @@ export interface UploadResult {
 }
 
 export interface UploadError {
-  stage: Exclude<InternalStage, 'idle' | 'done' | 'error'>;
+  stage: Exclude<UploadStage, 'idle' | 'done' | 'error'>;
   cause: unknown;
 }
 
@@ -38,17 +40,18 @@ export interface UseWalrusUploadOptions {
   epochs?: number;
 }
 
-// why: writeFilesFlow encodes N files into a single quilt blob then delegates
-// to writeBlobFlow → 1 register + 1 certify regardless of file count. So
-// `popupCount = 2` for the Walrus portion of any creator flow; U7 layers a
-// third popup for the model3d::publish_and_share PTB. Verified against
-// @mysten/walrus@1.1.7 source (dist/flows/write-files.mjs).
+// writeFilesFlow encodes N files into a single quilt blob then delegates to
+// writeBlobFlow → 1 register + 1 certify regardless of file count. The Walrus
+// portion of any creator flow is exactly 2 popups; U7 layers a third for the
+// model3d::publish_and_share PTB. Verified against @mysten/walrus@1.1.7 source
+// (dist/flows/write-files.mjs). See docs/solutions/architecture-patterns/
+// walrus-writefilesflow-popup-batching for the rationale.
 const WALRUS_POPUP_COUNT = 2;
 
 export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   const [status, setStatus] = useState<UploadStatus>('idle');
+  const [stage, setStage] = useState<UploadStage>('idle');
   const [error, setError] = useState<UploadError | null>(null);
-  const stageRef = useRef<InternalStage>('idle');
   const clientRef = useRef<WalrusEnhancedClient | null>(options.client ?? null);
 
   const getClient = useCallback((): WalrusEnhancedClient => {
@@ -64,7 +67,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
       setError(null);
       setStatus('uploading');
-      stageRef.current = 'encoding';
+      setStage('encoding');
 
       const client = options.client ?? getClient();
       const owner = signer.toSuiAddress();
@@ -74,10 +77,12 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
       const flow = client.walrus.writeFilesFlow({ files: walrusFiles });
 
+      let lastStage: UploadStage = 'encoding';
       try {
         await flow.encode();
 
-        stageRef.current = 'awaiting-register';
+        lastStage = 'awaiting-register';
+        setStage(lastStage);
         await flow.executeRegister({
           signer,
           epochs: options.epochs ?? 10,
@@ -85,10 +90,12 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           owner,
         });
 
-        stageRef.current = 'relay-upload';
+        lastStage = 'relay-upload';
+        setStage(lastStage);
         await flow.upload({});
 
-        stageRef.current = 'awaiting-certify';
+        lastStage = 'awaiting-certify';
+        setStage(lastStage);
         await flow.executeCertify({ signer });
 
         const fileRefs: Array<{ id: string; blobId: string }> = await flow.listFiles();
@@ -100,13 +107,13 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           })),
         };
 
-        stageRef.current = 'done';
+        setStage('done');
         setStatus('done');
         return result;
       } catch (cause) {
-        const failedStage = stageRef.current as UploadError['stage'];
-        stageRef.current = 'error';
+        const failedStage = lastStage as UploadError['stage'];
         setError({ stage: failedStage, cause });
+        setStage('error');
         setStatus('error');
         throw cause;
       }
@@ -116,13 +123,14 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
   const reset = useCallback(() => {
     setStatus('idle');
+    setStage('idle');
     setError(null);
-    stageRef.current = 'idle';
   }, []);
 
   return {
     uploadFiles,
     status,
+    stage,
     error,
     reset,
     popupCount: WALRUS_POPUP_COUNT,

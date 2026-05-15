@@ -1,10 +1,20 @@
 import { sign, verify } from 'hono/jwt';
 import type { JWTPayload } from 'hono/utils/jwt/types';
+import { z } from 'zod';
 
 // HS256, 24h expiry (plan P5). Symmetric secret is fine for Phase 2; rotate to
 // asymmetric (RS256) in Phase 4 when a second service consumes these JWTs.
 const ALG = 'HS256';
 const TTL_SECONDS = 24 * 60 * 60;
+
+// Validates the claims shape Hono's verify() returns. Catches forged tokens
+// signed with the right secret but carrying garbage payloads (defense in depth
+// against `as unknown as SessionClaims` casts trusting upstream too far).
+const SessionClaimsSchema = z.object({
+  sub: z.string().regex(/^0x[0-9a-fA-F]+$/, 'sub must be a 0x-prefixed Sui address'),
+  iat: z.number().int().positive(),
+  exp: z.number().int().positive(),
+});
 
 export interface SessionClaims extends JWTPayload {
   sub: string; // Sui address (0x-prefixed)
@@ -16,6 +26,13 @@ export class JwtConfigError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'JwtConfigError';
+  }
+}
+
+export class JwtMalformedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'JwtMalformedError';
   }
 }
 
@@ -48,8 +65,17 @@ export function createJwtSigner(secret: string): JwtSigner {
       return sign(payload, secret, ALG);
     },
     async verifySession(token: string): Promise<SessionClaims> {
-      const decoded = (await verify(token, secret, ALG)) as unknown as SessionClaims;
-      return decoded;
+      const raw = await verify(token, secret, ALG);
+      const parsed = SessionClaimsSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new JwtMalformedError(
+          `JWT payload does not match SessionClaims schema: ${parsed.error.message}`,
+        );
+      }
+      // SessionClaims extends JWTPayload (open); spread keeps any extra JWT-standard
+      // fields (iss, aud, etc.) Hono may have populated while guaranteeing the three
+      // we depend on are valid.
+      return { ...(raw as JWTPayload), ...parsed.data };
     },
   };
 }

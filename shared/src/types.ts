@@ -197,14 +197,14 @@ export interface GenerateResponse {
 // can't emit out-of-catalog values. Used by backend AnthropicRouter via
 // zod-to-json-schema for Anthropic tool-use input_schema.
 
-const boxParamsSchema = z.object({
+export const boxParamsSchema = z.object({
   shape: z.literal('box'),
   width:  z.number().min(paramRanges.box.width.min).max(paramRanges.box.width.max),
   height: z.number().min(paramRanges.box.height.min).max(paramRanges.box.height.max),
   depth:  z.number().min(paramRanges.box.depth.min).max(paramRanges.box.depth.max),
 });
 
-const chestParamsSchema = z.object({
+export const chestParamsSchema = z.object({
   shape: z.literal('chest'),
   width:  z.number().min(paramRanges.chest.width.min).max(paramRanges.chest.width.max),
   height: z.number().min(paramRanges.chest.height.min).max(paramRanges.chest.height.max),
@@ -212,21 +212,21 @@ const chestParamsSchema = z.object({
   lidOpenRadians: z.number().min(paramRanges.chest.lidOpenRadians.min).max(paramRanges.chest.lidOpenRadians.max),
 });
 
-const cylinderParamsSchema = z.object({
+export const cylinderParamsSchema = z.object({
   shape: z.literal('cylinder'),
   radius:   z.number().min(paramRanges.cylinder.radius.min).max(paramRanges.cylinder.radius.max),
   height:   z.number().min(paramRanges.cylinder.height.min).max(paramRanges.cylinder.height.max),
   segments: z.number().int().min(paramRanges.cylinder.segments.min).max(paramRanges.cylinder.segments.max),
 });
 
-const sphereParamsSchema = z.object({
+export const sphereParamsSchema = z.object({
   shape: z.literal('sphere'),
   radius:      z.number().min(paramRanges.sphere.radius.min).max(paramRanges.sphere.radius.max),
   latSegments: z.number().int().min(paramRanges.sphere.latSegments.min).max(paramRanges.sphere.latSegments.max),
   lonSegments: z.number().int().min(paramRanges.sphere.lonSegments.min).max(paramRanges.sphere.lonSegments.max),
 });
 
-const swordParamsSchema = z.object({
+export const swordParamsSchema = z.object({
   shape: z.literal('sword'),
   bladeLength: z.number().min(paramRanges.sword.bladeLength.min).max(paramRanges.sword.bladeLength.max),
   bladeWidth:  z.number().min(paramRanges.sword.bladeWidth.min).max(paramRanges.sword.bladeWidth.max),
@@ -234,7 +234,7 @@ const swordParamsSchema = z.object({
   pommelSize:  z.number().min(paramRanges.sword.pommelSize.min).max(paramRanges.sword.pommelSize.max),
 });
 
-const hammerParamsSchema = z.object({
+export const hammerParamsSchema = z.object({
   shape: z.literal('hammer'),
   headWidth:    z.number().min(paramRanges.hammer.headWidth.min).max(paramRanges.hammer.headWidth.max),
   headDepth:    z.number().min(paramRanges.hammer.headDepth.min).max(paramRanges.hammer.headDepth.max),
@@ -243,19 +243,22 @@ const hammerParamsSchema = z.object({
   handleRadius: z.number().min(paramRanges.hammer.handleRadius.min).max(paramRanges.hammer.handleRadius.max),
 });
 
-const platformParamsSchema = z.object({
+export const platformParamsSchema = z.object({
   shape: z.literal('platform'),
   style: z.enum(['round', 'square']),
   size:      z.number().min(paramRanges.platform.size.min).max(paramRanges.platform.size.max),
   thickness: z.number().min(paramRanges.platform.thickness.min).max(paramRanges.platform.thickness.max),
 });
 
-const tripoParamsSchema = z.object({
+export const tripoParamsSchema = z.object({
   shape: z.literal('tripo'),
   prompt: z.string().min(1).max(1000),
 });
 
-export const GenerateParamsSchema = z.discriminatedUnion('shape', [
+// All 7 procedural shape schemas, in catalog order. Backends and other
+// consumers that want to gate against "no tripo here" should compose a
+// discriminated union from this array (see backend/src/lib/schema.ts).
+export const proceduralParamsSchemas = [
   boxParamsSchema,
   chestParamsSchema,
   cylinderParamsSchema,
@@ -263,6 +266,10 @@ export const GenerateParamsSchema = z.discriminatedUnion('shape', [
   swordParamsSchema,
   hammerParamsSchema,
   platformParamsSchema,
+] as const;
+
+export const GenerateParamsSchema = z.discriminatedUnion('shape', [
+  ...proceduralParamsSchemas,
   tripoParamsSchema,
 ]);
 

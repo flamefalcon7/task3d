@@ -3,6 +3,8 @@ const TRIPO_BASE = 'https://api.tripo3d.ai/v2/openapi';
 const DONE_STATUSES = new Set(['success', 'done', 'complete', 'completed']);
 const FAIL_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled']);
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export class TripoAuthError extends Error {
   constructor(message = 'Tripo API authentication failed (401)') {
     super(message);
@@ -37,29 +39,55 @@ interface PollOpts {
   sleep?: (ms: number) => Promise<void>;
 }
 
+interface ClientOpts {
+  /** Per-request HTTP timeout (AbortSignal). Distinct from pollTask's maxWaitMs which bounds the whole loop. Default 30s. */
+  requestTimeoutMs?: number;
+}
+
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError');
+}
+
 export class TripoClient {
-  constructor(private apiKey: string) {
+  private requestTimeoutMs: number;
+
+  constructor(private apiKey: string, opts: ClientOpts = {}) {
     if (!apiKey) throw new Error('TRIPO_API_KEY required');
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  private signal(): AbortSignal {
+    // AbortSignal.timeout(ms) auto-aborts at ms. Node 22 LTS supports it natively.
+    return AbortSignal.timeout(this.requestTimeoutMs);
   }
 
   async submitTask(prompt: string): Promise<string> {
-    const res = await fetch(`${TRIPO_BASE}/task`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        type: 'text_to_model',
-        model_version: 'Tripo-P1',
-        prompt,
-        face_limit: 5000,
-        texture: false,
-        output_format: 'glb',
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${TRIPO_BASE}/task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          type: 'text_to_model',
+          model_version: 'Tripo-P1',
+          prompt,
+          face_limit: 5000,
+          texture: false,
+          output_format: 'glb',
+        }),
+        signal: this.signal(),
+      });
+    } catch (e) {
+      if (isAbortError(e)) {
+        throw new TripoTimeoutError(`Tripo submitTask timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw e;
+    }
 
     if (res.status === 401) throw new TripoAuthError();
     if (!res.ok) throw new TripoFailedError(`Tripo submitTask returned ${res.status}`);
@@ -80,9 +108,20 @@ export class TripoClient {
     let attempt = 0;
 
     while (elapsed < maxWaitMs) {
-      const res = await fetch(`${TRIPO_BASE}/task/${taskId}`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${TRIPO_BASE}/task/${taskId}`, {
+          headers: { Authorization: `Bearer ${this.apiKey}` },
+          signal: this.signal(),
+        });
+      } catch (e) {
+        if (isAbortError(e)) {
+          throw new TripoTimeoutError(
+            `Tripo pollTask request timed out after ${this.requestTimeoutMs}ms (task ${taskId})`,
+          );
+        }
+        throw e;
+      }
       if (res.status === 401) throw new TripoAuthError();
       if (!res.ok) throw new TripoFailedError(`Tripo pollTask returned ${res.status}`);
 
@@ -122,7 +161,15 @@ export class TripoClient {
   }
 
   async downloadGlb(url: string): Promise<Uint8Array> {
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetch(url, { signal: this.signal() });
+    } catch (e) {
+      if (isAbortError(e)) {
+        throw new TripoTimeoutError(`Tripo downloadGlb timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw e;
+    }
     if (!res.ok) throw new TripoFailedError(`Tripo downloadGlb returned ${res.status}`);
     const buf = await res.arrayBuffer();
     return new Uint8Array(buf);

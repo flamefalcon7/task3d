@@ -16,14 +16,40 @@ interface NonceEntry {
 // silently overwrite an in-flight challenge if the user clicks Sign In twice.
 // Phase 2 in-memory only; backend restart between challenge and verify
 // invalidates pending sign-ins (acceptable for hackathon scope; Phase 3 Redis).
+//
+// Lazy delete-on-read in `take` only evicts entries the client comes back
+// for — abandoned challenges (closed tab, rejected wallet popup) leak. The
+// sweep below evicts expired entries on a fixed interval so process memory
+// stays bounded. See docs/solutions/best-practices/in-memory-nonce-store-
+// needs-explicit-ttl-sweep for the rationale.
+const DEFAULT_SWEEP_INTERVAL_MS = 60 * 1000;
+
 export interface NonceStore {
   put(nonce: string, entry: NonceEntry): void;
   take(nonce: string): NonceEntry | undefined;
   size(): number;
+  stopSweep(): void;
 }
 
-export function createInMemoryNonceStore(now: () => number = Date.now): NonceStore {
+export function createInMemoryNonceStore(
+  now: () => number = Date.now,
+  sweepIntervalMs: number = DEFAULT_SWEEP_INTERVAL_MS,
+): NonceStore {
   const map = new Map<string, NonceEntry>();
+
+  const sweep = (): void => {
+    const t = now();
+    for (const [nonce, entry] of map) {
+      if (entry.expiresAt < t) map.delete(nonce);
+    }
+  };
+
+  const handle = setInterval(sweep, sweepIntervalMs);
+  // unref so the sweep timer doesn't keep Node alive on shutdown.
+  if (typeof handle === 'object' && handle !== null && 'unref' in handle) {
+    (handle as { unref: () => void }).unref();
+  }
+
   return {
     put(nonce, entry) {
       map.set(nonce, entry);
@@ -36,6 +62,7 @@ export function createInMemoryNonceStore(now: () => number = Date.now): NonceSto
       return entry;
     },
     size: () => map.size,
+    stopSweep: () => clearInterval(handle),
   };
 }
 

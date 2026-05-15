@@ -62,6 +62,15 @@ describe('TripoClient', () => {
       const client = new TripoClient('key');
       await expect(client.submitTask('x')).rejects.toBeInstanceOf(TripoFormatError);
     });
+
+    it('throws TripoTimeoutError when the HTTP request is aborted by AbortSignal', async () => {
+      // AbortSignal.timeout aborts with a DOMException(name='TimeoutError').
+      // fetch surfaces it as a thrown DOMException; simulate that here.
+      const abortErr = new DOMException('aborted', 'TimeoutError');
+      fetchMock.mockRejectedValueOnce(abortErr);
+      const client = new TripoClient('key', { requestTimeoutMs: 50 });
+      await expect(client.submitTask('x')).rejects.toBeInstanceOf(TripoTimeoutError);
+    });
   });
 
   describe('pollTask', () => {
@@ -118,6 +127,15 @@ describe('TripoClient', () => {
         TripoFormatError,
       );
     });
+
+    it('throws TripoTimeoutError when an individual poll fetch is aborted', async () => {
+      const abortErr = new DOMException('aborted', 'TimeoutError');
+      fetchMock.mockRejectedValueOnce(abortErr);
+      const client = new TripoClient('key', { requestTimeoutMs: 50 });
+      await expect(client.pollTask('t1', { sleep: noSleep })).rejects.toBeInstanceOf(
+        TripoTimeoutError,
+      );
+    });
   });
 
   describe('downloadGlb', () => {
@@ -135,6 +153,15 @@ describe('TripoClient', () => {
       const client = new TripoClient('key');
       await expect(client.downloadGlb('https://cdn/x.glb')).rejects.toBeInstanceOf(
         TripoFailedError,
+      );
+    });
+
+    it('throws TripoTimeoutError when downloadGlb is aborted', async () => {
+      const abortErr = new DOMException('aborted', 'TimeoutError');
+      fetchMock.mockRejectedValueOnce(abortErr);
+      const client = new TripoClient('key', { requestTimeoutMs: 50 });
+      await expect(client.downloadGlb('https://cdn/x.glb')).rejects.toBeInstanceOf(
+        TripoTimeoutError,
       );
     });
   });

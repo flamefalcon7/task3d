@@ -54,7 +54,7 @@ export function CreatorFlow() {
 
   const { session } = useSession();
   const account = useCurrentAccount();
-  const { uploadFiles, popupCount } = useWalrusUpload();
+  const { uploadFiles, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const signer = useDappKitSigner(account?.address ?? null);
 
@@ -221,7 +221,7 @@ export function CreatorFlow() {
           <div style={{ marginTop: 12 }}>
             <MintButton
               status={mintStatus}
-              popupCount={popupCount ?? 0}
+              uploadStage={uploadStage}
               disabled={!canMint}
               onClick={onMint}
               errorMessage={mintError ?? undefined}

@@ -10,17 +10,62 @@ describe('MintButton', () => {
     expect(screen.getByTestId('mint-button').textContent).toBe('Mint');
   });
 
-  it('shows step 1/3 label when uploading with popupCount=0', () => {
-    render(<MintButton status="uploading" popupCount={0} onClick={() => {}} />);
+  it('labels step 1/3 when awaiting Walrus register popup', () => {
+    render(
+      <MintButton
+        status="uploading"
+        uploadStage="awaiting-register"
+        onClick={() => {}}
+      />,
+    );
     expect(screen.getByTestId('mint-button').textContent).toMatch(
-      /Step 1 of 3/,
+      /Step 1 of 3 — approve Walrus register/,
+    );
+  });
+
+  it('labels step 2/3 when awaiting Walrus certify popup', () => {
+    render(
+      <MintButton
+        status="uploading"
+        uploadStage="awaiting-certify"
+        onClick={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('mint-button').textContent).toMatch(
+      /Step 2 of 3 — approve Walrus certify/,
+    );
+  });
+
+  it('labels relay-upload (non-popup) stage as "Uploading…"', () => {
+    render(
+      <MintButton
+        status="uploading"
+        uploadStage="relay-upload"
+        onClick={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('mint-button').textContent).toMatch(
+      /Uploading to Walrus/,
+    );
+  });
+
+  it('falls back to "Preparing upload…" while encoding', () => {
+    render(
+      <MintButton
+        status="uploading"
+        uploadStage="encoding"
+        onClick={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('mint-button').textContent).toMatch(
+      /Preparing upload/,
     );
   });
 
   it('shows step 3/3 (Sui publish) when signing', () => {
     render(<MintButton status="signing" onClick={() => {}} />);
     expect(screen.getByTestId('mint-button').textContent).toMatch(
-      /Step 3 of 3/,
+      /Step 3 of 3 — approve Sui publish/,
     );
   });
 

@@ -153,6 +153,24 @@ describe('POST /api/auth/verify', () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('unknown_or_expired_nonce');
     expect(verifyMessage).not.toHaveBeenCalled();
+    nonces.stopSweep();
+  });
+
+  it('sweep evicts expired nonces in the background', async () => {
+    // Tight sweep interval (real time, not now-injection) so the test runs
+    // fast. The store's internal setInterval is real; the entries' TTLs are
+    // checked against the injected `now`.
+    let nowMs = 1_000_000_000_000;
+    const store = createInMemoryNonceStore(() => nowMs, /* sweepIntervalMs */ 30);
+    store.put('a', { address: ADDRESS, expiresAt: nowMs + 100 });  // valid for 100ms
+    store.put('b', { address: ADDRESS, expiresAt: nowMs + 10_000 }); // valid for 10s
+    expect(store.size()).toBe(2);
+
+    nowMs += 200; // 'a' is now expired
+    await new Promise((r) => setTimeout(r, 60)); // let two sweep ticks fire
+
+    expect(store.size()).toBe(1);
+    store.stopSweep();
   });
 
   it('nonce reuse → second call returns 401', async () => {
@@ -190,6 +208,30 @@ describe('JWT lifecycle', () => {
     const past = Math.floor(Date.now() / 1000) - 60 * 60;
     const expired = await sign({ sub: ADDRESS, iat: past - 10, exp: past }, VALID_SECRET, 'HS256');
     await expect(signer.verifySession(expired)).rejects.toThrow();
+  });
+
+  it('rejects a validly-signed token whose payload does not match SessionClaims', async () => {
+    // Forge a token signed with the right secret but missing `sub` — defends
+    // against a coding regression that would re-introduce the `as unknown as
+    // SessionClaims` cast and silently accept malformed payloads.
+    // iat must be ≤ now to pass Hono's iat-window check before our zod runs.
+    const signer = createJwtSigner(VALID_SECRET);
+    const { sign } = await import('hono/jwt');
+    const now = Math.floor(Date.now() / 1000);
+    const malformed = await sign({ iat: now - 60, exp: now + 3600 }, VALID_SECRET, 'HS256');
+    await expect(signer.verifySession(malformed)).rejects.toThrow(/SessionClaims/);
+  });
+
+  it('rejects a token whose sub is not a 0x-prefixed Sui address', async () => {
+    const signer = createJwtSigner(VALID_SECRET);
+    const { sign } = await import('hono/jwt');
+    const now = Math.floor(Date.now() / 1000);
+    const malformed = await sign(
+      { sub: 'not-an-address', iat: now - 60, exp: now + 3600 },
+      VALID_SECRET,
+      'HS256',
+    );
+    await expect(signer.verifySession(malformed)).rejects.toThrow(/SessionClaims/);
   });
 });
 

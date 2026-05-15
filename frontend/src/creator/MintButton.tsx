@@ -1,8 +1,11 @@
+import type { UploadStage } from '../walrus/useWalrusUpload';
+
 export type MintStatus = 'idle' | 'uploading' | 'signing' | 'success' | 'error';
 
 interface Props {
   status: MintStatus;
-  popupCount?: number;
+  /** Fine-grained Walrus upload sub-stage. Only consulted when status === 'uploading'. */
+  uploadStage?: UploadStage;
   disabled?: boolean;
   onClick: () => void;
   errorMessage?: string;
@@ -11,23 +14,30 @@ interface Props {
 
 export function MintButton({
   status,
-  popupCount = 0,
+  uploadStage,
   disabled,
   onClick,
   errorMessage,
   explorerUrl,
 }: Props) {
   // Three-popup creator flow (DL-001): Walrus register, Walrus certify, Sui
-  // publish. popupCount comes from useWalrusUpload (constant 2 for Walrus).
+  // publish. Walrus stage comes from useWalrusUpload reactively so each popup
+  // step is labeled accurately. The 'relay-upload' stage is non-popup work
+  // between register and certify.
   let label = 'Mint';
-  if (status === 'uploading' && popupCount === 0) {
-    label = 'Step 1 of 3 — Walrus register…';
-  } else if (status === 'uploading' && popupCount === 1) {
-    label = 'Step 2 of 3 — Walrus certify…';
-  } else if (status === 'uploading') {
-    label = `Uploading… (popup ${popupCount + 1} of 3)`;
+  if (status === 'uploading') {
+    if (uploadStage === 'awaiting-register') {
+      label = 'Step 1 of 3 — approve Walrus register…';
+    } else if (uploadStage === 'relay-upload') {
+      label = 'Uploading to Walrus…';
+    } else if (uploadStage === 'awaiting-certify') {
+      label = 'Step 2 of 3 — approve Walrus certify…';
+    } else {
+      // encoding / fallback while waiting for the first stage
+      label = 'Preparing upload…';
+    }
   } else if (status === 'signing') {
-    label = 'Step 3 of 3 — Sui publish…';
+    label = 'Step 3 of 3 — approve Sui publish…';
   } else if (status === 'success') {
     label = 'Minted ✓';
   } else if (status === 'error') {
