@@ -18,6 +18,9 @@
     "typecheck": "tsc --noEmit",
     "test": "echo \"shared: no tests (type-only module)\""
   },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
   "devDependencies": {
     "typescript": "^5.5.0"
   }

@@ -1,59 +1,61 @@
 import { z } from 'zod';
+import { paramRanges } from '@overflow2026/shared';
 
 // Mirrors GenerateParams discriminated union in @overflow2026/shared.
-// Ranges aligned with backend/src/lib/catalog.ts (the UI source of truth).
-// Keep these in sync when adding a new shape or widening a slider.
+// Ranges sourced from paramRanges (shared/src/types.ts) — the single source
+// of truth shared with the catalog (frontend sliders) and the LLM router's
+// RouterDecisionSchema. Add a shape by editing paramRanges in shared.
 const boxSchema = z.object({
   shape: z.literal('box'),
-  width:  z.number().min(0.1).max(5),
-  height: z.number().min(0.1).max(5),
-  depth:  z.number().min(0.1).max(5),
+  width:  z.number().min(paramRanges.box.width.min).max(paramRanges.box.width.max),
+  height: z.number().min(paramRanges.box.height.min).max(paramRanges.box.height.max),
+  depth:  z.number().min(paramRanges.box.depth.min).max(paramRanges.box.depth.max),
 });
 
 const chestSchema = z.object({
   shape: z.literal('chest'),
-  width:  z.number().min(0.2).max(4),
-  height: z.number().min(0.2).max(4),
-  depth:  z.number().min(0.2).max(4),
-  lidOpenRadians: z.number().min(0).max(Math.PI),
+  width:  z.number().min(paramRanges.chest.width.min).max(paramRanges.chest.width.max),
+  height: z.number().min(paramRanges.chest.height.min).max(paramRanges.chest.height.max),
+  depth:  z.number().min(paramRanges.chest.depth.min).max(paramRanges.chest.depth.max),
+  lidOpenRadians: z.number().min(paramRanges.chest.lidOpenRadians.min).max(paramRanges.chest.lidOpenRadians.max),
 });
 
 const cylinderSchema = z.object({
   shape: z.literal('cylinder'),
-  radius:   z.number().min(0.1).max(3),
-  height:   z.number().min(0.1).max(5),
-  segments: z.number().int().min(3).max(64),
+  radius:   z.number().min(paramRanges.cylinder.radius.min).max(paramRanges.cylinder.radius.max),
+  height:   z.number().min(paramRanges.cylinder.height.min).max(paramRanges.cylinder.height.max),
+  segments: z.number().int().min(paramRanges.cylinder.segments.min).max(paramRanges.cylinder.segments.max),
 });
 
 const sphereSchema = z.object({
   shape: z.literal('sphere'),
-  radius:      z.number().min(0.1).max(3),
-  latSegments: z.number().int().min(2).max(32),
-  lonSegments: z.number().int().min(3).max(48),
+  radius:      z.number().min(paramRanges.sphere.radius.min).max(paramRanges.sphere.radius.max),
+  latSegments: z.number().int().min(paramRanges.sphere.latSegments.min).max(paramRanges.sphere.latSegments.max),
+  lonSegments: z.number().int().min(paramRanges.sphere.lonSegments.min).max(paramRanges.sphere.lonSegments.max),
 });
 
 const swordSchema = z.object({
   shape: z.literal('sword'),
-  bladeLength: z.number().min(0.2).max(2.0),
-  bladeWidth:  z.number().min(0.02).max(0.3),
-  gripLength:  z.number().min(0.05).max(0.5),
-  pommelSize:  z.number().min(0.02).max(0.2),
+  bladeLength: z.number().min(paramRanges.sword.bladeLength.min).max(paramRanges.sword.bladeLength.max),
+  bladeWidth:  z.number().min(paramRanges.sword.bladeWidth.min).max(paramRanges.sword.bladeWidth.max),
+  gripLength:  z.number().min(paramRanges.sword.gripLength.min).max(paramRanges.sword.gripLength.max),
+  pommelSize:  z.number().min(paramRanges.sword.pommelSize.min).max(paramRanges.sword.pommelSize.max),
 });
 
 const hammerSchema = z.object({
   shape: z.literal('hammer'),
-  headWidth:    z.number().min(0.05).max(1.0),
-  headDepth:    z.number().min(0.05).max(0.5),
-  headHeight:   z.number().min(0.05).max(0.5),
-  handleLength: z.number().min(0.1).max(2.0),
-  handleRadius: z.number().min(0.01).max(0.15),
+  headWidth:    z.number().min(paramRanges.hammer.headWidth.min).max(paramRanges.hammer.headWidth.max),
+  headDepth:    z.number().min(paramRanges.hammer.headDepth.min).max(paramRanges.hammer.headDepth.max),
+  headHeight:   z.number().min(paramRanges.hammer.headHeight.min).max(paramRanges.hammer.headHeight.max),
+  handleLength: z.number().min(paramRanges.hammer.handleLength.min).max(paramRanges.hammer.handleLength.max),
+  handleRadius: z.number().min(paramRanges.hammer.handleRadius.min).max(paramRanges.hammer.handleRadius.max),
 });
 
 const platformSchema = z.object({
   shape: z.literal('platform'),
   style: z.enum(['round', 'square']),
-  size:      z.number().min(0.2).max(5),
-  thickness: z.number().min(0.02).max(1),
+  size:      z.number().min(paramRanges.platform.size.min).max(paramRanges.platform.size.max),
+  thickness: z.number().min(paramRanges.platform.thickness.min).max(paramRanges.platform.thickness.max),
 });
 
 export const generateParamsSchema = z.discriminatedUnion('shape', [
@@ -67,6 +69,15 @@ export const generateParamsSchema = z.discriminatedUnion('shape', [
 ]);
 
 export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;
+
+// Phase 2: /api/generate accepts either { prompt } (LLM mode) or the flat
+// params shape (slider/backward-compat mode). The route handler branches on
+// which variant validated.
+export const promptRequestSchema = z.object({
+  prompt: z.string().min(1).max(1000),
+});
+
+export type ValidatedPromptRequest = z.infer<typeof promptRequestSchema>;
 
 export const generateResponseSchema = z.object({
   glbBytes: z.string(),

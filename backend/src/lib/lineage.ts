@@ -7,7 +7,7 @@ import type {
 
 export interface BuildLineageInput {
   id: string;
-  shape: ShapeId;
+  shape: ShapeId | 'tripo';
   params: GenerateParams;
   generatorSource: GeneratorSource;
   createdAt: string;
