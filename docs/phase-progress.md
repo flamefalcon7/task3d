@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-15 PM (Phase 2 code COMPLETE + 8 knowledge-capture docs landed in `docs/solutions/`. Testnet deploy still parked.)
+## Last Updated: 2026-05-15 late PM (Phase 2 code + 8 docs + 5 P1/P2 polish items all landed. Deploy path (c) investigated and ruled out — fork or local-clone required. Phase 3 unblocked and is the right next move.)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -79,6 +79,31 @@ Eight `docs/solutions/` entries written via 8 sequential `/ce-compound` lightwei
 
 CLAUDE.md project-structure tree already references `docs/solutions/` (added with the first capture). All 8 docs are now discoverable to `ce-learnings-researcher` runs starting Phase 3.
 
+### Phase 2 Polish Batch (2026-05-15 late PM, commit `48a480e`)
+
+5 P1/P2 mechanical fixes from the code-review batch (the user picked "Demo-risk + mechanical (Recommended)"):
+
+| # | Fix | Files | Tests added |
+|---|---|---|---|
+| 1 | **MintButton dead-branch step labels** — replaced unreachable `popupCount === 0/1` branches with reactive `uploadStage` from `useWalrusUpload`. Walrus stages (`awaiting-register` / `relay-upload` / `awaiting-certify`) now drive accurate Step 1/2 of 3 labels. | `useWalrusUpload.ts`, `MintButton.tsx`, `CreatorFlow.tsx` | +3 (uploadStage coverage) |
+| 2 | **Tripo per-request timeout** — `TripoClient.submitTask` / each `pollTask` fetch / `downloadGlb` now ride `AbortSignal.timeout(30s)`. A hung TCP connection no longer outlives `pollTask` `maxWaitMs`. AbortError surfaces as `TripoTimeoutError`. | `tripo-client.ts` | +3 (per-fetch AbortError → TimeoutError) |
+| 3 | **JWT verify zod-parse** — replaced `as unknown as SessionClaims` with `SessionClaimsSchema` (zod) parse. New `JwtMalformedError` class. Forged-but-validly-signed malformed payloads now reject loudly. | `jwt.ts`, `auth.test.ts` | +2 (missing sub, non-Sui-address sub) |
+| 4 | **Schema drift consolidation** — exported `boxParamsSchema`...`platformParamsSchema` + `proceduralParamsSchemas` array from shared. Backend's `generateParamsSchema` now composes from the shared array. Single authoring site. | `shared/src/types.ts`, `backend/src/lib/schema.ts` | (no new tests; existing pass) |
+| 5 | **Nonce TTL sweep** — `createInMemoryNonceStore` now runs `setInterval`-based eviction (unref'd) instead of relying on lazy delete-on-read. New `stopSweep()` on `NonceStore`. Existing expired-nonce test cleaned up. | `auth.ts`, `auth.test.ts` | +1 (sweep evicts expired) |
+
+**Final test counts after polish: backend 113, frontend 94, Move 21 = 228 total tests, all green.** Branch state: 24 commits since `main`.
+
+### Phase 2 Deploy Investigation (2026-05-15 late PM)
+
+Investigated path (c) "MVR / Sui CLI re-check" per the user's preference for lowest-friction path. **Result: path (c) fully blocked.**
+
+- **Sui CLI 1.72.1** is the latest release on `MystenLabs/sui` (verified via WebFetch of GitHub releases). No 1.72.2+ exists.
+- **`sui client publish --help`** does not include any flag to assert "this dep is already published at X" from the consumer side. The `--with-unpublished-dependencies` flag does the wrong thing (would publish our own copy of Walrus, not reference the deployed one). `--pubfile-path` is for compilation, not deploy.
+- **MVR alias syntax** (`Walrus = { mvr = "@walrus/core" }`) is rejected by CLI 1.72.1 — `mvr` key not wired into the manifest parser at all.
+- **Walrus upstream Move.toml** (`MystenLabs/walrus@testnet`) still declares `walrus = "0x0"` with no `[package] published-at`. Same for the transitive `wal` package (`wal = "0x0"`). Mysten has not added it.
+
+Verdict: the deploy block is real and requires **path (a) fork** or **path (b) local-clone + patch**. Estimated 10-30 min of mechanical work; can be done anytime before 6/21 submission. **Phase 3 onward does NOT depend on deploy** — the contract code is correct and tested, only the on-chain instantiation is parked.
+
 ### 🚧 Blocking issues for `main` merge
 
 1. **Testnet deploy** — Walrus + WAL `published-at` linking unresolved. `sui move build` + `sui move test` work locally with `override-addresses` syntax; `sui client publish` rejects "unpublished dependencies". Three documented resolution paths in `contracts/model3d/Move.toml`:
@@ -90,7 +115,74 @@ CLAUDE.md project-structure tree already references `docs/solutions/` (added wit
 
 ### Next concrete step
 
-**Resolve testnet deploy.** Recommended order: try option (b) local-clone + patch first (lowest commitment); if that works, capture `MODEL3D_PACKAGE_ID` + UpgradeCap object ID in `.env.testnet`; transfer UpgradeCap to a known team-controlled address; run live e2e; then merge `feat/phase-2-sui-integration` → `main`.
+**Start Phase 3 — sample game scene** (the highest-leverage demo deliverable). Testnet deploy is now intentionally deferred to Phase 5 polish week (or whenever Mysten responds to the dev-channel outreach below) since Phase 3+ does not depend on it.
+
+Recommended order for next session:
+
+1. **(Parallel, zero cost)** Send the dev-channel message below to the Sui Discord / Telegram dev-channel mods. If Mysten responds with an upstream fix or hidden CLI flag, the 30-minute fork/clone work evaporates. If no response in 3-5 days, fall back to path (b) when we get to Phase 5.
+2. **(Main work)** Open `/ce-plan` for Phase 3 — sample game scene. Babylon scene that loads 3D models from Walrus aggregator, lets a user walk around / interact with them. This is the "Real-World Application" prize-track centerpiece and the first thing in the demo video.
+3. **(Phase 3 parallel)** Seed catalog: generate 5-8 hero models with the existing procedural generators, upload them to Walrus, so the Browse page has real content for the demo. Does not need the contract.
+
+Phase 4 (Kiosk + TransferPolicy) and Phase 5 (pitch deck + demo video) are also unblocked and can proceed in parallel if desired.
+
+**Time budget:** 37 days to submission (6/21). Phase 2 shipped 8 days ahead of its 5/29 deadline. Plenty of buffer for Phase 3-5 polish.
+
+### Pending Sui dev-channel outreach (drafted but not sent)
+
+Drafted during this session to ask Mysten about the Walrus deploy block. User to copy-paste and send to Sui Discord / Telegram dev-channel mods. Zero cost if ignored; upstream fix avoids the fork/clone work if it lands.
+
+```
+Hey mods — looking for guidance on a Walrus testnet deploy block (Sui CLI 1.72.1).
+
+Issue. My Move package depends on Walrus (`walrus::blob::Blob`). `sui move build`
+and `sui move test` pass. But `sui client publish` aborts:
+
+    Error: unpublished dependencies: WAL, Walrus
+
+Diagnosis. Walrus's own `contracts/walrus/Move.toml` on the `testnet` branch
+declares `walrus = "0x0"` with no `[package] published-at` field. Same for the
+transitive `contracts/wal/Move.toml` (`wal = "0x0"`, no `published-at`). The Sui
+CLI's publish step reads each transitive dep's own Move.toml for `published-at`
+and rejects when missing — there's no consumer-side override flag.
+
+Confirmed testnet package addresses (queried 2026-05-14 via `sui client object`):
+- Walrus: 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66
+- WAL:    0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a
+
+What I tried:
+- `override-addresses` inline on the Walrus git dep → satisfies `sui move build`
+  but `sui client publish` still rejects
+- `[addresses]` block at the consumer level → same outcome
+- `Walrus = { mvr = "@walrus/core" }` syntax → CLI 1.72.1 rejects `mvr` key
+  (not wired in?)
+- `--with-unpublished-dependencies` flag → wrong direction (would publish my
+  own copy, not reference the deployed Walrus)
+- Checking CLI changelog for 1.72.2+ → 1.72.1 appears to be the latest
+
+Workaround I'm about to commit to (path-of-least-resistance for a hackathon
+deadline):
+1. Local-clone `MystenLabs/walrus@testnet`
+2. Patch `contracts/walrus/Move.toml` to add `published-at = "0xd847..."`
+3. Patch `contracts/wal/Move.toml` to add `published-at = "0x8270..."`
+4. Switch my Move.toml to `Walrus = { local = "../walrus-vendor/contracts/walrus" }`
+5. `sui client publish` from there
+
+Questions for a Mysten dev:
+1. Is there a CLI flag I missed that lets a consumer assert "this dep is
+   on-chain at X" without forking/cloning?
+2. Is MVR (`@walrus/core` alias) actually shipped in 1.72.1, or scheduled for a
+   future release? Can't find docs.
+3. Any plan to add `published-at` to `MystenLabs/walrus@testnet`'s Move.toml?
+   Happy to send a PR if the addresses above are authoritative.
+4. If a PR is welcome, should the WAL package's Move.toml get the same
+   treatment, or is WAL's address tracked differently?
+
+Context: I'm building for Sui Overflow 2026 / Walrus track, deadline 6/21.
+Hackathon scope is small — solo submission, single testnet deploy. Happy to
+share my Move.toml or the failing repro in a thread if useful.
+
+Thanks 🙏
+```
 
 ### Notes for next session
 
