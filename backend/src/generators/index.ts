@@ -5,3 +5,4 @@ export { SphereGenerator, buildSphereMesh } from './sphere.js';
 export { SwordGenerator, buildSwordMesh } from './sword.js';
 export { HammerGenerator, buildHammerMesh } from './hammer.js';
 export { PlatformGenerator, buildPlatformMesh } from './platform.js';
+export { TripoGenerator } from './tripo.js';
