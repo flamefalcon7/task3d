@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-15 (Phase 2 code COMPLETE — all 10 units shipped on `feat/phase-2-sui-integration`. Testnet deploy still parked.)
+## Last Updated: 2026-05-15 PM (Phase 2 code COMPLETE + 8 knowledge-capture docs landed in `docs/solutions/`. Testnet deploy still parked.)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **38 of 38**
@@ -61,6 +61,23 @@ See `docs/spec.md` §6 for full 5-phase plan.
 | U9 | `ce626e1` | Buyer e2e — ModelDetailPage + BuyAccessButton + purchaseAccessPtb + useModelById + useOwnsAccess (DL-009 guard) | frontend 67 → 91 |
 
 **Final test counts: backend 104, frontend 91, Move 21 = 216 total tests, all green.**
+
+### Phase 2 Knowledge Capture (2026-05-15 PM)
+
+Eight `docs/solutions/` entries written via 8 sequential `/ce-compound` lightweight passes — captures Phase 2's non-obvious learnings while context is fresh, so future Phase 3+ sessions (and `ce-learnings-researcher`) inherit them:
+
+| # | Doc | Category | Why it's worth capturing |
+|---|---|---|---|
+| 1 | `sui-ptb-struct-arg-pitfall-2026-05-15.md` (prior session) | integration-issues | P0 PTB struct-as-`vector<u8>` bug — `dryRunTransactionBlock` test rule |
+| 2 | `walrus-wal-published-at-deploy-block-2026-05-15.md` | integration-issues | The current testnet deploy block + 3 documented resolution paths |
+| 3 | `mysten-sui-client-split-jsonrpc-grpc-2026-05-15.md` | tooling-decisions | D-019 — `SuiClient` → `SuiJsonRpcClient`/`SuiGrpcClient` migration |
+| 4 | `walrus-writefilesflow-popup-batching-2026-05-15.md` | architecture-patterns | OQ-014 — N files = 2 popups via quilt batching |
+| 5 | `param-ranges-single-source-of-truth-2026-05-15.md` | design-patterns | R14 — `paramRanges` shared by zod + catalog + RouterDecisionSchema |
+| 6 | `cors-is-browser-only-cost-bearing-endpoints-need-server-auth-2026-05-15.md` | best-practices | P0 #2 — CORS doesn't gate `curl` against metered upstreams |
+| 7 | `in-memory-nonce-store-needs-explicit-ttl-sweep-2026-05-15.md` | best-practices | Parked P1 — lazy-delete leaks abandoned nonces |
+| 8 | `subagent-dispatch-tight-reads-inline-skeletons-2026-05-15.md` | conventions | Compound-engineering workflow learning: broad-read subagents die at 40-50K |
+
+CLAUDE.md project-structure tree already references `docs/solutions/` (added with the first capture). All 8 docs are now discoverable to `ce-learnings-researcher` runs starting Phase 3.
 
 ### 🚧 Blocking issues for `main` merge
 
