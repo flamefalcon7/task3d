@@ -139,7 +139,8 @@ project-root/
 │   ├── decisions.md            # ADR log
 │   ├── phase-progress.md       # Current progress / next step (updated every session)
 │   ├── open-questions.md       # Unresolved questions
-│   └── plans/                  # plan-mode outputs for substantial features
+│   ├── plans/                  # plan-mode outputs for substantial features
+│   └── solutions/              # documented solutions to past problems (bugs, patterns, decisions), organized by category with YAML frontmatter (module, tags, problem_type) — relevant when implementing or debugging in documented areas
 ├── backend/                    # TS Node + Hono (procedural generators + LLM router, D-012)
 ├── frontend/                   # React + Vite + Babylon (imperative)
 ├── shared/                     # types shared by browser + backend (Generator, GenerateParams, LineageRecord)
