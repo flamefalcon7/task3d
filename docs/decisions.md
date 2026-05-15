@@ -888,7 +888,58 @@ Defer the `SuiGrpcClient` migration to a separate v1.1+ task (the deprecation de
 
 ---
 
+## D-017: Adopt `react-router-dom@7.5.x` for `/`, `/generate`, `/model/:id` routes
+
+**Status**: Accepted
+**Date**: 2026-05-15
+**Phase**: Phase 2 (Sui Integration) — before U8 / U7 / U9
+
+### Context
+
+Per D-014 (Browse-first marketplace), Phase 2 frontend grows from a single Generate page to three top-level routes:
+- `/` → Browse marketplace (U8)
+- `/generate` → Creator flow (U7, was Phase 1's `/`)
+- `/model/:objectId` → Model detail + buy access (U9)
+
+Plan-002 calls out `react-router-dom@7` adoption + risk R8 (latest major API surprises) + scope-guardian SG-005 (new dependency needs ADR + version pin). The doc-review patches confirmed an exact-pinned `7.5.x` per D-008 discipline (no floating minor for demo-critical deps).
+
+### Decision
+
+Add `react-router-dom@7.5.x` (exact-pinned) to `frontend/package.json`. Use the imperative `BrowserRouter` + `Routes` + `Route` + `Link` + `useParams` pattern. No data loaders or actions (those are RR7 features that would add complexity without Phase 2 benefit).
+
+Routing infrastructure ships in U8 (`frontend/src/App.tsx` becomes a `<BrowserRouter><Routes>...</Routes></BrowserRouter>` shell). U7 + U9 add their respective `<Route>` entries to the same `Routes` block.
+
+### Rationale
+
+- **vs. hash-router (manual)**: RR7 is mainstream, supports deep linking out of the box (judges can paste `/model/0x...` URLs), and reduces UI surface invented from scratch.
+- **vs. conditional-rendering single-page**: D-014 wants Browse as the default page and Generate as a secondary CTA; URL-distinct routes are the natural way to express that, both for users and for analytics/sharing.
+- **vs. older `react-router-dom@6`**: `react-router-dom@7` is the current stable release as of 2026-05-15; downgrading just to dodge "latest major" risk is a false economy — the 6 → 7 migration is well-documented and our usage stays within stable API surface (`BrowserRouter`, `Routes`, `Route`, `Link`, `useParams`).
+- **Exact-pin `7.5.x`**: matches D-008 discipline for demo-critical deps. Plan R8 explicitly flagged the floating-minor risk.
+
+### Alternatives Considered
+
+- **Hash routing via custom hook**: rejected — three routes is enough that the saved bundle is small; URL aesthetics matter for demo screenshots.
+- **TanStack Router**: rejected — adds complexity, learning curve, and 25KB bundle for marginal Phase 2 benefit.
+- **`@mysten/dapp-kit` provides routing**: false — dapp-kit only provides wallet context, no routing primitives.
+
+### Consequences
+
+- ✅ Three clean routes; deep links work for share/screenshot
+- ✅ U8 sets up the routing shell once; U7 + U9 are tiny additions
+- ⚠️ Bundle adds ~10KB gzipped — acceptable; bundle code-split for `/generate` and `/model/:id` mitigates per plan R13
+- ⚠️ Tests using `render()` from `@testing-library/react` now need wrapping in `<MemoryRouter>` for components that use `useParams` or `<Link>` — small test helper acceptable
+- 🔮 Phase 4+ may adopt RR7 data loaders for `/model/:id` (currently uses hook-based fetch) — out of scope for v1
+
+### Related
+
+- spec.md §4 (frontend stack)
+- D-008 (SDK lock discipline — applies to non-Mysten deps too for demo stability)
+- D-014 (Browse-first marketplace, three routes)
+- Plan-002 R8 (RR7 risk), R13 (bundle size code-split), SG-005 (ADR + pin)
+- U8 ships routing infra; U7 + U9 add their routes
+
+---
+
 # Reserved Decision Numbers
 
-D-017: React Router 7 adoption — to be captured before U7 starts.
 D-020 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
