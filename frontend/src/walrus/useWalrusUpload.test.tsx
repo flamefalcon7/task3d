@@ -150,7 +150,7 @@ describe('useWalrusUpload', () => {
     expect(res?.patchIds?.[0]).toBe('patch-synth-0');
   });
 
-  it('wraps each Uint8Array as a WalrusFile with an identifier', async () => {
+  it('wraps each Uint8Array as a WalrusFile with a zero-padded identifier', async () => {
     writeFilesFlowFactory.mockReturnValue(makeHappyFlow());
     const { result } = renderHook(() => useWalrusUpload());
     await act(async () => {
@@ -160,8 +160,40 @@ describe('useWalrusUpload', () => {
       );
     });
     expect(walrusFileFromMock).toHaveBeenCalledTimes(2);
-    expect(walrusFileFromMock.mock.calls[0]?.[0]?.identifier).toBe('file-0');
-    expect(walrusFileFromMock.mock.calls[1]?.[0]?.identifier).toBe('file-1');
+    // padWidth = max(2, length('1')) = 2 → 'file-00', 'file-01'.
+    expect(walrusFileFromMock.mock.calls[0]?.[0]?.identifier).toBe('file-00');
+    expect(walrusFileFromMock.mock.calls[1]?.[0]?.identifier).toBe('file-01');
+  });
+
+  it('identifier padding preserves input order for N>=11 (Walrus SDK sorts by identifier)', async () => {
+    // Regression for the Forge variant-mix bug: @mysten/walrus@1.1.7's
+    // encodeQuilt() sorts blobs lexicographically by identifier before
+    // building the quilt. Unpadded 'file-${i}' breaks because 'file-10'
+    // sorts BEFORE 'file-2' (char '1' < '2' at position 5), which silently
+    // misaligns patchIds[] vs the input files[] array. Zero-padding to a
+    // fixed width makes lex order == numeric order across the full range.
+    writeFilesFlowFactory.mockReturnValue(makeHappyFlow());
+    const { result } = renderHook(() => useWalrusUpload());
+    await act(async () => {
+      await result.current.uploadFiles(
+        Array.from({ length: 12 }, (_, i) => new Uint8Array([i])),
+        makeSigner(),
+      );
+    });
+
+    // padWidth for length 12 = max(2, length('11')) = 2.
+    const identifiers = walrusFileFromMock.mock.calls.map(
+      (call) => call?.[0]?.identifier ?? '',
+    );
+    expect(identifiers).toEqual([
+      'file-00', 'file-01', 'file-02', 'file-03',
+      'file-04', 'file-05', 'file-06', 'file-07',
+      'file-08', 'file-09', 'file-10', 'file-11',
+    ]);
+
+    // Critical: lex sort of these identifiers MUST equal input order.
+    const sorted = [...identifiers].sort();
+    expect(sorted).toEqual(identifiers);
   });
 
   it('transitions status to error and surfaces stage when wallet rejects register', async () => {

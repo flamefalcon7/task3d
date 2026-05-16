@@ -76,8 +76,20 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
       const client = options.client ?? getClient();
       const owner = signer.toSuiAddress();
+      // Identifier MUST zero-pad the index. @mysten/walrus@1.1.7 sorts blobs
+      // lexicographically by identifier inside encodeQuilt (utils/quilts.mjs)
+      // before building quiltIndex, and listFiles() returns patches in that
+      // sorted order. Without padding, identifiers like 'file-10' sort BEFORE
+      // 'file-2' (lex compare at position 5: '1' < '2'), which silently
+      // misaligns patchIds[] vs the input `files` order for N >= 11. With
+      // zero-padding to a fixed width, lex order == numeric order for the
+      // full N range (we cap at 16 per Move MAX_VARIANTS).
+      const padWidth = Math.max(2, String(files.length - 1).length);
       const walrusFiles = files.map((bytes, i) =>
-        WalrusFile.from({ contents: bytes, identifier: `file-${i}` }),
+        WalrusFile.from({
+          contents: bytes,
+          identifier: `file-${String(i).padStart(padWidth, '0')}`,
+        }),
       );
 
       const flow = client.walrus.writeFilesFlow({ files: walrusFiles });
