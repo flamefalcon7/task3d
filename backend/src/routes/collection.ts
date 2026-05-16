@@ -1,0 +1,91 @@
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { collectionBuildRequestSchema } from '@overflow2026/shared';
+import type { CollectionBuildResponse } from '@overflow2026/shared';
+import { Buffer } from 'node:buffer';
+import { swapMaterial, loadBundledTexture } from '../lib/gltf-material-swap.js';
+import type { JwtSigner } from '../lib/jwt.js';
+
+export interface CollectionRouteDeps {
+  // JWT is REQUIRED for this route (KTD-7). Unlike /api/generate's prompt
+  // mode, every Forge build call is creator-attributable so we always
+  // demand an authenticated session. Tests can inject a stub signer.
+  jwt?: JwtSigner;
+}
+
+// SEC-001: ~8MB GLB binary => ~10.7MB base64 + envelope; 12MB cap leaves
+// headroom and rejects oversized requests BEFORE @gltf-transform/core
+// allocates anything. Zod's max(11_000_000) on baseGlbBase64 is the
+// second line of defense at field-level.
+const MAX_BODY_BYTES = 12 * 1024 * 1024;
+
+export function buildCollectionRoute(deps: CollectionRouteDeps) {
+  const route = new Hono();
+
+  route.use(
+    '/build',
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) => c.json({ error: 'payload_too_large' }, 413),
+    }),
+  );
+
+  route.post('/build', async (c) => {
+    // KTD-7: JWT required. Mirror /api/generate prompt-mode auth ladder.
+    if (!deps.jwt) {
+      return c.json(
+        { error: 'auth_unavailable', message: 'Collection build requires server-side JWT configuration' },
+        503,
+      );
+    }
+    const authHeader = c.req.header('Authorization');
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : null;
+    if (!token) {
+      return c.json(
+        { error: 'auth_required', message: 'Collection build requires Authorization: Bearer <jwt>' },
+        401,
+      );
+    }
+    try {
+      await deps.jwt.verifySession(token);
+    } catch {
+      return c.json({ error: 'auth_invalid', message: 'Invalid or expired session token' }, 401);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_json' }, 400);
+    }
+
+    const parsed = collectionBuildRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_params', issues: parsed.error.issues }, 400);
+    }
+
+    const { baseGlbBase64, variants } = parsed.data;
+    const baseGlb = Uint8Array.from(Buffer.from(baseGlbBase64, 'base64'));
+
+    try {
+      const swapped = await Promise.all(
+        variants.map((v) => swapMaterial(baseGlb, v, loadBundledTexture)),
+      );
+      const response: CollectionBuildResponse = {
+        variants: swapped.map((g) => ({ glbBase64: Buffer.from(g).toString('base64') })),
+      };
+      return c.json(response);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'no_material_in_base_glb') {
+        return c.json({ error: 'no_material_in_base_glb' }, 422);
+      }
+      // Treat anything else from gltf-transform as a malformed base GLB.
+      return c.json({ error: 'glb_parse_failed', message }, 422);
+    }
+  });
+
+  return route;
+}
