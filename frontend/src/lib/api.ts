@@ -17,10 +17,20 @@ export async function fetchShapes(): Promise<ShapeCatalog> {
   return (await res.json()) as ShapeCatalog;
 }
 
-export async function generate(params: GenerateParams): Promise<GenerateResult> {
+export async function generate(
+  params: GenerateParams,
+  // Backend prompt mode (shape='tripo' with a prompt body) is JWT-gated;
+  // slider mode (procedural shapes) is anonymous. Caller is responsible
+  // for passing the session.jwt when invoking prompt mode — see
+  // ForgePage.onGenerateBase + CreatorFlow.
+  authToken?: string,
+): Promise<GenerateResult> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
   const res = await fetch('/api/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(params),
   });
   if (!res.ok) {

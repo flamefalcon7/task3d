@@ -168,20 +168,25 @@ export function ForgePage() {
   }, [editorState.variants.length, selectedPreview]);
 
   const onGenerateBase = useCallback(async () => {
+    if (!session) {
+      setErrorMsg('Sign in first — Tripo generation is JWT-gated to protect the API budget.');
+      setPhase('error');
+      return;
+    }
     setErrorMsg(null);
     setPhase('generating-base');
     try {
-      const result = await generate({
-        shape: 'tripo',
-        prompt: prompt.trim(),
-      });
+      const result = await generate(
+        { shape: 'tripo', prompt: prompt.trim() },
+        session.jwt,
+      );
       setBaseGlb(result.glbBytes);
       setPhase('editing-variants');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setPhase('error');
     }
-  }, [prompt]);
+  }, [prompt, session]);
 
   const onMint = useCallback(async () => {
     if (!session || !signer || !baseGlb) return;
@@ -202,7 +207,10 @@ export function ForgePage() {
       };
       const buildRes = await fetch('/api/collection/build', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.jwt}`,
+        },
         body: JSON.stringify(buildReq),
       });
       if (!buildRes.ok) {
@@ -344,6 +352,23 @@ export function ForgePage() {
         phase === 'error') &&
         !baseGlb && (
           <div data-testid="forge-prompt-stage">
+            {!session && (
+              <div
+                data-testid="forge-prompt-signin-hint"
+                style={{
+                  marginBottom: 12,
+                  padding: 10,
+                  border: '1px solid #fbcc7a',
+                  background: '#fff7e6',
+                  borderRadius: 6,
+                }}
+              >
+                <div style={{ fontSize: 13, color: '#7a4a00', marginBottom: 6 }}>
+                  Sign in first — Tripo generation costs API credits, so prompt mode is JWT-gated.
+                </div>
+                <SignInButton />
+              </div>
+            )}
             <PromptInput
               value={prompt}
               onChange={setPrompt}
@@ -352,12 +377,18 @@ export function ForgePage() {
             <button
               type="button"
               onClick={onGenerateBase}
-              disabled={phase === 'generating-base' || prompt.trim() === ''}
+              disabled={
+                phase === 'generating-base' ||
+                prompt.trim() === '' ||
+                !session
+              }
               style={{ marginTop: 12 }}
               data-testid="forge-generate-base"
             >
               {phase === 'generating-base'
                 ? `Generating via Tripo… ${Math.floor(tripoElapsed / 1000)}s elapsed`
+                : !session
+                ? 'Sign in to generate'
                 : 'Generate base car'}
             </button>
 

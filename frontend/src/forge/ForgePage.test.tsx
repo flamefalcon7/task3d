@@ -117,6 +117,14 @@ describe('ForgePage', () => {
   });
 
   it('shows_variant_editor_after_base_glb_resolves', async () => {
+    // Session required — backend /api/generate prompt mode is JWT-gated,
+    // and ForgePage now gates the Generate button on session too.
+    useSessionMock.mockReturnValue({
+      session: { address: '0xCAFE', jwt: 'jwt' },
+      signIn: vi.fn(),
+      disconnect: vi.fn(),
+      address: '0xCAFE',
+    });
     mockFetch(async (input) => {
       if (String(input).includes('/api/generate')) {
         return new Response(JSON.stringify(makeGenerateResponse()), {
@@ -140,25 +148,19 @@ describe('ForgePage', () => {
     });
   });
 
-  it('mint_button_disabled_when_no_session', async () => {
-    mockFetch(async () =>
-      new Response(JSON.stringify(makeGenerateResponse()), { status: 200 }),
-    );
+  it('no_session_blocks_generate_and_shows_signin_hint', () => {
+    // Default useSessionMock returns session=null (per beforeEach). The
+    // Generate button must be disabled and the inline sign-in hint must
+    // be visible — otherwise the user clicks and silently 401s against
+    // /api/generate prompt mode.
     renderForge();
     fireEvent.change(screen.getByTestId('prompt-input'), {
       target: { value: 'a car' },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('forge-generate-base'));
-    });
-    await waitFor(() =>
-      expect(screen.getByTestId('forge-editor-stage')).toBeTruthy(),
-    );
-
-    expect(screen.getByTestId('forge-signin-hint')).toBeTruthy();
-    expect(
-      (screen.getByTestId('forge-mint-button') as HTMLButtonElement).disabled,
-    ).toBe(true);
+    const btn = screen.getByTestId('forge-generate-base') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/sign in/i);
+    expect(screen.getByTestId('forge-prompt-signin-hint')).toBeTruthy();
   });
 
   it('mint_button_label_says_sign_3_transactions_for_collection_mode', async () => {
