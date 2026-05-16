@@ -5,7 +5,7 @@
 //   4. buildCollectionPtb → signAndExecuteTransaction (1 popup)
 // Total: 3 wallet popups regardless of N (Walrus quilt batches register+certify).
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useCurrentAccount,
@@ -80,6 +80,50 @@ function slugify(s: string): string {
     .slice(0, 60) || 'untitled';
 }
 
+// Wall-clock elapsed time in ms since `active` last flipped false→true.
+// Resets to 0 when active goes false. Used to drive Tripo progress bar
+// + mint-stage elapsed counter without backend SSE.
+function useElapsed(active: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!active) {
+      startRef.current = null;
+      setElapsed(0);
+      return;
+    }
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => {
+      if (startRef.current !== null) setElapsed(Date.now() - startRef.current);
+    }, 200);
+    return () => clearInterval(id);
+  }, [active]);
+  return elapsed;
+}
+
+// Rotate a sequence of "what's happening" messages every `windowMs` —
+// even when the underlying process exposes no progress signal, rotating
+// text gives the user a sense the system is alive + tells them what to
+// expect at each stage of the latency budget.
+function rotatingSubtext(elapsedMs: number, messages: readonly string[], windowMs = 5000): string {
+  if (messages.length === 0) return '';
+  const idx = Math.floor(elapsedMs / windowMs) % messages.length;
+  return messages[idx]!;
+}
+
+const TRIPO_MESSAGES = [
+  'Tripo is generating the base mesh…',
+  'Computing UV mapping for texture coordinates…',
+  'Optimising topology toward the low-poly target…',
+  'Baking final geometry…',
+  'Encoding GLB for download…',
+  'Just about there — finalising export…',
+] as const;
+
+const TRIPO_EXPECTED_MS = 90_000;
+const TRIPO_BAR_CAP = 0.9; // bar fills 0→90% then sits until done
+
 export function ForgePage() {
   const [phase, setPhase] = useState<Phase>('prompt');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -99,6 +143,22 @@ export function ForgePage() {
   const signer = useDappKitSigner(account?.address ?? null);
   const { uploadFiles, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+
+  // UX: live elapsed timers + rotating subtext during long-wait stages.
+  // Walrus byte-level upload progress isn't exposed by the SDK (fetch
+  // upload progress requires XHR), so we surface stage transitions +
+  // estimated payload size instead.
+  const tripoElapsed = useElapsed(phase === 'generating-base');
+  const mintElapsed = useElapsed(
+    phase === 'building-variants' ||
+      phase === 'uploading' ||
+      phase === 'signing',
+  );
+  const totalUploadMb = useMemo(() => {
+    if (!variantGlbs) return null;
+    const totalBytes = variantGlbs.reduce((acc, g) => acc + g.byteLength, 0);
+    return totalBytes / (1024 * 1024);
+  }, [variantGlbs]);
 
   // Keep selectedPreview in bounds if the user removes rows.
   useEffect(() => {
@@ -207,20 +267,52 @@ export function ForgePage() {
   // Mint-button copy: per plan-003 U4 Patterns note, collection mode says
   // "Sign 3 transactions to publish your collection (N variants)" — popup
   // count is always 3 regardless of N.
+  const variantCount = editorState.variants.length;
   const mintLabel = (() => {
-    if (phase === 'building-variants') return 'Building variants…';
+    if (phase === 'building-variants')
+      return `Material-swapping ${variantCount} variants…`;
     if (phase === 'uploading') {
+      if (uploadStage === 'encoding')
+        return `Encoding ${variantCount} variants into Walrus quilt…`;
       if (uploadStage === 'awaiting-register')
-        return 'Step 1 of 3 — approve Walrus register…';
+        return 'Step 1 of 3 — approve Walrus register in your wallet…';
+      if (uploadStage === 'relay-upload') {
+        const sizeHint = totalUploadMb !== null
+          ? ` (~${totalUploadMb.toFixed(1)} MB)`
+          : '';
+        return `Uploading to Walrus testnet${sizeHint}…`;
+      }
       if (uploadStage === 'awaiting-certify')
-        return 'Step 2 of 3 — approve Walrus certify…';
-      if (uploadStage === 'relay-upload') return 'Uploading to Walrus…';
+        return 'Step 2 of 3 — approve Walrus certify in your wallet…';
       return 'Preparing upload…';
     }
-    if (phase === 'signing') return 'Step 3 of 3 — approve Sui publish…';
+    if (phase === 'signing')
+      return `Step 3 of 3 — approve Sui mint (Collection + ${variantCount} Model3Ds)…`;
     if (phase === 'success') return 'Minted ✓';
     if (phase === 'error') return 'Failed — retry';
-    return `Sign 3 transactions to publish your collection (${editorState.variants.length} variants)`;
+    return `Sign 3 transactions to publish your collection (${variantCount} variants)`;
+  })();
+
+  // Subtext shown beneath the mint button while busy — tells the user what
+  // to expect at each stage so the Walrus + Sui popups feel scripted
+  // rather than surprise.
+  const mintSubtext = (() => {
+    if (phase === 'building-variants')
+      return 'Backend is swapping base-color + texture on each variant GLB. Usually 1-2 seconds.';
+    if (phase === 'uploading') {
+      if (uploadStage === 'encoding')
+        return 'Encoding all variants into one Walrus quilt blob. Usually 1-3 seconds.';
+      if (uploadStage === 'awaiting-register')
+        return 'Your wallet should be open. This signs the on-chain register so storage nodes know to expect the upload.';
+      if (uploadStage === 'relay-upload')
+        return 'Streaming the quilt to a Walrus upload relay. Network-dependent — usually 5-30 seconds.';
+      if (uploadStage === 'awaiting-certify')
+        return 'Your wallet should be open. This signs the storage certificate to make the blob retrievable.';
+      return '';
+    }
+    if (phase === 'signing')
+      return `Your wallet should be open. One Sui PTB creates the Collection + ${variantCount} Model3D shared objects.`;
+    return '';
   })();
 
   const mintBusy =
@@ -265,9 +357,48 @@ export function ForgePage() {
               data-testid="forge-generate-base"
             >
               {phase === 'generating-base'
-                ? 'Generating base car via Tripo… ~60 sec'
+                ? `Generating via Tripo… ${Math.floor(tripoElapsed / 1000)}s elapsed`
                 : 'Generate base car'}
             </button>
+
+            {phase === 'generating-base' && (
+              <div data-testid="forge-tripo-progress" style={{ marginTop: 12 }}>
+                {/* Estimated progress bar — fills 0→90% over ~90s, sits
+                    until done. The Walrus SDK + Tripo API don't expose
+                    per-byte progress to the browser, so this is a
+                    visual proxy that gives users a sense of motion. */}
+                <progress
+                  data-testid="forge-tripo-bar"
+                  max={1}
+                  value={Math.min(
+                    (tripoElapsed / TRIPO_EXPECTED_MS) * TRIPO_BAR_CAP,
+                    TRIPO_BAR_CAP,
+                  )}
+                  style={{ width: '100%', height: 8 }}
+                />
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: '#666',
+                    marginTop: 6,
+                    minHeight: '1.5em',
+                  }}
+                  data-testid="forge-tripo-subtext"
+                >
+                  {tripoElapsed >= TRIPO_EXPECTED_MS
+                    ? 'Taking longer than usual (Tripo typically 60-120 s). Should be ready any moment.'
+                    : rotatingSubtext(tripoElapsed, TRIPO_MESSAGES)}
+                </div>
+                <div
+                  style={{ fontSize: 11, color: '#999', marginTop: 4 }}
+                  data-testid="forge-tripo-hint"
+                >
+                  Expected: 60-120 s. This is a real text-to-3D call —
+                  Tripo's queue + render time, not our backend.
+                </div>
+              </div>
+            )}
+
             {phase === 'error' && errorMsg && (
               <div
                 role="alert"
@@ -319,6 +450,26 @@ export function ForgePage() {
             >
               {mintLabel}
             </button>
+
+            {mintBusy && (
+              <div
+                data-testid="forge-mint-status"
+                style={{ marginTop: 10, padding: 10, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fafafa' }}
+              >
+                {mintSubtext && (
+                  <div style={{ fontSize: 12, color: '#444', marginBottom: 6 }}>
+                    {mintSubtext}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: '#888', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Elapsed: {Math.floor(mintElapsed / 1000)} s</span>
+                  <span data-testid="forge-mint-stage-label">
+                    Stage: {phase === 'uploading' ? `uploading / ${uploadStage}` : phase}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {!session && (
               <div
                 data-testid="forge-signin-hint"
