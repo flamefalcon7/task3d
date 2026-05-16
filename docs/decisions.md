@@ -1140,6 +1140,59 @@ Adopt `@babylonjs/havok` as the physics binding for the Tiny Racetrack scene. Lo
 
 ---
 
+## D-023: Drop LLM router — prompt mode dispatches directly to Tripo
+
+**Status**: Accepted
+**Date**: 2026-05-16
+**Phase**: 3 (Real-World Application)
+**Supersedes**: narrows D-011 (LLM router as the agentic seam) and D-014 (LLM extracts tags). Both decisions remain partially intact: the `Router` interface stays in `shared/src/types.ts` as the seam for future expansion, but the only concrete implementation is now `HardcodedRouter`. `AnthropicRouter` is removed.
+
+### Context
+
+Phase 3's Forge UI (U4, plan-003) is the only surface that submits free-form prompts. The Forge frame is explicitly "generate a base car via Tripo" — N variants are produced by backend material swap, not by LLM routing. The router's only real-world decision in this flow is "should this prompt go procedural or Tripo?" — and the UI has already committed to Tripo before the prompt is submitted. The LLM call adds ~1 s latency, $0.001 per call, and a new failure mode (Anthropic outage / rate limit / quota) to every demo run, in exchange for zero behavioral value at this stage.
+
+The cost of keeping the abstraction "for future use" is non-zero: two router implementations to maintain, parallel test paths, an `ANTHROPIC_API_KEY` env var every dev/CI environment must set, and one more piece of pitch surface ("we route with Claude") that has to be defended in Q&A. None of that earns its keep in v1.
+
+### Decision
+
+Remove `AnthropicRouter` from `backend/src/agent/router.ts`. Remove `@anthropic-ai/sdk` from `backend/package.json`. Remove `RouterDecisionSchema` + `RouterDecision` from `shared/src/types.ts` (the schema existed only to validate LLM tool-use output). `HardcodedRouter` learns prompt mode: when `{ prompt }` is supplied AND a Tripo generator is registered, dispatch directly to Tripo with a deterministic tag derivation (split-on-non-word, lowercase, ≤ 5 tokens). When Tripo is not registered, throw `TripoDisabledError`.
+
+The `/api/generate` JWT gate stays — Tripo itself is a paid API, so the cost-protection rationale (review #2 P0) carries over from the Anthropic case. The `Router` + `Generator` interfaces in `shared/src/types.ts` stay as the seam for future LLM/agent reintroduction.
+
+### Rationale
+
+- **Zero behavioral value at v1**: the Forge UI is the only prompt surface, and it always wants Tripo.
+- **Removes a paid API dependency**: simpler env setup, no quota anxiety during the demo recording window.
+- **~1 s latency saved** per Forge mint by skipping the Claude tool-use round-trip.
+- **Failure-mode reduction**: Anthropic outage / rate limit no longer crashes Forge mints.
+- **Pitch is still honest**: the architectural seam exists; the "LLM router" framing was always forward-looking, not load-bearing for the v1 demo. Phase 5 narrative can describe the seam without claiming Claude is in the live path.
+- **Tags are still useful** but not load-bearing: tags written to Move are owned by the Forge UI (`collection:<slug>` + textureId), not by the router. Lineage-record tags are descriptive metadata; a deterministic split-on-whitespace derivation is good enough.
+
+### Alternatives Considered
+
+- **Keep `AnthropicRouter` optional, dual-path** — `HardcodedRouter` AND `AnthropicRouter` both registered, server selects based on `ANTHROPIC_API_KEY` presence. Rejected: two code paths to maintain, two test surfaces, drifting behavior over time. The "optional" framing tends to rot into "only one path is tested in practice."
+- **Defer the decision** — set `ANTHROPIC_API_KEY` for now, revisit Phase 5. Rejected: hackathon timeline doesn't reward un-acted decisions; removal is a 30-minute change and the longer the dependency stays, the more pitch surface accumulates around it.
+- **Stronger NLU on the prompt** — pre-LLM heuristics ("if prompt contains 'box' → procedural") to pick a generator. Rejected: not necessary while the only prompt UI is Forge (always Tripo). Reintroduce a smarter router if Phase 5 adds a free-form prompt → any-shape surface.
+
+### Consequences
+
+- ✅ `ANTHROPIC_API_KEY` no longer required at startup; backend `.env` shrinks to `JWT_SECRET` + optional Tripo vars.
+- ✅ `@anthropic-ai/sdk` drops from the dependency tree (~smaller install, fewer security advisories to track).
+- ✅ One fewer failure mode in the demo recording session.
+- ⚠️ Pitch deck cannot claim LLM-routed generation as a live feature. The architectural seam can still be mentioned as forward-looking.
+- ⚠️ If we later want LLM-routed prompts (Phase 5 or post-hackathon), reintroducing `AnthropicRouter` is a clean reverse — the `Router` interface is preserved.
+- 🔮 If we add a "search by natural language" surface in v1.1+, that's a separate seam (a search router, not a generator router) — D-023 doesn't constrain it.
+
+### Related
+
+- D-011 — agentic LLM framing (this ADR narrows but does not supersede)
+- D-014 — LLM extracts tags (this ADR drops the LLM tag extraction; deterministic derivation replaces it)
+- `backend/src/agent/router.ts` — implementation site
+- `shared/src/types.ts` — `RouterDecisionSchema` removed; `Router` + `Generator` interfaces remain
+- `docs/process.md` — refresh after this ADR lands
+
+---
+
 # Reserved Decision Numbers
 
-D-023 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-024 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

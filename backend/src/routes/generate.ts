@@ -3,14 +3,15 @@ import { randomUUID } from 'node:crypto';
 import type { GenerateParams, GenerateResponse, Router, ShapeId } from '@overflow2026/shared';
 import { generateParamsSchema, promptRequestSchema } from '../lib/schema.js';
 import { buildLineageJson, buildLineageStub } from '../lib/lineage.js';
-import { RouterFormatError, RouterParseError, TripoDisabledError } from '../agent/router.js';
+import { TripoDisabledError } from '../agent/router.js';
 import type { JwtSigner } from '../lib/jwt.js';
 
 export interface GenerateRouteDeps {
   router: Router;
   // Optional so tests that don't exercise prompt-mode can omit. Prompt-mode
-  // requests are rejected with 401 when jwt is absent — protects the
-  // Anthropic budget from anonymous callers (review #2 P0).
+  // requests are rejected with 401 when jwt is absent — protects the paid
+  // Tripo API from anonymous callers (review #2 P0; carries forward from the
+  // pre-D-023 Anthropic-protection rationale).
   jwt?: JwtSigner;
 }
 
@@ -30,9 +31,10 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
       return c.json({ error: 'invalid params', issues: paramsParsed.error.issues }, 400);
     }
 
-    // Auth gate (review #2): prompt-mode hits Anthropic, which costs the
-    // operator per call. Anonymous slider-mode (procedural compute) remains
-    // open since procedural generators run local + free.
+    // Auth gate (review #2): prompt-mode hits Tripo (D-023), which costs the
+    // operator per call (~60–120 credits per generation). Anonymous slider
+    // mode (procedural compute) remains open — procedural generators run
+    // local + free.
     if (promptParsed.success) {
       if (!deps.jwt) {
         return c.json({ error: 'auth_unavailable', message: 'Prompt-mode requires server-side JWT configuration' }, 503);
@@ -103,9 +105,6 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
     } catch (err) {
       if (err instanceof TripoDisabledError) {
         return c.json({ error: 'tripo_disabled', message: err.message }, 400);
-      }
-      if (err instanceof RouterParseError || err instanceof RouterFormatError) {
-        return c.json({ error: 'router_error', message: err.message }, 502);
       }
       throw err;
     }

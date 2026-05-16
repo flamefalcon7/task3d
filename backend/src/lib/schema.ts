@@ -2,19 +2,19 @@ import { z } from 'zod';
 import { proceduralParamsSchemas } from '@overflow2026/shared';
 
 // /api/generate slider path validates against the 7 procedural shape schemas
-// only — the tripo variant in shared GenerateParamsSchema is RouterDecision
-// output, never a direct request input (DL-010). Composing the 7-shape
-// subset here keeps the request gate strict while letting the schema authoring
-// stay single-sourced in shared/src/types.ts.
+// only — the tripo variant in shared GenerateParamsSchema is never a direct
+// request input (DL-010). Tripo gets exercised via promptRequestSchema +
+// HardcodedRouter.route({ prompt }) (D-023). Composing the 7-shape subset
+// here keeps the slider request gate strict.
 export const generateParamsSchema = z.discriminatedUnion('shape', [
   ...proceduralParamsSchemas,
 ]);
 
 export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;
 
-// Phase 2: /api/generate accepts either { prompt } (LLM mode) or the flat
-// params shape (slider/backward-compat mode). The route handler branches on
-// which variant validated.
+// /api/generate accepts either { prompt } (D-023: dispatched directly to
+// Tripo by HardcodedRouter) or the flat params shape (slider mode → matching
+// procedural generator). The route handler branches on which variant validated.
 export const promptRequestSchema = z.object({
   prompt: z.string().min(1).max(1000),
 });

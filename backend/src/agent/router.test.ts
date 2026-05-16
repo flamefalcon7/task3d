@@ -1,13 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type Anthropic from '@anthropic-ai/sdk';
+import { describe, it, expect } from 'vitest';
 import type { Generator, GeneratorId, GenerateResult } from '@overflow2026/shared';
-import {
-  AnthropicRouter,
-  HardcodedRouter,
-  RouterFormatError,
-  RouterParseError,
-  TripoDisabledError,
-} from './router.js';
+import { HardcodedRouter, TripoDisabledError } from './router.js';
 import {
   BoxGenerator,
   ChestGenerator,
@@ -18,17 +11,16 @@ import {
   SwordGenerator,
 } from '../generators/index.js';
 
-// Minimal fake — we never actually generate in router tests, only check that
-// the router returned the right generator. Concrete classes are also fine via
-// instanceof, but a stub keeps tests fast and side-effect-free.
+// Minimal fake — we never actually invoke generate() in router tests, only
+// check that the router returned the right generator instance.
 class StubTripoGenerator implements Generator {
   async generate(): Promise<GenerateResult> {
     throw new Error('Stub Tripo should not be invoked in router tests');
   }
 }
 
-function buildGeneratorMap(): Map<GeneratorId, Generator> {
-  return new Map<GeneratorId, Generator>([
+function buildGeneratorMap(opts: { withTripo: boolean }): Map<GeneratorId, Generator> {
+  const map = new Map<GeneratorId, Generator>([
     ['box', new BoxGenerator()],
     ['chest', new ChestGenerator()],
     ['cylinder', new CylinderGenerator()],
@@ -36,20 +28,13 @@ function buildGeneratorMap(): Map<GeneratorId, Generator> {
     ['sword', new SwordGenerator()],
     ['hammer', new HammerGenerator()],
     ['platform', new PlatformGenerator()],
-    ['tripo', new StubTripoGenerator()],
   ]);
+  if (opts.withTripo) map.set('tripo', new StubTripoGenerator());
+  return map;
 }
 
-function fakeClient(content: unknown[]): Anthropic {
-  return {
-    messages: {
-      create: vi.fn().mockResolvedValue({ content }),
-    },
-  } as unknown as Anthropic;
-}
-
-describe('HardcodedRouter', () => {
-  it('slider mode: { shape: "box" } returns RouteResult with BoxGenerator', async () => {
+describe('HardcodedRouter slider mode (procedural shapes)', () => {
+  it('{ shape: "box" } returns BoxGenerator + procedural lineage marker', async () => {
     const router = new HardcodedRouter();
     const result = await router.route({
       shape: 'box',
@@ -58,117 +43,91 @@ describe('HardcodedRouter', () => {
     expect(result.generator).toBeInstanceOf(BoxGenerator);
     expect(result.lineageStub.generatorSource).toBe('procedural');
   });
+
+  it('{ shape: "sword" } returns SwordGenerator', async () => {
+    const router = new HardcodedRouter();
+    const result = await router.route({
+      shape: 'sword',
+      params: { shape: 'sword', bladeLength: 1, bladeWidth: 0.1, gripLength: 0.2, pommelSize: 0.05 },
+    });
+    expect(result.generator).toBeInstanceOf(SwordGenerator);
+  });
+
+  it('throws when neither shape nor prompt is supplied', async () => {
+    const router = new HardcodedRouter();
+    await expect(router.route({})).rejects.toThrow(/prompt.*shape/i);
+  });
+
+  it('throws for unknown shape', async () => {
+    const router = new HardcodedRouter();
+    await expect(
+      router.route({
+        shape: 'unknown' as 'box',
+        params: { shape: 'box', width: 1, height: 1, depth: 1 },
+      }),
+    ).rejects.toThrow(/No generator for shape/);
+  });
 });
 
-describe('AnthropicRouter prompt mode', () => {
-  let generators: Map<GeneratorId, Generator>;
+describe('HardcodedRouter prompt mode (D-023 Tripo passthrough)', () => {
+  it('dispatches { prompt } directly to Tripo when registered', async () => {
+    const generators = buildGeneratorMap({ withTripo: true });
+    const router = new HardcodedRouter(generators);
 
-  beforeEach(() => {
-    generators = buildGeneratorMap();
-  });
-
-  it('happy path: routes "wooden chest" to ChestGenerator', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_1',
-        name: 'route',
-        input: {
-          generator: 'chest',
-          params: { shape: 'chest', width: 1, height: 1, depth: 1, lidOpenRadians: 0.3 },
-          tags: ['fantasy', 'container'],
-        },
-      },
-    ]);
-    const router = new AnthropicRouter(client, generators, false);
-
-    const result = await router.route({ prompt: 'wooden chest' });
-    expect(result.generator).toBeInstanceOf(ChestGenerator);
-    expect(result.lineageStub.generatorSource).toBe('procedural');
-    expect(result.lineageStub.prompt).toBe('wooden chest');
-    expect(result.lineageStub.llmDecision).toMatchObject({ generator: 'chest', tags: ['fantasy', 'container'] });
-  });
-
-  it('routes to tripo when TRIPO_ENABLED=true', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_2',
-        name: 'route',
-        input: {
-          generator: 'tripo',
-          params: { shape: 'tripo', prompt: 'phoenix sculpture' },
-          tags: ['mythical', 'sculpture'],
-        },
-      },
-    ]);
-    const router = new AnthropicRouter(client, generators, true);
-
-    const result = await router.route({ prompt: 'ornate phoenix sculpture' });
+    const result = await router.route({ prompt: 'futuristic racing car, low-poly' });
     expect(result.generator).toBe(generators.get('tripo'));
     expect(result.lineageStub.generatorSource).toBe('tripo');
+    expect(result.lineageStub.prompt).toBe('futuristic racing car, low-poly');
+    expect(result.lineageStub.shape).toBe('tripo');
+    expect(result.lineageStub.params).toEqual({ shape: 'tripo', prompt: 'futuristic racing car, low-poly' });
   });
 
-  it('throws TripoDisabledError when TRIPO_ENABLED=false and LLM picks tripo', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_3',
-        name: 'route',
-        input: {
-          generator: 'tripo',
-          params: { shape: 'tripo', prompt: 'dragon' },
-          tags: ['mythical'],
-        },
-      },
-    ]);
-    const router = new AnthropicRouter(client, generators, false);
+  it('derives lineage tags from the prompt (lowercase, words >= 3 chars, dedup, cap 5)', async () => {
+    const generators = buildGeneratorMap({ withTripo: true });
+    const router = new HardcodedRouter(generators);
 
-    await expect(router.route({ prompt: 'ornate dragon statue' })).rejects.toBeInstanceOf(TripoDisabledError);
+    const result = await router.route({ prompt: 'A red, RED, sleek racing car with neon accents' });
+    const tags = (result.lineageStub.llmDecision as { tags: string[] }).tags;
+    expect(tags).toEqual(['red', 'sleek', 'racing', 'car', 'with']);
+    expect(tags).not.toContain('a');
+    // dedup
+    expect(tags.filter((t) => t === 'red')).toHaveLength(1);
   });
 
-  it('throws RouterFormatError when SDK returns no tool_use block', async () => {
-    const client = fakeClient([{ type: 'text', text: 'sorry, I cannot route this' }]);
-    const router = new AnthropicRouter(client, generators, false);
+  it('throws TripoDisabledError when Tripo not in generators map', async () => {
+    const generators = buildGeneratorMap({ withTripo: false });
+    const router = new HardcodedRouter(generators);
 
-    await expect(router.route({ prompt: 'something' })).rejects.toBeInstanceOf(RouterFormatError);
+    await expect(router.route({ prompt: 'racing car' })).rejects.toBeInstanceOf(TripoDisabledError);
   });
 
-  it('throws RouterParseError when params violate zod ranges (width=1000 for box, max=5)', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_4',
-        name: 'route',
-        input: {
-          generator: 'box',
-          params: { shape: 'box', width: 1000, height: 1, depth: 1 },
-          tags: ['huge'],
-        },
-      },
-    ]);
-    const router = new AnthropicRouter(client, generators, false);
+  it('truncates very long prompts to 1000 chars before dispatch', async () => {
+    const generators = buildGeneratorMap({ withTripo: true });
+    const router = new HardcodedRouter(generators);
+    const long = 'red car '.repeat(1000);
 
-    await expect(router.route({ prompt: 'enormous box' })).rejects.toBeInstanceOf(RouterParseError);
+    const result = await router.route({ prompt: long });
+    expect(result.lineageStub.prompt).toHaveLength(1000);
   });
 });
 
-describe('server.buildRouter factory', () => {
-  it('returns AnthropicRouter when ANTHROPIC_API_KEY is set (>= 16 chars)', async () => {
+describe('server.buildRouter factory (D-023)', () => {
+  it('returns HardcodedRouter with only procedural generators when Tripo disabled', async () => {
     const { buildRouter } = await import('../server.js');
-    const router = buildRouter({ ANTHROPIC_API_KEY: 'sk-ant-test-12345678', TRIPO_ENABLED: 'false' });
-    expect(router).toBeInstanceOf(AnthropicRouter);
+    const router = buildRouter({ JWT_SECRET: 'x'.repeat(64) });
+    expect(router).toBeInstanceOf(HardcodedRouter);
+
+    // Prompt mode without Tripo registered → TripoDisabledError
+    await expect(router.route({ prompt: 'anything' })).rejects.toBeInstanceOf(TripoDisabledError);
   });
 
-  it('returns HardcodedRouter when ANTHROPIC_API_KEY missing', async () => {
+  it('throws at startup when TRIPO_ENABLED=true but TRIPO_API_KEY missing', async () => {
     const { buildRouter } = await import('../server.js');
-    const router = buildRouter({});
-    expect(router).toBeInstanceOf(HardcodedRouter);
+    expect(() => buildRouter({ TRIPO_ENABLED: 'true' })).toThrow(/TRIPO_API_KEY missing/);
   });
 });
 
 // Minimal JwtSigner double used to gate prompt-mode tests on auth (review P0 #2).
-// signSession returns a fixed token; verifySession resolves only for that token.
 const TEST_BEARER = 'test-bearer-token';
 const fakeJwt = {
   async signSession() {
@@ -180,63 +139,51 @@ const fakeJwt = {
   },
 };
 
-describe('/api/generate integration with AnthropicRouter', () => {
-  it('POST { prompt: "box" } with valid Authorization + mocked AnthropicRouter returns 200', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_5',
-        name: 'route',
-        input: {
-          generator: 'box',
-          params: { shape: 'box', width: 1, height: 1, depth: 1 },
-          tags: ['primitive'],
-        },
+describe('/api/generate integration (D-023 Tripo passthrough)', () => {
+  it('POST { prompt } with valid Authorization + Tripo registered returns 200', async () => {
+    // Stub a Tripo generator that returns a minimal GLB so the route can
+    // serialize a response. Real Tripo SDK is not invoked.
+    const stubTripo: Generator = {
+      async generate() {
+        return {
+          glbBytes: new Uint8Array([0x67, 0x6c, 0x54, 0x46]), // "glTF" magic
+          lineageStub: { generatorSource: 'tripo' as const },
+        };
       },
-    ]);
-    const router = new AnthropicRouter(client, buildGeneratorMap(), false);
+    };
+    const generators = buildGeneratorMap({ withTripo: false });
+    generators.set('tripo', stubTripo);
+    const router = new HardcodedRouter(generators);
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router, jwt: fakeJwt });
 
     const res = await app.request('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
-      body: JSON.stringify({ prompt: 'simple box' }),
+      body: JSON.stringify({ prompt: 'red car' }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { lineageStub: { prompt?: string; generatorSource?: string } };
-    expect(body.lineageStub.generatorSource).toBe('procedural');
-    expect(body.lineageStub.prompt).toBe('simple box');
+    expect(body.lineageStub.generatorSource).toBe('tripo');
+    expect(body.lineageStub.prompt).toBe('red car');
   });
 
-  it('POST { prompt: "dragon" } with valid auth + TRIPO_ENABLED=false returns 400 tripo_disabled', async () => {
-    const client = fakeClient([
-      {
-        type: 'tool_use',
-        id: 'toolu_6',
-        name: 'route',
-        input: {
-          generator: 'tripo',
-          params: { shape: 'tripo', prompt: 'dragon' },
-          tags: ['mythical'],
-        },
-      },
-    ]);
-    const router = new AnthropicRouter(client, buildGeneratorMap(), false);
+  it('POST { prompt } when Tripo NOT registered returns 400 tripo_disabled', async () => {
+    const router = new HardcodedRouter(buildGeneratorMap({ withTripo: false }));
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router, jwt: fakeJwt });
 
     const res = await app.request('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
-      body: JSON.stringify({ prompt: 'ornate dragon statue' }),
+      body: JSON.stringify({ prompt: 'red car' }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('tripo_disabled');
   });
 
-  it('POST { prompt: ... } without Authorization header returns 401', async () => {
+  it('POST { prompt } without Authorization returns 401 auth_required', async () => {
     const router = new HardcodedRouter();
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router, jwt: fakeJwt });
@@ -251,7 +198,7 @@ describe('/api/generate integration with AnthropicRouter', () => {
     expect(body.error).toBe('auth_required');
   });
 
-  it('POST { prompt: ... } with invalid Bearer token returns 401 auth_invalid', async () => {
+  it('POST { prompt } with invalid Bearer token returns 401 auth_invalid', async () => {
     const router = new HardcodedRouter();
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router, jwt: fakeJwt });
@@ -266,7 +213,7 @@ describe('/api/generate integration with AnthropicRouter', () => {
     expect(body.error).toBe('auth_invalid');
   });
 
-  it('POST { shape, params } (slider mode) does NOT require auth — returns 200 anonymously', async () => {
+  it('POST { shape, params } slider mode does NOT require auth', async () => {
     const router = new HardcodedRouter();
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router }); // no jwt — slider mode is open

@@ -1,22 +1,25 @@
 // Type contracts shared between browser (frontend) and server (backend).
-// Per D-011: Generator interface so Phase 2 LLM router and Phase 3 Tripo
-// generator can slot in behind the same contract without caller refactor.
+// Per D-011 + D-023: Generator interface so procedural shapes + Tripo can
+// slot in behind one contract; Router interface is the seam for a future
+// LLM-routed agent. v1 uses HardcodedRouter directly (D-023 dropped the
+// AnthropicRouter implementation).
 
 import { z } from 'zod';
 
 export type ShapeId = 'box' | 'chest' | 'cylinder' | 'sphere' | 'sword' | 'hammer' | 'platform';
 
 // `tripo` is a generator id but not a "shape" — shapes are procedural categories
-// the catalog publishes via GET /api/shapes; `tripo` is an LLM-routed fallback.
+// the catalog publishes via GET /api/shapes; `tripo` is prompt-mode passthrough
+// (D-023: dispatched directly when /api/generate receives { prompt }).
 export type GeneratorId = ShapeId | 'tripo';
 
 export type PlatformStyle = 'round' | 'square';
 
 // Single source of truth for param numeric ranges. backend/src/lib/catalog.ts
 // (catalog → frontend sliders) and backend/src/lib/schema.ts (zod request
-// validation) and shared/src/types.ts (RouterDecisionSchema validating LLM
-// output) all read from here. Adding/widening a shape range requires editing
-// only this object — R14 mitigation.
+// validation) and the per-shape zod schemas below all read from here.
+// Adding/widening a shape range requires editing only this object —
+// R14 mitigation.
 export const paramRanges = {
   box: {
     width:  { min: 0.1, max: 5 },
@@ -192,10 +195,11 @@ export interface GenerateResponse {
   lineageStub: Partial<LineageRecord>;
 }
 
-// --- Zod schemas (LLM structured-output contract) -------------------------
-// These mirror the param interfaces above, bound to paramRanges so the LLM
-// can't emit out-of-catalog values. Used by backend AnthropicRouter via
-// zod-to-json-schema for Anthropic tool-use input_schema.
+// --- Zod schemas (request validation) -------------------------------------
+// Mirror the param interfaces above, bound to paramRanges. The backend
+// generateParamsSchema composes a subset of these for the /api/generate
+// slider mode (D-023 dropped the LLM tool-use input_schema consumer; these
+// schemas are now request-validation only).
 
 export const boxParamsSchema = z.object({
   shape: z.literal('box'),
@@ -273,13 +277,10 @@ export const GenerateParamsSchema = z.discriminatedUnion('shape', [
   tripoParamsSchema,
 ]);
 
-export const RouterDecisionSchema = z.object({
-  generator: z.enum(['box', 'chest', 'cylinder', 'sphere', 'sword', 'hammer', 'platform', 'tripo']),
-  params: GenerateParamsSchema,
-  tags: z.array(z.string()).max(10),
-});
-
-export type RouterDecision = z.infer<typeof RouterDecisionSchema>;
+// D-023: RouterDecisionSchema + RouterDecision removed. They existed only to
+// validate Anthropic tool-use output from the AnthropicRouter, which is gone.
+// HardcodedRouter (the only remaining Router impl) constructs its outputs
+// in-process from typed shapes; no zod parsing of external LLM output needed.
 
 // Summary view of a published Model3D Sui object, surfaced to the Browse UI.
 // u64 fields are kept as strings to avoid bigint-across-JSON pain (D-015).

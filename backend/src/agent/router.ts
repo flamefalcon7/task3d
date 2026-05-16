@@ -1,15 +1,11 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type {
   Generator,
   GeneratorId,
   RouteInput,
   RouteResult,
   Router,
-  RouterDecision,
   ShapeId,
 } from '@overflow2026/shared';
-import { RouterDecisionSchema } from '@overflow2026/shared';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   BoxGenerator,
   ChestGenerator,
@@ -20,35 +16,52 @@ import {
   SwordGenerator,
 } from '../generators/index.js';
 
-export class RouterParseError extends Error {
-  public readonly zodIssue?: unknown;
-  constructor(message: string, zodIssue?: unknown) {
-    super(message);
-    this.name = 'RouterParseError';
-    this.zodIssue = zodIssue;
-  }
-}
-
-export class RouterFormatError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RouterFormatError';
-  }
-}
-
+// Thrown when prompt-mode is invoked but Tripo isn't configured. Surfaces a
+// helpful message listing the procedural shapes that are still available.
 export class TripoDisabledError extends Error {
-  constructor(message = 'tripo generator disabled — try a procedural shape (box, chest, cylinder, sphere, sword, hammer, platform)') {
+  constructor(
+    message = 'tripo generator disabled — set TRIPO_ENABLED=true + TRIPO_API_KEY, or use slider mode with one of: box, chest, cylinder, sphere, sword, hammer, platform',
+  ) {
     super(message);
     this.name = 'TripoDisabledError';
   }
 }
 
-// Phase 1 stub kept as the dev/no-key fallback (server.ts switches based on
-// ANTHROPIC_API_KEY). Slider-mode callers go through this path directly.
-export class HardcodedRouter implements Router {
-  private readonly generators: Map<ShapeId, Generator>;
+// Deterministic tag derivation for prompt-mode requests. Replaces the LLM
+// tag extraction that D-023 dropped — lineage records still carry useful
+// descriptive metadata without an Anthropic call. Strategy: split on
+// non-word chars, lowercase, drop tokens < 3 chars (noise), drop dupes,
+// cap at 5 (matches RouterDecisionSchema's old tags array max).
+function deriveTagsFromPrompt(prompt: string): string[] {
+  const tokens = prompt
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
 
-  constructor() {
+// Only concrete Router implementation in v1 (D-023 removed AnthropicRouter).
+// Slider mode: caller passes { shape, params } — dispatch to matching
+// procedural generator. Prompt mode: caller passes { prompt } — dispatch
+// to Tripo if registered, else throw TripoDisabledError.
+export class HardcodedRouter implements Router {
+  private readonly generators: Map<GeneratorId, Generator>;
+
+  // Procedural-only constructor (back-compat). server.ts uses the explicit
+  // constructor when Tripo is registered.
+  constructor(generators?: Map<GeneratorId, Generator>) {
+    if (generators) {
+      this.generators = generators;
+      return;
+    }
     this.generators = new Map<ShapeId, Generator>([
       ['box', new BoxGenerator()],
       ['chest', new ChestGenerator()],
@@ -61,8 +74,30 @@ export class HardcodedRouter implements Router {
   }
 
   async route(input: RouteInput): Promise<RouteResult> {
+    // Prompt mode: D-023 deterministic Tripo passthrough.
+    if (input.prompt) {
+      const prompt = input.prompt.slice(0, 1000);
+      const tripo = this.generators.get('tripo');
+      if (!tripo) throw new TripoDisabledError();
+      const tags = deriveTagsFromPrompt(prompt);
+      const tripoParams = { shape: 'tripo' as const, prompt };
+      return {
+        generator: tripo,
+        lineageStub: {
+          generatorSource: 'tripo',
+          prompt,
+          shape: 'tripo',
+          params: tripoParams,
+          // Stash derived tags on the lineage record so downstream consumers
+          // (Walrus lineage JSON, future indexer) keep getting tags.
+          llmDecision: { generator: 'tripo', params: tripoParams, tags },
+        },
+      };
+    }
+
+    // Slider mode unchanged.
     if (!input.shape) {
-      throw new Error('HardcodedRouter requires { shape } — prompt-mode requires AnthropicRouter');
+      throw new Error('HardcodedRouter requires { prompt } or { shape, params }');
     }
     const generator = this.generators.get(input.shape);
     if (!generator) {
@@ -71,89 +106,6 @@ export class HardcodedRouter implements Router {
     return {
       generator,
       lineageStub: { generatorSource: 'procedural' },
-    };
-  }
-}
-
-// JSON Schema derived once at module load; Anthropic tool-use requires
-// input_schema in JSON Schema form, and we want zod (TS-friendly) to remain
-// the authoring surface — hence zod-to-json-schema on a shared zod object.
-const routerDecisionJsonSchema = zodToJsonSchema(RouterDecisionSchema, { target: 'openApi3' });
-
-const SYSTEM_PROMPT =
-  'You route user prompts to a 3D model generator. Pick ONE generator from {box, chest, cylinder, sphere, sword, hammer, platform, tripo} and emit params that fit its schema. Use procedural generators when the prompt fits a basic primitive or weapon/platform/chest. Use `tripo` ONLY for shapes that no procedural generator can produce (e.g. organic creatures, ornate sculptures). Always extract 1-5 short tags describing aesthetic / category.';
-
-export class AnthropicRouter implements Router {
-  constructor(
-    private readonly client: Anthropic,
-    private readonly generators: Map<GeneratorId, Generator>,
-    private readonly tripoEnabled: boolean,
-  ) {}
-
-  async route(input: RouteInput): Promise<RouteResult> {
-    // Backward compat: slider-mode callers pass { shape, params } directly.
-    if (!input.prompt) {
-      if (!input.shape) {
-        throw new Error('AnthropicRouter requires either { prompt } or { shape, params }');
-      }
-      const generator = this.generators.get(input.shape);
-      if (!generator) {
-        throw new Error(`No generator for shape "${input.shape}"`);
-      }
-      return {
-        generator,
-        lineageStub: { generatorSource: 'procedural' },
-      };
-    }
-
-    const prompt = input.prompt.slice(0, 1000);
-
-    const response = await this.client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      tools: [
-        {
-          name: 'route',
-          description: 'Choose a generator and emit params + tags for the user prompt.',
-          input_schema: routerDecisionJsonSchema as Anthropic.Tool.InputSchema,
-        },
-      ],
-      tool_choice: { type: 'tool', name: 'route' },
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const toolUse = response.content.find((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use');
-    if (!toolUse || toolUse.name !== 'route' || typeof toolUse.input !== 'object' || toolUse.input === null) {
-      throw new RouterFormatError('Anthropic response missing route tool_use block');
-    }
-
-    const parsed = RouterDecisionSchema.safeParse(toolUse.input);
-    if (!parsed.success) {
-      throw new RouterParseError('Router decision failed zod validation', parsed.error.issues);
-    }
-    const decision: RouterDecision = parsed.data;
-
-    if (decision.generator === 'tripo' && !this.tripoEnabled) {
-      throw new TripoDisabledError();
-    }
-
-    const generator = this.generators.get(decision.generator);
-    if (!generator) {
-      throw new RouterParseError(`No generator registered for "${decision.generator}"`);
-    }
-
-    const generatorSource = decision.generator === 'tripo' ? 'tripo' : 'procedural';
-
-    return {
-      generator,
-      lineageStub: {
-        generatorSource,
-        prompt,
-        llmDecision: decision,
-        params: decision.params,
-        shape: decision.generator,
-      },
     };
   }
 }

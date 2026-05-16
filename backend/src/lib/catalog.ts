@@ -3,9 +3,8 @@ import { paramRanges } from '@overflow2026/shared';
 
 // Single source of truth for shape param ranges is paramRanges in shared/.
 // This catalog adds presentation metadata (label / step / default) on top of
-// those numeric bounds; zod schemas (backend) + RouterDecisionSchema (shared)
-// also read from paramRanges so LLM output, request validation, and slider
-// UI can never drift.
+// those numeric bounds; the per-shape zod schemas in shared/ also read from
+// paramRanges so request validation and slider UI can never drift.
 export const SHAPE_CATALOG: ShapeCatalog = [
   {
     id: 'box',
