@@ -22,6 +22,8 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
   return {
     objectId: '0xaaa',
     blobId: 'blob-1',
+    collectionId: '0xcoll-1',
+    patchId: '',
     creator: '0x1234567890abcdef',
     shapeType: 'box',
     paramsJson: '{"shape":"box"}',

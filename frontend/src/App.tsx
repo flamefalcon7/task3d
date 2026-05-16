@@ -2,10 +2,14 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { BrowsePage } from './browse/BrowsePage';
 import { CreatorFlow } from './creator/CreatorFlow';
 import { ModelDetailPage } from './buy/ModelDetailPage';
+import { ForgePage } from './forge/ForgePage';
+import { CollectionDetailPage } from './collection/CollectionDetailPage';
 
 // D-014 + D-013: / is the demo default homepage (Browse marketplace);
 // /generate is the secondary CTA used by creators. /model/:objectId is the
-// buyer detail page (U9).
+// buyer detail page (U9). Phase 3 adds /forge (creator collection mint per
+// U4), /collection/:slug (variant browser per U5), and /track (Tiny
+// Racetrack per U6; route added when that unit ships).
 function App() {
   return (
     <BrowserRouter>
@@ -13,6 +17,8 @@ function App() {
         <Route path="/" element={<BrowsePage />} />
         <Route path="/generate" element={<CreatorFlow />} />
         <Route path="/model/:objectId" element={<ModelDetailPage />} />
+        <Route path="/forge" element={<ForgePage />} />
+        <Route path="/collection/:slug" element={<CollectionDetailPage />} />
       </Routes>
     </BrowserRouter>
   );

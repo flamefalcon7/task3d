@@ -39,9 +39,14 @@ function jsonToSummary(
   const blobId = String(blob.blob_id ?? json.blob_id ?? '');
   const lineageBlobId = String(json.lineage_blob_id ?? '');
   const rawTags = Array.isArray(json.tags) ? (json.tags as unknown[]) : [];
+  // Phase 3 (U1): see useModelIndex nodeToSummary for the same migration.
+  const collectionId = String(json.collection_id ?? '');
+  const patchId = String(json.patch_id ?? '');
   return {
     objectId,
     blobId,
+    collectionId,
+    patchId,
     creator: String(json.creator ?? ''),
     shapeType: String(json.shape_type ?? ''),
     paramsJson: String(json.params_json ?? ''),

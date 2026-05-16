@@ -61,10 +61,18 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const createdAtMs = String(json.created_at_ms ?? '0');
   const rawTags = Array.isArray(json.tags) ? (json.tags as unknown[]) : [];
   const tags = rawTags.map((t) => String(t));
+  // Phase 3 (U1): Model3D now carries collection_id + patch_id instead of
+  // blob. Read them from the GraphQL response if present; fall back to '' for
+  // pre-U2 Phase 2 fixtures and degenerate-of-1 mints (patch_id == '').
+  // U5 will refine the GraphQL mapping when Browse groups by collectionId.
+  const collectionId = String(json.collection_id ?? '');
+  const patchId = String(json.patch_id ?? '');
 
   return {
     objectId,
     blobId,
+    collectionId,
+    patchId,
     creator,
     shapeType,
     paramsJson,
