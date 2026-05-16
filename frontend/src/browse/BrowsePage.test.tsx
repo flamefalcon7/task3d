@@ -73,34 +73,79 @@ describe('BrowsePage', () => {
     expect(screen.getAllByText('Retry').length).toBeGreaterThan(0);
   });
 
-  it('renders a grid of cards from the hook', () => {
+  it('renders a grid of cards from the hook (one card per distinct collection)', () => {
+    // Each makeModel defaults to collectionId '0xcoll-1' — so without overrides
+    // these three variants collapse into a single CollectionCard. We give each
+    // a distinct collectionId so the grid still shows three cards.
     mockHook({
       models: [
-        makeModel({ objectId: '0xa' }),
-        makeModel({ objectId: '0xb', shapeType: 'sword' }),
-        makeModel({ objectId: '0xc', shapeType: 'sphere', tags: ['armor'] }),
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b', shapeType: 'sword' }),
+        makeModel({ objectId: '0xc', collectionId: '0xc-c', shapeType: 'sphere', tags: ['armor'] }),
       ],
     });
     renderPage();
     expect(screen.getByTestId('model-grid')).toBeTruthy();
-    expect(screen.getByTestId('model-card-0xa')).toBeTruthy();
-    expect(screen.getByTestId('model-card-0xb')).toBeTruthy();
-    expect(screen.getByTestId('model-card-0xc')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-a')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-b')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-c')).toBeTruthy();
   });
 
-  it('tag filter narrows visible models', () => {
+  it('groups variants sharing one collection_id into a single collection card (U5)', () => {
+    const variants = Array.from({ length: 16 }, (_, i) =>
+      makeModel({ objectId: `0xv${i}`, collectionId: '0xshared', patchId: `p${i}` }),
+    );
+    mockHook({ models: variants });
+    renderPage();
+    // 16 variants → 1 card, with a "16 variants" badge
+    expect(screen.getByTestId('collection-card-0xshared')).toBeTruthy();
+    expect(screen.queryByTestId('collection-card-0xv0')).toBeNull();
+    expect(screen.getByTestId('collection-card-badge').textContent).toContain('16 variants');
+  });
+
+  it('renders a solo collection card for a Phase 2 degenerate-of-1 mint (U5)', () => {
+    mockHook({
+      models: [makeModel({ objectId: '0xa', collectionId: '0xsolo', patchId: '' })],
+    });
+    renderPage();
+    expect(screen.getByTestId('collection-card-0xsolo')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-badge').textContent).toContain('1 variant');
+    expect(screen.getByTestId('collection-card-badge').textContent).not.toContain('variants');
+  });
+
+  it('renders multiple collection cards for multiple distinct collections (U5)', () => {
+    const mkGroup = (cid: string, n: number) =>
+      Array.from({ length: n }, (_, i) => makeModel({ objectId: `${cid}-v${i}`, collectionId: cid }));
+    mockHook({
+      models: [...mkGroup('0xc-1', 4), ...mkGroup('0xc-2', 4), ...mkGroup('0xc-3', 4)],
+    });
+    renderPage();
+    expect(screen.getByTestId('collection-card-0xc-1')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-2')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-3')).toBeTruthy();
+    // 3 collection cards, each with a 4-variant badge
+    const badges = screen.getAllByTestId('collection-card-badge');
+    expect(badges).toHaveLength(3);
+    for (const b of badges) {
+      expect(b.textContent).toContain('4 variants');
+    }
+  });
+
+  it('tag filter narrows visible collections (U5: filter applies pre-grouping)', () => {
+    // Distinct collectionId per model so the filter visibly removes cards
+    // rather than collapsing into a multi-variant group.
     mockHook({
       models: [
-        makeModel({ objectId: '0xa', tags: ['weapon'] }),
-        makeModel({ objectId: '0xb', tags: ['armor'] }),
-        makeModel({ objectId: '0xc', tags: ['weapon', 'metal'] }),
+        makeModel({ objectId: '0xa', collectionId: '0xc-a', tags: ['weapon'] }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b', tags: ['armor'] }),
+        makeModel({ objectId: '0xc', collectionId: '0xc-c', tags: ['weapon', 'metal'] }),
       ],
     });
     renderPage();
     fireEvent.change(screen.getByTestId('tag-filter'), { target: { value: 'armor' } });
-    expect(screen.queryByTestId('model-card-0xa')).toBeNull();
-    expect(screen.getByTestId('model-card-0xb')).toBeTruthy();
-    expect(screen.queryByTestId('model-card-0xc')).toBeNull();
+    expect(screen.queryByTestId('collection-card-0xc-a')).toBeNull();
+    expect(screen.getByTestId('collection-card-0xc-b')).toBeTruthy();
+    expect(screen.queryByTestId('collection-card-0xc-c')).toBeNull();
   });
 
   it('calls refetch when the refresh button is clicked', () => {

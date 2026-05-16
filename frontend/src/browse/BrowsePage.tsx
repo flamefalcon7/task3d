@@ -1,8 +1,34 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import type { Model3DSummary } from '@overflow2026/shared';
 import { useModelIndex } from './useModelIndex';
-import { ModelCard } from './ModelCard';
+import { CollectionCard } from './CollectionCard';
 import { SignInButton } from '../auth/SignInButton';
+
+// Phase 3 (U5): Browse renders one card per Collection rather than per
+// Model3D variant. Phase 2 "degenerate-of-1" mints whose collectionId points
+// at their own bespoke Collection still render — they collapse to a
+// single-card group with a "1 variant" badge, which is the desired UX.
+//
+// Models whose collectionId is unknown (pre-U1 fixtures or partial decodes)
+// are bucketed under the synthetic '_orphans' key so they remain visible.
+// Each orphan still gets its own card via objectId fallback so we don't
+// confusingly merge unrelated assets.
+export function groupByCollection(
+  models: Model3DSummary[],
+): Map<string, Model3DSummary[]> {
+  const groups = new Map<string, Model3DSummary[]>();
+  for (const m of models) {
+    const key = m.collectionId || `_orphan:${m.objectId}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(m);
+    } else {
+      groups.set(key, [m]);
+    }
+  }
+  return groups;
+}
 
 export function BrowsePage() {
   const [tagFilter, setTagFilter] = useState<string>('');
@@ -20,6 +46,10 @@ export function BrowsePage() {
     // require a second pass; for the demo catalog size this is acceptable.
     return Array.from(s).sort();
   }, [models]);
+
+  // Phase 3 (U5): group by collectionId so the Browse grid shows collection
+  // cards, not individual variants.
+  const collectionGroups = useMemo(() => groupByCollection(models), [models]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#15171b', color: '#ddd', fontFamily: 'system-ui' }}>
@@ -97,8 +127,8 @@ export function BrowsePage() {
               gap: 16,
             }}
           >
-            {models.map((m) => (
-              <ModelCard key={m.objectId} model={m} />
+            {Array.from(collectionGroups.entries()).map(([cid, variants]) => (
+              <CollectionCard key={cid} collectionId={cid} variants={variants} />
             ))}
           </div>
         )}

@@ -17,6 +17,13 @@ export function buildModel3DTypeTag(packageId: string): string {
 // destructure into Model3DSummary. Final field shape per the Sui GraphQL
 // schema — adjust here if the schema rejects this query (U9 picks up the
 // same shape; both pages stay in sync).
+//
+// Phase 3 (U5): we rely on `contents.json` to surface `collection_id` and
+// `patch_id` from the Move struct so Browse can group variants by collection
+// and CollectionDetail can request per-variant quilt patches. The Sui GraphQL
+// `json` projection emits every field of the Move struct verbatim, so no
+// explicit field selection is required — the schema is keyed off the struct
+// definition in `contracts/sources/model3d.move` (D-020).
 export const MODEL3D_INDEX_QUERY = /* GraphQL */ `
   query Model3Ds($type: String!) {
     objects(filter: { type: $type }) {
