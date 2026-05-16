@@ -1089,6 +1089,57 @@ The three previously-investigated paths in `docs/solutions/integration-issues/wa
 
 ---
 
+## D-022: Adopt `@babylonjs/havok` for Tiny Racetrack rigid-body physics
+
+**Status**: Accepted
+**Date**: 2026-05-16
+**Phase**: 3 (Real-World Application — Tiny Racetrack scene per D-020)
+
+### Context
+
+Plan-003 U6 introduces a buyer-side `/track` route — a Babylon scene loading the buyer's owned car GLB, with WASD-driven rigid-body motion, hard-wall collisions, and a chase camera. Phase 2 Babylon scenes are static previews (no physics). To get arcade-grade driving (acceleration, steering, wall stops) we need a physics engine that ships a Babylon plugin and supports browser WASM execution.
+
+The candidate physics backends supported by Babylon 6.x are:
+- **`@babylonjs/havok`** — Mysten-uses-Havok-only, ~500KB Havok WASM lazy-loadable, Babylon-team first-party plugin (`HavokPlugin`).
+- **Ammo.js** — Bullet port, larger bundle, less reliable Babylon v2 physics integration as of 2026.
+- **Cannon-es** — pure JS, no WASM, smaller bundle but materially slower at >100 rigid bodies; quality of vehicle dynamics is also weaker.
+
+### Decision
+
+Adopt `@babylonjs/havok` as the physics binding for the Tiny Racetrack scene. Load the WASM binary via Vite's `?url` import, mirroring the existing `@mysten/walrus-wasm` pattern in `frontend/src/walrus/walrusClient.ts:6`. Restrict the dependency to `/track` route only (lazy-load — do not eagerly import in `App.tsx`).
+
+### Rationale
+
+- Babylon-team-supported plugin → least integration friction
+- WASM execution is fast enough at 60fps for a small bounded oval with 1 active rigid body + 4 walls
+- Bundle impact (~500KB gzipped Havok WASM) is acceptable when lazy-loaded behind `/track` route
+- Cannon-es vehicle dynamics are visibly less believable for the demo recording
+- Hackathon timeline (6-8 days for Phase 3) — picking the path with the best documentation + Babylon Playground examples reduces R1 (Havok integration day-slip)
+
+### Alternatives Considered
+
+- **Cannon-es**: rejected — vehicle behavior less convincing; we don't need the bundle savings on a lazy route.
+- **Ammo.js**: rejected — larger bundle than Havok, weaker integration story in Babylon 6.x.
+- **No physics, scripted animation**: rejected — kills the "feel" of driving the variant you bought. The demo's emotional punch is wired into rigid-body behavior.
+
+### Consequences
+
+- ✅ U6 can implement WASD-driven car + wall collisions with first-party Babylon support.
+- ✅ Lazy-loading keeps Browse / Forge / Collection routes free of Havok WASM (per Spike-C, those routes also avoid Walrus WASM).
+- ⚠️ Adds a runtime dependency that must be present at deploy time — Phase 5 production build needs to verify the WASM URL resolves under the static hosting setup.
+- ⚠️ Havok license is permissive but proprietary (free for use, source unavailable). Compliance with Sui Overflow's "open-source" requirement: same posture as `@mysten/walrus-wasm` (also Mysten-distributed binary).
+- 🔮 If we ever need server-side physics for replay validation, Havok WASM also runs in Node — same binding works.
+
+### Related
+
+- D-020 — Phase 3 demo pivot to Tiny Racetrack (this dependency is U6's enabler)
+- D-007 — drop `react-babylonjs`; use imperative Babylon (Havok integrates at the imperative layer)
+- `docs/plans/2026-05-15-003-feat-phase-3-collection-forge-plan.md` § KTD-4 + R1 + U6
+- `frontend/src/walrus/walrusClient.ts:6` — WASM `?url` precedent
+- Babylon Havok docs: https://doc.babylonjs.com/features/featuresDeepDive/physics/usingPhysicsEngine
+
+---
+
 # Reserved Decision Numbers
 
-D-022 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-023 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

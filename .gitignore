@@ -4,6 +4,9 @@
 .vscode/
 .idea/
 
+# Claude Code worktree-isolated subagents (per ce-work skill)
+.claude/worktrees/
+
 # Secrets
 .env
 .env.*
