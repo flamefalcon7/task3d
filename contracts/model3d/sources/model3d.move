@@ -2,6 +2,12 @@
 // economy. L2 Derivative (and its grant/mint/purchase_derivative_access entries)
 // is deferred to v1.1; the design is preserved in `docs/spec.md` §2.8 but no L2
 // code ships in Phase 2.
+//
+// Phase 3 (Collection Forge): adds `Collection` wrapping the Walrus quilt Blob.
+// `Model3D` no longer holds a `Blob` directly — instead it references its parent
+// `Collection` by `collection_id` and identifies its quilt patch by `patch_id`.
+// Phase 2's `publish_and_share` entry is preserved as a degenerate-of-1 wrapper
+// (one Collection + one Model3D, empty `patch_id`).
 module model3d::model3d;
 
 use std::string::{Self, String};
@@ -30,11 +36,23 @@ const EParamsJsonTooLong:   u64 = 12;
 const ENameTooLong:         u64 = 13;
 const EBlobIdMalformed:     u64 = 14;
 
+// Phase 3 — Collection / variant assertions
+const ENotCollectionCreator:        u64 = 15;
+const ESlugMalformed:               u64 = 16;
+const ETooManyVariants:             u64 = 17;
+const ESlugTooLong:                 u64 = 18;
+const EVariantParamsJsonTooLong:    u64 = 19;
+
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
 const MAX_PARAMS_JSON_LEN:  u64 = 4096;
 const MAX_NAME_LEN:         u64 = 128;
 const MAX_BLOB_ID_LEN:      u64 = 128;
+
+// Phase 3 — Collection / variant bounds
+const MAX_SLUG_LEN:                 u64 = 64;
+const MAX_VARIANTS:                 u64 = 16;
+const MAX_VARIANT_PARAMS_JSON_LEN:  u64 = 1024;
 
 // === Types ===
 
@@ -46,9 +64,34 @@ public struct LicenseTerms has store, copy, drop {
     require_attribution: bool,
 }
 
-public struct Model3D has key, store {
+// Phase 3 — wraps the Walrus quilt Blob that holds N×variants. Shared so any
+// wallet can pass `&Collection` to read-only entries; only the original creator
+// may add variants (see `mint_variant` F7 authorization).
+public struct Collection has key, store {
     id: UID,
     blob: Blob,
+    creator: address,
+    name: String,
+    slug: String,
+    variant_count: u32,
+    license: LicenseTerms,
+    created_at_ms: u64,
+}
+
+// Phase 3 — declarative description of a single variant slot in a Collection.
+// Consumed by `mint_variant` to produce a `Model3D`.
+public struct VariantSpec has store, drop {
+    patch_id: String,
+    params_json: String,
+    name: String,
+    tags: vector<String>,
+    direct_access_price: u64,
+}
+
+public struct Model3D has key, store {
+    id: UID,
+    collection_id: ID,
+    patch_id: String,
     creator: address,
     shape_type: String,
     params_json: String,
@@ -78,6 +121,14 @@ public struct ModelPublished has copy, drop {
     direct_access_price: u64,
     policy: u8,
     lineage_blob_id: String,
+}
+
+public struct CollectionPublished has copy, drop {
+    collection_id: ID,
+    creator: address,
+    name: String,
+    slug: String,
+    license_policy: u8,
 }
 
 public struct AccessPurchased has copy, drop {
@@ -110,6 +161,9 @@ public fun policy_restricted(): u8 { POLICY_RESTRICTED }
 public fun policy_allow_list(): u8 { POLICY_ALLOW_LIST }
 public fun policy_permissionless(): u8 { POLICY_PERMISSIONLESS }
 public fun max_derivative_royalty_bps(): u16 { MAX_DERIVATIVE_ROYALTY_BPS }
+public fun max_variants(): u64 { MAX_VARIANTS }
+public fun max_slug_len(): u64 { MAX_SLUG_LEN }
+public fun max_variant_params_json_len(): u64 { MAX_VARIANT_PARAMS_JSON_LEN }
 
 // === Read-only accessors (used by Phase 2 frontend + indexers + tests) ===
 
@@ -123,10 +177,19 @@ public fun lineage_blob_id(model: &Model3D): &String { &model.lineage_blob_id }
 public fun is_encrypted(model: &Model3D): bool { model.is_encrypted }
 public fun license(model: &Model3D): &LicenseTerms { &model.license }
 public fun created_at_ms(model: &Model3D): u64 { model.created_at_ms }
+public fun collection_id(model: &Model3D): ID { model.collection_id }
+public fun patch_id(model: &Model3D): &String { &model.patch_id }
 public fun license_policy(license: &LicenseTerms): u8 { license.policy }
 public fun license_derivative_royalty_bps(license: &LicenseTerms): u16 {
     license.derivative_royalty_bps
 }
+
+public fun collection_creator(coll: &Collection): address { coll.creator }
+public fun collection_name(coll: &Collection): &String { &coll.name }
+public fun collection_slug(coll: &Collection): &String { &coll.slug }
+public fun collection_variant_count(coll: &Collection): u32 { coll.variant_count }
+public fun collection_license(coll: &Collection): &LicenseTerms { &coll.license }
+public fun collection_created_at_ms(coll: &Collection): u64 { coll.created_at_ms }
 
 public fun access_target_id(access: &Access): ID { access.target_id }
 public fun access_holder(access: &Access): address { access.holder }
@@ -156,26 +219,117 @@ public fun validate_publish_inputs(
     assert!(string::length(lineage_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
 }
 
-// === L1: Publish base ===
+// Phase 3 — Collection-level validation. Mirrors the `validate_publish_inputs`
+// ladder; reused error codes where the semantic limit is identical.
+public fun validate_collection_inputs(
+    name: &String,
+    slug: &String,
+    license: &LicenseTerms,
+) {
+    assert!(string::length(slug) > 0, ESlugMalformed);
+    assert!(string::length(slug) <= MAX_SLUG_LEN, ESlugTooLong);
+    assert!(string::length(name) <= MAX_NAME_LEN, ENameTooLong);
+    assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
+}
 
-public fun publish(
-    blob: Blob,
-    shape_type: String,
+// Phase 3 — Variant-level validation invoked from `mint_variant`. Note tighter
+// `params_json` bound (1024 vs 4096 for Phase 2) per SEC-004 — material-swap
+// variants don't need the larger budget.
+public fun validate_variant_spec(
+    spec: &VariantSpec,
+    lineage_blob_id: &String,
+) {
+    assert!(vector::length(&spec.tags) <= MAX_TAGS, ETooManyTags);
+    let mut i = 0;
+    let n = vector::length(&spec.tags);
+    while (i < n) {
+        assert!(string::length(vector::borrow(&spec.tags, i)) <= MAX_TAG_LEN, ETagTooLong);
+        i = i + 1;
+    };
+    assert!(string::length(&spec.params_json) <= MAX_VARIANT_PARAMS_JSON_LEN, EVariantParamsJsonTooLong);
+    assert!(string::length(&spec.name) <= MAX_NAME_LEN, ENameTooLong);
+    assert!(string::length(&spec.patch_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    assert!(string::length(lineage_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+}
+
+// === Phase 3: Collection + variant constructors ===
+
+public fun new_variant_spec(
+    patch_id: String,
     params_json: String,
     name: String,
     tags: vector<String>,
-    lineage_blob_id: String,
     direct_access_price: u64,
-    is_encrypted: bool,
+): VariantSpec {
+    VariantSpec {
+        patch_id,
+        params_json,
+        name,
+        tags,
+        direct_access_price,
+    }
+}
+
+public fun publish_collection(
+    blob: Blob,
+    name: String,
+    slug: String,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
+): Collection {
+    validate_collection_inputs(&name, &slug, &license);
+    let coll = Collection {
+        id: object::new(ctx),
+        blob,
+        creator: ctx.sender(),
+        name,
+        slug,
+        variant_count: 0,
+        license,
+        created_at_ms: clock.timestamp_ms(),
+    };
+    event::emit(CollectionPublished {
+        collection_id: object::id(&coll),
+        creator: ctx.sender(),
+        name: coll.name,
+        slug: coll.slug,
+        license_policy: license.policy,
+    });
+    coll
+}
+
+// Phase 3 — Mint a single variant Model3D against a Collection. The `coll`
+// parameter is `&mut` so we can increment `variant_count` while still using the
+// Spike-B PASS pattern (b): the PTB passes the Collection Result handle through
+// by reference, never by value. Only the Collection's creator may invoke this
+// (F7 authorization) — the assertion guards the "single-creator collection"
+// invariant the Phase 3 brainstorm assumes.
+public fun mint_variant(
+    coll: &mut Collection,
+    spec: VariantSpec,
+    shape_type: String,
+    lineage_blob_id: String,
+    is_encrypted: bool,
+    clock: &Clock,
+    ctx: &mut TxContext,
 ): Model3D {
-    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &license);
+    assert!(coll.creator == ctx.sender(), ENotCollectionCreator);
+    assert!((coll.variant_count as u64) < MAX_VARIANTS, ETooManyVariants);
+    validate_variant_spec(&spec, &lineage_blob_id);
+
+    let VariantSpec {
+        patch_id,
+        params_json,
+        name,
+        tags,
+        direct_access_price,
+    } = spec;
 
     let model = Model3D {
         id: object::new(ctx),
-        blob,
+        collection_id: object::id(coll),
+        patch_id,
         creator: ctx.sender(),
         shape_type,
         params_json,
@@ -184,22 +338,35 @@ public fun publish(
         lineage_blob_id,
         direct_access_price,
         is_encrypted,
-        license,
+        license: coll.license,
         created_at_ms: clock.timestamp_ms(),
     };
+    coll.variant_count = coll.variant_count + 1;
+
     event::emit(ModelPublished {
         model_id: object::id(&model),
         creator: ctx.sender(),
         direct_access_price,
-        policy: license.policy,
+        policy: coll.license.policy,
         lineage_blob_id: model.lineage_blob_id,
     });
     model
 }
 
+#[allow(lint(share_owned, custom_state_change))]
+public fun share_collection(coll: Collection) {
+    transfer::share_object(coll);
+}
+
+// === Phase 2 ABI compatibility — degenerate-of-1 wrapper ===
+
 // D-016 — Phase 2 entry. Always shares the resulting Model3D so any wallet can
 // pass `&Model3D` to `purchase_model_access` (Kiosk-mediated ownership is
 // promoted to Phase 4 must-have per D-013; see OQ-013 for coexistence).
+//
+// Phase 3: internally produces a degenerate 1-variant Collection so the new
+// struct shape is observable to indexers + the frontend even on the legacy
+// entry. `shape_type` is preserved per-variant via `mint_variant`'s signature.
 #[allow(lint(share_owned))]
 public fun publish_and_share(
     blob: Blob,
@@ -214,20 +381,41 @@ public fun publish_and_share(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let model = publish(
+    // Re-run Phase 2's validation ladder so the legacy entry preserves its full
+    // assertion semantics (params_json up to 4096, etc.) — the variant-spec
+    // ladder uses a tighter 1024 bound which would reject Phase 2 inputs.
+    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &license);
+
+    let mut coll = publish_collection(
         blob,
-        shape_type,
-        params_json,
-        name,
-        tags,
-        lineage_blob_id,
-        direct_access_price,
-        is_encrypted,
+        copy name,
+        // Degenerate-of-1 collections get a synthetic slug. Phase 2 callers
+        // don't think in slug terms; "_legacy" sidesteps the empty-slug
+        // assertion while remaining recognizable in indexer output.
+        string::utf8(b"_legacy"),
         license,
         clock,
         ctx,
     );
+    let spec = new_variant_spec(
+        // Empty patch_id == "the whole blob" for degenerate-of-1 collections.
+        string::utf8(b""),
+        params_json,
+        name,
+        tags,
+        direct_access_price,
+    );
+    let model = mint_variant(
+        &mut coll,
+        spec,
+        shape_type,
+        lineage_blob_id,
+        is_encrypted,
+        clock,
+        ctx,
+    );
     transfer::share_object(model);
+    share_collection(coll);
 }
 
 // === L3: Purchase access ===
@@ -281,39 +469,52 @@ public fun mint_model_access(
 // === Test-only helpers ===
 
 #[test_only]
-public fun new_model_for_testing(
+public fun new_collection_for_testing(
     blob: Blob,
-    shape_type: String,
-    params_json: String,
     name: String,
-    tags: vector<String>,
-    lineage_blob_id: String,
-    direct_access_price: u64,
-    is_encrypted: bool,
+    slug: String,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
-): Model3D {
-    publish(
-        blob,
-        shape_type,
-        params_json,
-        name,
-        tags,
-        lineage_blob_id,
-        direct_access_price,
-        is_encrypted,
-        license,
-        clock,
-        ctx,
-    )
+): Collection {
+    publish_collection(blob, name, slug, license, clock, ctx)
 }
 
 #[test_only]
-public fun destroy_model_for_testing(model: Model3D): Blob {
-    let Model3D {
+public fun mint_variant_for_testing(
+    coll: &mut Collection,
+    spec: VariantSpec,
+    shape_type: String,
+    lineage_blob_id: String,
+    is_encrypted: bool,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Model3D {
+    mint_variant(coll, spec, shape_type, lineage_blob_id, is_encrypted, clock, ctx)
+}
+
+#[test_only]
+public fun destroy_collection_for_testing(coll: Collection): Blob {
+    let Collection {
         id,
         blob,
+        creator: _,
+        name: _,
+        slug: _,
+        variant_count: _,
+        license: _,
+        created_at_ms: _,
+    } = coll;
+    object::delete(id);
+    blob
+}
+
+#[test_only]
+public fun destroy_model_for_testing(model: Model3D) {
+    let Model3D {
+        id,
+        collection_id: _,
+        patch_id: _,
         creator: _,
         shape_type: _,
         params_json: _,
@@ -326,7 +527,6 @@ public fun destroy_model_for_testing(model: Model3D): Blob {
         created_at_ms: _,
     } = model;
     object::delete(id);
-    blob
 }
 
 #[test_only]
