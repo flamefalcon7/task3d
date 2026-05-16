@@ -1,6 +1,90 @@
 # Phase Progress
 
-## Last Updated: 2026-05-16 AM — Plan-003 written, doc-reviewed (headless), 9 P0+P1 fixes walkthrough applied. **Ready for `/ce-work`.** Plan file: `docs/plans/2026-05-15-003-feat-phase-3-collection-forge-plan.md`. 3 pre-flight spikes (A/B/C) documented in plan's Risks & Dependencies section — they run before U1. Branch `feat/phase-2-sui-integration` carries uncommitted docs (D-020, D-021, brainstorm, plan, Move.toml fix, phase-progress, solutions update) — recommend committing before `/ce-work` dispatches.
+## Last Updated: 2026-05-16 PM — **PHASE 3 CODE COMPLETE.** 12 commits this session on `feat/phase-2-sui-integration` (U1–U6 + spikes + D-022 + D-023 + dev-fixes). Move 37 + Backend 132 + Frontend 158 = **325 tests green.** Sui testnet deploy live: `MODEL3D_PACKAGE_ID=0x18a480b3...c3`. Only U7 (manual e2e + demo recording) remaining for Phase 3 — that's a human-driven step. Phase 4 (Kiosk + TransferPolicy) is the next code work; OQ-013 still needs ADR-ifying before plan-004.
+
+## Phase 3 closeout (2026-05-16 PM)
+
+### Commits this session
+
+```
+d811870 refactor(router): drop AnthropicRouter; prompt mode dispatches to Tripo (D-023)
++1 docs(env) — Enoki vars documented in frontend/.env.example
+b56b50d fix(dev): backend env loading + correct Sui testnet GraphQL endpoint
+638b9c5 feat(frontend): U6 — /track Havok physics + WASD + chase camera
+773feee feat(frontend): U5 — Browse grouping + /collection/:slug
+80344ce feat(frontend): U4 — /forge + buildCollectionPtb
+417474f feat(backend): U3 — POST /api/collection/build
+73eb32f chore(phase-3): pre-stage shared types + route stubs (U3/U4/U5 parallel-batch prep)
+0d0e0ab feat(deploy): U2 — publish model3d to testnet — Phase 3 contract live
+0769617 feat(contract): U1 — Phase 3 Collection struct + N×variant mint flow
+3ff78ee docs(adr): D-022 @babylonjs/havok adoption for Tiny Racetrack physics
+cf26fb0 fix(walrus): spikes A+B+C — patch useWalrusUpload wiring; verify PTB chain shape
+```
+
+### ADRs landed this session
+
+- **D-020** — Phase 3 demo pivot (Collection Forge + Tiny Racetrack)
+- **D-021** — Walrus testnet dep subtree fix (one-line Move.toml change)
+- **D-022** — `@babylonjs/havok` adoption for Tiny Racetrack rigid-body physics
+- **D-023** — drop `AnthropicRouter`; prompt mode dispatches directly to Tripo (narrows D-011 + D-014)
+
+### Sui testnet artifacts (live, verified)
+
+```
+PackageID:  0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3
+UpgradeCap: 0x11b63b1f9a1677e20a6f7015416da8dde4e291b72ed7563cc5de2bf0268fd795
+Deploy tx:  8gKrqemFVcAeBr3rifQurRDGuSF7pm2Yp44wXo15Kv5A
+Gas used:   ~0.029 SUI on testnet
+Deployed wallet (creator):
+            0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed
+Sui Scan:   https://suiscan.xyz/testnet/tx/8gKrqemFVcAeBr3rifQurRDGuSF7pm2Yp44wXo15Kv5A
+```
+
+### Plan-003 unit completion
+
+| Unit | Status | Commit | Test delta |
+|---|---|---|---|
+| **Spike-A** useWalrusUpload wiring | ✅ PASS | `cf26fb0` | +1 regression test |
+| **Spike-B** PTB chain shape (pattern b) | ✅ PASS | `cf26fb0` | +5 structural tests |
+| **Spike-C** Walrus aggregator URL (outcome a) | ✅ PASS | docs only | n/a |
+| **U1** Move Collection struct + entries | ✅ | `0769617` | Move 21 → 37 |
+| **U2** Testnet deploy + Phase 2 regression smoke | ✅ | `0d0e0ab` | All 250 tests at deploy time |
+| **U3** Backend material-swap endpoint | ✅ | `417474f` | Backend 113 → 130 |
+| **U4** Forge page + buildCollectionPtb | ✅ | `80344ce` | Frontend 100 → 119 |
+| **U5** Browse grouping + Collection detail | ✅ | `773feee` | Frontend 119 → 158 |
+| **U6** Tiny Racetrack + Havok | ✅ R1 PASS (no fallback) | `638b9c5` | Frontend 158 (+20 in track/) |
+| **U7** E2E + demo capture | ⏳ User-driven (manual) | — | n/a |
+
+### Live-tested endpoints (post-D-023, current dev server state)
+
+All 6 backend endpoints + 4 external services verified working via curl. See `docs/process.md` for the full endpoint matrix.
+
+Two issues we discovered ONLY by running the live dev server (vitest had passed but missed both):
+1. Backend died at startup with `JwtConfigError: JWT_SECRET must be set` — fixed in `b56b50d` by adding `--env-file=.env` to the `tsx watch` dev script + generating + documenting `backend/.env` template.
+2. Browse "Failed to fetch" — `SUI_GRAPHQL_ENDPOINT` pointed at the deprecated + DNS-removed `sui-testnet.mystenlabs.com`. Replaced with `graphql.testnet.sui.io/graphql` per current Sui docs.
+
+CLAUDE.md captures the underlying lesson: "type checking and test suites verify code correctness, not feature correctness — if you can't test the UI, say so explicitly rather than claiming success." Failed to honour that twice this session; ChatGPT-equivalent learnings captured in process doc.
+
+### Insights worth carrying forward
+
+- **Pre-flight spikes pattern works.** Three 30-min spikes (R7/R8/R9) all landed PASS verdicts BEFORE U1 dispatched — saved ABI churn that would have wasted ~1 day if we'd discovered them mid-U1.
+- **D-023 lesson** (LLM router as decorative-for-committed-flow-UX): when the user-facing surface has already pre-committed to a generator choice, an LLM "deciding which generator" call is decorative — pay the latency + cost + failure-mode tax for zero signal. Reusable for any AI-routed app: ask "is the routing decision actually open at this UX surface?" before integrating an LLM router.
+- **Worktree isolation false-negative.** `Agent isolation: "worktree"` failed for this repo with `Cannot create agent worktree: not in a git repository`, despite the repo being a real one. Fell back to shared-directory mode + pre-staging shared files (commit `73eb32f`) to avoid collisions. Worked cleanly. Worth filing this with the harness team — the git-detection has a false-negative case.
+- **Parallel-batch with pre-staging.** Even without worktree isolation, U3+U4+U5 parallel-dispatched successfully by pre-staging shared files (`shared/src/types.ts`, route stubs in `App.tsx`) so each subagent had clean isolated file ownership. Pattern worth re-using.
+- **Subagent dispatch tight-reads pattern held up.** All 4 U-units (U3/U4/U5/U6) used inline skeletons + 5-8 file read lists per the captured 2026-05-15 learning. Zero subagent OOM'd at 40-50K tokens this round — Phase 2's failure mode didn't reappear.
+
+### Hackathon Tracker
+- Days to submission (6/21): **37 of 38**
+- Days to demo day (7/20–21): **66 of 67**
+- Days to winners (8/27): **104 of 105**
+
+---
+
+## Pre-Phase-3 history (prior sessions, kept for context)
+
+## Original log header (kept for history):
+
+## ~2026-05-16 AM Snapshot~ — Plan-003 written, doc-reviewed (headless), 9 P0+P1 fixes walkthrough applied. **Ready for `/ce-work`.** Plan file: `docs/plans/2026-05-15-003-feat-phase-3-collection-forge-plan.md`. 3 pre-flight spikes (A/B/C) documented in plan's Risks & Dependencies section — they run before U1. Branch `feat/phase-2-sui-integration` carries uncommitted docs (D-020, D-021, brainstorm, plan, Move.toml fix, phase-progress, solutions update) — recommend committing before `/ce-work` dispatches.
 
 ### Hackathon Tracker
 - Days to submission (6/21): **37 of 38**
