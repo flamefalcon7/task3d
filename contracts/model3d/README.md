@@ -43,16 +43,23 @@ cd contracts/model3d
 sui client publish --gas-budget 100000000
 ```
 
-Then capture the published values into `.env.testnet` at the repo root (gitignored):
+Then capture the published values into `frontend/.env.local` (gitignored). Backend has no on-chain dependency.
 
 ```env
-MODEL3D_PACKAGE_ID=<deploy_pending>
-MODEL3D_UPGRADE_CAP=<deploy_pending>
-MODEL3D_WALRUS_PACKAGE_ID=<deploy_pending>
+VITE_MODEL3D_PACKAGE_ID=<package_id_from_publish>
 ```
 
-Sui Explorer URL (after deploy):
-`https://suiscan.xyz/testnet/object/<MODEL3D_PACKAGE_ID>`
+### Phase 3 deploy capture (2026-05-16, U2 of plan-003)
+
+```env
+VITE_MODEL3D_PACKAGE_ID=0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3
+MODEL3D_UPGRADE_CAP=0x11b63b1f9a1677e20a6f7015416da8dde4e291b72ed7563cc5de2bf0268fd795
+PUBLISH_DIGEST=8gKrqemFVcAeBr3rifQurRDGuSF7pm2Yp44wXo15Kv5A
+```
+
+Sui Explorer:
+- Package: <https://suiscan.xyz/testnet/object/0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3>
+- Publish tx: <https://suiscan.xyz/testnet/tx/8gKrqemFVcAeBr3rifQurRDGuSF7pm2Yp44wXo15Kv5A>
 
 ### MVR sanity check (plan adv-005)
 
