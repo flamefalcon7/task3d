@@ -2,7 +2,12 @@
 // Plan P7: single endpoint, no events-query fallback (SG-003).
 // U9 reuses the type-filter query infrastructure here.
 
-export const SUI_GRAPHQL_ENDPOINT = 'https://sui-testnet.mystenlabs.com/graphql';
+// Canonical Sui testnet GraphQL endpoint (2026). The earlier
+// sui-testnet.mystenlabs.com host (GraphQL Alpha) has been deprecated AND
+// its DNS record removed — that's why the browser showed "Failed to fetch".
+// https://docs.sui.io/references/sui-graphql lists graphql.<network>.sui.io
+// as the current Beta endpoint family.
+export const SUI_GRAPHQL_ENDPOINT = 'https://graphql.testnet.sui.io/graphql';
 
 // why: the package id is appended onto the canonical Sui type tag
 // `<pkg>::model3d::Model3D`. We keep the query string parametric on the
