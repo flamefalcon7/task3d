@@ -26,6 +26,11 @@ export interface BlobUploadResult {
 export interface UploadResult {
   blobIds: string[];
   blobObjects: BlobUploadResult[];
+  // Synthetic quilt-patch IDs from encodeQuiltPatchId — one per file. All files
+  // in a quilt share the same Sui Blob object; patchIds address individual
+  // files within the shared blob. Used by Collection Forge to bind each
+  // Model3D variant to its slice (KTD-3).
+  patchIds: string[];
 }
 
 export interface UploadError {
@@ -98,13 +103,19 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
         setStage(lastStage);
         await flow.executeCertify({ signer });
 
-        const fileRefs: Array<{ id: string; blobId: string }> = await flow.listFiles();
+        // flow.listFiles() returns N entries, all sharing the same blobObject
+        // and blobId (quilt = 1 Sui Blob with N internal byte-range patches).
+        // `f.id` is the synthetic encoded patch id; `f.blobObject.id` is the
+        // real Sui object id consumed by tx.object(...) in downstream PTBs.
+        type FileRef = { id: string; blobId: string; blobObject: { id: string } };
+        const fileRefs: FileRef[] = await flow.listFiles();
         const result: UploadResult = {
-          blobIds: fileRefs.map((f: { blobId: string }) => f.blobId),
-          blobObjects: fileRefs.map((f: { id: string; blobId: string }) => ({
+          blobIds: fileRefs.map((f) => f.blobId),
+          blobObjects: fileRefs.map((f) => ({
             blobId: f.blobId,
-            blobObjectId: f.id,
+            blobObjectId: f.blobObject.id,
           })),
+          patchIds: fileRefs.map((f) => f.id),
         };
 
         setStage('done');

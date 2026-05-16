@@ -49,11 +49,33 @@ function makeHappyFlow() {
     .mockResolvedValue({ step: 'registered', txDigest: '0xdigest' });
   const upload = vi.fn().mockResolvedValue({ step: 'uploaded' });
   const executeCertify = vi.fn().mockResolvedValue({ step: 'certified' });
+  // Real SDK semantics: all entries in one quilt share blobId + blobObject;
+  // `id` is a synthetic encodeQuiltPatchId per file. The Sui Blob object id
+  // looks like /^0x[0-9a-f]{64}$/.
+  const SHARED_BLOB_ID = 'blob-quilt-1';
+  const SHARED_BLOB_OBJECT_ID =
+    '0x' + 'a'.repeat(64);
   const listFiles = vi.fn().mockResolvedValue([
-    { id: '0xobj1', blobId: 'blob-1', blobObject: {} },
-    { id: '0xobj2', blobId: 'blob-2', blobObject: {} },
+    {
+      id: 'patch-synth-0',
+      blobId: SHARED_BLOB_ID,
+      blobObject: { id: SHARED_BLOB_OBJECT_ID },
+    },
+    {
+      id: 'patch-synth-1',
+      blobId: SHARED_BLOB_ID,
+      blobObject: { id: SHARED_BLOB_OBJECT_ID },
+    },
   ]);
-  return { encode, executeRegister, upload, executeCertify, listFiles };
+  return {
+    encode,
+    executeRegister,
+    upload,
+    executeCertify,
+    listFiles,
+    SHARED_BLOB_ID,
+    SHARED_BLOB_OBJECT_ID,
+  };
 }
 
 beforeEach(() => {
@@ -95,11 +117,37 @@ describe('useWalrusUpload', () => {
     expect(flow.executeCertify).toHaveBeenCalledOnce();
 
     expect(res).toBeDefined();
-    expect(res?.blobIds).toEqual(['blob-1', 'blob-2']);
+    // A 2-file quilt shares one Walrus blob → both blobIds are identical.
+    expect(res?.blobIds).toEqual([flow.SHARED_BLOB_ID, flow.SHARED_BLOB_ID]);
     expect(res?.blobObjects).toHaveLength(2);
-    expect(res?.blobObjects?.[0]).toEqual({ blobId: 'blob-1', blobObjectId: '0xobj1' });
+    expect(res?.blobObjects?.[0]).toEqual({
+      blobId: flow.SHARED_BLOB_ID,
+      blobObjectId: flow.SHARED_BLOB_OBJECT_ID,
+    });
+    // Synthetic patch ids surface verbatim (KTD-3) — one per file, distinct.
+    expect(res?.patchIds).toEqual(['patch-synth-0', 'patch-synth-1']);
 
     await waitFor(() => expect(result.current.status).toBe('done'));
+  });
+
+  it('assigns the Sui Blob object id (not the synthetic patch id) to blobObjectId', async () => {
+    // Regression for the latent Phase 2 wiring bug (R7 in plan-003): prior
+    // code did `blobObjectId: f.id` which assigned the synthetic encoded
+    // quilt-patch id. PTBs that consume `tx.object(blobObjectId)` would reject
+    // with "unknown object" on the first real testnet mint.
+    const flow = makeHappyFlow();
+    writeFilesFlowFactory.mockReturnValue(flow);
+    const { result } = renderHook(() => useWalrusUpload());
+
+    let res: Awaited<ReturnType<typeof result.current.uploadFiles>> | undefined;
+    await act(async () => {
+      res = await result.current.uploadFiles([new Uint8Array([1])], makeSigner());
+    });
+
+    expect(res?.blobObjects?.[0]?.blobObjectId).toMatch(/^0x[0-9a-f]{64}$/);
+    // And confirm we did NOT accidentally surface the patch id here.
+    expect(res?.blobObjects?.[0]?.blobObjectId).not.toBe('patch-synth-0');
+    expect(res?.patchIds?.[0]).toBe('patch-synth-0');
   });
 
   it('wraps each Uint8Array as a WalrusFile with an identifier', async () => {
