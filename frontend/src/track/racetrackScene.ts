@@ -115,12 +115,14 @@ const LINEAR_DAMPING = 0.2;
 const ANGULAR_DAMPING = 0.6;
 const CHASE_RADIUS = 15;
 // Yaw offset applied to the car geometry inside its physics pivot, in
-// radians. Vehicle GLBs vary in their local "forward" convention — Tripo
-// outputs (and most camera-facing models) face -Z by default, so we rotate
-// the visual 180° to align it with the pivot's +Z (the direction the
-// FORWARD_IMPULSE pushes). Tune per asset family if a future generator
-// emits cars facing a different axis.
-const CAR_GEOMETRY_YAW_OFFSET = Math.PI;
+// radians. Different GLB sources export with different local forward axes
+// (Tripo, Sketchfab, manual exports all differ). Adjust per asset family:
+//   0        = GLB already faces the pivot's +Z (drive direction)
+//   Math.PI  = GLB faces -Z (rotate 180°)
+//   Math.PI/2  = GLB faces +X (rotate 90° CCW)
+//  -Math.PI/2 = GLB faces -X (rotate 90° CW)
+// Currently 0 — observed correct for the Phase 3 Forge Tripo outputs.
+const CAR_GEOMETRY_YAW_OFFSET = 0;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
