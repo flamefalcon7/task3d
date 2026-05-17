@@ -338,6 +338,82 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
   });
 
+  // ─── U5: carousel switching teardown (per-car PB isolation, R14/AE6) ───
+
+  it('U5/AE6 — switching to another car clears the overlay and reloads its PB', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [
+        variant({ objectId: '0xA', name: 'Red' }),
+        variant({ objectId: '0xB', name: 'Blue' }),
+      ],
+      loading: false,
+      error: null,
+    });
+    // Car A starts with no PB; car B has a stored PB.
+    localStorage.setItem('track-pb:0xB', '22500');
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+
+    // Drive a lap on car A so the result modal is on screen with car A's
+    // freshly-written PB.
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 24000,
+        finishedLapMs: 24000,
+        checkpointHit: true,
+      });
+    });
+    expect(screen.queryByTestId('track-result-overlay')).toBeTruthy();
+    expect(screen.getByTestId('track-hud-best').textContent).toMatch(/24\.00s/);
+    expect(localStorage.getItem('track-pb:0xA')).toBe('24000');
+
+    // Switch to car B via the carousel. The selected-effect must reset lap
+    // state, clear lastResult, and re-read PB for the new car.
+    fireEvent.click(screen.getByTestId('carousel-tile-1'));
+
+    expect(screen.queryByTestId('track-result-overlay')).toBeNull();
+    expect(screen.getByTestId('track-hud-best').textContent).toMatch(/22\.50s/);
+    expect(screen.getByTestId('track-hud-lap').textContent).toMatch(/Lap: 0\.00s/);
+  });
+
+  it('U5/AE6 — after switching cars, the next lap-finish writes under the new car\'s storage key', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [
+        variant({ objectId: '0xA' }),
+        variant({ objectId: '0xB' }),
+      ],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+
+    // Switch to car B before any lap is driven on car A.
+    fireEvent.click(screen.getByTestId('carousel-tile-1'));
+    // Scene rebuilds for the new car — wait for the new callback capture.
+    await waitFor(() =>
+      expect(createSceneMock.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+
+    // Drive a lap on car B (simulated via the most recently captured callback).
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 21000,
+        finishedLapMs: 21000,
+        checkpointHit: true,
+      });
+    });
+    // PB written under car B's key only; car A's slot stays empty.
+    expect(localStorage.getItem('track-pb:0xB')).toBe('21000');
+    expect(localStorage.getItem('track-pb:0xA')).toBeNull();
+  });
+
   it('U4 — slower than stored PB shows positive delta and keeps the old PB in storage', async () => {
     useOwnedVariantsMock.mockReturnValue({
       variants: [variant({ objectId: '0xa' })],

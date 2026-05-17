@@ -257,8 +257,10 @@ export function TrackPage() {
             Couldn't load this variant: {sceneError}
           </div>
         )}
-        {/* U4 — HUD overlay (KTD-3, React not Babylon GUI). */}
-        {!sceneLoading && !sceneError && (
+        {/* U4 — HUD overlay (KTD-3, React not Babylon GUI). Stays mounted
+            during scene reload so the values for the new car are immediately
+            visible behind the loading overlay (no flash on carousel switch). */}
+        {!sceneError && (
           <>
             <div
               data-testid="track-hud-lap"
