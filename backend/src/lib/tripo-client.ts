@@ -74,7 +74,10 @@ export class TripoClient {
         },
         body: JSON.stringify({
           type: 'text_to_model',
-          model_version: 'Tripo-P1',
+          // D-024: Turbo-v1.0 over v2.5/v3.0/P1 for speed+cost (≈15s, ≈15cr).
+          // Quality acceptable for racing-car base mesh; backend material-swap
+          // produces N variants downstream, so per-call quality<<perceived speed.
+          model_version: 'Turbo-v1.0-20250506',
           prompt,
           face_limit: 5000,
           texture: false,
@@ -90,7 +93,10 @@ export class TripoClient {
     }
 
     if (res.status === 401) throw new TripoAuthError();
-    if (!res.ok) throw new TripoFailedError(`Tripo submitTask returned ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new TripoFailedError(`Tripo submitTask returned ${res.status}: ${errBody}`);
+    }
 
     const body = (await res.json()) as { data?: { task_id?: string } };
     const taskId = body?.data?.task_id;
