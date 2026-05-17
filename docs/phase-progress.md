@@ -1,6 +1,72 @@
 # Phase Progress
 
-## Last Updated: 2026-05-17 PM — **U7 path debugged.** 8 commits this session on `feat/phase-2-sui-integration` removing every latent blocker between Forge → Walrus → Sui that the Phase 3 test suite (mocked) couldn't catch. First successful live testnet mint produced collection `0x38bad19ea39a007cca17311275d99f7a15994b18632a2938a5a7e296ee4925b4` (1 variant `0x46f248975df4c202d8950efa26d9892b3bf62e9764d39829cea2f4786ae86a58`). Walrus round-trip script proven byte-identical end-to-end. Frontend tests: 159/159, tsc clean. **U7 capture artifacts (multi-variant mint, two-wallet buy + drive, 90-sec recording, Suiscan screenshots) still pending** — those are the human-driven steps the user runs through `pitch/demo-script.md`.
+## Last Updated: 2026-05-17 evening — **Plan-004 shipped end-to-end.** All 5 units (U1 car-physics fix, U2 extruded ribbon track, U3 lap state machine + triggers, U4 HUD + PB + retry, U5 carousel teardown) landed in 6 commits on `feat/phase-2-sui-integration`. Frontend tests: 159 → 214 (+55), backend 132, workspace typecheck clean. **Manual /track smoke remains user-driven** — drive a lap with the dev fixture, beat a PB, switch cars, confirm per-car PB isolation. See plan's §Verification.
+
+## Session 2026-05-17 evening — Plan-004 tiny-racetrack game loop
+
+### Commits this session
+
+```
+77bb053 chore(backend): revert glb.ts cast to Float32Array<ArrayBuffer>
+a0aad59 feat(track): U5 — carousel switching teardown + PB isolation across cars
+068d11b feat(track): U4 — HUD overlay + per-car PB + result modal + retry
+76f5ea2 feat(track): U3 — lap state machine + per-frame trigger volumes + reset
+1f9a363 feat(track): U2 — procedural oval track (ribbon + tangent-aligned barriers)
+3936401 feat(track): U1 — fix car physics (pivot + steer via physics API)
+fd55d1b docs(plan): brainstorm + plan-004 — tiny racetrack 1-lap game loop
+e3e458e feat(browse): top-nav links to Forge + Racetrack; relabel single mint
+e9b1dea feat(frontend): dev /dev/compare page for Tripo model_version diffing
+5a386f5 chore(backend): TS-compat GLB cast + Tripo Turbo-v1.0 + verbose submit errors
+```
+
+### Unit completion
+
+| Unit | Files added/modified | Tests delta | Commit |
+|---|---|---|---|
+| U1 | racetrackScene.{ts,test.ts} | +7 (KTD-1/KTD-2 wiring) | `3936401` |
+| U2 | oval.{ts,test.ts} + racetrackScene.{ts,test.ts} | +12 (9 oval + 3 net scene) | `1f9a363` |
+| U3 | lapState.{ts,test.ts} + racetrackScene.{ts,test.ts} | +14 (10 reducer + 4 wiring) | `76f5ea2` |
+| U4 | personalBest.{ts,test.ts}, ResultOverlay.{tsx,test.tsx}, TrackPage.{tsx,test.tsx} | +20 (6 PB + 7 modal + 7 page) | `068d11b` |
+| U5 | TrackPage.{tsx,test.tsx} | +2 (AE6 isolation scenarios) | `a0aad59` |
+
+### Key decisions made during execution
+
+- **KTD-7 ribbon track** delivered. Catmull-Rom math implemented inline in `oval.ts` rather than wrapping Babylon's `Curve3.CreateCatmullRomSpline` — keeps the module pure (no WebGL needed in tests) and decouples us from Babylon's spline behavior changing across versions. Lap perimeter ~150 units at the chosen (35×50, r=10) config.
+- **KTD-4 Havok trigger volumes** → **AA-3 fallback chosen.** Used per-frame distance-check (TRIGGER_RADIUS=8) instead of `PhysicsShape.isTrigger`. Plan accepts both; AA-3 was cheaper to wire, deterministic, and avoided the 15-min spike into the 1.3.12 Havok type definitions. Documented inline.
+- **R-r4b safety ground** preserved underneath the road. Wide flat invisible floor at y=-0.5 catches the car if it bounces over a barrier. Road ribbon's MESH collider is the primary driving surface; ground is the fallback floor (kept the implementation cost ~5 LOC and removes a class of "car falls into void" demo failures).
+- **HUD stays mounted during scene reload.** During carousel switching, the loading overlay covers the HUD visually but the values for the new car are already in the DOM — no flash of empty state. Surfaced by writing the U5/AE6 test.
+- **glb.ts cast reverted.** Earlier 5a386f5's "unknown-cast for compat" was actually a regression; @gltf-transform/core's setArray() pins to `Float32Array<ArrayBuffer>` (narrow). Restored explicit narrow cast — works on both backend TS 5.5 and frontend TS 5.8.
+
+### Verification status
+
+- ✅ Frontend tests: 214 passed (159 → 214, +55 new — U1+U2+U3+U4+U5 collectively)
+- ✅ Backend tests: 132 passed (no change — backend untouched in plan-004)
+- ✅ Move tests: untouched (21 passed, no contract changes)
+- ✅ Workspace typecheck: clean (shared + backend + frontend)
+- ⏳ **Manual /track smoke** (user-driven — per CLAUDE.md "if you can't test the UI, say so explicitly"): drive a lap with `/dev-glbs/p1.glb`, beat the PB, retry via button + R-key, switch cars in carousel, confirm per-car PB isolation. See plan's §Verification.
+
+### Insights worth carrying forward
+
+- **Plan-time hard-time-box + named fallback worked.** U2 carried a "2-day box, fall back to AA-2 inner-wall-ring if ribbon doesn't land by EOD-1". Implementation landed within the first attempt at the primary path. The fallback being named in the plan meant zero second-guessing during execution. Worth re-using on any "longest unit in the plan" that has known risk surface.
+- **Pure-module + tiny mock pattern.** `oval.ts` uses only Babylon's Vector3 as a value type. Test mocks just Vector3 with a `{x,y,z}` class — no full Babylon mock surface needed. 9 tests in 6ms. Pattern reusable for any geometric/math helper that's "Babylon-adjacent but doesn't need WebGL".
+- **Per-frame trigger volumes are simpler than Havok-native triggers.** AA-3 (plane intersection / distance check) shipped in ~15 LOC + 4 scene tests. Havok-native triggers would have required spelunking 1.3.12 .d.ts files + handling collision observable lifecycles + cleanup on dispose. For lap-detection-style "did X enter zone Y" gameplay, distance checks are correct by construction and easier to test.
+- **HUD-during-reload surfaced by writing the U5 test.** The plan didn't explicitly call out "HUD stays mounted during scene reload" — I'd hidden it on sceneLoading initially. The AE6 test forced me to think about what the user actually sees during a carousel switch (loading overlay covers HUD visually anyway, so the conditional was strictly worse UX). Tests-as-spec working as intended.
+
+### Hackathon Tracker
+
+- Days to submission (6/21): **35 of 38**
+- Days to demo day (7/20–21): **64 of 67**
+- Days to winners (8/27): **102 of 105**
+
+### Next concrete step
+
+User runs the manual /track smoke per plan-004's §Verification. After that lands ✅: Phase 3 is fully closed (Forge + Tiny Racetrack both demo-ready). Next priority per the prior session's roadmap: **Phase 4 — Sui Kiosk + TransferPolicy royalty integration** (D-013 v1 must-have, biggest unstarted risk; OQ-013 → Phase 4 ADR needed first).
+
+### Previous session notes preserved below
+
+---
+
+## Previously Last Updated: 2026-05-17 PM — **U7 path debugged.** 8 commits this session on `feat/phase-2-sui-integration` removing every latent blocker between Forge → Walrus → Sui that the Phase 3 test suite (mocked) couldn't catch. First successful live testnet mint produced collection `0x38bad19ea39a007cca17311275d99f7a15994b18632a2938a5a7e296ee4925b4` (1 variant `0x46f248975df4c202d8950efa26d9892b3bf62e9764d39829cea2f4786ae86a58`). Walrus round-trip script proven byte-identical end-to-end. Frontend tests: 159/159, tsc clean. **U7 capture artifacts (multi-variant mint, two-wallet buy + drive, 90-sec recording, Suiscan screenshots) still pending** — those are the human-driven steps the user runs through `pitch/demo-script.md`.
 
 ## Session 2026-05-17 PM — live-testnet debugging pass
 
