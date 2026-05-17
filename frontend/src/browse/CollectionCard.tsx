@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
+import { PreviewCanvas } from '../babylon/PreviewCanvas';
 
 // CollectionCard replaces ModelCard for the grouped Browse view (U5). One
 // card per Collection — its preview/name are derived from the first variant
@@ -79,24 +80,17 @@ export function CollectionCard({ collectionId, variants }: Props) {
       <div
         style={{
           aspectRatio: '1 / 1',
-          background: 'linear-gradient(135deg, #23262c 0%, #15171b 100%)',
-          display: 'grid',
-          placeItems: 'center',
-          color: '#444',
-          fontSize: 36,
+          background: '#15171b',
           position: 'relative',
+          overflow: 'hidden',
         }}
-        aria-hidden
+        data-testid="collection-card-preview"
       >
-        {/* Phase 5 polish may render the GLB inline; for now the URL is the
-            stable artifact tests assert on. */}
-        <img
-          src={previewUrl}
-          alt=""
-          data-testid="collection-card-preview"
-          style={{ display: 'none' }}
-        />
-        ◇
+        {/* One Babylon canvas per card. Browsers cap WebGL contexts at
+            ~8-16 per page — if the marketplace grows past ~6 cards, later
+            cards will render black. Tracked as a Phase 5 follow-up
+            (IntersectionObserver lazy-mount, or shared-engine thumbnails). */}
+        <PreviewCanvas glbUrl={previewUrl} />
         <span
           data-testid="collection-card-badge"
           style={{

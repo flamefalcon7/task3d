@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
+
+// Stub Babylon-backed preview so jsdom doesn't try to run WebGL.
+vi.mock('../babylon/PreviewCanvas', () => ({
+  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
+    <div data-testid="preview-canvas-stub" data-glb-url={glbUrl ?? ''} />
+  ),
+}));
+
 import { BrowsePage } from './BrowsePage';
 import * as hookMod from './useModelIndex';
 

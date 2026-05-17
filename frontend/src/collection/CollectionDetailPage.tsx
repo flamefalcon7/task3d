@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useCollectionBySlug } from './useCollectionBySlug';
 import { SignInButton } from '../auth/SignInButton';
+import { PreviewCanvas } from '../babylon/PreviewCanvas';
 
 // Phase 3 (U5): Browse → collection card → here. Renders all N variants of
 // a collection as a grid of tiles, each fetched directly from the Walrus
@@ -133,21 +134,16 @@ export function CollectionDetailPage() {
               <div
                 style={{
                   aspectRatio: '1 / 1',
-                  background: 'linear-gradient(135deg, #23262c, #15171b)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#444',
-                  fontSize: 28,
+                  background: '#15171b',
+                  overflow: 'hidden',
                 }}
-                aria-hidden
+                data-testid={`variant-preview-${v.objectId}`}
               >
-                <img
-                  src={aggregatorUrlForVariant(v)}
-                  alt=""
-                  data-testid={`variant-preview-${v.objectId}`}
-                  style={{ display: 'none' }}
-                />
-                ◇
+                {/* One Babylon canvas per tile. Browsers cap WebGL contexts
+                    at ~8-16 per page; collections above that count will see
+                    later tiles render as black. Acceptable for v1 since the
+                    cap is 16 variants per Move contract. */}
+                <PreviewCanvas glbUrl={aggregatorUrlForVariant(v)} />
               </div>
               <div style={{ padding: 10 }}>
                 <div

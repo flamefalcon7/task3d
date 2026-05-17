@@ -3,6 +3,7 @@ import { useCurrentAccount } from '@mysten/dapp-kit';
 import { useModelById, useOwnsAccess } from './hooks';
 import { BuyAccessButton } from './BuyAccessButton';
 import { SignInButton } from '../auth/SignInButton';
+import { PreviewCanvas } from '../babylon/PreviewCanvas';
 
 export function ModelDetailPage() {
   const { objectId } = useParams<{ objectId: string }>();
@@ -35,7 +36,13 @@ export function ModelDetailPage() {
     );
   }
 
-  const aggregatorUrl = `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${model.blobId}`;
+  // Phase 3 mints carry patchId addressing a specific slice inside the
+  // collection's quilt; Phase 2 degenerate-of-1 mints have patchId === ''
+  // and the whole blob IS the only patch, so falling back to the blob URL
+  // renders identically.
+  const aggregatorUrl = model.patchId
+    ? `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${model.patchId}`
+    : `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${model.blobId}`;
 
   return (
     <div
@@ -53,16 +60,13 @@ export function ModelDetailPage() {
         <div
           style={{
             aspectRatio: '1',
-            background: '#f0f0f0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            background: '#15171b',
             borderRadius: 8,
+            overflow: 'hidden',
           }}
-          data-testid="preview-placeholder"
+          data-testid="preview-canvas-wrap"
         >
-          {/* Phase 2: static placeholder. Phase 5 polish may render Babylon. */}
-          <span style={{ fontSize: 64, opacity: 0.4 }}>◇</span>
+          <PreviewCanvas glbUrl={aggregatorUrl} />
         </div>
         <a
           href={aggregatorUrl}

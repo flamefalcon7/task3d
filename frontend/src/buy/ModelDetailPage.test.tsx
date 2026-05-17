@@ -8,6 +8,13 @@ vi.mock('@mysten/dapp-kit', () => ({
   useSignAndExecuteTransaction: () => ({ mutateAsync: vi.fn() }),
 }));
 
+// Stub Babylon-backed preview so jsdom doesn't try to run WebGL.
+vi.mock('../babylon/PreviewCanvas', () => ({
+  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
+    <div data-testid="preview-canvas-stub" data-glb-url={glbUrl ?? ''} />
+  ),
+}));
+
 const useModelByIdMock = vi.fn();
 const useOwnsAccessMock = vi.fn();
 vi.mock('./hooks', () => ({
@@ -66,7 +73,7 @@ describe('ModelDetailPage', () => {
     expect(screen.getByTestId('walrus-link').textContent).toMatch(
       /walrus_blob_demo/,
     );
-    expect(screen.getByTestId('preview-placeholder')).toBeTruthy();
+    expect(screen.getByTestId('preview-canvas-wrap')).toBeTruthy();
   });
 
   it('shows "Sign in to buy" hint when no account', () => {

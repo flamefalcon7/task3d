@@ -1,7 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
+
+// PreviewCanvas pulls in Babylon, which jsdom can't run. Stub it with a
+// div carrying data-glb-url so URL-construction tests still have something
+// to assert on.
+vi.mock('../babylon/PreviewCanvas', () => ({
+  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
+    <div data-testid="preview-canvas-stub" data-glb-url={glbUrl ?? ''} />
+  ),
+}));
+
 import { CollectionCard } from './CollectionCard';
 
 function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
@@ -62,22 +72,25 @@ describe('CollectionCard', () => {
     expect(link.getAttribute('href')).toBe('/collection/0xdeadbeef');
   });
 
-  it('preview img src uses Walrus quilt-patch URL when patchId is set', () => {
+  it('preview canvas uses Walrus quilt-patch URL when patchId is set', () => {
     renderCard({
       collectionId: '0xcoll',
       variants: [makeModel({ patchId: 'my-patch-id' })],
     });
-    const img = screen.getByTestId('collection-card-preview') as HTMLImageElement;
-    expect(img.src).toContain('/v1/blobs/by-quilt-patch-id/my-patch-id');
+    const stub = screen.getByTestId('preview-canvas-stub');
+    expect(stub.getAttribute('data-glb-url')).toContain(
+      '/v1/blobs/by-quilt-patch-id/my-patch-id',
+    );
   });
 
-  it('preview falls back to whole-blob URL when patchId is empty', () => {
+  it('preview canvas falls back to whole-blob URL when patchId is empty', () => {
     renderCard({
       collectionId: '0xcoll',
       variants: [makeModel({ patchId: '', blobId: 'blob-xyz' })],
     });
-    const img = screen.getByTestId('collection-card-preview') as HTMLImageElement;
-    expect(img.src).toContain('/v1/blobs/blob-xyz');
-    expect(img.src).not.toContain('by-quilt-patch-id');
+    const stub = screen.getByTestId('preview-canvas-stub');
+    const url = stub.getAttribute('data-glb-url') ?? '';
+    expect(url).toContain('/v1/blobs/blob-xyz');
+    expect(url).not.toContain('by-quilt-patch-id');
   });
 });

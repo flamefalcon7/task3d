@@ -8,6 +8,13 @@ vi.mock('./useCollectionBySlug', () => ({
   useCollectionBySlug: (slug: string) => useCollectionBySlugMock(slug),
 }));
 
+// Stub Babylon-backed preview so jsdom doesn't try to run WebGL.
+vi.mock('../babylon/PreviewCanvas', () => ({
+  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
+    <div data-testid="preview-canvas-stub" data-glb-url={glbUrl ?? ''} />
+  ),
+}));
+
 vi.mock('../auth/SignInButton', () => ({
   SignInButton: () => null,
 }));
@@ -77,11 +84,13 @@ describe('CollectionDetailPage', () => {
     useCollectionBySlugMock.mockReturnValue({ variants, loading: false, error: null });
 
     renderAt('0xcoll');
-    const img0 = screen.getByTestId('variant-preview-0xv0') as HTMLImageElement;
-    const img1 = screen.getByTestId('variant-preview-0xv1') as HTMLImageElement;
-    expect(img0.src).toContain('/v1/blobs/by-quilt-patch-id/patch-aaa');
-    expect(img1.src).toContain('/v1/blobs/by-quilt-patch-id/patch-bbb');
-    expect(img0.src).not.toBe(img1.src);
+    const url0 =
+      screen.getByTestId('variant-preview-0xv0').querySelector('[data-glb-url]')?.getAttribute('data-glb-url') ?? '';
+    const url1 =
+      screen.getByTestId('variant-preview-0xv1').querySelector('[data-glb-url]')?.getAttribute('data-glb-url') ?? '';
+    expect(url0).toContain('/v1/blobs/by-quilt-patch-id/patch-aaa');
+    expect(url1).toContain('/v1/blobs/by-quilt-patch-id/patch-bbb');
+    expect(url0).not.toBe(url1);
   });
 
   it('clicking a variant tile links to /model/<objectId>', () => {
