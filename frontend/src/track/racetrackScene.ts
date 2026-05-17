@@ -568,6 +568,14 @@ export async function createRacetrackScene(
     insideStartTrigger = true;
     insideCheckpointTrigger = false;
     dispatch({ type: 'reset' });
+    // Re-focus the canvas after Retry so scene.onKeyboardObservable resumes
+    // receiving WASD. Clicking the Retry button moves focus off the canvas;
+    // without this re-focus, the player presses W and nothing happens until
+    // they click the canvas back into focus. Defensive check because the
+    // mock canvas in tests doesn't always have focus().
+    if (typeof opts.canvas.focus === 'function') {
+      opts.canvas.focus();
+    }
   };
 
   engine.runRenderLoop(() => scene.render());
