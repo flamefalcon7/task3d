@@ -290,6 +290,67 @@ describe('TrackPage', () => {
     expect(screen.queryByTestId('track-result-overlay')).toBeNull();
   });
 
+  it('U4/R13 — pressing R while running (mid-lap) also triggers retry', async () => {
+    // R13 says R is accessible mid-run too — player can abort a bad lap.
+    // Only the finished-state path was previously asserted; this covers the
+    // running-state branch so a regression that flipped the guard to
+    // `!== 'finished'` (incorrect) would be caught.
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured, resetSpy } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    // Transition to running (post-throttle) but not yet finished.
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'running',
+        startedAtMs: 0,
+        currentLapMs: 5000,
+        finishedLapMs: null,
+        checkpointHit: false,
+      });
+    });
+    fireEvent.keyDown(window, { key: 'r' });
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('U4 — R-key is ignored while typing in an input or with a modifier (Cmd-R)', async () => {
+    // Code-review #9 — R-key listener at window level must skip when focus
+    // is in a text input (future-proofing against on-page search/comment
+    // fields) and when Cmd/Ctrl is held (Cmd-R hard-reload).
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured, resetSpy } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 20000,
+        finishedLapMs: 20000,
+        checkpointHit: true,
+      });
+    });
+
+    // Cmd-R must not trigger retry (browser hard-reload would race).
+    fireEvent.keyDown(window, { key: 'r', metaKey: true });
+    expect(resetSpy).not.toHaveBeenCalled();
+
+    // R inside a hypothetical <input> on /track must also not retry.
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: 'r' });
+    expect(resetSpy).not.toHaveBeenCalled();
+    document.body.removeChild(input);
+  });
+
   it('U4/R13 — pressing R while finished triggers retry equivalently', async () => {
     useOwnedVariantsMock.mockReturnValue({
       variants: [variant({ objectId: '0xa' })],

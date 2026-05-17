@@ -4,33 +4,13 @@
 // pulling in @babylonjs/gui for 3 UI elements. Backdrop blocks pointer
 // events but doesn't close on click — only the Retry button resets.
 
+import { formatPbDelta, formatResultTime } from './formatLapTime';
+
 interface ResultOverlayProps {
   lapMs: number;
   previousPbMs: number | null;
   isNewPb: boolean;
   onRetry: () => void;
-}
-
-function formatLapTime(ms: number): string {
-  // SS.cc for sub-minute laps (the common case for our ~25s lap), MM:SS.cc
-  // for longer. cc = hundredths of a second, not thousandths — easier to
-  // read on a HUD without losing meaningful granularity.
-  const totalCs = Math.round(ms / 10);
-  const cs = totalCs % 100;
-  const totalSeconds = Math.floor(totalCs / 100);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60);
-  const csPad = cs.toString().padStart(2, '0');
-  if (minutes === 0) return `${seconds}.${csPad}s`;
-  const secPad = seconds.toString().padStart(2, '0');
-  return `${minutes}:${secPad}.${csPad}`;
-}
-
-function formatDelta(lapMs: number, previousPbMs: number): string {
-  const diff = lapMs - previousPbMs;
-  const sign = diff < 0 ? '-' : '+';
-  const abs = Math.abs(diff) / 1000;
-  return `${sign}${abs.toFixed(2)}s`;
 }
 
 export function ResultOverlay({
@@ -78,14 +58,22 @@ export function ResultOverlay({
           style={{ fontSize: 48, fontWeight: 700, lineHeight: 1, marginBottom: 16 }}
           data-testid="track-result-time"
         >
-          {formatLapTime(lapMs)}
+          {formatResultTime(lapMs)}
         </div>
         {isNewPb ? (
+          // Show the improvement delta alongside the NEW PB banner when there
+          // was a prior PB — players want to see how much they shaved off.
+          // First-ever PB shows only the banner (no delta to compute).
           <div
             data-testid="track-result-delta"
             style={{ fontSize: 18, color: '#ffd166', fontWeight: 600, marginBottom: 24 }}
           >
-            NEW PB!
+            NEW PB!{' '}
+            {previousPbMs !== null && (
+              <span style={{ fontSize: 14, opacity: 0.85, fontWeight: 500 }}>
+                ({formatPbDelta(lapMs, previousPbMs)})
+              </span>
+            )}
           </div>
         ) : previousPbMs !== null ? (
           <div
@@ -96,7 +84,7 @@ export function ResultOverlay({
               marginBottom: 24,
             }}
           >
-            {formatDelta(lapMs, previousPbMs)} vs PB ({formatLapTime(previousPbMs)})
+            {formatPbDelta(lapMs, previousPbMs)} vs PB ({formatResultTime(previousPbMs)})
           </div>
         ) : (
           <div

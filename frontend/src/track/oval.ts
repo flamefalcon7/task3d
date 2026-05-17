@@ -50,6 +50,11 @@ export function buildOvalControlPoints(
  * Returns `samples` Vector3s in order along the curve, closing back to
  * start (sample[samples-1] connects to sample[0]).
  *
+ * Note: actual returned length is `floor(samples / controlPoints.length) *
+ * controlPoints.length`. For 8 control points and samples=80, returns 80
+ * (exact). For samples=81 it returns 80 (silently rounds down). Callers
+ * reading `result.length` should not assume it equals the input `samples`.
+ *
  * We do the math inline rather than calling `Curve3.CreateCatmullRomSpline`
  * so this stays a pure module — no Babylon runtime needed in tests, no
  * dependency on Babylon's spline behavior staying stable across versions.
@@ -101,11 +106,20 @@ function catmullRomPoint(
 
 /**
  * Unit tangent at the given sample index, computed via central difference
- * between neighboring samples. Loops cyclically at boundaries.
- * Tangent points in the direction of travel along the curve (CCW).
+ * between neighboring samples. Loops cyclically at boundaries — `index`
+ * is `% samples.length` so any integer is in-range. Caller is responsible
+ * for passing `samples` that represents a closed curve in the expected
+ * traversal direction.
+ *
+ * Returns `(0, 0, 1)` as a safe default when `samples` is empty or when
+ * the adjacent samples coincide (zero-length central difference).
+ *
+ * Tangent points in the direction of travel along the curve (CCW for our
+ * `buildOvalControlPoints` output).
  */
 export function tangentAt(samples: Vector3[], index: number): Vector3 {
   const n = samples.length;
+  if (n === 0) return new Vector3(0, 0, 1);
   const next = samples[(index + 1) % n]!;
   const prev = samples[(index - 1 + n) % n]!;
   const dx = next.x - prev.x;
@@ -116,10 +130,13 @@ export function tangentAt(samples: Vector3[], index: number): Vector3 {
 }
 
 /**
- * Sum of segment lengths around the closed sampled curve. Useful for
- * sizing test bounds and tuning track perimeter for target lap time.
+ * Sum of segment lengths around the closed sampled curve. Assumes `samples`
+ * represents a closed loop — sums the closing segment (last→first) as well.
+ * Returns 0 for an empty array. Primarily a diagnostic / test utility;
+ * production code reads sample positions directly without invoking this.
  */
 export function perimeter(samples: Vector3[]): number {
+  if (samples.length === 0) return 0;
   let p = 0;
   for (let i = 0; i < samples.length; i++) {
     const a = samples[i]!;

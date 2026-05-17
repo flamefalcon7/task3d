@@ -44,7 +44,7 @@ describe('ResultOverlay', () => {
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
   });
 
-  it('covers AE3 — improvement shows negative delta vs prior PB', () => {
+  it('covers AE3 — improvement shows NEW PB banner + negative delta vs prior PB', () => {
     render(
       <ResultOverlay
         lapMs={23420}
@@ -53,8 +53,12 @@ describe('ResultOverlay', () => {
         onRetry={() => undefined}
       />,
     );
-    // Delta = 23420 - 25100 = -1680ms = -1.68s.
-    expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
+    // Delta = 23420 - 25100 = -1680ms = -1.68s. Banner + delta must both
+    // appear; prior version of this test only asserted NEW PB and never
+    // exercised formatPbDelta's negative-delta path.
+    const delta = screen.getByTestId('track-result-delta').textContent;
+    expect(delta).toMatch(/NEW PB/);
+    expect(delta).toMatch(/-1\.68s/);
   });
 
   it('covers AE3 — regression shows positive delta vs prior PB', () => {
@@ -80,6 +84,26 @@ describe('ResultOverlay', () => {
       />,
     );
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/—/);
+  });
+
+  it('formatResultTime handles edge values: zero-ms renders 0.00s, non-finite renders em-dash', () => {
+    // Zero-ms is reachable if Retry fires before any tick propagates.
+    // Negative/NaN/Infinity guard against broken upstream state.
+    const { unmount } = render(
+      <ResultOverlay lapMs={0} previousPbMs={null} isNewPb={true} onRetry={() => undefined} />,
+    );
+    expect(screen.getByTestId('track-result-time').textContent).toMatch(/0\.00s/);
+    unmount();
+
+    render(
+      <ResultOverlay
+        lapMs={Number.NaN}
+        previousPbMs={null}
+        isNewPb={true}
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('track-result-time').textContent).toMatch(/—/);
   });
 
   it('Retry button click invokes onRetry exactly once', () => {

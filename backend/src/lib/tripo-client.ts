@@ -94,7 +94,10 @@ export class TripoClient {
 
     if (res.status === 401) throw new TripoAuthError();
     if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
+      // Truncate so a CloudFlare/nginx 5xx HTML page (typically 10-50 KB)
+      // doesn't bloat error logs or fill structured-log fields. 200 chars
+      // captures a JSON error object or the start of an HTML body.
+      const errBody = (await res.text().catch(() => '')).slice(0, 200);
       throw new TripoFailedError(`Tripo submitTask returned ${res.status}: ${errBody}`);
     }
 

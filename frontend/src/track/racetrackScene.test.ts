@@ -303,7 +303,12 @@ import { createRacetrackScene } from './racetrackScene';
 import type { LapState } from './lapState';
 
 function fakeCanvas(): HTMLCanvasElement {
-  return {} as HTMLCanvasElement;
+  // Provide just enough HTMLCanvasElement surface for the scene init path.
+  // The scene focuses the canvas to enable keyboard input (Plan-004 fix #19).
+  return {
+    tabIndex: 0,
+    focus: () => undefined,
+  } as unknown as HTMLCanvasElement;
 }
 
 function fakeGlb(): Uint8Array {
@@ -484,7 +489,11 @@ describe('createRacetrackScene', () => {
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
-    // Two render observers: [0] chase-cam follow, [1] keyboard-driven input.
+    // Three render observers in registration order: [0] chase-cam follow,
+    // [1] keyboard-driven input (the one we want here), [2] U3 lap-state
+    // tick + trigger checks. If a 4th observer is added later, update this
+    // count assertion AND the ordinal accesses across U1/U3 tests.
+    expect(renderCallbacks).toHaveLength(3);
     const inputTick = renderCallbacks[1] as () => void;
     const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
       .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
@@ -632,6 +641,11 @@ describe('createRacetrackScene', () => {
     keyboardObserver({ event: { key: 'w' }, type: 1 });
     inputTick();
     onLapStateChange.mockClear();
+    // Isolate the reset() call's velocity-write contribution from any
+    // earlier steer/forward keypresses. Without this, a future test that
+    // also presses A/D before reset would inflate the expected count.
+    M.state.lastCarBody!.setLinearVelocity.mockClear();
+    M.state.lastCarBody!.setAngularVelocity.mockClear();
 
     handles.reset();
 

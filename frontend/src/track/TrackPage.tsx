@@ -9,6 +9,7 @@ import type { RacetrackSceneHandles } from './racetrackScene';
 import { initialLapState, type LapState } from './lapState';
 import { getPb, setPb } from './personalBest';
 import { ResultOverlay } from './ResultOverlay';
+import { formatHudTime } from './formatLapTime';
 
 // Phase 3 U6 — /track page. Wraps the Babylon scene in a React shell:
 // query owned variants → render carousel + canvas → rebuild scene each time
@@ -24,10 +25,6 @@ function aggregatorUrlForVariant(v: Model3DSummary): string {
     return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${v.patchId}`;
   }
   return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${v.blobId}`;
-}
-
-function formatShortSeconds(ms: number): string {
-  return `${(ms / 1000).toFixed(2)}s`;
 }
 
 interface LastResult {
@@ -73,40 +70,65 @@ export function TrackPage() {
 
   // Build (and rebuild) the scene whenever the selected variant changes.
   // Each rebuild disposes the previous scene to avoid stacking engines.
+  // The AbortController + post-await cancellation guards together prevent
+  // two race-leaks reviewers caught: a rapid carousel switch must (a) abort
+  // the in-flight Walrus fetch so we don't waste bandwidth and (b) dispose
+  // any scene that finished initialising AFTER cancellation fired, so we
+  // never overwrite sceneRef with an orphaned engine.
   useEffect(() => {
     if (!canvasRef.current || !selected) return;
+    const canvas = canvasRef.current; // capture before any await
     let cancelled = false;
+    const controller = new AbortController();
     setSceneLoading(true);
     setSceneError(null);
     (async () => {
       try {
         const url = aggregatorUrlForVariant(selected);
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
         const carGlbBytes = new Uint8Array(await res.arrayBuffer());
         if (cancelled) return;
         sceneRef.current?.dispose();
         sceneRef.current = null;
-        sceneRef.current = await createRacetrackScene({
-          canvas: canvasRef.current!,
+        const handles = await createRacetrackScene({
+          canvas,
           carGlbBytes,
           onLapStateChange: setLapState,
         });
-      } catch (e) {
-        if (!cancelled) {
-          setSceneError(e instanceof Error ? e.message : String(e));
+        if (cancelled) {
+          handles.dispose();
+          return;
         }
+        sceneRef.current = handles;
+      } catch (e) {
+        // AbortError is the expected unwind on cleanup; don't surface it.
+        if (cancelled) return;
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setSceneError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setSceneLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [selected]);
 
   // U4 — on lap finish, write PB + populate result modal. Captures the
   // CURRENT pb (pre-update) so the modal shows delta vs the old best.
+  //
+  // The `lastResult !== null` guard is load-bearing for the carousel-switch
+  // race: when `selected` changes from A to B while car A's result modal is
+  // showing, this effect's `selected` dep fires WITH lapState.status still
+  // 'finished' and finishedLapMs still A's value (the selected-effect's
+  // setLapState(initial) is queued for the next render). Without the guard,
+  // setPb(B.objectId, A.lapMs) would corrupt B's PB storage. The closure
+  // here still sees the old `lastResult` (set on the original finish),
+  // so the guard correctly skips. After selected-effect's setLastResult(null)
+  // commits in the next render, lapState.status is also 'waiting' and the
+  // first status guard catches the re-fire instead.
   useEffect(() => {
     if (
       lapState.status !== 'finished' ||
@@ -115,6 +137,7 @@ export function TrackPage() {
     ) {
       return;
     }
+    if (lastResult !== null) return; // already wrote PB for this finish
     const lapMs = lapState.finishedLapMs;
     const previousPbMs = pb;
     const isNewPb = previousPbMs === null || lapMs < previousPbMs;
@@ -126,7 +149,7 @@ export function TrackPage() {
     // pb intentionally omitted from deps — we want a single snapshot at
     // finish-time, not a re-evaluation when setPbState fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lapState.status, lapState.finishedLapMs, selected]);
+  }, [lapState.status, lapState.finishedLapMs, selected, lastResult]);
 
   // U4 — Retry calls scene.reset() which teleports the car + dispatches
   // `reset` to the lap state machine; the resulting `waiting` state clears
@@ -142,9 +165,23 @@ export function TrackPage() {
 
   // R13 — keyboard 'r'/'R' equivalent to clicking Retry. Works mid-run too
   // so the player can abort a bad lap. No-op while waiting (nothing to reset).
+  //
+  // Skip when a modifier is held (Cmd-R hard-reload, Cmd-Shift-R, Ctrl-R)
+  // and when focus is in a text-entry field so future inputs on /track
+  // (search box, comment field, etc.) don't trigger retry while typing.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== 'r') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (lapState.status === 'waiting') return;
       handleRetry();
     };
@@ -279,7 +316,7 @@ export function TrackPage() {
                 letterSpacing: 1,
               }}
             >
-              Lap: {formatShortSeconds(lapState.currentLapMs)}
+              Lap: {formatHudTime(lapState.currentLapMs)}
             </div>
             <div
               data-testid="track-hud-best"
@@ -295,7 +332,7 @@ export function TrackPage() {
                 fontFamily: 'monospace',
               }}
             >
-              Best: {pb !== null ? formatShortSeconds(pb) : '—'}
+              Best: {pb !== null ? formatHudTime(pb) : '—'}
             </div>
           </>
         )}

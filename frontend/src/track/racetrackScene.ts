@@ -89,19 +89,25 @@ const TRACK_CORNER_RADIUS = 10;
 const TRACK_SAMPLES = 80;
 const ROAD_WIDTH = 14;
 const BARRIER_COUNT = 24;
-const BARRIER_OUTWARD_OFFSET = 8; // perpendicular distance from road center
+// Perpendicular distance from road center to each barrier wall.
+// Independent of TRIGGER_RADIUS below — equal values today are coincidental.
+const BARRIER_OUTWARD_OFFSET = 8;
 const SAFETY_GROUND_SIZE = 200; // wide invisible floor as fallback if car flies off
 const WALL_HEIGHT = 4;
 // U3 — trigger volume size. Generous enough that a fast car can't skip
 // through between frames, narrow enough that finishCrossed only fires when
 // the car is actually on the start/finish line.
+// Independent of BARRIER_OUTWARD_OFFSET above — equal values are coincidental.
 const TRIGGER_RADIUS = 8;
 const CAR_MASS = 1500;
 const FORWARD_IMPULSE = 50;
 const REVERSE_IMPULSE = 30;
-// KTD-1: steer drives the body's Y angular velocity directly (rad/s when
-// keys held). Replaces U6's mesh.rotate(STEER_RATE) which fought Havok's
-// own angular velocity and accumulated runaway spin.
+// KTD-1: steer drives the body's Y angular velocity directly. While a steer
+// key is held, the body's Y angular velocity is SET (overwritten) to this
+// magnitude each frame — not accumulated — so held-key = constant turn rate
+// and key-release lets angular damping decay the spin. Replaces U6's
+// mesh.rotate(STEER_RATE) which fought Havok's own integration and
+// accumulated runaway spin. Units: rad/s.
 const STEER_ANGULAR_VELOCITY = 2.2;
 // KTD-1: damping so the car coasts to a stop after key release instead of
 // sliding/spinning forever on a frictionless plane.
@@ -113,6 +119,14 @@ export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
 ): Promise<RacetrackSceneHandles> {
   const engine = new Engine(opts.canvas, true);
+  // Make the canvas focusable so scene.onKeyboardObservable receives WASD
+  // events without requiring a manual click. Agents driving the page via
+  // Playwright `page.keyboard.press('w')` will fail silently otherwise —
+  // R-key works (it's window-scoped on TrackPage) but drive keys go through
+  // Babylon's canvas pipeline. tabIndex=-1 makes it focusable programmatically
+  // but keeps it out of the tab-order so keyboard nav isn't disrupted.
+  opts.canvas.tabIndex = -1;
+  opts.canvas.focus();
   const scene = new Scene(engine);
   scene.clearColor.set(0.55, 0.7, 0.85, 1);
 
@@ -260,7 +274,7 @@ export async function createRacetrackScene(
   checkpointMat.alpha = 0.6;
   checkpoint.material = checkpointMat;
 
-  // 5. Load car GLB from bytes. Wrap the Uint8Array in a Blob + object URL
+  // 7. Load car GLB from bytes. Wrap the Uint8Array in a Blob + object URL
   // so Babylon's loader (which expects a URL) can ingest it. .glb forces
   // the GLB pipeline rather than gltf-json.
   const blob = new Blob([opts.carGlbBytes as BlobPart], {
@@ -304,7 +318,7 @@ export async function createRacetrackScene(
   carBody.body.setLinearDamping(LINEAR_DAMPING);
   carBody.body.setAngularDamping(ANGULAR_DAMPING);
 
-  // 6. Chase camera — ArcRotateCamera tracks the pivot each frame. Not
+  // 8. Chase camera — ArcRotateCamera tracks the pivot each frame. Not
   // attaching control on purpose: we want WASD to drive, not orbit drag.
   const camera = new ArcRotateCamera(
     'chase',
@@ -318,11 +332,16 @@ export async function createRacetrackScene(
     camera.target.copyFrom(carPivot.position);
   });
 
-  // 7. WASD / arrow-key input. Accumulate held keys in a Set so multi-key
+  // 9. WASD / arrow-key input. Accumulate held keys in a Set so multi-key
   // (W+A = forward-left) works without state machine. Forward/reverse stay
   // as impulses applied along the pivot's facing direction. Steer drives
   // the body's Y angular velocity directly (KTD-1) — never mesh.rotate,
   // which would fight Havok's own integration and accumulate spin.
+  //
+  // Agent-native note: scene.onKeyboardObservable receives events through
+  // the canvas's focused-element pipeline. We set tabIndex + .focus() above
+  // so the canvas can receive keyboard events without requiring the user
+  // (or test agent) to click it first.
   const keys = new Set<string>();
   scene.onKeyboardObservable.add((kbInfo) => {
     const k = kbInfo.event.key.toLowerCase();
@@ -360,7 +379,7 @@ export async function createRacetrackScene(
     }
   });
 
-  // 8. U3 — lap state machine + per-frame trigger volume checks.
+  // 10. U3 — lap state machine + per-frame trigger volume checks.
   // KTD-4 fallback (R-r4/AA-3): distance-based plane-intersection rather
   // than Havok trigger-volume observers. Cheaper to wire, deterministic,
   // works the same downstream.
@@ -416,7 +435,12 @@ export async function createRacetrackScene(
     );
     carBody.body.setLinearVelocity(new Vector3(0, 0, 0));
     carBody.body.setAngularVelocity(new Vector3(0, 0, 0));
-    // Re-arm trigger flags: car is back on the start line.
+    // Re-arm trigger flags: car is back on the start line so the start
+    // trigger is treated as "already inside" — finishCrossed only fires
+    // when the car LEAVES and RE-ENTERS the zone. This coupling means any
+    // future change that teleports the car to a non-start spawn point must
+    // ALSO recompute the trigger flags based on actual position rather
+    // than assuming start-line entry.
     insideStartTrigger = true;
     insideCheckpointTrigger = false;
     dispatch({ type: 'reset' });

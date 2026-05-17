@@ -6,6 +6,13 @@
 // a WebGL context, and Retry can be a single `reset` action — no need
 // to re-create the scene.
 
+/**
+ * Closed discriminated union — adding a new status value is a breaking
+ * change for every consumer of onLapStateChange. Update all reducer cases
+ * AND every status-branching consumer (TrackPage HUD/overlay gating, etc.)
+ * together. The reducer's explicit `: LapState` return type guarantees the
+ * compiler catches missing case branches if this union grows.
+ */
 export type LapStatus = 'waiting' | 'running' | 'finished';
 
 export interface LapState {
@@ -21,6 +28,10 @@ export interface LapState {
 export type LapAction =
   | { type: 'throttle'; nowMs: number }
   | { type: 'tick'; nowMs: number }
+  // checkpoint intentionally carries no nowMs — it only records zone entry.
+  // Extend with nowMs if split-time recording is ever added; all dispatch
+  // sites (currently only racetrackScene.ts's onBeforeRender observer)
+  // must be updated together.
   | { type: 'checkpoint' }
   | { type: 'finishCrossed'; nowMs: number }
   | { type: 'reset' };
@@ -36,6 +47,10 @@ export function initialLapState(): LapState {
 }
 
 export function lapReducer(state: LapState, action: LapAction): LapState {
+  // Explicit return type is load-bearing: without it, TS infers
+  // `LapState | undefined` from the implicit switch fall-through, and a
+  // future LapAction variant added without a matching case would silently
+  // return undefined to the scene's dispatch wrapper at runtime.
   switch (action.type) {
     case 'throttle':
       // First W keypress kicks the timer off. Subsequent throttle while
