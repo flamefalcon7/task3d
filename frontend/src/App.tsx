@@ -5,6 +5,7 @@ import { ModelDetailPage } from './buy/ModelDetailPage';
 import { ForgePage } from './forge/ForgePage';
 import { CollectionDetailPage } from './collection/CollectionDetailPage';
 import { TrackPage } from './track/TrackPage';
+import { CompareGlbsPage } from './dev/CompareGlbsPage';
 
 // D-014 + D-013: / is the demo default homepage (Browse marketplace);
 // /generate is the secondary CTA used by creators. /model/:objectId is the
@@ -22,6 +23,7 @@ function App() {
         <Route path="/forge" element={<ForgePage />} />
         <Route path="/collection/:slug" element={<CollectionDetailPage />} />
         <Route path="/track" element={<TrackPage />} />
+        <Route path="/dev/compare" element={<CompareGlbsPage />} />
       </Routes>
     </BrowserRouter>
   );
