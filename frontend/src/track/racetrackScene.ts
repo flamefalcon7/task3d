@@ -121,9 +121,9 @@ const CHASE_RADIUS = 15;
 //   Math.PI  = GLB faces -Z (rotate 180°)
 //   Math.PI/2  = GLB faces +X (rotate 90° CCW)
 //  -Math.PI/2 = GLB faces -X (rotate 90° CW)
-// Currently +90° — Tripo outputs face +X locally; rotate CCW so +X aligns
+// Currently -90° — Tripo outputs face -X locally; rotate CW so -X aligns
 // with the pivot's +Z drive direction.
-const CAR_GEOMETRY_YAW_OFFSET = Math.PI / 2;
+const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
