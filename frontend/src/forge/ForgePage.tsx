@@ -87,6 +87,16 @@ function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
+// editorState contains `bigint` fields (priceMist) that JSON.stringify rejects
+// by default. Stringify with a replacer that converts bigints to their decimal
+// string form so the hash is stable + non-throwing. Only used for staleness
+// comparison, never for transport over the wire.
+function hashEditorState(state: VariantEditorState): string {
+  return JSON.stringify(state, (_, v) =>
+    typeof v === 'bigint' ? `${v.toString()}n` : v,
+  );
+}
+
 function slugify(s: string): string {
   return s
     .toLowerCase()
@@ -147,6 +157,11 @@ export function ForgePage() {
   const [collectionName, setCollectionName] = useState('Neon Drift Series');
   const [baseGlb, setBaseGlb] = useState<Uint8Array | null>(null);
   const [variantGlbs, setVariantGlbs] = useState<Uint8Array[] | null>(null);
+  // Snapshot of the editor state the current variantGlbs were built from.
+  // Mint reuses variantGlbs (skipping the rebuild) only when this matches the
+  // live editorState — keeps the preview-then-mint path fast without risking
+  // stale previews if the user changes a color and immediately mints.
+  const [builtForStateJson, setBuiltForStateJson] = useState<string | null>(null);
   const [editorState, setEditorState] = useState<VariantEditorState>(
     newVariantEditorState,
   );
@@ -223,40 +238,69 @@ export function ForgePage() {
     }
   }, []);
 
+  // Calls /api/collection/build for the current editorState. Used by both
+  // onPreview (standalone) and onMint (as the first step). Returns the swapped
+  // GLBs so the caller can chain into upload without re-reading state.
+  const runBuildVariants = useCallback(async (): Promise<Uint8Array[]> => {
+    if (!session || !baseGlb) throw new Error('build: session + baseGlb required');
+    const stateJson = hashEditorState(editorState);
+    const buildReq: CollectionBuildRequest = {
+      baseGlbBase64: bytesToBase64(baseGlb),
+      variants: editorState.variants.map((row) => ({
+        baseColorRgb: hexToBaseColorRgb(row.colorHex),
+        textureId: row.textureId,
+        paramsJson: JSON.stringify({
+          color: row.colorHex,
+          texture: row.textureId,
+        }),
+      })),
+    };
+    const buildRes = await fetch('/api/collection/build', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.jwt}`,
+      },
+      body: JSON.stringify(buildReq),
+    });
+    if (!buildRes.ok) {
+      const txt = await buildRes.text().catch(() => '');
+      throw new Error(`build: HTTP ${buildRes.status} ${txt}`);
+    }
+    const buildBody = (await buildRes.json()) as CollectionBuildResponse;
+    const swapped: Uint8Array[] = buildBody.variants.map((v) =>
+      base64ToBytes(v.glbBase64),
+    );
+    setVariantGlbs(swapped);
+    setBuiltForStateJson(stateJson);
+    return swapped;
+  }, [baseGlb, editorState, session]);
+
+  const onPreview = useCallback(async () => {
+    if (!session || !baseGlb) return;
+    setErrorMsg(null);
+    setPhase('building-variants');
+    try {
+      await runBuildVariants();
+      setPhase('editing-variants');
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setPhase('error');
+    }
+  }, [session, baseGlb, runBuildVariants]);
+
   const onMint = useCallback(async () => {
     if (!session || !signer || !baseGlb) return;
     setErrorMsg(null);
     setPhase('building-variants');
     try {
-      // 1. Backend material-swap → N swapped GLBs.
-      const buildReq: CollectionBuildRequest = {
-        baseGlbBase64: bytesToBase64(baseGlb),
-        variants: editorState.variants.map((row) => ({
-          baseColorRgb: hexToBaseColorRgb(row.colorHex),
-          textureId: row.textureId,
-          paramsJson: JSON.stringify({
-            color: row.colorHex,
-            texture: row.textureId,
-          }),
-        })),
-      };
-      const buildRes = await fetch('/api/collection/build', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.jwt}`,
-        },
-        body: JSON.stringify(buildReq),
-      });
-      if (!buildRes.ok) {
-        const txt = await buildRes.text().catch(() => '');
-        throw new Error(`build: HTTP ${buildRes.status} ${txt}`);
-      }
-      const buildBody = (await buildRes.json()) as CollectionBuildResponse;
-      const swapped: Uint8Array[] = buildBody.variants.map((v) =>
-        base64ToBytes(v.glbBase64),
-      );
-      setVariantGlbs(swapped);
+      // 1. Backend material-swap → N swapped GLBs (skip if a fresh preview
+      //    already produced GLBs matching the current editorState).
+      const stateJson = hashEditorState(editorState);
+      const swapped: Uint8Array[] =
+        variantGlbs && builtForStateJson === stateJson
+          ? variantGlbs
+          : await runBuildVariants();
 
       // 2. Walrus quilt upload (popups 1 + 2).
       setPhase('uploading');
@@ -305,6 +349,9 @@ export function ForgePage() {
     collectionName,
     uploadFiles,
     signAndExecute,
+    variantGlbs,
+    builtForStateJson,
+    runBuildVariants,
   ]);
 
   // Mint-button copy: per plan-003 U4 Patterns note, collection mode says
@@ -369,6 +416,18 @@ export function ForgePage() {
     collectionName.trim().length > 0 &&
     !mintBusy &&
     phase !== 'success';
+  const previewIsStale =
+    !!variantGlbs && builtForStateJson !== hashEditorState(editorState);
+  const canPreview = !!session && !!baseGlb && !mintBusy && phase !== 'success';
+  const previewLabel = (() => {
+    if (phase === 'building-variants' && !signer)
+      return `Building ${editorState.variants.length} variants…`;
+    if (phase === 'building-variants')
+      return `Building ${editorState.variants.length} variants…`;
+    if (!variantGlbs) return `Preview ${editorState.variants.length} variants`;
+    if (previewIsStale) return 'Re-preview (variants changed)';
+    return 'Preview up to date ✓';
+  })();
 
   return (
     <div
@@ -544,7 +603,22 @@ export function ForgePage() {
             />
           </div>
 
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={onPreview}
+              disabled={!canPreview}
+              data-testid="forge-preview-button"
+              title={
+                previewIsStale
+                  ? 'Variants changed since the last preview — click to rebuild'
+                  : !variantGlbs
+                  ? 'Render each variant in the preview without minting'
+                  : 'Preview matches the current editor state'
+              }
+            >
+              {previewLabel}
+            </button>
             <button
               type="button"
               onClick={onMint}

@@ -70,7 +70,7 @@ export function VariantPreview({
           >
             {variantGlbs
               ? 'Select a variant to preview'
-              : 'Click Mint to build variants for preview'}
+              : 'Click Preview to build variants for preview'}
           </div>
         )}
       </div>
