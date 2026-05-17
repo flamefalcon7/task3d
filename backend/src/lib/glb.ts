@@ -74,20 +74,20 @@ export async function meshToGlb(mesh: MeshData): Promise<Uint8Array> {
   const doc = new Document();
   const buffer = doc.createBuffer();
 
-  // Cast through unknown so we stay compatible across TS versions: TS 5.7+
-  // makes TypedArray generic (Float32Array<ArrayBufferLike>) while older TS
-  // treats it as non-generic. @gltf-transform/core's setArray() narrows to
-  // its own internal type either way.
+  // TS 5.7 made TypedArray generic (Float32Array<ArrayBufferLike>) while
+  // @gltf-transform/core's setArray() signature pins the parameter to
+  // Float32Array<ArrayBuffer>. Cast explicitly to the narrow form so both
+  // backend tsc (TS 5.5 at the workspace pin) and TS 5.7+ accept it.
   const positionAccessor = doc
     .createAccessor('POSITION')
     .setType('VEC3')
-    .setArray(mesh.positions as unknown as Float32Array)
+    .setArray(mesh.positions as Float32Array<ArrayBuffer>)
     .setBuffer(buffer);
 
   const indexAccessor = doc
     .createAccessor('INDICES')
     .setType('SCALAR')
-    .setArray(mesh.indices as unknown as Uint16Array)
+    .setArray(mesh.indices as Uint16Array<ArrayBuffer>)
     .setBuffer(buffer);
 
   const primitive = doc
