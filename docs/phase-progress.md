@@ -1,8 +1,86 @@
 # Phase Progress
 
-## Last Updated: 2026-05-16 PM — **PHASE 3 CODE COMPLETE.** 12 commits this session on `feat/phase-2-sui-integration` (U1–U6 + spikes + D-022 + D-023 + dev-fixes). Move 37 + Backend 132 + Frontend 158 = **325 tests green.** Sui testnet deploy live: `MODEL3D_PACKAGE_ID=0x18a480b3...c3`. Only U7 (manual e2e + demo recording) remaining for Phase 3 — that's a human-driven step. Phase 4 (Kiosk + TransferPolicy) is the next code work; OQ-013 still needs ADR-ifying before plan-004.
+## Last Updated: 2026-05-17 PM — **U7 path debugged.** 8 commits this session on `feat/phase-2-sui-integration` removing every latent blocker between Forge → Walrus → Sui that the Phase 3 test suite (mocked) couldn't catch. First successful live testnet mint produced collection `0x38bad19ea39a007cca17311275d99f7a15994b18632a2938a5a7e296ee4925b4` (1 variant `0x46f248975df4c202d8950efa26d9892b3bf62e9764d39829cea2f4786ae86a58`). Walrus round-trip script proven byte-identical end-to-end. Frontend tests: 159/159, tsc clean. **U7 capture artifacts (multi-variant mint, two-wallet buy + drive, 90-sec recording, Suiscan screenshots) still pending** — those are the human-driven steps the user runs through `pitch/demo-script.md`.
 
-## Phase 3 closeout (2026-05-16 PM)
+## Session 2026-05-17 PM — live-testnet debugging pass
+
+User started this session asking how to test U7. Read past phase-progress + plan-003 §U7 + demo-script for context. Then ran the live mint path and surfaced 8 distinct blockers — each one a latent bug that vitest mocks couldn't surface. All fixed in-session with tests + typecheck green throughout.
+
+### Commits this session
+
+```
+d155dff feat(preview): render real Babylon previews on browse/collection/model pages
+a76bbc6 fix(forge): drop hardcoded 'Neon Drift Series' default collection name
+7c1fa14 chore(walrus): node round-trip smoke test (upload + aggregator download)
+ceebf17 fix(walrus): pass register tx digest into flow.upload()
+cf98acf fix(babylon): pass pluginExtension '.glb' so blob: URLs load
+a0a2cbe feat(forge): preview button — render variants before minting
+3f5099e fix(walrus): add signAndExecuteTransaction to dapp-kit signer shim
+```
+
+### Bug-by-bug log
+
+| # | Symptom (live testnet) | Layer | Root cause | Commit |
+|---|---|---|---|---|
+| 1 | `signer.signAndExecuteTransaction is not a function` at popup 1 | dapp-kit ↔ Walrus | `@mysten/walrus@1.1.7` client.mjs:1298 calls `signer.signAndExecuteTransaction({transaction,client})`; our shim only exposed `toSuiAddress + signTransaction`. Comment in code even claimed otherwise — true of older SDK, not 1.1.7. | `3f5099e` |
+| 2 | No way to preview variants before signing 3 popups | Forge UX | Mint button ran build → upload → sign as one block. Added Preview button + freshness hash check; Mint reuses GLBs if state unchanged. | `a0a2cbe` |
+| 3 | Variant preview canvas empty (load silently fails) | Babylon | `LoadAssetContainerAsync` infers loader from URL extension; `blob:` URLs have none. Passing `pluginExtension: '.glb'` unconditionally (we only ever load GLB per D-006). | `cf98acf` |
+| 4 | `Either resume.blobObjectId or upload digest must be provided` at Walrus relay step | Walrus upload flow | `useWalrusUpload` called `flow.upload({})`. The canonical pattern (SDK's own `run` generator) captures `txDigest` from `executeRegister` and forwards it into `upload({digest})`. | `ceebf17` |
+| 5 | Need offline confidence Walrus path actually works | infra | Wrote `frontend/scripts/walrus-roundtrip.mjs` — mirrors `useWalrusUpload` line-by-line but driven by an Ed25519 keypair. Verified 781 KB GLB + 4 KB random both round-trip byte-identical in 12.4 s. Quilt batching confirmed (same `blobObjectId` across patches). | `7c1fa14` |
+| 6 | Collection name pre-filled "Neon Drift Series" on every visit | Forge UX | The plan-003 brainstorm example name leaked into `useState` default. Reset to empty; placeholder + `canMint` length check already gate the button. | `a76bbc6` |
+| 7 | `/`, `/collection/<id>`, `/model/<id>` all show static ◇ glyph instead of model | preview UX | All 3 pages had hidden `<img>` tags pointing at GLB URLs (which `<img>` can't render). Comments labelled it "Phase 5 polish may render Babylon" — promoted now since user is actually browsing live mints. Each page swapped to per-tile `PreviewCanvas`. | `d155dff` |
+| (additional) | Earlier session's `bdefe91` / `16c023c` / `b56b50d` etc. were the prior-session batch of similar live-testnet fixes. Same theme: vitest covers code shape, not API contract reality. | — | — | — |
+
+### Live-testnet artifacts produced this session
+
+```
+Mint tx digest:    AZSBMxc2RcHTtBrPiKVRHaM3y7xEXCsStsoPsxE234nr   (Walrus quilt round-trip script)
+Collection object: 0x38bad19ea39a007cca17311275d99f7a15994b18632a2938a5a7e296ee4925b4
+Model3D variant:   0x46f248975df4c202d8950efa26d9892b3bf62e9764d39829cea2f4786ae86a58
+Walrus blob:       OSRXKPVDiQhXzif8G11QsRjLXPX11Ul4c9sgWf7AAzM
+Walrus blob obj:   0x92f8c97ffa12d8564be0f79177a31e07f8b7a6dc9242bf8d04f1020672f19ef7
+Wallet (creator):  0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed (capy)
+```
+
+### Insights worth carrying forward
+
+- **Vitest blind spots are systemic, not bug-of-the-day.** Every blocker this session was a contract mismatch between our code and a third-party SDK — and every one had tests that mocked the SDK with our wrong assumption baked in (`useWalrusUpload.test` mocked `executeRegister` shape; `ForgePage.test` mocked `useWalrusUpload` entirely; `PreviewCanvas.test` mocked Babylon's loader so the `blob:` URL extension issue couldn't fire). Captured CLAUDE.md note already says "type checking and test suites verify code correctness, not feature correctness." Reinforced 5x this session. **Action**: any new SDK adapter should ship with at least one integration test that hits the real SDK (or a recorded fixture), not a fully mocked one.
+- **A Node-side round-trip script is a force multiplier.** `walrus-roundtrip.mjs` decouples Walrus debugging from React + wallet popups + Babylon. When a browser-side bug surfaces, we can split-test: does the Node script pass? If yes → bug is React/wallet-side; if no → bug is Walrus-side. Saved at least 2 wrong directions this session.
+- **D-006 GLB-only assumption simplifies Babylon plumbing.** Unconditional `pluginExtension: '.glb'` is correct precisely because the decision is locked. Worth re-examining when v1.1 considers FBX/USDZ — the unconditional pattern would silently break.
+- **WebGL context cap is going to bite on Browse/Collection pages.** Capped now via per-tile canvases that work fine ≤8 cards but degrade past that. Acceptable for v1 (variant cap is 16; marketplace card count is small in demo). Phase 5 fix: lazy-mount via IntersectionObserver, or generate static thumbnails at mint time.
+
+### What still needs to happen for U7 dev verification (per D-026: capture deferred to Phase 5)
+
+1. Mint a real **5-variant** collection via Forge on localhost-testnet (multi-variant flow not yet exercised live)
+2. Switch to a **second wallet** (faucet ~5 SUI), click Buy Access on a variant — confirm tx succeeds
+3. Open `/track` on wallet B, confirm the owned variant appears in the carousel and drives
+
+Recording, Suiscan screenshots, and production URLs are explicitly **out of scope until Phase 5** (D-026 — record once against the final mainnet + Kiosk flow rather than re-record after every phase).
+
+### Feature priorities going forward (per user direction 2026-05-17 PM)
+
+User priority order: **complete all features first → deploy + record at the end.** Two ADRs landed this session capturing the resulting scope edits:
+
+- **D-025**: drop the seed catalog. Live mints during demo recording are viable now that Turbo-v1.0 (D-024) brings prompt-mode to ~15s; the seed catalog mitigation no longer applies. Frees ~5–8 Tripo calls as recording-day buffer.
+- **D-026**: defer production deploy + demo capture + traction signals to Phase 5. Avoids re-recording after Phase 4 mainnet redeploy + Kiosk integration. Project stays localhost-only until Phase 5.
+
+**Remaining feature work (in priority order):**
+
+1. **Phase 3 close**: U7 dev verification (5-variant mint + buy + drive on localhost-testnet) — small remaining lift, no recording
+2. **Phase 4**: Sui Kiosk + TransferPolicy royalty integration (D-013 v1 must-have, zero LOC today — biggest unstarted risk)
+3. **Phase 4**: Mainnet redeploy + network switcher in frontend
+4. **Phase 4 Stretch A**: Seal encryption for `is_encrypted=true` models
+5. **Phase 4 Stretch B**: Forensic watermark
+6. **Phase 5**: Production deploy (Vercel + cloud VM), demo recording, Suiscan capture, DeepSurge submission, README polish, pitch deck slides, traction signals — all batched at the end
+
+### Hackathon Tracker
+- Days to submission (6/21): **35 of 38**
+- Days to demo day (7/20–21): **64 of 67**
+- Days to winners (8/27): **102 of 105**
+
+---
+
+## Phase 3 closeout (2026-05-16 PM) — kept for context
 
 ### Commits this session
 

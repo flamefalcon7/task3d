@@ -1193,6 +1193,172 @@ The `/api/generate` JWT gate stays — Tripo itself is a paid API, so the cost-p
 
 ---
 
+## D-024: Tripo `model_version = Turbo-v1.0-20250506` for prompt-mode generation
+
+**Status**: Accepted
+**Date**: 2026-05-17
+**Phase**: Phase 3 (Collection Forge + Tiny Racetrack)
+
+### Context
+
+Initial Tripo wiring used `model_version: 'Tripo-P1'` (invalid string — Tripo
+API rejected with 400 `code 2017 "The version value is invalid"`, surfaced as
+500 Internal Server Error). During testnet dev we live-tested four valid
+versions (single prompt, `face_limit=5000`, `texture=false`) and measured both
+wall-clock latency and `consumed_credit` reported by `/v2/openapi/task/<id>`.
+
+| Version | Time | Credit | Mesh count | File size | Quality framing |
+|---------|------|--------|-----------|-----------|-----------------|
+| `Turbo-v1.0-20250506` | ~15s | ~15 | 1 | 638 KB | Speed-first, raw mesh |
+| `v1.4-20240625` | ~25s | ~15 | 1 | 1.78 MB | Legacy basic |
+| `v3.0-20250812` | ~100s | 20 | n/a (no credit at test time) | – | Sculpture-level |
+| `P1-20260311` | ~40s | ~50 | 1 | 762 KB | Game-ready, native 3D diffusion |
+
+### Decision
+
+Use `Turbo-v1.0-20250506` for all prompt-mode text-to-3D generation. Wired
+in `backend/src/lib/tripo-client.ts` `submitTask()`.
+
+### Rationale
+
+- **Speed-cost Pareto winner.** 15s end-to-end keeps Forge generate-base under
+  the 20s threshold beyond which users start questioning whether the request
+  is hung (we added rotating subtext + progress bar specifically to survive
+  30s; Turbo eliminates the need).
+- **Per-call cost is decisive.** Turbo affords ~30+ full Forge runs per 500
+  credit vs P1's ~10 — enough for dev iteration plus demo recording.
+- **Quality ceiling doesn't bind us.** Forge dispatches `text_to_model` exactly
+  once per collection; the 16 demo variants come from server-side material-swap
+  (D-023), so per-call mesh fidelity matters less than perceived response time.
+- **Game-ready posture is preserved by face_limit.** `face_limit=5000` caps
+  output regardless of model_version, so Turbo sits in the same poly budget
+  as P1's marketed "48-20K range".
+
+### Alternatives Considered
+
+- **`P1-20260311`** — marketed "game-ready" with native 3D diffusion. Rejected:
+  ~40s and ~50 credit per call (3-4x Turbo) for marginal quality improvement
+  we can't differentiate at racing-demo zoom levels.
+- **`v3.0-20250812`** — sculpture-level detail and sharp edges. Rejected:
+  ~100s wall-clock is fatal for Forge UX; 5x slower than Turbo for detail
+  the material-swap step would mask anyway.
+- **`v2.5-20250123`** — interim choice after the Tripo-P1 bugfix. Rejected
+  after Turbo measured 2x faster at comparable credit cost.
+- **`Tripo-P1`** (the original buggy string) — Tripo rejects this; we kept
+  the audit trail (TripoFailedError now surfaces response body) to prevent
+  silent regressions of the same shape.
+
+### Consequences
+
+- ✅ Forge generate-base feels snappy — users wait ~15s not ~30s
+- ✅ ~30+ Forge runs per top-up vs ~10 — enough headroom for demo polish
+- ✅ Backend errors include Tripo response body (added in this change) so
+  future model_version mistakes surface immediately
+- ⚠️ Turbo's mesh fidelity is the lowest of the production lineup. Acceptable
+  for racing-car silhouette; would need re-evaluation if Forge is ever used
+  for character / hero models
+- ⚠️ Single-mesh output (1 mesh per car) means no wheel rotation possible
+  without an additional `mesh_segmentation` step (40 credit, ~30s). Not
+  pursuing wheel rotation for v1 demo
+- 🔮 v1.1 may add a `model_version` UI selector for creators wanting higher
+  fidelity per generation; today the choice is operator-locked
+
+### Related
+
+- spec.md section: §2.6 (Generation Router), §2.11 (Tripo integration)
+- Related decisions: D-023 (drop LLM router, prompt mode → Tripo directly)
+- Mesh-segmentation explored but **not adopted** for v1: Tripo's segmentation
+  splits 1 mesh into N (tested: 1→8 with name `tripo_part1..8`, no semantics).
+  Racing demo observers don't track wheel rotation closely enough to justify
+  the +40 cr per car + +30s Forge UX latency. Punted to v1.1 roadmap; pitch
+  deck frames as planned enhancement.
+
+---
+
+## D-025: Drop the seed catalog — rely on live mints for demo content
+
+**Status**: Accepted
+**Date**: 2026-05-17
+**Phase**: Phase 3 (Collection Forge + Tiny Racetrack)
+
+### Context
+
+D-014 §14.3 specified a Tripo seed catalog: team-as-creators would burn ~5–8 Tripo P1 credits before demo recording to pre-mint hero objects (dragon / castle / phoenix / ornate sword) so Browse looked populated. With D-023 (LLM router dropped) and D-024 (Turbo-v1.0 at ~15s + ~15 credits per call), the underlying constraints have shifted.
+
+### Decision
+
+Skip the seed catalog. The demo recording uses live mints performed at recording time. Tripo budget reserved for the recording itself + final polish iterations.
+
+### Rationale
+
+- Turbo-v1.0 makes prompt-mode generation fast enough (~15s) that live mints during the demo recording are viable — the seed-catalog mitigation for slow Tripo P1 (~40s) doesn't apply anymore.
+- Live mints during recording produce demonstrably real on-chain artifacts at known timestamps, stronger for the pitch than pre-staged content of unclear provenance.
+- ~5–8 saved Tripo calls = headroom for retries during recording (R5 mitigation in plan-003 is more important now).
+- Browse looking sparse on demo day is a presentation problem solved by recording 1–2 collections live before pressing record, not by seed catalog inventory.
+
+### Alternatives Considered
+
+- **Keep seed catalog as specced.** Rejected: ties demo content to past decisions, no longer needed for latency reasons.
+- **Mint 1 hero seed only.** Rejected: arbitrary number; either the live-mint flow is robust enough to demo or it isn't.
+
+### Consequences
+
+- ✅ Tripo credit headroom preserved for recording day
+- ✅ Cuts one Phase 3 task item with no demo-quality loss
+- ⚠️ Browse will be empty for any visitor who lands on the site before the user has minted anything live — non-issue for hackathon scope but worth knowing if site goes public
+- 🔮 Phase 5 polish may add a "seed via script" affordance if marketplace traction matters post-submission
+
+### Related
+
+- spec.md section: §6 Phase 3 "Seed catalog 建立" — strike that bullet
+- Related decisions: narrows [[D-014]] §14.3 Tripo seed-only operating mode; complements [[D-023]] (LLM router drop) and [[D-024]] (Turbo-v1.0 model choice)
+
+---
+
+## D-026: Defer production deploy + demo capture until all features complete
+
+**Status**: Accepted
+**Date**: 2026-05-17
+**Phase**: Phase 3 → Phase 5 (capture happens at the end)
+
+### Context
+
+Spec §6 Phase 3 lists "deploy frontend to Vercel, backend to cloud VM" + traction signals (Discord, Twitter, blog) as Phase 3 deliverables. Plan-003 U7 specifies capturing tx hashes, Suiscan screenshots, and a 90-second demo recording. Doing these in Phase 3 means re-doing them after Phase 4 (Kiosk + mainnet) ships, since:
+- Mainnet redeploy invalidates testnet tx hashes captured for Phase 3
+- Kiosk integration changes the publish flow → demo script needs re-recording
+- Production URLs depend on Phase 4 network choice (testnet vs mainnet at submission time)
+
+### Decision
+
+All production-deploy and demo-capture work is deferred to Phase 5. Until then, the project stays localhost-only and the demo flow is exercised against testnet from the developer's machine. Phase 3 closes once code is feature-complete + manually verified on testnet; no recording, no screenshots, no production hostnames captured.
+
+### Rationale
+
+- Recording the demo once at end > recording twice with stale takes
+- Localhost is sufficient for two-wallet exercise of the U7 flow — the user has both wallets locally and runs `pnpm dev`
+- Phase 5 already budgets time for these deliverables (spec §6 Phase 5: README polish, demo video ≤5 min, DeepSurge submission)
+- Frees Phase 3 / Phase 4 calendar for the higher-value-at-risk work: Kiosk integration (D-013 v1 must-have, zero LOC today)
+
+### Alternatives Considered
+
+- **Spec as-written**: deploy in Phase 3, deploy again in Phase 4 for mainnet. Rejected: double work, double bug surface, double recording.
+- **Single deploy in Phase 4 + record in Phase 4**: still strands Phase 5 polish budget. Phase 5 grouping is cleaner since polish + submission are already there.
+
+### Consequences
+
+- ✅ One recording session at the end, against the final mainnet contract + Kiosk flow
+- ✅ Phase 3 closes faster — only "U7 dev verification on localhost-testnet" remaining, not full capture artifacts
+- ⚠️ No public URL to share if anyone asks before Phase 5 — acceptable trade-off for hackathon scope
+- ⚠️ Traction signals (Discord / Twitter / blog) slip into Phase 5 — narrower window for organic traction, but recording polish takes priority
+
+### Related
+
+- spec.md section: §6 Phase 3 "部署 frontend / cloud VM" + "Traction signal" bullets — strike from Phase 3 list, fold into Phase 5
+- plan-003 U7: status reframes from "Phase 3 closing artifact" to "Phase 3 dev verification only; full capture in Phase 5"
+- Related decisions: complements [[D-009]] testnet-for-6/21 + mainnet-by-8/27 strategy
+
+---
+
 # Reserved Decision Numbers
 
-D-024 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-027 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
