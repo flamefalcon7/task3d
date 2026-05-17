@@ -100,19 +100,44 @@ const WALL_HEIGHT = 4;
 // Independent of BARRIER_OUTWARD_OFFSET above — equal values are coincidental.
 const TRIGGER_RADIUS = 8;
 const CAR_MASS = 1500;
-const FORWARD_IMPULSE = 50;
-const REVERSE_IMPULSE = 30;
-// KTD-1: steer drives the body's Y angular velocity directly. While a steer
-// key is held, the body's Y angular velocity is SET (overwritten) to this
-// magnitude each frame — not accumulated — so held-key = constant turn rate
-// and key-release lets angular damping decay the spin. Replaces U6's
-// mesh.rotate(STEER_RATE) which fought Havok's own integration and
-// accumulated runaway spin. Units: rad/s.
-const STEER_ANGULAR_VELOCITY = 2.2;
-// KTD-1: damping so the car coasts to a stop after key release instead of
-// sliding/spinning forever on a frictionless plane.
-const LINEAR_DAMPING = 0.2;
-const ANGULAR_DAMPING = 0.6;
+// Arcade-car control model (researched from NFS-style arcade racers + Mario
+// Kart's handling). Four interlocking rules replace the old "constant
+// impulse + free angular velocity + slight damping" ice-puck feel:
+//
+// 1. Top-speed cap on throttle: impulse tapers to zero as forwardSpeed
+//    approaches MAX_FORWARD_SPEED. Prevents runaway acceleration.
+// 2. Speed-dependent steering: turn rate scales with current forward speed.
+//    Stationary cars barely turn (parking-spot factor only); fast cars get
+//    full rate. Real cars need speed to steer; this matches intuition.
+// 3. Lateral grip: each frame we cancel a fraction of the lateral velocity
+//    (component perpendicular to facing). Without this, the car slides
+//    sideways through corners like it's on ice.
+// 4. Tight angular damping: when no steer key is held, the body decays
+//    its yaw rate fast so the car doesn't keep spinning after the input
+//    releases.
+const FORWARD_IMPULSE = 60;
+const REVERSE_IMPULSE = 32;
+const MAX_FORWARD_SPEED = 18; // units/sec; ~25s lap at average ~6 u/s
+const MAX_REVERSE_SPEED = 8;
+// Steering: rad/s at full effectiveness. Scaled per-frame by speed factor.
+const STEER_ANGULAR_VELOCITY = 2.4;
+// Speed (units/sec) at which steering reaches its full rate. Below this,
+// steering scales linearly from STEER_MIN_FACTOR up to 1.0.
+const STEER_FULL_SPEED = 6;
+// Minimum steering rate as a fraction of STEER_ANGULAR_VELOCITY, applied
+// at zero speed. Prevents getting stuck against a wall — driver can still
+// turn the car in place at 30% rate. Real cars can't, but arcade games do.
+const STEER_MIN_FACTOR = 0.3;
+// Fraction of lateral velocity removed each frame by the grip model.
+// 0 = no grip (full ice), 1 = perfect grip (no sliding ever).
+// 0.15 = realistic arcade feel — slight drift on hard corners.
+const LATERAL_GRIP_PER_FRAME = 0.15;
+// Linear damping kept low — top-speed cap + grip handle deceleration.
+// Setting too high makes the car feel sticky.
+const LINEAR_DAMPING = 0.05;
+// Angular damping high — when no steer input, yaw rate decays in ~3 frames
+// so the car doesn't keep spinning after key release.
+const ANGULAR_DAMPING = 0.85;
 const CHASE_RADIUS = 15;
 // Yaw offset applied to the car geometry inside its physics pivot, in
 // radians. Different GLB sources export with different local forward axes
@@ -371,32 +396,73 @@ export async function createRacetrackScene(
   });
   scene.onBeforeRenderObservable.add(() => {
     const forward = carPivot.getDirection(Vector3.Forward());
+    // "Right" axis = forward rotated 90° CW in XZ plane (Y up). Derived
+    // inline so the mocked test surface doesn't need Vector3.Right() and
+    // we don't depend on getDirection responding to multiple arguments.
+    const rightX = forward.z;
+    const rightZ = -forward.x;
+
+    // Decompose current velocity into forward + lateral components.
+    const velocity = carBody.body.getLinearVelocity();
+    const forwardSpeed =
+      velocity.x * forward.x + velocity.y * forward.y + velocity.z * forward.z;
+    const lateralSpeed = velocity.x * rightX + velocity.z * rightZ;
+
+    // Throttle — impulse tapers to zero as we approach MAX_FORWARD_SPEED.
+    // Smooth top-speed cap; no hard clamp needed.
     if (keys.has('w') || keys.has('arrowup')) {
-      carBody.body.applyImpulse(
-        forward.scale(FORWARD_IMPULSE),
-        carPivot.absolutePosition,
-      );
+      const throttleScale = Math.max(0, 1 - Math.max(0, forwardSpeed) / MAX_FORWARD_SPEED);
+      if (throttleScale > 0) {
+        carBody.body.applyImpulse(
+          forward.scale(FORWARD_IMPULSE * throttleScale),
+          carPivot.absolutePosition,
+        );
+      }
       // U3 — first W (or arrow-up) press kicks the lap timer off.
       // Reducer no-ops on subsequent throttle while already running.
       dispatch({ type: 'throttle', nowMs: performance.now() });
     }
+
+    // Reverse — same tapered cap against MAX_REVERSE_SPEED.
     if (keys.has('s') || keys.has('arrowdown')) {
-      carBody.body.applyImpulse(
-        forward.scale(-REVERSE_IMPULSE),
-        carPivot.absolutePosition,
-      );
+      const reverseScale = Math.max(0, 1 - Math.max(0, -forwardSpeed) / MAX_REVERSE_SPEED);
+      if (reverseScale > 0) {
+        carBody.body.applyImpulse(
+          forward.scale(-REVERSE_IMPULSE * reverseScale),
+          carPivot.absolutePosition,
+        );
+      }
     }
+
+    // Steering — yaw rate scales with current speed. STEER_MIN_FACTOR
+    // floor keeps parking-spot turning possible at zero speed (so the
+    // player can rotate after backing into a wall).
     let steerInput = 0;
     if (keys.has('a') || keys.has('arrowleft')) steerInput -= 1;
     if (keys.has('d') || keys.has('arrowright')) steerInput += 1;
     if (steerInput !== 0) {
-      // KTD-1: drive Y angular velocity directly. Held key = constant turn
-      // rate; release = angular damping decays the spin.
+      const speedFactor = Math.max(
+        STEER_MIN_FACTOR,
+        Math.min(1, Math.abs(forwardSpeed) / STEER_FULL_SPEED),
+      );
       const angVel = carBody.body.getAngularVelocity();
       angVel.x = 0;
       angVel.z = 0;
-      angVel.y = steerInput * STEER_ANGULAR_VELOCITY;
+      angVel.y = steerInput * STEER_ANGULAR_VELOCITY * speedFactor;
       carBody.body.setAngularVelocity(angVel);
+    }
+
+    // Lateral grip — cancel a fraction of sideways drift each frame.
+    // Without this, the car slides like a hockey puck through corners.
+    // Skip near zero forward speed (parking) to avoid fighting the
+    // parking-rotation behaviour.
+    if (Math.abs(forwardSpeed) > 0.5 && Math.abs(lateralSpeed) > 0.01) {
+      const lateralImpulse = new Vector3(
+        -rightX * lateralSpeed * LATERAL_GRIP_PER_FRAME * CAR_MASS,
+        0,
+        -rightZ * lateralSpeed * LATERAL_GRIP_PER_FRAME * CAR_MASS,
+      );
+      carBody.body.applyImpulse(lateralImpulse, carPivot.absolutePosition);
     }
   });
 

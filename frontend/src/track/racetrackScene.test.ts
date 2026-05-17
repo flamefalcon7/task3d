@@ -87,6 +87,7 @@ const M = vi.hoisted(() => {
         getAngularVelocity: ReturnType<typeof vi.fn>;
         setAngularVelocity: ReturnType<typeof vi.fn>;
         setLinearVelocity: ReturnType<typeof vi.fn>;
+        getLinearVelocity: ReturnType<typeof vi.fn>;
       },
     },
   };
@@ -189,11 +190,14 @@ vi.mock('@babylonjs/core', () => {
       applyImpulse: vi.fn(),
       setLinearDamping: vi.fn(),
       setAngularDamping: vi.fn(),
-      // Default mocked angular velocity: car at rest. Tests can override
-      // by replacing the implementation via M.state.lastCarBody.
+      // Default mocked velocities: car at rest. Tests can override
+      // via M.state.lastCarBody to simulate non-zero motion.
       getAngularVelocity: vi.fn(() => new M.Vec3Mock(0, 0, 0)),
+      getLinearVelocity: vi.fn(() => new M.Vec3Mock(0, 0, 0)),
       setAngularVelocity: vi.fn(),
       setLinearVelocity: vi.fn(),
+      // U6 Havok-v2 teleport flag toggled by reset() (see racetrackScene.ts).
+      disablePreStep: true,
     };
     constructor(...args: unknown[]) {
       M.physicsAggregateCtor(...args);
