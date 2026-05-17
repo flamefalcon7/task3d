@@ -328,6 +328,13 @@ export async function createRacetrackScene(
   );
   carBody.body.setLinearDamping(LINEAR_DAMPING);
   carBody.body.setAngularDamping(ANGULAR_DAMPING);
+  // Allow Retry's transform-node assignment to actually teleport the body.
+  // Havok v2's default `disablePreStep=true` means the body owns the
+  // transform — assignments to carPivot.position are overwritten on the
+  // next physics step, so reset() looked like it only reset the timer.
+  // Setting false here costs one matrix read per frame for our single
+  // dynamic body — negligible — and makes mesh-driven teleports work.
+  carBody.body.disablePreStep = false;
 
   // 8. Chase camera — ArcRotateCamera tracks the pivot each frame. Not
   // attaching control on purpose: we want WASD to drive, not orbit drag.
@@ -435,15 +442,21 @@ export async function createRacetrackScene(
   });
 
   const reset = (): void => {
-    // Teleport car back to spawn + zero velocity. The PhysicsBody position
-    // tracks the pivot's transform, so reassigning carPivot.position is
-    // enough — no need to call body.setTransformPosition manually.
+    // Teleport car back to spawn + zero velocity. Works because we set
+    // body.disablePreStep = false at init — Havok reads the pivot's
+    // transform on the next pre-step and moves the body to match.
+    // computeWorldMatrix(true) flushes the Euler rotation → quaternion
+    // conversion synchronously so the body sees the new orientation,
+    // not stale state from before the assignment.
     carPivot.position = new Vector3(startSample.x, 1, startSample.z);
     carPivot.rotation = new Vector3(
       0,
       Math.atan2(startTangent.x, startTangent.z),
       0,
     );
+    if (typeof carPivot.computeWorldMatrix === 'function') {
+      carPivot.computeWorldMatrix(true);
+    }
     carBody.body.setLinearVelocity(new Vector3(0, 0, 0));
     carBody.body.setAngularVelocity(new Vector3(0, 0, 0));
     // Re-arm trigger flags: car is back on the start line so the start
