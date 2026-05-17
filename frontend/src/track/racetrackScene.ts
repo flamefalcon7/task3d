@@ -141,9 +141,11 @@ const ANGULAR_DAMPING = 0.85;
 const CHASE_RADIUS = 15;
 // Chase camera azimuth lerp rate. 0 = camera angle doesn't follow car
 // (locked to world axis — old behavior). 1 = camera snaps instantly behind
-// the car each frame (no lag, can feel jittery on hard turns). 0.08 gives
-// a ~120ms catch-up which feels like a classic racing-game chase cam.
-const CHASE_ALPHA_LERP = 0.08;
+// the car each frame (no lag, can feel jittery on hard turns). 0.04 gives
+// a ~250ms catch-up — slow enough that the car visibly rotates relative
+// to the camera during turns (you see your turn-in), camera-swing isn't
+// violent on corners.
+const CHASE_ALPHA_LERP = 0.04;
 // Yaw offset applied to the car geometry inside its physics pivot, in
 // radians. Different GLB sources export with different local forward axes
 // (Tripo, Sketchfab, manual exports all differ). Adjust per asset family:
