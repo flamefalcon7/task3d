@@ -195,3 +195,31 @@ import { SLUSH_WALLET_NAME } from '@mysten/slush-wallet';
 **Network config gotcha**: `createNetworkConfig` entries in 1.0 must include both `network` (typed `'testnet' | 'mainnet' | 'devnet' | 'localnet'`) AND `url`. Older sample code used `{ url }` only — that fails the `NetworkConfig` type, which now extends `SuiJsonRpcClientOptions` per the D-019 split.
 
 **Signature verification (backend)**: `verifyPersonalMessageSignature` lives at `@mysten/sui/verify` (not `@mysten/sui/cryptography/verify` as the plan stated). Returns a `PublicKey` and asserts address equality via `options.address` — throws on mismatch.
+
+---
+
+## OQ-015: Babylon `pluginExtension` + blob: URL gotcha — write up as solutions doc
+
+**Status**: ✅ RESOLVED (workaround in place); follow-up: write `docs/solutions/integration-issues/` entry.
+**Raised**: 2026-05-17 (plan-004 ce-code-review)
+**Originator**: Earlier session debugging pass surfaced this during live-testnet bug 3 (PreviewCanvas blob-URL didn't load); fix landed in `cf98acf`.
+
+### Context
+
+`LoadAssetContainerAsync(url, scene)` infers the loader from URL extension. `blob:` URLs have no extension, so the GLB loader isn't auto-selected and the load silently fails (or falls through to a JSON loader and throws). Workaround: always pass `pluginExtension: '.glb'` explicitly when loading from a blob URL.
+
+The current code (`PreviewCanvas.tsx` and `racetrackScene.ts`) does this correctly — relies on D-006 (GLB-only locked) so the unconditional extension is safe.
+
+### Why this is still an OQ
+
+The pattern is undocumented in `docs/solutions/`. A future contributor adding a second non-GLB asset format (or reading the code thinking "why is this unconditional?") will lack the context. The plan-004 doc captured this in its "Deferred to Follow-Up Work" section but per CLAUDE.md the right home is here + a `docs/solutions/integration-issues/` entry during Phase 5 polish.
+
+### Resolution path
+
+Phase 5 polish window — write `docs/solutions/integration-issues/babylon-pluginextension-blob-url-2026-05-17.md` documenting:
+1. The symptom (empty canvas / silent load failure)
+2. The root cause (extension-based loader inference on blob: URLs)
+3. The workaround (`pluginExtension: '.glb'`)
+4. The dependency on D-006 (GLB-only) — when v1.1 introduces FBX/USDZ, the unconditional pattern silently breaks for new formats
+
+Not blocking; informational follow-up.

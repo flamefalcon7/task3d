@@ -37,13 +37,32 @@ e9b1dea feat(frontend): dev /dev/compare page for Tripo model_version diffing
 - **HUD stays mounted during scene reload.** During carousel switching, the loading overlay covers the HUD visually but the values for the new car are already in the DOM — no flash of empty state. Surfaced by writing the U5/AE6 test.
 - **glb.ts cast reverted.** Earlier 5a386f5's "unknown-cast for compat" was actually a regression; @gltf-transform/core's setArray() pins to `Float32Array<ArrayBuffer>` (narrow). Restored explicit narrow cast — works on both backend TS 5.5 and frontend TS 5.8.
 
+### Current Phase
+
+**Phase 3 — Real-World Application (final close).** Plan-004 (Tiny Racetrack game loop) shipped on top of plan-003 (Forge + Tiny Racetrack scaffold). Phase 3 is code-complete pending the manual /track smoke; next is Phase 4 (Sui Kiosk + TransferPolicy + mainnet redeploy).
+
 ### Verification status
 
-- ✅ Frontend tests: 214 passed (159 → 214, +55 new — U1+U2+U3+U4+U5 collectively)
-- ✅ Backend tests: 132 passed (no change — backend untouched in plan-004)
+- ✅ Frontend tests: 214 passed (159 → 214, +55 new — U1+U2+U3+U4+U5 collectively); 78 in `frontend/src/track/` alone after /ce-code-review fix batch
+- ✅ Backend tests: 132 passed (no change — backend untouched in plan-004 logic; tripo-client.ts errBody truncation added without test gap)
 - ✅ Move tests: untouched (21 passed, no contract changes)
 - ✅ Workspace typecheck: clean (shared + backend + frontend)
 - ⏳ **Manual /track smoke** (user-driven — per CLAUDE.md "if you can't test the UI, say so explicitly"): drive a lap with `/dev-glbs/p1.glb`, beat the PB, retry via button + R-key, switch cars in carousel, confirm per-car PB isolation. See plan's §Verification.
+
+### In Progress
+
+- **Manual /track smoke** (user-driven) — sole remaining plan-004 verification item. All code changes shipped + all 8 P1 code-review findings addressed.
+
+### Notes for Next Session
+
+- /ce-code-review on plan-004 dispatched 12 reviewers; all 8 P1 findings + ~14 P2 findings landed as fixes this session. Residual P2/P3 items surfaced in the run artifact at `/tmp/compound-engineering/ce-code-review/20260517-163813-5e7e39f0/` — five items deliberately deferred:
+  1. **#11 60fps React re-render from tick action** — needs rAF-based HUD timer refactor (decouple display from reducer). Profile before fixing; not yet a frame-dropper.
+  2. **#12 dev/CompareGlbsPage + dev-glbs fixtures shipping to prod build** — D-024 (Turbo-v1.0 Accepted) was the stated deletion trigger but user may want to keep the tool for a future Tripo model evaluation. Add `frontend/public/dev-glbs/` to `.gitignore` AT MINIMUM before Phase 5 prod deploy.
+  3. **#26 Test for scene.dispose() racing in-flight Walrus fetch** — needs deferred-promise test setup; defensively the AbortController fix from #2 already mitigates the underlying bug.
+  4. **#29 Lap-quartering bypass (drive past checkpoint, U-turn, hit start)** — game-design decision: add `dot(velocity, startTangent) > 0` check at finish-line entry. May affect feel. Worth a one-time test during manual smoke to see if it actually matters.
+  5. **#32 useOwnedVariants returns variants with empty blobId/patchId** — validation should happen upstream in the indexer, not here.
+- Three ADR-debt items also surfaced (PS-002/003/004): KTD-5 (localStorage PB keying), KTD-6 (cross-boundary reducer), AA-3 (per-frame trigger fallback chosen over Havok-native). All documented in plan-004 + phase-progress but no formal D-XXX ADRs landed. Per CLAUDE.md "Hackathon Reality Check" judgement call — these are new patterns worth capturing before Phase 4 expands them. Suggested: D-027 / D-028 / D-029 inline ADRs in a single batch.
+- The `scene.onKeyboardObservable` agent-native trap is now fixed (canvas.tabIndex=-1 + focus on init) — agents and Playwright tests no longer need to manually focus the canvas before WASD dispatch.
 
 ### Insights worth carrying forward
 
