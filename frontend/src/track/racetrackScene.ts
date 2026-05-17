@@ -114,6 +114,13 @@ const STEER_ANGULAR_VELOCITY = 2.2;
 const LINEAR_DAMPING = 0.2;
 const ANGULAR_DAMPING = 0.6;
 const CHASE_RADIUS = 15;
+// Yaw offset applied to the car geometry inside its physics pivot, in
+// radians. Vehicle GLBs vary in their local "forward" convention — Tripo
+// outputs (and most camera-facing models) face -Z by default, so we rotate
+// the visual 180° to align it with the pivot's +Z (the direction the
+// FORWARD_IMPULSE pushes). Tune per asset family if a future generator
+// emits cars facing a different axis.
+const CAR_GEOMETRY_YAW_OFFSET = Math.PI;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -301,6 +308,10 @@ export async function createRacetrackScene(
   // the mesh several nodes deep with arbitrary rotations).
   const carPivot = new TransformNode('car-pivot', scene);
   carGeometry.parent = carPivot;
+  // Align the GLB's local forward axis with the pivot's +Z (the direction
+  // FORWARD_IMPULSE pushes). Without this, the car drives backwards
+  // visually — Tripo + most vehicle GLBs face -Z in their local frame.
+  carGeometry.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
   // U2: spawn on the start/finish line, facing the curve tangent so the
   // first W keypress drives along the track instead of sideways.
   carPivot.position = new Vector3(startSample.x, 1, startSample.z);
