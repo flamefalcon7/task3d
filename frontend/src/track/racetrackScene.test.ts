@@ -40,6 +40,8 @@ const M = vi.hoisted(() => {
     physicsAggregateCtor: vi.fn(),
     meshBuilderCreateGround: vi.fn(),
     meshBuilderCreateBox: vi.fn(),
+    meshBuilderExtrudeShape: vi.fn(),
+    meshBuilderCreatePlane: vi.fn(),
     arcRotateCameraCtor: vi.fn(),
     hemisphericLightCtor: vi.fn(),
     standardMaterialCtor: vi.fn(),
@@ -158,11 +160,27 @@ vi.mock('@babylonjs/core', () => {
   const MeshBuilder = {
     CreateGround: (...args: unknown[]) => {
       M.meshBuilderCreateGround(...args);
-      return { material: null };
+      return { material: null, position: new M.Vec3Mock() };
     },
     CreateBox: (...args: unknown[]) => {
       M.meshBuilderCreateBox(...args);
-      return { material: null, position: new M.Vec3Mock() };
+      return {
+        material: null,
+        position: new M.Vec3Mock(),
+        rotation: new M.Vec3Mock(),
+      };
+    },
+    ExtrudeShape: (name: string, _opts: unknown, _scene: unknown) => {
+      M.meshBuilderExtrudeShape(name, _opts, _scene);
+      return { material: null };
+    },
+    CreatePlane: (name: string, _opts: unknown, _scene: unknown) => {
+      M.meshBuilderCreatePlane(name, _opts, _scene);
+      return {
+        material: null,
+        position: new M.Vec3Mock(),
+        rotation: new M.Vec3Mock(),
+      };
     },
   };
   class PhysicsAggregate {
@@ -183,7 +201,7 @@ vi.mock('@babylonjs/core', () => {
       M.state.lastCarBody = this.body;
     }
   }
-  const PhysicsShapeType = { BOX: 'BOX' as const };
+  const PhysicsShapeType = { BOX: 'BOX' as const, MESH: 'MESH' as const };
   const KeyboardEventTypes = { KEYDOWN: 1 as const, KEYUP: 2 as const };
   class TransformNode {
     position = new M.Vec3Mock();
@@ -250,6 +268,8 @@ beforeEach(() => {
   M.physicsAggregateCtor.mockClear();
   M.meshBuilderCreateGround.mockClear();
   M.meshBuilderCreateBox.mockClear();
+  M.meshBuilderExtrudeShape.mockClear();
+  M.meshBuilderCreatePlane.mockClear();
   M.arcRotateCameraCtor.mockClear();
   M.hemisphericLightCtor.mockClear();
   M.standardMaterialCtor.mockClear();
@@ -307,22 +327,60 @@ describe('createRacetrackScene', () => {
     expect(gravity.y).toBeCloseTo(-9.81);
   });
 
-  it('builds ground + 4 perimeter walls as static physics aggregates', async () => {
+  it('U2 — builds safety ground + road ribbon + 48 barrier boxes as static aggregates', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
+    // Safety ground (R-r4b fallback floor) — 1 CreateGround call.
     expect(M.meshBuilderCreateGround).toHaveBeenCalledTimes(1);
-    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(4); // 4 walls
-    // 1 ground aggregate + 4 wall aggregates + 1 car aggregate = 6
-    expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(6);
-    // The first 5 aggregates (ground + 4 walls) must all be mass:0.
+    // 24 outer + 24 inner barrier boxes following the curve tangent.
+    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(48);
+    // Road ribbon extruded once along the closed sample path.
+    expect(M.meshBuilderExtrudeShape).toHaveBeenCalledTimes(1);
+    // Total aggregates: 1 safety ground + 1 ribbon + 48 barriers + 1 car = 51.
+    expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(51);
+    // First 50 (everything except the car) must all be mass:0 static.
     const staticOptions = M.physicsAggregateCtor.mock.calls
-      .slice(0, 5)
+      .slice(0, 50)
       .map((args) => args[2]);
     for (const opts of staticOptions) {
       expect((opts as { mass: number }).mass).toBe(0);
     }
+  });
+
+  it('U2 — road ribbon uses a MESH-shape collider (not BOX)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Ribbon is the 2nd aggregate (index 1): safety ground at 0, ribbon at 1.
+    const ribbonAggregateArgs = M.physicsAggregateCtor.mock.calls[1]!;
+    expect(ribbonAggregateArgs[1]).toBe('MESH');
+  });
+
+  it('U2 — start/finish + checkpoint planes exist with no physics aggregate', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Exactly 2 plane creates (start/finish + checkpoint), neither aggregated.
+    expect(M.meshBuilderCreatePlane).toHaveBeenCalledTimes(2);
+    const planeNames = M.meshBuilderCreatePlane.mock.calls.map((c) => c[0]);
+    expect(planeNames).toContain('start-finish');
+    expect(planeNames).toContain('checkpoint');
+  });
+
+  it('U2 — car spawns on the start/finish line (samples[0]), lifted to Y=1', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // With the default TRACK config (35×50, r=10), samples[0] sits on the
+    // east straight at x≈17.5. The pivot must be raised to Y=1 so the
+    // box collider doesn't clip the road surface on the first frame.
+    expect(M.state.lastTransformNode?.position.y).toBe(1);
+    expect(Math.abs(M.state.lastTransformNode!.position.x)).toBeGreaterThan(1);
   });
 
   it('loads the car GLB via LoadAssetContainerAsync', async () => {
@@ -333,10 +391,10 @@ describe('createRacetrackScene', () => {
     expect(M.loadAssetContainer).toHaveBeenCalledTimes(1);
     expect(M.loadAssetContainer.mock.calls[0]![0]).toBe('blob:mock');
     expect(M.state.lastCarContainer?.addAllToScene).toHaveBeenCalled();
-    // Car body should be a DYNAMIC aggregate with non-zero mass.
-    const carOpts = M.physicsAggregateCtor.mock.calls[5]![2] as {
-      mass: number;
-    };
+    // Car body should be a DYNAMIC aggregate with non-zero mass. It's the
+    // LAST aggregate constructed (after safety ground + ribbon + 48 barriers).
+    const calls = M.physicsAggregateCtor.mock.calls;
+    const carOpts = calls[calls.length - 1]![2] as { mass: number };
     expect(carOpts.mass).toBeGreaterThan(0);
   });
 
@@ -395,10 +453,11 @@ describe('createRacetrackScene', () => {
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
-    // 1 ground + 4 walls + 1 car = 6 aggregates; the car aggregate is the
-    // 6th (index 5). Its first arg must be the pivot we constructed.
+    // Car aggregate is the LAST one constructed (after safety ground +
+    // road ribbon + 48 barriers). Its first arg must be the pivot.
     expect(M.transformNodeCtor).toHaveBeenCalledWith('car-pivot', expect.anything());
-    const carAggregateArgs = M.physicsAggregateCtor.mock.calls[5]!;
+    const calls = M.physicsAggregateCtor.mock.calls;
+    const carAggregateArgs = calls[calls.length - 1]!;
     expect(carAggregateArgs[0]).toBe(M.state.lastTransformNode);
   });
 

@@ -41,6 +41,12 @@ import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import '@babylonjs/loaders/glTF/index.js';
 import HavokPhysics from '@babylonjs/havok';
 
+import {
+  buildOvalControlPoints,
+  sampleOvalCurve,
+  tangentAt,
+} from './oval';
+
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
 export interface RacetrackSceneOptions {
@@ -58,9 +64,17 @@ export interface RacetrackSceneHandles {
 // without re-reading the body. Values picked to feel snappy but not arcadey
 // for a hackathon demo recording (R1 fallback considered: if these need
 // per-car tuning we drop back to Trophy Hall L1).
-const TRACK_SIZE = 200;
+// U2 — procedural oval track tuned for ~150-unit perimeter, ~25s lap at
+// the current FORWARD_IMPULSE. Adjust TRACK_* during physics-feel tuning.
+const TRACK_WIDTH = 35; // along X
+const TRACK_LENGTH = 50; // along Z (longer side)
+const TRACK_CORNER_RADIUS = 10;
+const TRACK_SAMPLES = 80;
+const ROAD_WIDTH = 14;
+const BARRIER_COUNT = 24;
+const BARRIER_OUTWARD_OFFSET = 8; // perpendicular distance from road center
+const SAFETY_GROUND_SIZE = 200; // wide invisible floor as fallback if car flies off
 const WALL_HEIGHT = 4;
-const WALL_THICKNESS = 1;
 const CAR_MASS = 1500;
 const FORWARD_IMPULSE = 50;
 const REVERSE_IMPULSE = 30;
@@ -92,54 +106,138 @@ export async function createRacetrackScene(
   // 2. Light
   new HemisphericLight('light', new Vector3(0, 1, 0), scene);
 
-  // 3. Track ground (200×200 unit plane, static box collider).
-  const ground = MeshBuilder.CreateGround(
-    'ground',
-    { width: TRACK_SIZE, height: TRACK_SIZE },
+  // 3. Safety ground — wide flat invisible-ish floor under the track.
+  // R-r4b: the road ribbon's MESH collider is the primary driving surface;
+  // this floor catches the car if it ever bounces over a barrier so it
+  // doesn't fall into the void. Sits 0.5 units below road level.
+  const safetyGround = MeshBuilder.CreateGround(
+    'safety-ground',
+    { width: SAFETY_GROUND_SIZE, height: SAFETY_GROUND_SIZE },
     scene,
   );
-  const groundMat = new StandardMaterial('groundMat', scene);
-  groundMat.diffuseColor = new Color3(0.25, 0.45, 0.25);
-  ground.material = groundMat;
-  new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
+  safetyGround.position = new Vector3(0, -0.5, 0);
+  const grassMat = new StandardMaterial('grassMat', scene);
+  grassMat.diffuseColor = new Color3(0.18, 0.32, 0.18);
+  safetyGround.material = grassMat;
+  new PhysicsAggregate(safetyGround, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
-  // 4. Four perimeter walls — mass:0 = static so the car bounces off them.
-  // Positioned with their inner face flush against the ±TRACK_SIZE/2 edges.
-  const half = TRACK_SIZE / 2;
-  const wallSpecs: Array<{
-    name: string;
-    size: { width: number; height: number; depth: number };
-    position: Vector3;
-  }> = [
-    {
-      name: 'wall-north',
-      size: { width: TRACK_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS },
-      position: new Vector3(0, WALL_HEIGHT / 2, half),
-    },
-    {
-      name: 'wall-south',
-      size: { width: TRACK_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS },
-      position: new Vector3(0, WALL_HEIGHT / 2, -half),
-    },
-    {
-      name: 'wall-east',
-      size: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: TRACK_SIZE },
-      position: new Vector3(half, WALL_HEIGHT / 2, 0),
-    },
-    {
-      name: 'wall-west',
-      size: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: TRACK_SIZE },
-      position: new Vector3(-half, WALL_HEIGHT / 2, 0),
-    },
+  // 4. Procedural oval (KTD-7): build control points, sample the
+  // Catmull-Rom curve, then extrude a road ribbon along it plus
+  // tangent-aligned barrier boxes on both sides.
+  const controlPoints = buildOvalControlPoints(
+    TRACK_WIDTH,
+    TRACK_LENGTH,
+    TRACK_CORNER_RADIUS,
+  );
+  const samples = sampleOvalCurve(controlPoints, TRACK_SAMPLES);
+
+  // Road ribbon: extrude a road-width line cross-section along the closed
+  // sample path. Closing the path: push samples[0] at the end so the
+  // ExtrudeShape wraps cleanly without a visible seam.
+  const roadProfile = [
+    new Vector3(-ROAD_WIDTH / 2, 0, 0),
+    new Vector3(ROAD_WIDTH / 2, 0, 0),
   ];
-  const wallMat = new StandardMaterial('wallMat', scene);
-  wallMat.diffuseColor = new Color3(0.6, 0.6, 0.65);
-  for (const spec of wallSpecs) {
-    const wall = MeshBuilder.CreateBox(spec.name, spec.size, scene);
-    wall.position.copyFrom(spec.position);
-    wall.material = wallMat;
-    new PhysicsAggregate(wall, PhysicsShapeType.BOX, { mass: 0 }, scene);
+  const closedPath = [...samples, samples[0]!];
+  const roadRibbon = MeshBuilder.ExtrudeShape(
+    'road-ribbon',
+    { shape: roadProfile, path: closedPath, sideOrientation: 2 /* DOUBLESIDE */ },
+    scene,
+  );
+  const asphaltMat = new StandardMaterial('asphaltMat', scene);
+  asphaltMat.diffuseColor = new Color3(0.18, 0.18, 0.2);
+  roadRibbon.material = asphaltMat;
+  // MESH collider for the road. R-r4b mitigation: if this judders against
+  // the car's BOX collider, the safety ground above still catches the car.
+  new PhysicsAggregate(roadRibbon, PhysicsShapeType.MESH, { mass: 0 }, scene);
+
+  // 5. Barrier walls — 24 outer + 24 inner, tangent-aligned. Replaces U6's
+  // 4 perimeter walls; gives the track visible rails on both sides.
+  const barrierMat = new StandardMaterial('barrierMat', scene);
+  barrierMat.diffuseColor = new Color3(0.7, 0.55, 0.25);
+  for (let i = 0; i < BARRIER_COUNT; i++) {
+    const sampleIdx = Math.floor((i * TRACK_SAMPLES) / BARRIER_COUNT);
+    const center = samples[sampleIdx]!;
+    const tangent = tangentAt(samples, sampleIdx);
+    // Perpendicular to tangent in the XZ plane (rotate 90° CW = outward
+    // for CCW-traversed curve).
+    const outwardX = tangent.z;
+    const outwardZ = -tangent.x;
+    const yaw = Math.atan2(tangent.x, tangent.z);
+
+    const placeBarrier = (
+      name: string,
+      offsetX: number,
+      offsetZ: number,
+    ): void => {
+      const box = MeshBuilder.CreateBox(
+        name,
+        { width: 1, height: WALL_HEIGHT, depth: 3 },
+        scene,
+      );
+      box.position = new Vector3(
+        center.x + offsetX,
+        WALL_HEIGHT / 2,
+        center.z + offsetZ,
+      );
+      box.rotation = new Vector3(0, yaw, 0);
+      box.material = barrierMat;
+      new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 0 }, scene);
+    };
+
+    placeBarrier(
+      `barrier-outer-${i}`,
+      outwardX * BARRIER_OUTWARD_OFFSET,
+      outwardZ * BARRIER_OUTWARD_OFFSET,
+    );
+    placeBarrier(
+      `barrier-inner-${i}`,
+      -outwardX * BARRIER_OUTWARD_OFFSET,
+      -outwardZ * BARRIER_OUTWARD_OFFSET,
+    );
   }
+
+  // 6. Start/finish line + checkpoint decals. Visual-only (no physics) —
+  // U3 wires the lap-detection trigger volumes separately.
+  const startFinish = MeshBuilder.CreatePlane(
+    'start-finish',
+    { width: ROAD_WIDTH, height: 2 },
+    scene,
+  );
+  const startSample = samples[0]!;
+  const startTangent = tangentAt(samples, 0);
+  startFinish.position = new Vector3(startSample.x, 0.02, startSample.z);
+  startFinish.rotation = new Vector3(
+    Math.PI / 2,
+    Math.atan2(startTangent.x, startTangent.z),
+    0,
+  );
+  const startMat = new StandardMaterial('startMat', scene);
+  startMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
+  startFinish.material = startMat;
+
+  const checkpointIdx = Math.floor(TRACK_SAMPLES / 2);
+  const checkpoint = MeshBuilder.CreatePlane(
+    'checkpoint',
+    { width: ROAD_WIDTH, height: 1 },
+    scene,
+  );
+  const checkpointSample = samples[checkpointIdx]!;
+  const checkpointTangent = tangentAt(samples, checkpointIdx);
+  checkpoint.position = new Vector3(
+    checkpointSample.x,
+    0.02,
+    checkpointSample.z,
+  );
+  checkpoint.rotation = new Vector3(
+    Math.PI / 2,
+    Math.atan2(checkpointTangent.x, checkpointTangent.z),
+    0,
+  );
+  const checkpointMat = new StandardMaterial('checkpointMat', scene);
+  checkpointMat.diffuseColor = new Color3(0.4, 0.6, 0.9);
+  checkpointMat.alpha = 0.6;
+  checkpoint.material = checkpointMat;
 
   // 5. Load car GLB from bytes. Wrap the Uint8Array in a Blob + object URL
   // so Babylon's loader (which expects a URL) can ingest it. .glb forces
@@ -168,7 +266,14 @@ export async function createRacetrackScene(
   // the mesh several nodes deep with arbitrary rotations).
   const carPivot = new TransformNode('car-pivot', scene);
   carGeometry.parent = carPivot;
-  carPivot.position = new Vector3(0, 1, 0);
+  // U2: spawn on the start/finish line, facing the curve tangent so the
+  // first W keypress drives along the track instead of sideways.
+  carPivot.position = new Vector3(startSample.x, 1, startSample.z);
+  carPivot.rotation = new Vector3(
+    0,
+    Math.atan2(startTangent.x, startTangent.z),
+    0,
+  );
   const carBody = new PhysicsAggregate(
     carPivot,
     PhysicsShapeType.BOX,
