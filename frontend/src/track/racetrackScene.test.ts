@@ -86,6 +86,7 @@ const M = vi.hoisted(() => {
         setAngularDamping: ReturnType<typeof vi.fn>;
         getAngularVelocity: ReturnType<typeof vi.fn>;
         setAngularVelocity: ReturnType<typeof vi.fn>;
+        setLinearVelocity: ReturnType<typeof vi.fn>;
       },
     },
   };
@@ -192,6 +193,7 @@ vi.mock('@babylonjs/core', () => {
       // by replacing the implementation via M.state.lastCarBody.
       getAngularVelocity: vi.fn(() => new M.Vec3Mock(0, 0, 0)),
       setAngularVelocity: vi.fn(),
+      setLinearVelocity: vi.fn(),
     };
     constructor(...args: unknown[]) {
       M.physicsAggregateCtor(...args);
@@ -298,6 +300,7 @@ afterEach(() => {
 
 // Import AFTER vi.mock so the SUT picks up the mocks.
 import { createRacetrackScene } from './racetrackScene';
+import type { LapState } from './lapState';
 
 function fakeCanvas(): HTMLCanvasElement {
   return {} as HTMLCanvasElement;
@@ -403,10 +406,11 @@ describe('createRacetrackScene', () => {
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
-    // Two onBeforeRender observers: chase-cam tracker + input dispatcher.
+    // Three onBeforeRender observers: [0] chase-cam follow, [1] keyboard
+    // input + throttle dispatch, [2] lap-state tick + trigger checks.
     expect(
       M.state.lastScene?.onBeforeRenderObservable.add,
-    ).toHaveBeenCalledTimes(2);
+    ).toHaveBeenCalledTimes(3);
     // One keyboard observer.
     expect(M.state.lastScene?.onKeyboardObservable.add).toHaveBeenCalledTimes(
       1,
@@ -562,5 +566,90 @@ describe('createRacetrackScene', () => {
     // Forward-left motion: forward impulse + CCW yaw, same tick.
     expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
     expect(M.state.lastCarBody?.setAngularVelocity).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── U3: lap state machine + trigger wiring ───
+
+  it('U3 — exposes a reset() method on the scene handles', async () => {
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    expect(typeof handles.reset).toBe('function');
+  });
+
+  it('U3 — does not fire onLapStateChange before any input (state still waiting)', async () => {
+    const onLapStateChange = vi.fn();
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    // No render tick yet (engine.runRenderLoop callback isn't invoked in
+    // the mock), no keyboard input. Initial state never emits — emit is
+    // transition-driven.
+    expect(onLapStateChange).not.toHaveBeenCalled();
+  });
+
+  it('U3 — first W keypress transitions to running and fires onLapStateChange', async () => {
+    const onLapStateChange = vi.fn();
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 'w' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+
+    // Reducer transitioned waiting → running on the throttle dispatch.
+    const firstRunningCall = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'running',
+    );
+    expect(firstRunningCall).toBeDefined();
+    expect((firstRunningCall![0] as LapState).startedAtMs).not.toBeNull();
+  });
+
+  it('U3/AE5 — reset() zeroes linear + angular velocity and dispatches reset to onLapStateChange', async () => {
+    const onLapStateChange = vi.fn();
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    // Get into the running state first so reset has a transition to fire.
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    inputTick();
+    onLapStateChange.mockClear();
+
+    handles.reset();
+
+    // Velocities zeroed before the reducer dispatch — guarantees the car
+    // is stationary on the next render frame after Retry.
+    expect(M.state.lastCarBody?.setLinearVelocity).toHaveBeenCalledTimes(1);
+    expect(M.state.lastCarBody?.setAngularVelocity).toHaveBeenCalledTimes(1);
+    const linArg = M.state.lastCarBody!.setLinearVelocity.mock.calls[0]![0] as {
+      x: number; y: number; z: number;
+    };
+    expect(linArg.x).toBe(0);
+    expect(linArg.y).toBe(0);
+    expect(linArg.z).toBe(0);
+    // State reset back to waiting.
+    const resetCall = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'waiting',
+    );
+    expect(resetCall).toBeDefined();
+    expect((resetCall![0] as LapState).startedAtMs).toBeNull();
   });
 });

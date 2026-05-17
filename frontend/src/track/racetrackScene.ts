@@ -46,18 +46,35 @@ import {
   sampleOvalCurve,
   tangentAt,
 } from './oval';
+import {
+  initialLapState,
+  lapReducer,
+  type LapAction,
+  type LapState,
+} from './lapState';
 
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
 export interface RacetrackSceneOptions {
   canvas: HTMLCanvasElement;
   carGlbBytes: Uint8Array;
+  /**
+   * U3 — invoked whenever the internal lap state machine transitions.
+   * TrackPage (U4) mirrors this into React state for the HUD overlay.
+   */
+  onLapStateChange?: (state: LapState) => void;
 }
 
 export interface RacetrackSceneHandles {
   engine: Engine;
   scene: Scene;
   dispose: () => void;
+  /**
+   * U3 — called by TrackPage's Retry handler (U4). Teleports the car back
+   * to the start line, zeroes velocity, and dispatches a reset action so
+   * the lap state machine returns to `waiting`.
+   */
+  reset: () => void;
 }
 
 // Tunables — kept as named constants so future polish (Phase 5) can tweak
@@ -75,6 +92,10 @@ const BARRIER_COUNT = 24;
 const BARRIER_OUTWARD_OFFSET = 8; // perpendicular distance from road center
 const SAFETY_GROUND_SIZE = 200; // wide invisible floor as fallback if car flies off
 const WALL_HEIGHT = 4;
+// U3 — trigger volume size. Generous enough that a fast car can't skip
+// through between frames, narrow enough that finishCrossed only fires when
+// the car is actually on the start/finish line.
+const TRIGGER_RADIUS = 8;
 const CAR_MASS = 1500;
 const FORWARD_IMPULSE = 50;
 const REVERSE_IMPULSE = 30;
@@ -315,6 +336,9 @@ export async function createRacetrackScene(
         forward.scale(FORWARD_IMPULSE),
         carPivot.absolutePosition,
       );
+      // U3 — first W (or arrow-up) press kicks the lap timer off.
+      // Reducer no-ops on subsequent throttle while already running.
+      dispatch({ type: 'throttle', nowMs: performance.now() });
     }
     if (keys.has('s') || keys.has('arrowdown')) {
       carBody.body.applyImpulse(
@@ -336,6 +360,68 @@ export async function createRacetrackScene(
     }
   });
 
+  // 8. U3 — lap state machine + per-frame trigger volume checks.
+  // KTD-4 fallback (R-r4/AA-3): distance-based plane-intersection rather
+  // than Havok trigger-volume observers. Cheaper to wire, deterministic,
+  // works the same downstream.
+  let lapState: LapState = initialLapState();
+  // Car spawns ON the start line, so flag start trigger as "inside" from
+  // the start — only fires when the car LEAVES and RE-ENTERS the zone.
+  let insideStartTrigger = true;
+  let insideCheckpointTrigger = false;
+
+  function dispatch(action: LapAction): void {
+    const next = lapReducer(lapState, action);
+    if (next !== lapState) {
+      lapState = next;
+      opts.onLapStateChange?.(lapState);
+    }
+  }
+
+  scene.onBeforeRenderObservable.add(() => {
+    const now = performance.now();
+    dispatch({ type: 'tick', nowMs: now });
+
+    const carPos = carPivot.position;
+    const dStart = Math.hypot(
+      carPos.x - startSample.x,
+      carPos.z - startSample.z,
+    );
+    const insideStartNow = dStart < TRIGGER_RADIUS;
+    if (insideStartNow && !insideStartTrigger) {
+      dispatch({ type: 'finishCrossed', nowMs: now });
+    }
+    insideStartTrigger = insideStartNow;
+
+    const dCheckpoint = Math.hypot(
+      carPos.x - checkpointSample.x,
+      carPos.z - checkpointSample.z,
+    );
+    const insideCheckpointNow = dCheckpoint < TRIGGER_RADIUS;
+    if (insideCheckpointNow && !insideCheckpointTrigger) {
+      dispatch({ type: 'checkpoint' });
+    }
+    insideCheckpointTrigger = insideCheckpointNow;
+  });
+
+  const reset = (): void => {
+    // Teleport car back to spawn + zero velocity. The PhysicsBody position
+    // tracks the pivot's transform, so reassigning carPivot.position is
+    // enough — no need to call body.setTransformPosition manually.
+    carPivot.position = new Vector3(startSample.x, 1, startSample.z);
+    carPivot.rotation = new Vector3(
+      0,
+      Math.atan2(startTangent.x, startTangent.z),
+      0,
+    );
+    carBody.body.setLinearVelocity(new Vector3(0, 0, 0));
+    carBody.body.setAngularVelocity(new Vector3(0, 0, 0));
+    // Re-arm trigger flags: car is back on the start line.
+    insideStartTrigger = true;
+    insideCheckpointTrigger = false;
+    dispatch({ type: 'reset' });
+  };
+
   engine.runRenderLoop(() => scene.render());
   const onResize = () => engine.resize();
   if (typeof window !== 'undefined') {
@@ -345,6 +431,7 @@ export async function createRacetrackScene(
   return {
     engine,
     scene,
+    reset,
     dispose: () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);
