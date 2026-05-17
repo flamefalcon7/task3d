@@ -52,7 +52,14 @@ export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
     let cancelled = false;
     (async () => {
       try {
-        const container = await LoadAssetContainerAsync(glbUrl, scene);
+        // D-006: GLB only. Babylon infers the loader plugin from the URL's
+        // file extension, but blob: / data: URLs have no extension — without
+        // an explicit pluginExtension, the load throws silently and we'd
+        // surface as an empty canvas. Set it unconditionally since we never
+        // load any other format.
+        const container = await LoadAssetContainerAsync(glbUrl, scene, {
+          pluginExtension: '.glb',
+        });
         if (cancelled) {
           container.dispose();
           return;

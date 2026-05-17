@@ -43,6 +43,10 @@ describe('PreviewCanvas', () => {
     render(<PreviewCanvas glbUrl="blob:http://localhost/abc" />);
     await Promise.resolve();
     await Promise.resolve();
-    expect(spy).toHaveBeenCalledWith('blob:http://localhost/abc', expect.anything());
+    expect(spy).toHaveBeenCalledWith(
+      'blob:http://localhost/abc',
+      expect.anything(),
+      { pluginExtension: '.glb' },
+    );
   });
 });
