@@ -64,8 +64,14 @@ export function BrowsePage() {
       >
         <h1 style={{ fontSize: 18, margin: 0 }}>overflow2026 — Browse</h1>
         <nav style={{ display: 'flex', gap: 16, fontSize: 14, alignItems: 'center' }}>
+          <Link to="/forge" style={{ color: '#ffb86b', textDecoration: 'none', fontWeight: 600 }}>
+            🔥 Forge Collection
+          </Link>
+          <Link to="/track" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
+            Racetrack →
+          </Link>
           <Link to="/generate" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
-            Create →
+            Single mint →
           </Link>
           <div style={{ minWidth: 200 }}>
             <SignInButton />
