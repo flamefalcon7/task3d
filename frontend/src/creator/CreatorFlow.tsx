@@ -24,8 +24,11 @@ interface LineageStub extends Partial<LineageRecord> {
 
 // Minimal Signer wrapper bridging dapp-kit's useSignTransaction mutation into
 // the @mysten/sui/cryptography Signer surface that @mysten/walrus expects.
-// Walrus only calls signer.toSuiAddress() + signer.signTransaction(tx) under
-// the hood; everything else stays in dapp-kit's normal wallet flow.
+// @mysten/walrus@1.1.7 client.mjs:1298 calls signer.signAndExecuteTransaction
+// ({ transaction, client }) inside executeRegister + executeCertify — without
+// that method, every Walrus upload throws "is not a function". The body
+// mirrors @mysten/sui core.mjs:121-134: sign via the wallet, then execute
+// against the SuiClient that Walrus passes in.
 function useDappKitSigner(address: string | null) {
   const { mutateAsync: signTx } = useSignTransaction();
   return useMemo(() => {
@@ -33,6 +36,20 @@ function useDappKitSigner(address: string | null) {
     return {
       toSuiAddress: () => address,
       signTransaction: async (tx: unknown) => signTx({ transaction: tx as never }),
+      signAndExecuteTransaction: async ({
+        transaction,
+        client,
+      }: {
+        transaction: unknown;
+        client: { core: { executeTransaction: (input: unknown) => Promise<unknown> } };
+      }) => {
+        const { bytes, signature } = await signTx({ transaction: transaction as never });
+        return client.core.executeTransaction({
+          transaction: bytes,
+          signatures: [signature],
+          include: { transaction: true, effects: true },
+        });
+      },
     } as never;
   }, [address, signTx]);
 }
@@ -68,16 +85,15 @@ export function CreatorFlow() {
     setGenError(null);
     setGenerating(true);
     try {
-      // Phase 2: prompt mode shares the procedural endpoint with slider mode;
-      // a free-form prompt is captured but the backend currently only routes
-      // when a shape param is also present. Prompt-only inputs surface a
-      // tripo_disabled error from the backend per DL-010.
-      const input: GenerateParams = (
-        mode === 'prompt' && !params
-          ? ({ shape: 'box', prompt } as unknown as GenerateParams)
-          : (params as GenerateParams)
-      );
-      const result = await generate(input);
+      // Post-D-023: prompt mode dispatches directly to Tripo via JWT-gated
+      // /api/generate. Send the prompt-only payload `{ prompt }`; slider mode
+      // sends the full procedural params. Caller passes session.jwt for the
+      // prompt branch — anonymous slider mode still works without it.
+      const promptMode = mode === 'prompt' && !params;
+      const input: GenerateParams = promptMode
+        ? ({ prompt } as unknown as GenerateParams)
+        : (params as GenerateParams);
+      const result = await generate(input, promptMode ? session?.jwt : undefined);
       setGlb(result.glbBytes);
       const blob = new Blob([result.glbBytes as BlobPart], {
         type: 'model/gltf-binary',

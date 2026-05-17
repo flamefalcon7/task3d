@@ -47,6 +47,8 @@ type Phase =
 
 // Reuse the dapp-kit → Signer bridge from CreatorFlow (kept inline rather than
 // extracted to avoid touching files outside frontend/src/forge/).
+// @mysten/walrus@1.1.7 calls signer.signAndExecuteTransaction internally —
+// see CreatorFlow.tsx for the full rationale.
 function useDappKitSigner(address: string | null) {
   const { mutateAsync: signTx } = useSignTransaction();
   return useMemo(() => {
@@ -54,6 +56,20 @@ function useDappKitSigner(address: string | null) {
     return {
       toSuiAddress: () => address,
       signTransaction: async (tx: unknown) => signTx({ transaction: tx as never }),
+      signAndExecuteTransaction: async ({
+        transaction,
+        client,
+      }: {
+        transaction: unknown;
+        client: { core: { executeTransaction: (input: unknown) => Promise<unknown> } };
+      }) => {
+        const { bytes, signature } = await signTx({ transaction: transaction as never });
+        return client.core.executeTransaction({
+          transaction: bytes,
+          signatures: [signature],
+          include: { transaction: true, effects: true },
+        });
+      },
     } as never;
   }, [address, signTx]);
 }
@@ -187,6 +203,25 @@ export function ForgePage() {
       setPhase('error');
     }
   }, [prompt, session]);
+
+  // Dev-only: load a pre-generated GLB from frontend/public/dev-glbs/ instead
+  // of burning Tripo credits. Lets us exercise the material-swap → Walrus
+  // quilt → Sui PTB path repeatedly while iterating. Hidden in prod builds
+  // (import.meta.env.DEV is false at build time → block tree-shakes away).
+  const onLoadDevGlb = useCallback(async (filename: string) => {
+    setErrorMsg(null);
+    setPhase('generating-base');
+    try {
+      const res = await fetch(`/dev-glbs/${filename}`);
+      if (!res.ok) throw new Error(`dev fixture HTTP ${res.status}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      setBaseGlb(bytes);
+      setPhase('editing-variants');
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setPhase('error');
+    }
+  }, []);
 
   const onMint = useCallback(async () => {
     if (!session || !signer || !baseGlb) return;
@@ -389,7 +424,7 @@ export function ForgePage() {
                 ? `Generating via Tripo… ${Math.floor(tripoElapsed / 1000)}s elapsed`
                 : !session
                 ? 'Sign in to generate'
-                : 'Generate base car'}
+                : 'Generate base model'}
             </button>
 
             {phase === 'generating-base' && (
@@ -437,6 +472,43 @@ export function ForgePage() {
                 data-testid="forge-error"
               >
                 {errorMsg}
+              </div>
+            )}
+
+            {import.meta.env.DEV && phase !== 'generating-base' && (
+              <div
+                data-testid="forge-dev-fixtures"
+                style={{
+                  marginTop: 16,
+                  padding: 10,
+                  border: '1px dashed #888',
+                  borderRadius: 6,
+                  background: '#fafafa',
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ marginBottom: 6, color: '#555' }}>
+                  <strong>Dev only</strong> — skip Tripo, load a pre-generated GLB
+                  from <code>frontend/public/dev-glbs/</code>. Use this to
+                  exercise the Walrus + Sui path without burning API credits.
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[
+                    { file: 'p1.glb', label: 'p1 (762 KB)' },
+                    { file: 'turbo-v1.glb', label: 'turbo-v1 (638 KB)' },
+                    { file: 'v1.4.glb', label: 'v1.4 (1.7 MB)' },
+                    { file: 'turbo-seg.glb', label: 'turbo-seg (5 MB)' },
+                  ].map((f) => (
+                    <button
+                      key={f.file}
+                      type="button"
+                      onClick={() => onLoadDevGlb(f.file)}
+                      data-testid={`forge-dev-fixture-${f.file}`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
