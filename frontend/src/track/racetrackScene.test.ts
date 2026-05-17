@@ -45,6 +45,7 @@ const M = vi.hoisted(() => {
     standardMaterialCtor: vi.fn(),
     color3Ctor: vi.fn(),
     loadAssetContainer: vi.fn(),
+    transformNodeCtor: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -65,9 +66,24 @@ const M = vi.hoisted(() => {
           absolutePosition: InstanceType<typeof Vec3Mock>;
           rotate: ReturnType<typeof vi.fn>;
           getDirection: ReturnType<typeof vi.fn>;
+          getTotalVertices: ReturnType<typeof vi.fn>;
+          parent: unknown;
         }>;
         addAllToScene: ReturnType<typeof vi.fn>;
         dispose: ReturnType<typeof vi.fn>;
+      },
+      lastTransformNode: null as null | {
+        name: string;
+        position: InstanceType<typeof Vec3Mock>;
+        absolutePosition: InstanceType<typeof Vec3Mock>;
+        getDirection: ReturnType<typeof vi.fn>;
+      },
+      lastCarBody: null as null | {
+        applyImpulse: ReturnType<typeof vi.fn>;
+        setLinearDamping: ReturnType<typeof vi.fn>;
+        setAngularDamping: ReturnType<typeof vi.fn>;
+        getAngularVelocity: ReturnType<typeof vi.fn>;
+        setAngularVelocity: ReturnType<typeof vi.fn>;
       },
     },
   };
@@ -150,21 +166,55 @@ vi.mock('@babylonjs/core', () => {
     },
   };
   class PhysicsAggregate {
-    body = { applyImpulse: vi.fn() };
+    body = {
+      applyImpulse: vi.fn(),
+      setLinearDamping: vi.fn(),
+      setAngularDamping: vi.fn(),
+      // Default mocked angular velocity: car at rest. Tests can override
+      // by replacing the implementation via M.state.lastCarBody.
+      getAngularVelocity: vi.fn(() => new M.Vec3Mock(0, 0, 0)),
+      setAngularVelocity: vi.fn(),
+    };
     constructor(...args: unknown[]) {
       M.physicsAggregateCtor(...args);
+      // Car aggregate is the LAST one constructed (after ground + walls).
+      // Capture every aggregate's body; the last write wins so post-create
+      // the captured body is the car's.
+      M.state.lastCarBody = this.body;
     }
   }
   const PhysicsShapeType = { BOX: 'BOX' as const };
   const KeyboardEventTypes = { KEYDOWN: 1 as const, KEYUP: 2 as const };
+  class TransformNode {
+    position = new M.Vec3Mock();
+    absolutePosition = new M.Vec3Mock();
+    getDirection = vi.fn(() => new M.Vec3Mock(0, 0, 1));
+    constructor(public name: string, _scene: unknown) {
+      M.transformNodeCtor(name, _scene);
+      M.state.lastTransformNode = this;
+    }
+  }
   const LoadAssetContainerAsync = (...args: unknown[]) => {
     M.loadAssetContainer(...args);
+    // Simulate the typical Tripo/Babylon shape: __root__ TransformNode-ish
+    // mesh at index 0 with 0 vertices, real geometry at index 1. KTD-2 says
+    // we must pick the vertex-bearing one.
     const meshes = [
       {
         position: new M.Vec3Mock(),
         absolutePosition: new M.Vec3Mock(),
         rotate: vi.fn(),
         getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
+        getTotalVertices: vi.fn(() => 0),
+        parent: null as unknown,
+      },
+      {
+        position: new M.Vec3Mock(),
+        absolutePosition: new M.Vec3Mock(),
+        rotate: vi.fn(),
+        getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
+        getTotalVertices: vi.fn(() => 1024),
+        parent: null as unknown,
       },
     ];
     const container = {
@@ -186,6 +236,7 @@ vi.mock('@babylonjs/core', () => {
     PhysicsAggregate,
     PhysicsShapeType,
     KeyboardEventTypes,
+    TransformNode,
     LoadAssetContainerAsync,
     Vector3: M.Vec3Mock,
   };
@@ -204,9 +255,12 @@ beforeEach(() => {
   M.standardMaterialCtor.mockClear();
   M.color3Ctor.mockClear();
   M.loadAssetContainer.mockClear();
+  M.transformNodeCtor.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
+  M.state.lastTransformNode = null;
+  M.state.lastCarBody = null;
 
   // jsdom 25 ships URL but tests need deterministic createObjectURL output.
   vi.stubGlobal(
@@ -318,5 +372,136 @@ describe('createRacetrackScene', () => {
     expect(M.state.lastCarContainer?.dispose).toHaveBeenCalled();
     expect(M.state.lastScene?.dispose).toHaveBeenCalled();
     expect(M.state.lastEngine?.dispose).toHaveBeenCalled();
+  });
+
+  // ─── U1: car physics fix (KTD-1, KTD-2) ───
+
+  it('U1/KTD-2 — picks the vertex-bearing mesh for physics, not __root__', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Mock GLB has meshes[0] (0 verts, root-like) + meshes[1] (1024 verts,
+    // geometry). The geometry mesh — not the root — must be parented to
+    // the pivot so the box collider wraps the geometry's bounds.
+    const rootMesh = M.state.lastCarContainer!.meshes[0]!;
+    const geometryMesh = M.state.lastCarContainer!.meshes[1]!;
+    expect(rootMesh.parent).toBeNull();
+    expect(geometryMesh.parent).toBe(M.state.lastTransformNode);
+  });
+
+  it('U1/KTD-2 — physics aggregate binds to the car pivot (TransformNode), not a mesh', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // 1 ground + 4 walls + 1 car = 6 aggregates; the car aggregate is the
+    // 6th (index 5). Its first arg must be the pivot we constructed.
+    expect(M.transformNodeCtor).toHaveBeenCalledWith('car-pivot', expect.anything());
+    const carAggregateArgs = M.physicsAggregateCtor.mock.calls[5]!;
+    expect(carAggregateArgs[0]).toBe(M.state.lastTransformNode);
+  });
+
+  it('U1/KTD-1 — sets linear + angular damping so the car coasts to a stop', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    expect(M.state.lastCarBody?.setLinearDamping).toHaveBeenCalledTimes(1);
+    expect(M.state.lastCarBody?.setAngularDamping).toHaveBeenCalledTimes(1);
+    // Damping factor must be > 0 (otherwise car slides/spins forever).
+    expect(M.state.lastCarBody!.setLinearDamping.mock.calls[0]![0]).toBeGreaterThan(0);
+    expect(M.state.lastCarBody!.setAngularDamping.mock.calls[0]![0]).toBeGreaterThan(0);
+  });
+
+  it('U1 — W keypress applies a forward impulse', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    // Two render observers: [0] chase-cam follow, [1] keyboard-driven input.
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 'w' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+  });
+
+  it('U1/KTD-1 — A keypress drives angular velocity Y (and never calls mesh.rotate)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 'a' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+
+    expect(M.state.lastCarBody?.setAngularVelocity).toHaveBeenCalledTimes(1);
+    // A = counter-clockwise around Y (negative).
+    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as {
+      x: number;
+      y: number;
+      z: number;
+    };
+    expect(angVelArg.y).toBeLessThan(0);
+    expect(angVelArg.x).toBe(0);
+    expect(angVelArg.z).toBe(0);
+    // KTD-1 regression guard: mesh.rotate must NEVER be invoked. mesh.rotate
+    // was the U6 root cause — it mutated the mesh transform while Havok kept
+    // its own angular velocity, so they diverged into runaway spin.
+    for (const mesh of M.state.lastCarContainer!.meshes) {
+      expect(mesh.rotate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('U1/KTD-1 — D keypress drives angular velocity Y in the opposite direction', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 'd' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+
+    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as {
+      y: number;
+    };
+    // D = clockwise around Y (positive).
+    expect(angVelArg.y).toBeGreaterThan(0);
+  });
+
+  it('U1 — W+A held simultaneously fires both impulse and angular velocity', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    keyboardObserver({ event: { key: 'a' }, type: 1 });
+    inputTick();
+
+    // Forward-left motion: forward impulse + CCW yaw, same tick.
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+    expect(M.state.lastCarBody?.setAngularVelocity).toHaveBeenCalledTimes(1);
   });
 });

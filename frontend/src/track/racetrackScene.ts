@@ -34,6 +34,7 @@ import {
   PhysicsShapeType,
   Scene,
   StandardMaterial,
+  TransformNode,
   Vector3,
 } from '@babylonjs/core';
 import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
@@ -63,7 +64,14 @@ const WALL_THICKNESS = 1;
 const CAR_MASS = 1500;
 const FORWARD_IMPULSE = 50;
 const REVERSE_IMPULSE = 30;
-const STEER_RATE = 0.03;
+// KTD-1: steer drives the body's Y angular velocity directly (rad/s when
+// keys held). Replaces U6's mesh.rotate(STEER_RATE) which fought Havok's
+// own angular velocity and accumulated runaway spin.
+const STEER_ANGULAR_VELOCITY = 2.2;
+// KTD-1: damping so the car coasts to a stop after key release instead of
+// sliding/spinning forever on a frictionless plane.
+const LINEAR_DAMPING = 0.2;
+const ANGULAR_DAMPING = 0.6;
 const CHASE_RADIUS = 15;
 
 export async function createRacetrackScene(
@@ -145,33 +153,50 @@ export async function createRacetrackScene(
   });
   URL.revokeObjectURL(blobUrl);
   carContainer.addAllToScene();
-  const car = carContainer.meshes[0]!;
-  car.position = new Vector3(0, 1, 0);
+  // KTD-2: `carContainer.meshes[0]` is typically Babylon's `__root__`
+  // TransformNode (0 vertices), so binding the PhysicsAggregate to it gives
+  // a degenerate bounding box and a useless box collider. Pick the first
+  // mesh that actually carries geometry. Falls back to meshes[0] only for
+  // single-mesh GLBs where the root IS the geometry.
+  const carGeometry =
+    carContainer.meshes.find(
+      (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
+    ) ?? carContainer.meshes[0]!;
+  // KTD-2: parent the geometry to a TransformNode we own and aggregate
+  // physics on the pivot, not the geometry. This isolates the physics
+  // body's transform from any GLB-internal hierarchy (Tripo outputs nest
+  // the mesh several nodes deep with arbitrary rotations).
+  const carPivot = new TransformNode('car-pivot', scene);
+  carGeometry.parent = carPivot;
+  carPivot.position = new Vector3(0, 1, 0);
   const carBody = new PhysicsAggregate(
-    car,
+    carPivot,
     PhysicsShapeType.BOX,
     { mass: CAR_MASS },
     scene,
   );
+  carBody.body.setLinearDamping(LINEAR_DAMPING);
+  carBody.body.setAngularDamping(ANGULAR_DAMPING);
 
-  // 6. Chase camera — ArcRotateCamera tracks car.position each frame. Not
+  // 6. Chase camera — ArcRotateCamera tracks the pivot each frame. Not
   // attaching control on purpose: we want WASD to drive, not orbit drag.
   const camera = new ArcRotateCamera(
     'chase',
     -Math.PI / 2,
     Math.PI / 3,
     CHASE_RADIUS,
-    car.position.clone(),
+    carPivot.position.clone(),
     scene,
   );
   scene.onBeforeRenderObservable.add(() => {
-    camera.target.copyFrom(car.position);
+    camera.target.copyFrom(carPivot.position);
   });
 
   // 7. WASD / arrow-key input. Accumulate held keys in a Set so multi-key
-  // (W+A = forward-left) works without state machine. Apply impulses each
-  // frame; steer by yaw-rotating the mesh (the body follows because the
-  // aggregate is bound to the mesh's transform node).
+  // (W+A = forward-left) works without state machine. Forward/reverse stay
+  // as impulses applied along the pivot's facing direction. Steer drives
+  // the body's Y angular velocity directly (KTD-1) — never mesh.rotate,
+  // which would fight Havok's own integration and accumulate spin.
   const keys = new Set<string>();
   scene.onKeyboardObservable.add((kbInfo) => {
     const k = kbInfo.event.key.toLowerCase();
@@ -179,24 +204,30 @@ export async function createRacetrackScene(
     else if (kbInfo.type === KeyboardEventTypes.KEYUP) keys.delete(k);
   });
   scene.onBeforeRenderObservable.add(() => {
-    const forward = car.getDirection(Vector3.Forward());
+    const forward = carPivot.getDirection(Vector3.Forward());
     if (keys.has('w') || keys.has('arrowup')) {
       carBody.body.applyImpulse(
         forward.scale(FORWARD_IMPULSE),
-        car.absolutePosition,
+        carPivot.absolutePosition,
       );
     }
     if (keys.has('s') || keys.has('arrowdown')) {
       carBody.body.applyImpulse(
         forward.scale(-REVERSE_IMPULSE),
-        car.absolutePosition,
+        carPivot.absolutePosition,
       );
     }
-    if (keys.has('a') || keys.has('arrowleft')) {
-      car.rotate(Vector3.Up(), -STEER_RATE);
-    }
-    if (keys.has('d') || keys.has('arrowright')) {
-      car.rotate(Vector3.Up(), STEER_RATE);
+    let steerInput = 0;
+    if (keys.has('a') || keys.has('arrowleft')) steerInput -= 1;
+    if (keys.has('d') || keys.has('arrowright')) steerInput += 1;
+    if (steerInput !== 0) {
+      // KTD-1: drive Y angular velocity directly. Held key = constant turn
+      // rate; release = angular damping decays the spin.
+      const angVel = carBody.body.getAngularVelocity();
+      angVel.x = 0;
+      angVel.z = 0;
+      angVel.y = steerInput * STEER_ANGULAR_VELOCITY;
+      carBody.body.setAngularVelocity(angVel);
     }
   });
 
