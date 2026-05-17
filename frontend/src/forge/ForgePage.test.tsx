@@ -185,6 +185,10 @@ describe('ForgePage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('forge-editor-stage')).toBeTruthy(),
     );
+    // Collection name is empty by default — type one so Mint enables.
+    fireEvent.change(screen.getByTestId('name-input'), {
+      target: { value: 'Test Series' },
+    });
 
     const btn = screen.getByTestId('forge-mint-button');
     // popup count is 3 regardless of N — copy says "(1 variants)" for default
@@ -236,7 +240,10 @@ describe('ForgePage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('forge-editor-stage')).toBeTruthy(),
     );
-    // Default collection name 'Neon Drift Series' → slug 'neon-drift-series'
+    // Collection name is empty by default — type one so Mint enables.
+    fireEvent.change(screen.getByTestId('name-input'), {
+      target: { value: 'Neon Drift Series' },
+    });
     await act(async () => {
       fireEvent.click(screen.getByTestId('forge-mint-button'));
     });

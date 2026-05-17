@@ -154,7 +154,7 @@ export function ForgePage() {
   const [phase, setPhase] = useState<Phase>('prompt');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
-  const [collectionName, setCollectionName] = useState('Neon Drift Series');
+  const [collectionName, setCollectionName] = useState('');
   const [baseGlb, setBaseGlb] = useState<Uint8Array | null>(null);
   const [variantGlbs, setVariantGlbs] = useState<Uint8Array[] | null>(null);
   // Snapshot of the editor state the current variantGlbs were built from.
