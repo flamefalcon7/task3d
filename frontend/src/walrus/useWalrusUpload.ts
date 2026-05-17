@@ -100,7 +100,12 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
         lastStage = 'awaiting-register';
         setStage(lastStage);
-        await flow.executeRegister({
+        // executeRegister returns a WriteBlobStepRegistered carrying the
+        // on-chain register tx digest. flow.upload() needs that digest
+        // (or a resume.blobObjectId) to bind the upload-relay write to
+        // the just-registered Blob — without it the SDK throws
+        // "Either resume.blobObjectId or upload digest must be provided".
+        const registerResult = await flow.executeRegister({
           signer,
           epochs: options.epochs ?? 10,
           deletable: false,
@@ -109,7 +114,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
         lastStage = 'relay-upload';
         setStage(lastStage);
-        await flow.upload({});
+        await flow.upload({ digest: registerResult.txDigest });
 
         lastStage = 'awaiting-certify';
         setStage(lastStage);
