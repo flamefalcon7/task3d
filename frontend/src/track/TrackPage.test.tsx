@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-// Phase 3 U6 — TrackPage shell tests. Mock everything Babylon-shaped so the
-// tests stay in jsdom: useOwnedVariants returns plain JS arrays;
-// createRacetrackScene is a vi.fn returning fake handles. Real-engine
-// behaviour is exercised in racetrackScene.test.ts via module-boundary
-// Babylon mocks.
+// Phase 3 U6 + Plan-004 U4 — TrackPage shell tests. Mock everything
+// Babylon-shaped so the tests stay in jsdom: useOwnedVariants returns plain
+// JS arrays; createRacetrackScene is a vi.fn returning fake handles.
+// Real-engine behaviour is exercised in racetrackScene.test.ts via
+// module-boundary Babylon mocks.
+//
+// U4 helpers: `installLiveScene()` lets tests grab the captured
+// onLapStateChange callback and drive lap-state transitions manually.
+
+import type { LapState } from './lapState';
 
 const useCurrentAccountMock = vi.fn();
 vi.mock('@mysten/dapp-kit', () => ({
@@ -54,6 +60,7 @@ beforeEach(() => {
   useCurrentAccountMock.mockReset();
   useOwnedVariantsMock.mockReset();
   createSceneMock.mockReset();
+  localStorage.clear();
   // Default: a connected wallet so the variants branches are reachable.
   useCurrentAccountMock.mockReturnValue({ address: '0xWALLET' });
   // Default scene mock — never resolves so the loading overlay sticks. Each
@@ -64,7 +71,35 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
+
+/**
+ * U4 — set up a scene mock that resolves immediately with fake handles and
+ * captures the `onLapStateChange` callback so tests can simulate the lap
+ * machine transitioning. Also returns a reset spy for retry-flow assertions.
+ */
+function installLiveScene() {
+  const captured: { onLapStateChange?: (s: LapState) => void } = {};
+  const resetSpy = vi.fn();
+  const disposeSpy = vi.fn();
+  createSceneMock.mockImplementation(async (opts: { onLapStateChange?: (s: LapState) => void }) => {
+    captured.onLapStateChange = opts.onLapStateChange;
+    return { engine: {}, scene: {}, reset: resetSpy, dispose: disposeSpy };
+  });
+  // Also wire fetch — the page tries to download the GLB before constructing
+  // the scene. Return an empty ArrayBuffer so it just succeeds.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+      }),
+    ),
+  );
+  return { captured, resetSpy, disposeSpy };
+}
 
 describe('TrackPage', () => {
   it('shows sign-in prompt when no wallet is connected', () => {
@@ -158,5 +193,173 @@ describe('TrackPage', () => {
         'data-selected',
       ),
     ).toBe('true');
+  });
+
+  // ─── U4: HUD overlay + PB persistence + result modal + retry ───
+
+  it('U4 — HUD shows lap timer and best PB (— when no PB stored)', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    installLiveScene();
+    renderPage();
+    const hudLap = await screen.findByTestId('track-hud-lap');
+    const hudBest = await screen.findByTestId('track-hud-best');
+    expect(hudLap.textContent).toMatch(/Lap: 0\.00s/);
+    expect(hudBest.textContent).toMatch(/Best: —/);
+  });
+
+  it('U4 — HUD pulls existing PB from localStorage on car-load', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    // Pre-seed a stored PB for this car.
+    localStorage.setItem('track-pb:0xa', '24310');
+    installLiveScene();
+    renderPage();
+    const hudBest = await screen.findByTestId('track-hud-best');
+    expect(hudBest.textContent).toMatch(/24\.31s/);
+  });
+
+  it('U4 — finishing a lap renders the ResultOverlay with the lap time', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    renderPage();
+    // Wait for the scene to mount + capture the callback.
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 1000,
+        currentLapMs: 24310,
+        finishedLapMs: 24310,
+        checkpointHit: true,
+      });
+    });
+    const overlay = await screen.findByTestId('track-result-overlay');
+    expect(overlay).toBeTruthy();
+    expect(screen.getByTestId('track-result-time').textContent).toMatch(/24\.31s/);
+    // New PB on the first lap.
+    expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
+    // PB written to storage.
+    expect(localStorage.getItem('track-pb:0xa')).toBe('24310');
+  });
+
+  it('U4/AE5 — Retry button calls scene.reset() and clears the overlay', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured, resetSpy } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 20000,
+        finishedLapMs: 20000,
+        checkpointHit: true,
+      });
+    });
+    await screen.findByTestId('track-result-overlay');
+
+    fireEvent.click(screen.getByTestId('track-retry-button'));
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+
+    // After scene.reset() the real scene would emit waiting state — simulate
+    // that emission to confirm the overlay clears.
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'waiting',
+        startedAtMs: null,
+        currentLapMs: 0,
+        finishedLapMs: null,
+        checkpointHit: false,
+      });
+    });
+    expect(screen.queryByTestId('track-result-overlay')).toBeNull();
+  });
+
+  it('U4/R13 — pressing R while finished triggers retry equivalently', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured, resetSpy } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 20000,
+        finishedLapMs: 20000,
+        checkpointHit: true,
+      });
+    });
+
+    fireEvent.keyDown(window, { key: 'r' });
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('U4 — improving on a stored PB writes the new value to localStorage', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    localStorage.setItem('track-pb:0xa', '25100');
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 23420,
+        finishedLapMs: 23420,
+        checkpointHit: true,
+      });
+    });
+    await screen.findByTestId('track-result-overlay');
+    // Improved from 25100 → 23420, so storage updates.
+    expect(localStorage.getItem('track-pb:0xa')).toBe('23420');
+    expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
+  });
+
+  it('U4 — slower than stored PB shows positive delta and keeps the old PB in storage', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    localStorage.setItem('track-pb:0xa', '25100');
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'finished',
+        startedAtMs: 0,
+        currentLapMs: 26500,
+        finishedLapMs: 26500,
+        checkpointHit: true,
+      });
+    });
+    await screen.findByTestId('track-result-overlay');
+    // Regression: storage stays at the old (better) PB.
+    expect(localStorage.getItem('track-pb:0xa')).toBe('25100');
+    expect(screen.getByTestId('track-result-delta').textContent).toMatch(/\+1\.40s/);
   });
 });
