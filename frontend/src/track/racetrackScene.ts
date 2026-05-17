@@ -120,7 +120,9 @@ const REVERSE_IMPULSE = 32;
 const MAX_FORWARD_SPEED = 18; // units/sec; ~25s lap at average ~6 u/s
 const MAX_REVERSE_SPEED = 8;
 // Steering: rad/s at full effectiveness. Scaled per-frame by speed factor.
-const STEER_ANGULAR_VELOCITY = 2.4;
+// 1.4 = about 1 full rotation per 4.5 seconds at top scale. Lower numbers
+// = smoother, more car-like turns; higher numbers = arcade-snappy / kart.
+const STEER_ANGULAR_VELOCITY = 1.4;
 // Speed (units/sec) at which steering reaches its full rate. Below this,
 // steering scales linearly from STEER_MIN_FACTOR up to 1.0.
 const STEER_FULL_SPEED = 6;
