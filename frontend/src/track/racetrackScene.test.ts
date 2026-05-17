@@ -133,11 +133,19 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class ArcRotateCamera {
+    alpha: number;
+    beta: number;
+    radius: number;
     target: InstanceType<typeof M.Vec3Mock>;
     constructor(...args: unknown[]) {
       M.arcRotateCameraCtor(...args);
-      // 5th positional arg is the initial target — capture it so the
-      // chase-cam test can assert that the camera follows the car.
+      // Positional args mirror the real constructor: (name, alpha, beta,
+      // radius, target, scene). Initializing alpha/beta/radius lets the
+      // chase-cam observer's `camera.alpha += delta * LERP` math run
+      // without NaN propagation if a test ever fires the observer.
+      this.alpha = (args[1] as number | undefined) ?? 0;
+      this.beta = (args[2] as number | undefined) ?? 0;
+      this.radius = (args[3] as number | undefined) ?? 0;
       this.target =
         (args[4] as InstanceType<typeof M.Vec3Mock> | undefined) ??
         new M.Vec3Mock();

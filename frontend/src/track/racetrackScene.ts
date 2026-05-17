@@ -139,6 +139,11 @@ const LINEAR_DAMPING = 0.05;
 // so the car doesn't keep spinning after key release.
 const ANGULAR_DAMPING = 0.85;
 const CHASE_RADIUS = 15;
+// Chase camera azimuth lerp rate. 0 = camera angle doesn't follow car
+// (locked to world axis — old behavior). 1 = camera snaps instantly behind
+// the car each frame (no lag, can feel jittery on hard turns). 0.08 gives
+// a ~120ms catch-up which feels like a classic racing-game chase cam.
+const CHASE_ALPHA_LERP = 0.08;
 // Yaw offset applied to the car geometry inside its physics pivot, in
 // radians. Different GLB sources export with different local forward axes
 // (Tripo, Sketchfab, manual exports all differ). Adjust per asset family:
@@ -364,7 +369,12 @@ export async function createRacetrackScene(
   // dynamic body — negligible — and makes mesh-driven teleports work.
   carBody.body.disablePreStep = false;
 
-  // 8. Chase camera — ArcRotateCamera tracks the pivot each frame. Not
+  // 8. Chase camera — ArcRotateCamera tracks the pivot each frame AND
+  // orbits to sit behind the car's facing direction. Without the alpha
+  // tracking, the camera stays at a world-fixed orbit angle and the WASD
+  // controls feel disconnected as the car turns away from the camera
+  // (W = "screen forward" only at the start). Now the camera follows the
+  // heading with a 120ms lag, classic racing-game chase-cam feel. Not
   // attaching control on purpose: we want WASD to drive, not orbit drag.
   const camera = new ArcRotateCamera(
     'chase',
@@ -376,6 +386,23 @@ export async function createRacetrackScene(
   );
   scene.onBeforeRenderObservable.add(() => {
     camera.target.copyFrom(carPivot.position);
+
+    // Compute the alpha that puts the camera directly behind the car.
+    // ArcRotateCamera alpha: when car forward = (sin θ, 0, cos θ), the
+    // "camera behind car" position requires alpha = -π/2 - θ (verified
+    // for θ = 0, π/2, π — gives -π/2, -π, π/2 respectively, all of which
+    // place the camera on the opposite side of the target from the car's
+    // facing direction).
+    const forward = carPivot.getDirection(Vector3.Forward());
+    const theta = Math.atan2(forward.x, forward.z);
+    const targetAlpha = -Math.PI / 2 - theta;
+
+    // Shortest-arc lerp so we never take the long way around when the
+    // current alpha and target are on opposite sides of the ±π wrap.
+    let delta = targetAlpha - camera.alpha;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    camera.alpha += delta * CHASE_ALPHA_LERP;
   });
 
   // 9. WASD / arrow-key input. Accumulate held keys in a Set so multi-key
