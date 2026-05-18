@@ -57,6 +57,7 @@ import {
   type LapAction,
   type LapState,
 } from './lapState';
+// Plan-006 U8 — cinematic intro: camera orbits while React countdown plays.
 import { createSkidMarks, type SkidMarks } from './skidMarks';
 import { createTireSmoke, type TireSmoke } from './tireSmoke';
 
@@ -70,6 +71,23 @@ export interface RacetrackSceneOptions {
    * TrackPage (U4) mirrors this into React state for the HUD overlay.
    */
   onLapStateChange?: (state: LapState) => void;
+  /**
+   * Plan-006 U8 — fired once when the intro camera orbit completes.
+   * TrackPage uses this to show the countdown overlay.
+   */
+  onOrbitComplete?: () => void;
+  /**
+   * Plan-006 U8 — fired when the player holds W/up-arrow for longer than
+   * INTRO_HOLD_W_SKIP_MS during the intro phase. TrackPage responds by
+   * dispatching introSkip (which TrackPage routes back via handles.dispatchIntroSkip).
+   */
+  onIntroSkipRequested?: () => void;
+  /**
+   * Test/dev convenience: when true, the scene mounts already in the
+   * `waiting` state — no orbit, no countdown wait, input is immediately
+   * enabled. Production paths leave this false.
+   */
+  skipIntro?: boolean;
 }
 
 export interface RacetrackSceneHandles {
@@ -82,6 +100,17 @@ export interface RacetrackSceneHandles {
    * the lap state machine returns to `waiting`.
    */
   reset: () => void;
+  /**
+   * Plan-006 U8 — TrackPage calls this when the countdown overlay's GO
+   * step finishes. Dispatches introComplete into the scene's reducer so
+   * input unblocks.
+   */
+  dispatchIntroComplete: () => void;
+  /**
+   * Plan-006 U8 — TrackPage calls this in response to onIntroSkipRequested.
+   * Dispatches introSkip into the scene's reducer.
+   */
+  dispatchIntroSkip: () => void;
 }
 
 // Tunables — kept as named constants so future polish (Phase 5) can tweak
@@ -258,6 +287,13 @@ const CHECKER_COLS = 4;
 const CHECKER_ROWS = 2;
 const CHECKER_LIGHT: [number, number, number] = [0.95, 0.95, 0.95];
 const CHECKER_DARK: [number, number, number] = [0.08, 0.08, 0.08];
+// Plan-006 U8 — intro orbit + countdown timing. Camera revolves once
+// around the car over INTRO_ORBIT_DURATION_MS; React countdown then plays
+// before input enables. Hold-W >INTRO_HOLD_W_SKIP_MS dispatches introSkip
+// (dev/agent shortcut). Pure lerp-per-frame in the chase observer keeps
+// the test mock surface flat — no Babylon Animation API to stub.
+const INTRO_ORBIT_DURATION_MS = 2000;
+const INTRO_HOLD_W_SKIP_MS = 200;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -625,8 +661,30 @@ export async function createRacetrackScene(
   renderPipeline.imageProcessing.toneMappingEnabled = true;
   renderPipeline.imageProcessing.toneMappingType = 1; // ImageProcessingConfiguration.TONEMAPPING_ACES
 
+  // Plan-006 U8 — intro orbit observer state. introOrbitDone fires the
+  // onOrbitComplete callback exactly once when the elapsed orbit time
+  // exceeds the configured duration. introOrbitStartAlpha snapshots the
+  // camera's initial alpha so the orbit rotates relative to the framing
+  // chosen at scene init (rather than a hardcoded baseline).
+  let introOrbitDone = opts.skipIntro === true;
+  const introOrbitStartAlpha = camera.alpha;
+
   scene.onBeforeRenderObservable.add(() => {
     camera.target.copyFrom(carPivot.position);
+
+    // Intro phase: orbit the camera once around the car, then notify TrackPage.
+    // During intro the chase-cam tracking is suspended — the car is
+    // stationary anyway (input gated below).
+    if (lapState.status === 'intro') {
+      const elapsed = performance.now() - introStartMs;
+      const progress = Math.min(elapsed / INTRO_ORBIT_DURATION_MS, 1);
+      camera.alpha = introOrbitStartAlpha + progress * Math.PI * 2;
+      if (progress >= 1 && !introOrbitDone) {
+        introOrbitDone = true;
+        opts.onOrbitComplete?.();
+      }
+      return;
+    }
 
     // Compute the alpha that puts the camera directly behind the car.
     // ArcRotateCamera alpha: when car forward = (sin θ, 0, cos θ), the
@@ -672,6 +730,12 @@ export async function createRacetrackScene(
   // W press clears both. S release clears both.
   let brakeHeldMs = 0;
   let reverseMode = false;
+  // Plan-006 U8 — hold-W detection during intro. Accumulates frame-delta
+  // ONLY while status === 'intro' AND the player holds W/up. Crossing
+  // INTRO_HOLD_W_SKIP_MS fires onIntroSkipRequested once; the flag
+  // introSkipRequested prevents repeated fires within the same hold.
+  let introWHeldMs = 0;
+  let introSkipRequested = false;
   scene.onKeyboardObservable.add((kbInfo) => {
     let k = kbInfo.event.key.toLowerCase();
     // Plan-005 U2: KeyboardEvent.key for the space bar is the literal ' '
@@ -683,6 +747,25 @@ export async function createRacetrackScene(
     else if (kbInfo.type === KeyboardEventTypes.KEYUP) keys.delete(k);
   });
   scene.onBeforeRenderObservable.add(() => {
+    // Plan-006 U8 — intro input gate. While the camera is orbiting and
+    // the countdown is playing, all driving actions are suppressed.
+    // Hold-W detection runs HERE (not in the keyboard observer) so we
+    // accumulate per-frame delta rather than wall-clock; matches the
+    // brake-state-machine posture documented in plan-005 code-review #2.
+    if (lapState.status === 'intro') {
+      if (keys.has('w') || keys.has('arrowup')) {
+        introWHeldMs += engine.getDeltaTime();
+        if (!introSkipRequested && introWHeldMs >= INTRO_HOLD_W_SKIP_MS) {
+          introSkipRequested = true;
+          opts.onIntroSkipRequested?.();
+        }
+      } else {
+        introWHeldMs = 0;
+        introSkipRequested = false;
+      }
+      return; // no driving impulses, no FOV pump, no grip — car is parked.
+    }
+
     const forward = carPivot.getDirection(Vector3.Forward());
     // "Right" axis = forward rotated 90° CW in XZ plane (Y up). Derived
     // inline so the mocked test surface doesn't need Vector3.Right() and
@@ -824,7 +907,13 @@ export async function createRacetrackScene(
   // KTD-4 fallback (R-r4/AA-3): distance-based plane-intersection rather
   // than Havok trigger-volume observers. Cheaper to wire, deterministic,
   // works the same downstream.
-  let lapState: LapState = initialLapState();
+  // Plan-006 U8: mount in `intro` state (or skip to `waiting` for tests
+  // that pass skipIntro). introStartedAtMs is set so the React layer can
+  // display elapsed time.
+  const introStartMs = performance.now();
+  let lapState: LapState = opts.skipIntro
+    ? lapReducer(initialLapState(introStartMs), { type: 'introComplete' })
+    : initialLapState(introStartMs);
   // Car spawns ON the start line, so flag start trigger as "inside" from
   // the start — only fires when the car LEAVES and RE-ENTERS the zone.
   let insideStartTrigger = true;
@@ -954,6 +1043,15 @@ export async function createRacetrackScene(
     engine,
     scene,
     reset,
+    // Plan-006 U8 — TrackPage dispatches these in response to the React
+    // countdown's onComplete and to onIntroSkipRequested. The scene owns
+    // the reducer; TrackPage is just relaying user/timer events into it.
+    dispatchIntroComplete: () => {
+      dispatch({ type: 'introComplete' });
+    },
+    dispatchIntroSkip: () => {
+      dispatch({ type: 'introSkip' });
+    },
     dispose: () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);

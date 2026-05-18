@@ -80,13 +80,34 @@ afterEach(() => {
  * machine transitioning. Also returns a reset spy for retry-flow assertions.
  */
 function installLiveScene() {
-  const captured: { onLapStateChange?: (s: LapState) => void } = {};
+  const captured: {
+    onLapStateChange?: (s: LapState) => void;
+    onOrbitComplete?: () => void;
+    onIntroSkipRequested?: () => void;
+  } = {};
   const resetSpy = vi.fn();
   const disposeSpy = vi.fn();
-  createSceneMock.mockImplementation(async (opts: { onLapStateChange?: (s: LapState) => void }) => {
-    captured.onLapStateChange = opts.onLapStateChange;
-    return { engine: {}, scene: {}, reset: resetSpy, dispose: disposeSpy };
-  });
+  const dispatchIntroCompleteSpy = vi.fn();
+  const dispatchIntroSkipSpy = vi.fn();
+  createSceneMock.mockImplementation(
+    async (opts: {
+      onLapStateChange?: (s: LapState) => void;
+      onOrbitComplete?: () => void;
+      onIntroSkipRequested?: () => void;
+    }) => {
+      captured.onLapStateChange = opts.onLapStateChange;
+      captured.onOrbitComplete = opts.onOrbitComplete;
+      captured.onIntroSkipRequested = opts.onIntroSkipRequested;
+      return {
+        engine: {},
+        scene: {},
+        reset: resetSpy,
+        dispose: disposeSpy,
+        dispatchIntroComplete: dispatchIntroCompleteSpy,
+        dispatchIntroSkip: dispatchIntroSkipSpy,
+      };
+    },
+  );
   // Also wire fetch — the page tries to download the GLB before constructing
   // the scene. Return an empty ArrayBuffer so it just succeeds.
   vi.stubGlobal(
@@ -98,7 +119,13 @@ function installLiveScene() {
       }),
     ),
   );
-  return { captured, resetSpy, disposeSpy };
+  return {
+    captured,
+    resetSpy,
+    disposeSpy,
+    dispatchIntroCompleteSpy,
+    dispatchIntroSkipSpy,
+  };
 }
 
 describe('TrackPage', () => {
@@ -242,6 +269,7 @@ describe('TrackPage', () => {
         currentLapMs: 24310,
         finishedLapMs: 24310,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     const overlay = await screen.findByTestId('track-result-overlay');
@@ -269,6 +297,7 @@ describe('TrackPage', () => {
         currentLapMs: 20000,
         finishedLapMs: 20000,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     await screen.findByTestId('track-result-overlay');
@@ -285,6 +314,7 @@ describe('TrackPage', () => {
         currentLapMs: 0,
         finishedLapMs: null,
         checkpointHit: false,
+        introStartedAtMs: null,
       });
     });
     expect(screen.queryByTestId('track-result-overlay')).toBeNull();
@@ -311,6 +341,7 @@ describe('TrackPage', () => {
         currentLapMs: 5000,
         finishedLapMs: null,
         checkpointHit: false,
+        introStartedAtMs: null,
       });
     });
     fireEvent.keyDown(window, { key: 'r' });
@@ -336,6 +367,7 @@ describe('TrackPage', () => {
         currentLapMs: 20000,
         finishedLapMs: 20000,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
 
@@ -367,6 +399,7 @@ describe('TrackPage', () => {
         currentLapMs: 20000,
         finishedLapMs: 20000,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
 
@@ -391,6 +424,7 @@ describe('TrackPage', () => {
         currentLapMs: 23420,
         finishedLapMs: 23420,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     await screen.findByTestId('track-result-overlay');
@@ -425,6 +459,7 @@ describe('TrackPage', () => {
         currentLapMs: 24000,
         finishedLapMs: 24000,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     expect(screen.queryByTestId('track-result-overlay')).toBeTruthy();
@@ -468,6 +503,7 @@ describe('TrackPage', () => {
         currentLapMs: 21000,
         finishedLapMs: 21000,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     // PB written under car B's key only; car A's slot stays empty.
@@ -492,11 +528,85 @@ describe('TrackPage', () => {
         currentLapMs: 26500,
         finishedLapMs: 26500,
         checkpointHit: true,
+        introStartedAtMs: null,
       });
     });
     await screen.findByTestId('track-result-overlay');
     // Regression: storage stays at the old (better) PB.
     expect(localStorage.getItem('track-pb:0xa')).toBe('25100');
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/\+1\.40s/);
+  });
+
+  // ─── Plan-006 U8: intro orbit + countdown flow ───
+
+  it('U8 — countdown overlay does NOT mount before the camera orbit completes', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    renderPage();
+    // Initial state is intro (from initialLapState()), but orbitDone is
+    // false until the scene fires onOrbitComplete. Overlay must stay hidden.
+    await waitFor(() => expect(captured.onOrbitComplete).toBeDefined());
+    expect(screen.queryByTestId('countdown-overlay')).toBeNull();
+  });
+
+  it('U8 — scene firing onOrbitComplete mounts the countdown overlay', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onOrbitComplete).toBeDefined());
+    act(() => {
+      captured.onOrbitComplete!();
+    });
+    expect(screen.getByTestId('countdown-overlay')).toBeTruthy();
+  });
+
+  it('U8 — onIntroSkipRequested routes through scene.dispatchIntroSkip', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured, dispatchIntroSkipSpy } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onIntroSkipRequested).toBeDefined());
+    act(() => {
+      captured.onIntroSkipRequested!();
+    });
+    expect(dispatchIntroSkipSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('U8 — countdown overlay unmounts once lapState transitions to waiting', async () => {
+    useOwnedVariantsMock.mockReturnValue({
+      variants: [variant({ objectId: '0xa' })],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    renderPage();
+    await waitFor(() => expect(captured.onOrbitComplete).toBeDefined());
+    act(() => captured.onOrbitComplete!());
+    expect(screen.getByTestId('countdown-overlay')).toBeTruthy();
+    // Scene dispatches introComplete (e.g., countdown's GO → onComplete),
+    // which transitions lapState to waiting. The overlay's gate
+    // (`lapState.status === 'intro'`) flips false and it unmounts.
+    act(() => {
+      captured.onLapStateChange!({
+        status: 'waiting',
+        startedAtMs: null,
+        currentLapMs: 0,
+        finishedLapMs: null,
+        checkpointHit: false,
+        introStartedAtMs: null,
+      });
+    });
+    expect(screen.queryByTestId('countdown-overlay')).toBeNull();
   });
 });

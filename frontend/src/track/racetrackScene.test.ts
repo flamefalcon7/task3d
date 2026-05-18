@@ -434,7 +434,7 @@ function fakeGlb(): Uint8Array {
 describe('createRacetrackScene', () => {
   it('constructs an Engine with the provided canvas', async () => {
     const canvas = fakeCanvas();
-    await createRacetrackScene({ canvas, carGlbBytes: fakeGlb() });
+    await createRacetrackScene({ canvas, carGlbBytes: fakeGlb(), skipIntro: true });
     expect(M.engineCtor).toHaveBeenCalledTimes(1);
     expect(M.engineCtor.mock.calls[0]![0]).toBe(canvas);
   });
@@ -443,6 +443,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(M.havokFactory).toHaveBeenCalledTimes(1);
     expect(M.havokPluginCtor).toHaveBeenCalledTimes(1);
@@ -455,6 +456,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Safety ground (R-r4b fallback floor) — 1 CreateGround call.
     expect(M.meshBuilderCreateGround).toHaveBeenCalledTimes(1);
@@ -482,6 +484,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Ribbon is the 2nd aggregate (index 1): safety ground at 0, ribbon at 1.
     const ribbonAggregateArgs = M.physicsAggregateCtor.mock.calls[1]!;
@@ -492,6 +495,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Plan-006 U6 replaced the single white start-finish plane with a 4×2
     // checker grid (8 cells), so plane creates are now 8 checker + 1
@@ -509,6 +513,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // With the default TRACK config (35×50, r=10), samples[0] sits on the
     // east straight at x≈17.5. The pivot must be raised to Y=1 so the
@@ -521,6 +526,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(M.loadAssetContainer).toHaveBeenCalledTimes(1);
     expect(M.loadAssetContainer.mock.calls[0]![0]).toBe('blob:mock');
@@ -536,6 +542,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Three onBeforeRender observers: [0] chase-cam follow, [1] keyboard
     // input + throttle dispatch, [2] lap-state tick + trigger checks.
@@ -552,6 +559,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(M.state.lastEngine?.runRenderLoop).toHaveBeenCalledTimes(1);
   });
@@ -560,6 +568,7 @@ describe('createRacetrackScene', () => {
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     handles.dispose();
     expect(M.state.lastCarContainer?.dispose).toHaveBeenCalled();
@@ -573,6 +582,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Mock GLB has meshes[0] (0 verts, root-like) + meshes[1] (1024 verts,
     // geometry). The geometry mesh — not the root — must be parented to
@@ -587,6 +597,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Car aggregate is the LAST one constructed (after safety ground +
     // road ribbon + 48 barriers). Its first arg must be the pivot.
@@ -600,6 +611,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(M.state.lastCarBody?.setLinearDamping).toHaveBeenCalledTimes(1);
     expect(M.state.lastCarBody?.setAngularDamping).toHaveBeenCalledTimes(1);
@@ -612,6 +624,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -634,6 +647,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -666,6 +680,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -687,6 +702,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -709,6 +725,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Simulate the car moving forward at 12 u/s (in the +Z direction; the
     // mock forward vector from getDirection() is (0, 0, 1)).
@@ -738,6 +755,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 15));
     const renderCallbacks =
@@ -763,6 +781,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
     const renderCallbacks =
@@ -799,6 +818,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
     const renderCallbacks =
@@ -818,6 +838,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
     const renderCallbacks =
@@ -842,6 +863,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
     const renderCallbacks =
@@ -885,7 +907,7 @@ describe('createRacetrackScene', () => {
       },
       removeEventListener: () => undefined,
     } as unknown as HTMLCanvasElement;
-    await createRacetrackScene({ canvas, carGlbBytes: fakeGlb() });
+    await createRacetrackScene({ canvas, carGlbBytes: fakeGlb(), skipIntro: true });
     expect(blurHandlers).toHaveLength(1);
 
     const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
@@ -920,6 +942,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Set speed so handbrake will engage on the per-frame tick.
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
@@ -956,6 +979,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
     const renderCallbacks =
@@ -987,6 +1011,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
     const renderCallbacks =
@@ -1011,6 +1036,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Mock velocity (0,0,12): forwardSpeed=12, lateralSpeed=0 (rightX=1
     // gives velocity.x*rightX = 0*1 = 0). Lateral-grip branch gates on
@@ -1040,6 +1066,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     // Set velocity (5, 0, 12): forwardSpeed=12 (above HANDBRAKE_MIN_SPEED),
     // lateralSpeed = velocity.x * rightX + velocity.z * rightZ = 5*1 + 12*0 = 5.
@@ -1085,6 +1112,7 @@ describe('createRacetrackScene', () => {
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(typeof handles.reset).toBe('function');
   });
@@ -1095,6 +1123,7 @@ describe('createRacetrackScene', () => {
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
       onLapStateChange,
+    skipIntro: true,
     });
     // No render tick yet (engine.runRenderLoop callback isn't invoked in
     // the mock), no keyboard input. Initial state never emits — emit is
@@ -1104,10 +1133,13 @@ describe('createRacetrackScene', () => {
 
   it('U3 — first W keypress transitions to running and fires onLapStateChange', async () => {
     const onLapStateChange = vi.fn();
+    // Plan-006 U8 — skip the cinematic intro for this race-input test.
+    // Intro gating is covered by separate plan-006 U8 tests below.
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
       onLapStateChange,
+      skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -1128,10 +1160,12 @@ describe('createRacetrackScene', () => {
 
   it('U3/AE5 — reset() zeroes linear + angular velocity and dispatches reset to onLapStateChange', async () => {
     const onLapStateChange = vi.fn();
+    // skipIntro: this test exercises the racing → retry path, not the intro flow.
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
       onLapStateChange,
+      skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -1175,6 +1209,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     expect(skidMarksSpy.ctor).toHaveBeenCalledTimes(1);
     const [scene, threshold] = skidMarksSpy.ctor.mock.calls[0]!;
@@ -1186,6 +1221,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -1205,6 +1241,7 @@ describe('createRacetrackScene', () => {
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     skidMarksSpy.reset.mockClear();
     handles.reset();
@@ -1221,6 +1258,7 @@ describe('createRacetrackScene', () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(5, 0, 0));
     const renderCallbacks =
@@ -1237,9 +1275,117 @@ describe('createRacetrackScene', () => {
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
+    skipIntro: true,
     });
     skidMarksSpy.dispose.mockClear();
     handles.dispose();
     expect(skidMarksSpy.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Plan-006 U8: intro orbit + countdown wiring ───
+
+  it('Plan-006 U8 — mounts in `intro` state by default (no skipIntro)', async () => {
+    const onLapStateChange = vi.fn();
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    // Initial state is not emitted, but the scene's reducer is intro.
+    // Verify by pressing W and confirming it doesn't transition to running:
+    // the input gate suppresses driving actions during intro.
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+    keyboardObserver({ event: { key: 'w' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+    const ranToRunning = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'running',
+    );
+    expect(ranToRunning).toBeUndefined();
+  });
+
+  it('Plan-006 U8 — handles.dispatchIntroComplete transitions intro → waiting', async () => {
+    const onLapStateChange = vi.fn();
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    handles.dispatchIntroComplete();
+    const waitingCall = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'waiting',
+    );
+    expect(waitingCall).toBeDefined();
+    // Same transition flips the input gate — pressing W after intro
+    // completion now starts the lap timer.
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    inputTick();
+    const ranToRunning = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'running',
+    );
+    expect(ranToRunning).toBeDefined();
+  });
+
+  it('Plan-006 U8 — handles.dispatchIntroSkip transitions intro → waiting', async () => {
+    const onLapStateChange = vi.fn();
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onLapStateChange,
+    });
+    handles.dispatchIntroSkip();
+    const waitingCall = onLapStateChange.mock.calls.find(
+      ([s]) => (s as LapState).status === 'waiting',
+    );
+    expect(waitingCall).toBeDefined();
+  });
+
+  it('Plan-006 U8 — holding W during intro fires onIntroSkipRequested once after ~200ms', async () => {
+    const onIntroSkipRequested = vi.fn();
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onIntroSkipRequested,
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+    keyboardObserver({ event: { key: 'w' }, type: 1 /* KEYDOWN */ });
+    // Engine default delta is 16.67ms; 13 ticks = 216.7ms > 200ms threshold.
+    for (let i = 0; i < 13; i++) inputTick();
+    expect(onIntroSkipRequested).toHaveBeenCalledTimes(1);
+    // Continuing to hold W does NOT re-fire the callback; it's edge-triggered
+    // on threshold crossing.
+    for (let i = 0; i < 10; i++) inputTick();
+    expect(onIntroSkipRequested).toHaveBeenCalledTimes(1);
+  });
+
+  it('Plan-006 U8 — brief W tap during intro (< 200ms) does NOT fire onIntroSkipRequested', async () => {
+    const onIntroSkipRequested = vi.fn();
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      onIntroSkipRequested,
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    for (let i = 0; i < 5; i++) inputTick(); // ~83ms held
+    keyboardObserver({ event: { key: 'w' }, type: 2 /* KEYUP */ });
+    inputTick();
+    expect(onIntroSkipRequested).not.toHaveBeenCalled();
   });
 });
