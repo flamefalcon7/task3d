@@ -119,6 +119,13 @@ const FORWARD_IMPULSE = 60;
 const REVERSE_IMPULSE = 32;
 const MAX_FORWARD_SPEED = 18; // units/sec; ~25s lap at average ~6 u/s
 const MAX_REVERSE_SPEED = 8;
+// Plan-005 U1: brake state machine. S held while moving forward applies a
+// velocity-proportional brake force (mirrors lateral-grip pattern); after
+// the car comes to a near-stop, holding S for BRAKE_TO_REVERSE_HOLD_MS
+// switches into reverse mode. W cancels brake/reverse state.
+const BRAKE_FORCE = 0.04; // dimensionless multiplier — start here, tune in-browser
+const BRAKE_REVERSE_SPEED_THRESHOLD = 0.5; // |forwardSpeed| u/s at which brake hands off to reverse-prep timer
+const BRAKE_TO_REVERSE_HOLD_MS = 200; // S must be held this long below speed threshold before reverse engages
 // Steering: rad/s at full effectiveness. Scaled per-frame by speed factor.
 // 1.4 = about 1 full rotation per 4.5 seconds at top scale. Lower numbers
 // = smoother, more car-like turns; higher numbers = arcade-snappy / kart.
@@ -420,6 +427,12 @@ export async function createRacetrackScene(
   // so the canvas can receive keyboard events without requiring the user
   // (or test agent) to click it first.
   const keys = new Set<string>();
+  // Plan-005 U1: brake state machine closure state. brakeHoldStartMs arms
+  // when the car is near-stopped AND S is held; after BRAKE_TO_REVERSE_HOLD_MS
+  // elapses, reverseMode flips and S applies reverse impulse. W press clears
+  // both. S release clears both.
+  let brakeHoldStartMs: number | null = null;
+  let reverseMode = false;
   scene.onKeyboardObservable.add((kbInfo) => {
     const k = kbInfo.event.key.toLowerCase();
     if (kbInfo.type === KeyboardEventTypes.KEYDOWN) keys.add(k);
@@ -440,7 +453,9 @@ export async function createRacetrackScene(
     const lateralSpeed = velocity.x * rightX + velocity.z * rightZ;
 
     // Throttle — impulse tapers to zero as we approach MAX_FORWARD_SPEED.
-    // Smooth top-speed cap; no hard clamp needed.
+    // Smooth top-speed cap; no hard clamp needed. Pressing W also cancels
+    // any active brake-reverse state machine (R4 — pressing W exits both
+    // reverse-prep and reverse mode instantly).
     if (keys.has('w') || keys.has('arrowup')) {
       const throttleScale = Math.max(0, 1 - Math.max(0, forwardSpeed) / MAX_FORWARD_SPEED);
       if (throttleScale > 0) {
@@ -449,20 +464,56 @@ export async function createRacetrackScene(
           carPivot.absolutePosition,
         );
       }
+      brakeHoldStartMs = null;
+      reverseMode = false;
       // U3 — first W (or arrow-up) press kicks the lap timer off.
       // Reducer no-ops on subsequent throttle while already running.
       dispatch({ type: 'throttle', nowMs: performance.now() });
     }
 
-    // Reverse — same tapered cap against MAX_REVERSE_SPEED.
+    // Brake / reverse state machine (Plan-005 U1).
+    // Branch A: still moving forward → velocity-proportional brake force.
+    // Branch B: near-zero speed AND timer not yet armed → arm it.
+    // Branch C: near-zero speed AND timer armed AND elapsed → flip reverseMode.
+    // (The three branches are mutually exclusive via if/else-if so the timer
+    // can't be both armed and consumed on the same tick — see plan KTD-1.)
+    // If reverseMode is true, apply reverse impulse (tapered cap, same shape
+    // as the prior reverse handler).
+    // S released → clear both bits of state.
     if (keys.has('s') || keys.has('arrowdown')) {
-      const reverseScale = Math.max(0, 1 - Math.max(0, -forwardSpeed) / MAX_REVERSE_SPEED);
-      if (reverseScale > 0) {
+      if (forwardSpeed > BRAKE_REVERSE_SPEED_THRESHOLD) {
+        // Velocity-proportional brake, mirrors lateral-grip pattern below.
+        // Asymptotically decelerates → no overshoot possible.
+        const brakeMag = forwardSpeed * BRAKE_FORCE * CAR_MASS;
         carBody.body.applyImpulse(
-          forward.scale(-REVERSE_IMPULSE * reverseScale),
+          forward.scale(-brakeMag),
           carPivot.absolutePosition,
         );
+        brakeHoldStartMs = null;
+        reverseMode = false;
+      } else if (brakeHoldStartMs === null) {
+        brakeHoldStartMs = performance.now();
+      } else if (
+        !reverseMode &&
+        performance.now() - brakeHoldStartMs > BRAKE_TO_REVERSE_HOLD_MS
+      ) {
+        reverseMode = true;
       }
+      if (reverseMode) {
+        const reverseScale = Math.max(
+          0,
+          1 - Math.max(0, -forwardSpeed) / MAX_REVERSE_SPEED,
+        );
+        if (reverseScale > 0) {
+          carBody.body.applyImpulse(
+            forward.scale(-REVERSE_IMPULSE * reverseScale),
+            carPivot.absolutePosition,
+          );
+        }
+      }
+    } else {
+      brakeHoldStartMs = null;
+      reverseMode = false;
     }
 
     // Steering — yaw rate scales with current speed. STEER_MIN_FACTOR

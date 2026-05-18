@@ -589,6 +589,150 @@ describe('createRacetrackScene', () => {
     expect(M.state.lastCarBody?.setAngularVelocity).toHaveBeenCalledTimes(1);
   });
 
+  // ─── Plan-005 U1: brake state machine ───
+
+  it('Plan-005 U1/AE1 — S held at forward speed applies brake (no reverse impulse interleaved)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Simulate the car moving forward at 12 u/s (in the +Z direction; the
+    // mock forward vector from getDirection() is (0, 0, 1)).
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 's' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+    inputTick();
+    inputTick();
+
+    // 3 ticks of brake force, no reverse impulse (still moving forward).
+    // Brake impulse is along -forward (negative Z), so impulse.z < 0 each call.
+    const applyImpulseCalls = M.state.lastCarBody!.applyImpulse.mock.calls;
+    expect(applyImpulseCalls.length).toBe(3);
+    for (const call of applyImpulseCalls) {
+      const impulse = call[0] as { z: number };
+      expect(impulse.z).toBeLessThan(0); // opposing the +Z forward motion
+    }
+  });
+
+  it('Plan-005 U1/AE2 — S tap at high forward speed does NOT enter reverse mode', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 15));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    inputTick();
+    keyboardObserver({ event: { key: 's' }, type: 2 /* KEYUP */ });
+    // Even if we keep ticking, reverse mode must NOT have engaged — the brake
+    // timer never armed because forward speed was always above the threshold.
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    M.state.lastCarBody!.applyImpulse.mockClear();
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    inputTick(); // arms the brake timer (speed is 0 now)
+    // No reverse impulse should fire on this tick — timer just armed.
+    expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
+  });
+
+  it('Plan-005 U1 — S held at zero speed for > 200ms switches to reverse impulse', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    // Mock performance.now() so we can fast-forward through the 200ms hold.
+    const nowSpy = vi.spyOn(performance, 'now');
+    nowSpy.mockReturnValue(0);
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    inputTick(); // arms timer at t=0
+    expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
+
+    nowSpy.mockReturnValue(250); // 250ms later — past the 200ms threshold
+    inputTick(); // reverseMode flips true AND reverse impulse fires
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+    // Reverse impulse = forward.scale(-REVERSE_IMPULSE). Mock forward is
+    // (0, 0, 1), so reverse impulse is (0, 0, -32) — opposite to facing.
+    const impulse = M.state.lastCarBody!.applyImpulse.mock.calls[0]![0] as { z: number };
+    expect(impulse.z).toBeLessThan(0);
+    nowSpy.mockRestore();
+  });
+
+  it('Plan-005 U1 — releasing S exits reverse mode immediately', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    const nowSpy = vi.spyOn(performance, 'now');
+    nowSpy.mockReturnValue(0);
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    inputTick();
+    nowSpy.mockReturnValue(250);
+    inputTick(); // reverseMode true; reverse impulse fires
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+
+    // Release S
+    keyboardObserver({ event: { key: 's' }, type: 2 /* KEYUP */ });
+    M.state.lastCarBody!.applyImpulse.mockClear();
+    inputTick();
+    expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
+  it('Plan-005 U1 — pressing W while in reverse mode cancels reverse', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    const nowSpy = vi.spyOn(performance, 'now');
+    nowSpy.mockReturnValue(0);
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    inputTick();
+    nowSpy.mockReturnValue(250);
+    inputTick(); // reverseMode true
+
+    // Press W (without releasing S)
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    M.state.lastCarBody!.applyImpulse.mockClear();
+    inputTick();
+    // Only ONE impulse should fire: the forward throttle. NOT the reverse
+    // impulse from the still-held S (because W press reset reverseMode).
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+    const impulse = M.state.lastCarBody!.applyImpulse.mock.calls[0]![0] as { z: number };
+    expect(impulse.z).toBeGreaterThan(0); // forward direction
+    nowSpy.mockRestore();
+  });
+
   // ─── U3: lap state machine + trigger wiring ───
 
   it('U3 — exposes a reset() method on the scene handles', async () => {
