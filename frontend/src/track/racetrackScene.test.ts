@@ -53,6 +53,7 @@ const M = vi.hoisted(() => {
         runRenderLoop: ReturnType<typeof vi.fn>;
         resize: ReturnType<typeof vi.fn>;
         dispose: ReturnType<typeof vi.fn>;
+        getDeltaTime: ReturnType<typeof vi.fn>;
       },
       lastScene: null as null | {
         clearColor: { set: ReturnType<typeof vi.fn> };
@@ -133,6 +134,10 @@ vi.mock('@babylonjs/core', () => {
     runRenderLoop = vi.fn();
     resize = vi.fn();
     dispose = vi.fn();
+    // Default 16.67ms frame delta (60fps). Tests can override via
+    // M.state.lastEngine.getDeltaTime.mockReturnValue(...) to drive the
+    // brake-to-reverse frame-delta accumulator.
+    getDeltaTime = vi.fn(() => 16.67);
     constructor(...args: unknown[]) {
       M.engineCtor(...args);
       M.state.lastEngine = this;
@@ -343,10 +348,14 @@ import type { LapState } from './lapState';
 
 function fakeCanvas(): HTMLCanvasElement {
   // Provide just enough HTMLCanvasElement surface for the scene init path.
-  // The scene focuses the canvas to enable keyboard input (Plan-004 fix #19).
+  // - tabIndex / focus: plan-004 fix #19 (canvas focusable so WASD works)
+  // - addEventListener / removeEventListener: plan-005 code-review #1
+  //   (blur handler clears keys Set on focus loss)
   return {
     tabIndex: 0,
     focus: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
   } as unknown as HTMLCanvasElement;
 }
 
@@ -672,7 +681,7 @@ describe('createRacetrackScene', () => {
     expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
   });
 
-  it('Plan-005 U1 — S held at zero speed for > 200ms switches to reverse impulse', async () => {
+  it('Plan-005 U1 — S held at zero speed for > 200ms switches to reverse impulse (frame-delta accumulator)', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
@@ -684,21 +693,47 @@ describe('createRacetrackScene', () => {
     const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
       .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
 
-    // Mock performance.now() so we can fast-forward through the 200ms hold.
-    const nowSpy = vi.spyOn(performance, 'now');
-    nowSpy.mockReturnValue(0);
+    // Code-review #2: brake-to-reverse uses engine.getDeltaTime() frame-delta
+    // accumulator, NOT performance.now() wall-clock. Drive the accumulator
+    // by setting the per-frame delta directly; hidden-tab time naturally
+    // contributes nothing because the engine returns 0 during throttled RAF.
+    M.state.lastEngine!.getDeltaTime.mockReturnValue(50); // 50ms per frame
     keyboardObserver({ event: { key: 's' }, type: 1 });
-    inputTick(); // arms timer at t=0
+    inputTick(); // brakeHeldMs = 50
+    inputTick(); // brakeHeldMs = 100
+    inputTick(); // brakeHeldMs = 150
+    inputTick(); // brakeHeldMs = 200 (not strictly > 200, no flip yet)
     expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
 
-    nowSpy.mockReturnValue(250); // 250ms later — past the 200ms threshold
-    inputTick(); // reverseMode flips true AND reverse impulse fires
+    inputTick(); // brakeHeldMs = 250 > 200 → flip + apply reverse impulse
     expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
     // Reverse impulse = forward.scale(-REVERSE_IMPULSE). Mock forward is
     // (0, 0, 1), so reverse impulse is (0, 0, -32) — opposite to facing.
     const impulse = M.state.lastCarBody!.applyImpulse.mock.calls[0]![0] as { z: number };
     expect(impulse.z).toBeLessThan(0);
-    nowSpy.mockRestore();
+  });
+
+  it('Plan-005 U1 — frame-delta brake timer does NOT elapse during simulated tab-hide (hidden RAF returns 0)', async () => {
+    // Code-review #2 regression guard: with the old wall-clock implementation,
+    // a 500ms tab-hide while S was held would flip reverseMode on the first
+    // post-return tick. With frame-delta accumulation, hidden frames return
+    // 0 from engine.getDeltaTime() and the accumulator does not advance.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    M.state.lastEngine!.getDeltaTime.mockReturnValue(0); // simulated hidden RAF
+    keyboardObserver({ event: { key: 's' }, type: 1 });
+    for (let i = 0; i < 100; i++) inputTick(); // many "hidden" frames
+    expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
+    // Only AFTER frames start delivering real deltas does the accumulator move.
   });
 
   it('Plan-005 U1 — releasing S exits reverse mode immediately', async () => {
@@ -713,12 +748,9 @@ describe('createRacetrackScene', () => {
     const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
       .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
 
-    const nowSpy = vi.spyOn(performance, 'now');
-    nowSpy.mockReturnValue(0);
+    M.state.lastEngine!.getDeltaTime.mockReturnValue(250); // one large frame
     keyboardObserver({ event: { key: 's' }, type: 1 });
-    inputTick();
-    nowSpy.mockReturnValue(250);
-    inputTick(); // reverseMode true; reverse impulse fires
+    inputTick(); // brakeHeldMs = 250 > 200 → reverseMode true, fires reverse
     expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
 
     // Release S
@@ -726,7 +758,6 @@ describe('createRacetrackScene', () => {
     M.state.lastCarBody!.applyImpulse.mockClear();
     inputTick();
     expect(M.state.lastCarBody?.applyImpulse).not.toHaveBeenCalled();
-    nowSpy.mockRestore();
   });
 
   it('Plan-005 U1 — pressing W while in reverse mode cancels reverse', async () => {
@@ -741,23 +772,63 @@ describe('createRacetrackScene', () => {
     const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
       .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
 
-    const nowSpy = vi.spyOn(performance, 'now');
-    nowSpy.mockReturnValue(0);
+    // Get into reverseMode with one large frame, then switch to realistic
+    // frame delta so W's accumulator-reset survives at least 12 ticks (the
+    // ~200ms needed for S to re-accumulate past the threshold). With a
+    // sustained large frame delta, W and S would toggle every tick; that's
+    // a pathological case, not the realistic per-frame behavior.
+    M.state.lastEngine!.getDeltaTime.mockReturnValue(250);
     keyboardObserver({ event: { key: 's' }, type: 1 });
-    inputTick();
-    nowSpy.mockReturnValue(250);
-    inputTick(); // reverseMode true
+    inputTick(); // brakeHeldMs = 250 > 200 → reverseMode true
 
-    // Press W (without releasing S)
+    M.state.lastEngine!.getDeltaTime.mockReturnValue(16.67); // realistic 60fps
     keyboardObserver({ event: { key: 'w' }, type: 1 });
     M.state.lastCarBody!.applyImpulse.mockClear();
     inputTick();
-    // Only ONE impulse should fire: the forward throttle. NOT the reverse
-    // impulse from the still-held S (because W press reset reverseMode).
+    // Only ONE impulse should fire: the forward throttle. W reset
+    // brakeHeldMs to 0; S adds 16.67ms (well below 200ms), reverseMode
+    // stays false, reverse impulse does NOT fire.
     expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
     const impulse = M.state.lastCarBody!.applyImpulse.mock.calls[0]![0] as { z: number };
     expect(impulse.z).toBeGreaterThan(0); // forward direction
-    nowSpy.mockRestore();
+  });
+
+  it('Plan-005 code-review #1 — canvas blur clears the keys Set (no ghost-key state)', async () => {
+    // Regression guard for the alt-tab-leaves-handbrake-stuck demo-day hazard.
+    // If the blur handler is ever removed, holding Space and alt-tabbing would
+    // leave 'space' permanently in the keys Set — handbrake fires on every
+    // tick after return regardless of physical key state.
+    const blurHandlers: Array<(e: unknown) => void> = [];
+    const canvas = {
+      tabIndex: 0,
+      focus: () => undefined,
+      addEventListener: (event: string, handler: (e: unknown) => void) => {
+        if (event === 'blur') blurHandlers.push(handler);
+      },
+      removeEventListener: () => undefined,
+    } as unknown as HTMLCanvasElement;
+    await createRacetrackScene({ canvas, carGlbBytes: fakeGlb() });
+    expect(blurHandlers).toHaveLength(1);
+
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+    keyboardObserver({ event: { key: ' ' }, type: 1 /* KEYDOWN */ });
+    // After blur fires, the keys Set is cleared. Subsequent ticks see no
+    // 'space' even though the physical KEYUP never arrived.
+    blurHandlers[0]!(new Event('blur'));
+
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    keyboardObserver({ event: { key: 'd' }, type: 1 });
+    M.state.lastCarBody!.setAngularVelocity.mockClear();
+    inputTick();
+    // D alone (post-blur) should produce the un-boosted steering rate.
+    // 1.4 * speedFactor(12/6=1) * 1 (no handbrake) = 1.4.
+    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock
+      .calls[0]![0] as { y: number };
+    expect(angVelArg.y).toBeCloseTo(1.4, 1);
   });
 
   // ─── Plan-005 U2: handbrake mode ───

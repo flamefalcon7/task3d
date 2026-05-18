@@ -456,11 +456,20 @@ export async function createRacetrackScene(
   // so the canvas can receive keyboard events without requiring the user
   // (or test agent) to click it first.
   const keys = new Set<string>();
-  // Plan-005 U1: brake state machine closure state. brakeHoldStartMs arms
-  // when the car is near-stopped AND S is held; after BRAKE_TO_REVERSE_HOLD_MS
-  // elapses, reverseMode flips and S applies reverse impulse. W press clears
-  // both. S release clears both.
-  let brakeHoldStartMs: number | null = null;
+  // Plan-005 U1: brake state machine closure state. brakeHeldMs accumulates
+  // FRAME-DELTA time (engine.getDeltaTime()) while S is held and the car is
+  // near-stopped; after BRAKE_TO_REVERSE_HOLD_MS accumulates, reverseMode
+  // flips and S applies reverse impulse.
+  //
+  // Why frame-delta and not wall-clock: code-review #2 caught that
+  // performance.now() advances while the browser pauses RAF for a
+  // backgrounded tab. With a wall-clock snapshot, alt-tabbing while S is
+  // held caused brakeHeldMs to "elapse" during the hidden interval and
+  // flip reverseMode on the first post-return tick. Engine getDeltaTime is
+  // zero during throttled RAF, so hidden time contributes nothing.
+  //
+  // W press clears both. S release clears both.
+  let brakeHeldMs = 0;
   let reverseMode = false;
   scene.onKeyboardObservable.add((kbInfo) => {
     let k = kbInfo.event.key.toLowerCase();
@@ -498,7 +507,7 @@ export async function createRacetrackScene(
           carPivot.absolutePosition,
         );
       }
-      brakeHoldStartMs = null;
+      brakeHeldMs = 0;
       reverseMode = false;
       // U3 — first W (or arrow-up) press kicks the lap timer off.
       // Reducer no-ops on subsequent throttle while already running.
@@ -507,13 +516,12 @@ export async function createRacetrackScene(
 
     // Brake / reverse state machine (Plan-005 U1).
     // Branch A: still moving forward → velocity-proportional brake force.
-    // Branch B: near-zero speed AND timer not yet armed → arm it.
-    // Branch C: near-zero speed AND timer armed AND elapsed → flip reverseMode.
-    // (The three branches are mutually exclusive via if/else-if so the timer
-    // can't be both armed and consumed on the same tick — see plan KTD-1.)
+    // Branch B: near-zero speed → accumulate frame-delta into brakeHeldMs;
+    //           when it crosses BRAKE_TO_REVERSE_HOLD_MS, flip reverseMode.
     // If reverseMode is true, apply reverse impulse (tapered cap, same shape
     // as the prior reverse handler).
     // S released → clear both bits of state.
+    const frameDeltaMs = engine.getDeltaTime();
     if (keys.has('s') || keys.has('arrowdown')) {
       if (forwardSpeed > BRAKE_REVERSE_SPEED_THRESHOLD) {
         // Velocity-proportional brake, mirrors lateral-grip pattern below.
@@ -523,15 +531,17 @@ export async function createRacetrackScene(
           forward.scale(-brakeMag),
           carPivot.absolutePosition,
         );
-        brakeHoldStartMs = null;
+        brakeHeldMs = 0;
         reverseMode = false;
-      } else if (brakeHoldStartMs === null) {
-        brakeHoldStartMs = performance.now();
-      } else if (
-        !reverseMode &&
-        performance.now() - brakeHoldStartMs > BRAKE_TO_REVERSE_HOLD_MS
-      ) {
-        reverseMode = true;
+      } else {
+        // Branch B: near-zero speed AND S held — accumulate hold time.
+        // Use engine.getDeltaTime() (frame-delta) NOT performance.now()
+        // (wall-clock) so a backgrounded tab can't "elapse" the hold
+        // during throttled RAF (code-review #2).
+        brakeHeldMs += frameDeltaMs;
+        if (!reverseMode && brakeHeldMs > BRAKE_TO_REVERSE_HOLD_MS) {
+          reverseMode = true;
+        }
       }
       if (reverseMode) {
         const reverseScale = Math.max(
@@ -546,7 +556,7 @@ export async function createRacetrackScene(
         }
       }
     } else {
-      brakeHoldStartMs = null;
+      brakeHeldMs = 0;
       reverseMode = false;
     }
 
@@ -697,8 +707,19 @@ export async function createRacetrackScene(
 
   engine.runRenderLoop(() => scene.render());
   const onResize = () => engine.resize();
+  // Code-review #1: clear the `keys` Set when the canvas loses focus.
+  // Without this, holding any drive key (especially Space → handbrake)
+  // and alt-tabbing leaves the key string in the Set indefinitely —
+  // Babylon's onKeyboardObservable never fires KEYUP for blur-cancelled
+  // keys, so the car stays in handbrake/throttle/brake state until the
+  // player manually re-presses + releases the key. Clearing on blur is
+  // safe because no keys are physically being held when focus is lost.
+  const onBlur = () => keys.clear();
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', onResize);
+  }
+  if (typeof opts.canvas.addEventListener === 'function') {
+    opts.canvas.addEventListener('blur', onBlur);
   }
 
   return {
@@ -708,6 +729,9 @@ export async function createRacetrackScene(
     dispose: () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);
+      }
+      if (typeof opts.canvas.removeEventListener === 'function') {
+        opts.canvas.removeEventListener('blur', onBlur);
       }
       // Dispose skidMarks before scene.dispose() so its material + meshes
       // unregister cleanly from the still-live scene rather than fighting
