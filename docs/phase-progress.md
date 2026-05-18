@@ -2,6 +2,26 @@
 
 ## Last Updated: 2026-05-18 late afternoon — **Plan-006 racetrack scene polish shipped end-to-end on `feat/racetrack-scene-polish`.**
 
+### Current Phase
+
+Phase 3 — Sample Game Scene (Tiny Racetrack polish complete; Phase 4 Kiosk + mainnet pending)
+
+### Hackathon Tracker
+
+- Days to submission (6/21): **34 of 38**
+- Days to demo day (7/20–21): **63 of 67**
+- Days to winners (8/27): **101 of 105**
+
+### Completed This Session
+
+- Shipped plan-006 (8 implementation units, 10 commits)
+- See "Unit completion table" below for per-unit details
+- All 7 visual + game-feel polish items landed (R1–R7 plus D-027 ADR)
+
+### Blockers / Open Questions
+
+- None.
+
 All 8 implementation units of plan-006 landed in 8 feature commits (+1 docs commit for ideation/plan files). Branch `feat/racetrack-scene-polish` is forked from `feat/phase-2-sui-integration` and ready to merge back. Frontend test count: **246 → 276 (+30)**; typecheck clean across the workspace.
 
 ### Commits this session
@@ -68,12 +88,6 @@ ab8492a feat(track): plan-006 U2 — DefaultRenderingPipeline (bloom + FXAA + AC
 - Hold-W skip threshold is `INTRO_HOLD_W_SKIP_MS = 200`; can be lowered if dev-mode skip feels sluggish.
 - `Countdown.tsx` accepts an injectable `scheduler` prop — used in tests for deterministic timing, ignored in prod.
 - Deferred follow-ups per plan: engine audio, skid-mark emissive material, DirectionalLight + shadows. All gated on perf budget after pitch video direction is set.
-
-### Hackathon Tracker
-
-- Days to submission (6/21): **34 of 38**
-- Days to demo day (7/20–21): **63 of 67**
-- Days to winners (8/27): **101 of 105**
 
 ---
 

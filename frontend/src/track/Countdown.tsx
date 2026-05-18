@@ -33,7 +33,10 @@ export function Countdown({
   useEffect(() => {
     if (phase === 'done') return;
     if (phase === 'fading') {
-      const cancel = scheduler(() => setPhase('done'), FADE_DURATION_MS);
+      const cancel = scheduler(() => {
+        onComplete();
+        setPhase('done');
+      }, FADE_DURATION_MS);
       return cancel;
     }
     // Numeric phase 0..3
@@ -41,20 +44,25 @@ export function Countdown({
       const cancel = scheduler(() => setPhase(phase + 1), STEP_DURATION_MS);
       return cancel;
     }
-    // Phase is at the final step (GO!). Hold for STEP_DURATION_MS, then
-    // notify caller and begin fade-out. onComplete fires BEFORE the fade
-    // so the scene's input can unblock the instant the player sees GO.
-    const cancel = scheduler(() => {
-      onComplete();
+    // Phase is at the final step (GO!). Hold for STEP_DURATION_MS so the
+    // player reads "GO!", then begin the fade and notify the caller AFTER
+    // FADE_DURATION_MS so the visual fade actually renders. The previous
+    // order (onComplete then setPhase('fading')) caused the parent's gate
+    // (lapState.status === 'intro') to unmount Countdown before fading
+    // could paint — FADE_DURATION_MS was effectively dead.
+    const cancelHold = scheduler(() => {
       setPhase('fading');
     }, STEP_DURATION_MS);
-    return cancel;
+    return cancelHold;
   }, [phase, onComplete, scheduler]);
 
   if (phase === 'done') return null;
-
+  if (typeof phase !== 'number' && phase !== 'fading') {
+    // Exhaustiveness guard — unreachable under current Phase union.
+    return null;
+  }
   const isFading = phase === 'fading';
-  const label = isFading ? STEPS[STEPS.length - 1]! : STEPS[phase as number]!;
+  const label = isFading ? STEPS[STEPS.length - 1]! : STEPS[phase]!;
 
   return (
     <div

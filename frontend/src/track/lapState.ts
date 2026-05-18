@@ -79,6 +79,9 @@ export function initialLapState(nowMs: number | null = null): LapState {
   };
 }
 
+// Post-intro entry point. Distinct from initialLapState() (which returns
+// 'intro'). Used for scene rebuilds where you want to skip the cinematic —
+// currently only the `reset` reducer action.
 /**
  * Post-intro entry point: the racing state machine's "ready to drive"
  * state. The `reset` action returns to this shape; scene rebuild (e.g.,
@@ -159,5 +162,14 @@ export function lapReducer(state: LapState, action: LapAction): LapState {
         status: 'waiting',
         introStartedAtMs: null,
       };
+
+    default: {
+      // Plan-006 review fix — exhaustiveness guard. If a new LapAction
+      // variant is added without a case branch above, this assignment
+      // fails to compile (variant is no longer narrowable to `never`).
+      const _exhaustive: never = action;
+      void _exhaustive;
+      return state;
+    }
   }
 }

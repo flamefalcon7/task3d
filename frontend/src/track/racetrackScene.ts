@@ -85,9 +85,10 @@ export interface RacetrackSceneOptions {
   /**
    * Test/dev convenience: when true, the scene mounts already in the
    * `waiting` state — no orbit, no countdown wait, input is immediately
-   * enabled. Production paths leave this false.
+   * enabled. Production paths leave this false. The `dev_` prefix makes
+   * accidental production use visible at a glance.
    */
-  skipIntro?: boolean;
+  dev_skipIntro?: boolean;
 }
 
 export interface RacetrackSceneHandles {
@@ -666,7 +667,7 @@ export async function createRacetrackScene(
   // exceeds the configured duration. introOrbitStartAlpha snapshots the
   // camera's initial alpha so the orbit rotates relative to the framing
   // chosen at scene init (rather than a hardcoded baseline).
-  let introOrbitDone = opts.skipIntro === true;
+  let introOrbitDone = opts.dev_skipIntro === true;
   const introOrbitStartAlpha = camera.alpha;
 
   scene.onBeforeRenderObservable.add(() => {
@@ -908,10 +909,10 @@ export async function createRacetrackScene(
   // than Havok trigger-volume observers. Cheaper to wire, deterministic,
   // works the same downstream.
   // Plan-006 U8: mount in `intro` state (or skip to `waiting` for tests
-  // that pass skipIntro). introStartedAtMs is set so the React layer can
-  // display elapsed time.
+  // that pass dev_skipIntro). introStartedAtMs is set so the React layer
+  // can display elapsed time.
   const introStartMs = performance.now();
-  let lapState: LapState = opts.skipIntro
+  let lapState: LapState = opts.dev_skipIntro
     ? lapReducer(initialLapState(introStartMs), { type: 'introComplete' })
     : initialLapState(introStartMs);
   // Car spawns ON the start line, so flag start trigger as "inside" from
@@ -927,6 +928,8 @@ export async function createRacetrackScene(
     }
   }
 
+  // Plan-006 review — hoisted scratch buffer to avoid 60 allocs/sec.
+  const skidPredictedPos = new Vector3(0, 0, 0);
   scene.onBeforeRenderObservable.add(() => {
     const now = performance.now();
     dispatch({ type: 'tick', nowMs: now });
@@ -969,16 +972,14 @@ export async function createRacetrackScene(
     // (~0.47 u at MAX_FORWARD_SPEED=28) — the trail emits "behind" the car
     // instead of "from" the wheels.
     const FRAME_DT = 1 / 60;
-    const predictedPos = new Vector3(
-      carPivot.position.x + velocity.x * FRAME_DT,
-      carPivot.position.y,
-      carPivot.position.z + velocity.z * FRAME_DT,
-    );
-    skidMarks.tick(predictedPos, forward, lateralSpeed);
+    skidPredictedPos.x = carPivot.position.x + velocity.x * FRAME_DT;
+    skidPredictedPos.y = carPivot.position.y;
+    skidPredictedPos.z = carPivot.position.z + velocity.z * FRAME_DT;
+    skidMarks.tick(skidPredictedPos, forward, lateralSpeed);
     // Plan-006 U7 — tire smoke shares the same anchor + lateral-speed
     // signal as the skid marks above. Uses the predicted position so the
     // smoke origin tracks the wheel rather than lagging one frame behind.
-    tireSmoke.tick(predictedPos, forward, lateralSpeed);
+    tireSmoke.tick(skidPredictedPos, forward, lateralSpeed);
   });
 
   const reset = (): void => {
@@ -1053,6 +1054,11 @@ export async function createRacetrackScene(
       dispatch({ type: 'introSkip' });
     },
     dispose: () => {
+      // Plan-006 review fix — stop the render loop FIRST so no frame fires
+      // against a half-disposed pipeline / particle system / scene. The
+      // implicit stop inside engine.dispose() at the end of this block
+      // happens too late.
+      engine.stopRenderLoop();
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);
       }

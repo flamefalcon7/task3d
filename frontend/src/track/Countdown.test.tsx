@@ -50,7 +50,7 @@ describe('Countdown', () => {
     expect(screen.getByTestId('countdown-overlay').textContent).toBe('GO!');
   });
 
-  it('invokes onComplete after the GO! display step', () => {
+  it('invokes onComplete after the GO! display step + fade', () => {
     const onComplete = vi.fn();
     const { scheduler, flushOne } = makeScheduler();
     render(<Countdown onComplete={onComplete} scheduler={scheduler} />);
@@ -59,7 +59,9 @@ describe('Countdown', () => {
     act(() => flushOne()); // 2 → 1
     act(() => flushOne()); // 1 → GO!
     expect(onComplete).not.toHaveBeenCalled();
-    act(() => flushOne()); // GO! holds, then fires onComplete + fade
+    act(() => flushOne()); // GO! → fading (no onComplete yet)
+    expect(onComplete).not.toHaveBeenCalled();
+    act(() => flushOne()); // fading → done; onComplete fires AFTER fade renders
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
