@@ -227,6 +227,17 @@ const KERB_OUTER_PRIMARY: [number, number, number] = [0.85, 0.15, 0.15];   // re
 const KERB_OUTER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
 const KERB_INNER_PRIMARY: [number, number, number] = [0.2, 0.7, 0.25];     // green
 const KERB_INNER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
+// Plan-006 U5 — FOV pump tunables. Camera's field-of-view lerps toward
+// FOV_BASE + (forwardSpeed / MAX_FORWARD_SPEED) * FOV_PUMP_DELTA each
+// frame. Delta of 0.14 rad (~8°) is the cap recommended by the source
+// (threejs-speedup-effect) — wider feels nauseating; narrower is
+// imperceptible. Lerp rate 0.05 means the FOV catches up with ~95% of
+// the target over ~60 frames (1s @ 60fps), slow enough that the camera
+// "leans into" speed gradually instead of snapping. Babylon default FOV
+// is 0.8 rad (Math.PI/4 ≈ 45°); capturing the live value at camera
+// creation lets a future per-car FOV tweak work without re-tuning here.
+const FOV_PUMP_DELTA = 0.14; // radians; added on top of base FOV at MAX_FORWARD_SPEED
+const FOV_LERP_RATE = 0.05;  // per-frame catch-up factor
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -507,6 +518,9 @@ export async function createRacetrackScene(
     carPivot.position.clone(),
     scene,
   );
+  // Plan-006 U5 — capture base FOV so the per-frame pump lerps relative
+  // to whatever Babylon (or a future per-car override) set at creation.
+  const fovBase = camera.fov ?? Math.PI / 4;
 
   // Plan-006 U2 — DefaultRenderingPipeline (bloom + FXAA + ACES tonemap).
   // Wired AFTER the camera exists so it can attach to the render path.
@@ -710,6 +724,17 @@ export async function createRacetrackScene(
         -rightZ * lateralSpeed * gripCoeff * CAR_MASS,
       );
       carBody.body.applyImpulse(lateralImpulse, carPivot.absolutePosition);
+    }
+
+    // Plan-006 U5 — FOV pump. Lerp camera FOV toward base + (speedRatio *
+    // delta) so the camera kinetically "leans into" speed. clamp(speedRatio)
+    // keeps reverse contribution out of the pump (negative speeds reduce
+    // FOV which feels wrong). Sits at the tail of this observer so it
+    // shares the already-computed forwardSpeed; no second velocity read.
+    if (camera.fov !== undefined) {
+      const speedRatio = Math.min(Math.max(forwardSpeed / MAX_FORWARD_SPEED, 0), 1);
+      const targetFov = fovBase + speedRatio * FOV_PUMP_DELTA;
+      camera.fov = camera.fov + (targetFov - camera.fov) * FOV_LERP_RATE;
     }
   });
 
