@@ -1,6 +1,6 @@
 ---
 date: 2026-05-18
-status: active
+status: completed
 type: feat
 topic: throttle-brake-handbrake-drift
 origin: docs/brainstorms/2026-05-18-throttle-brake-handbrake-drift-requirements.md
