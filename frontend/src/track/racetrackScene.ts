@@ -126,6 +126,12 @@ const MAX_REVERSE_SPEED = 8;
 const BRAKE_FORCE = 0.04; // dimensionless multiplier — start here, tune in-browser
 const BRAKE_REVERSE_SPEED_THRESHOLD = 0.5; // |forwardSpeed| u/s at which brake hands off to reverse-prep timer
 const BRAKE_TO_REVERSE_HOLD_MS = 200; // S must be held this long below speed threshold before reverse engages
+// Plan-005 U2: handbrake mode. Holding Space at speed drops lateral grip
+// (slide into corners) AND boosts the steering coefficient (Mario Kart
+// power slide). Throttle and brake stay active during handbrake (R7).
+const HANDBRAKE_GRIP_MULTIPLIER = 0.13; // applied to LATERAL_GRIP_PER_FRAME (0.15 * 0.13 ≈ 0.02)
+const HANDBRAKE_STEER_MULTIPLIER = 1.5; // applied to final steering angular-velocity magnitude
+const HANDBRAKE_MIN_SPEED = 1.5; // |forwardSpeed| u/s below which handbrake stays disengaged
 // Steering: rad/s at full effectiveness. Scaled per-frame by speed factor.
 // 1.4 = about 1 full rotation per 4.5 seconds at top scale. Lower numbers
 // = smoother, more car-like turns; higher numbers = arcade-snappy / kart.
@@ -434,7 +440,12 @@ export async function createRacetrackScene(
   let brakeHoldStartMs: number | null = null;
   let reverseMode = false;
   scene.onKeyboardObservable.add((kbInfo) => {
-    const k = kbInfo.event.key.toLowerCase();
+    let k = kbInfo.event.key.toLowerCase();
+    // Plan-005 U2: KeyboardEvent.key for the space bar is the literal ' '
+    // (single space character), not the string 'space'. Without this shim
+    // `keys.has('space')` in the per-frame observer never matches and the
+    // handbrake feature silently fails. Verified via the UI Events spec.
+    if (k === ' ') k = 'space';
     if (kbInfo.type === KeyboardEventTypes.KEYDOWN) keys.add(k);
     else if (kbInfo.type === KeyboardEventTypes.KEYUP) keys.delete(k);
   });
@@ -516,9 +527,19 @@ export async function createRacetrackScene(
       reverseMode = false;
     }
 
+    // Plan-005 U2: handbrake gate. Active when Space is held AND the car
+    // is actually moving forward (or backward) above the MIN_SPEED floor.
+    // Gating on speed prevents Space + A from spinning the car in place
+    // (would conflict with the parking-spot rotation behaviour at zero
+    // speed). Derived ONCE here for use in both steering and grip branches.
+    const handbrakeActive =
+      keys.has('space') && Math.abs(forwardSpeed) > HANDBRAKE_MIN_SPEED;
+
     // Steering — yaw rate scales with current speed. STEER_MIN_FACTOR
     // floor keeps parking-spot turning possible at zero speed (so the
-    // player can rotate after backing into a wall).
+    // player can rotate after backing into a wall). Handbrake mode
+    // multiplies the final angular velocity by HANDBRAKE_STEER_MULTIPLIER
+    // for Mario Kart-style sharper turn-in.
     let steerInput = 0;
     if (keys.has('a') || keys.has('arrowleft')) steerInput -= 1;
     if (keys.has('d') || keys.has('arrowright')) steerInput += 1;
@@ -527,22 +548,28 @@ export async function createRacetrackScene(
         STEER_MIN_FACTOR,
         Math.min(1, Math.abs(forwardSpeed) / STEER_FULL_SPEED),
       );
+      const handbrakeBoost = handbrakeActive ? HANDBRAKE_STEER_MULTIPLIER : 1;
       const angVel = carBody.body.getAngularVelocity();
       angVel.x = 0;
       angVel.z = 0;
-      angVel.y = steerInput * STEER_ANGULAR_VELOCITY * speedFactor;
+      angVel.y =
+        steerInput * STEER_ANGULAR_VELOCITY * speedFactor * handbrakeBoost;
       carBody.body.setAngularVelocity(angVel);
     }
 
     // Lateral grip — cancel a fraction of sideways drift each frame.
     // Without this, the car slides like a hockey puck through corners.
     // Skip near zero forward speed (parking) to avoid fighting the
-    // parking-rotation behaviour.
+    // parking-rotation behaviour. Handbrake mode multiplies the grip
+    // coefficient by HANDBRAKE_GRIP_MULTIPLIER (~0.13) so the car
+    // actually slides sideways instead of staying glued to its facing.
     if (Math.abs(forwardSpeed) > 0.5 && Math.abs(lateralSpeed) > 0.01) {
+      const gripCoeff =
+        LATERAL_GRIP_PER_FRAME * (handbrakeActive ? HANDBRAKE_GRIP_MULTIPLIER : 1);
       const lateralImpulse = new Vector3(
-        -rightX * lateralSpeed * LATERAL_GRIP_PER_FRAME * CAR_MASS,
+        -rightX * lateralSpeed * gripCoeff * CAR_MASS,
         0,
-        -rightZ * lateralSpeed * LATERAL_GRIP_PER_FRAME * CAR_MASS,
+        -rightZ * lateralSpeed * gripCoeff * CAR_MASS,
       );
       carBody.body.applyImpulse(lateralImpulse, carPivot.absolutePosition);
     }

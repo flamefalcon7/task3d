@@ -733,6 +733,122 @@ describe('createRacetrackScene', () => {
     nowSpy.mockRestore();
   });
 
+  // ─── Plan-005 U2: handbrake mode ───
+
+  it('Plan-005 U2 — space-key normalization (KeyboardEvent.key is \' \' not \'space\')', async () => {
+    // Regression guard: KeyboardEvent.key for the space bar is the literal
+    // ' ' character. Without the `if (k === ' ') k = 'space'` shim, the
+    // per-frame observer's keys.has('space') check never matches and the
+    // handbrake feature silently fails. If this test starts failing, check
+    // the keyboard observer for that normalization line.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Set speed so handbrake will engage on the per-frame tick.
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    // Dispatch literal-space key — what real browsers send for the space bar.
+    keyboardObserver({ event: { key: ' ' }, type: 1 /* KEYDOWN */ });
+    keyboardObserver({ event: { key: 'd' }, type: 1 });
+    inputTick();
+
+    // If the shim works, D + handbrake → setAngularVelocity y magnitude is
+    // boosted by HANDBRAKE_STEER_MULTIPLIER. Without the shim, no boost.
+    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock
+      .calls[0]![0] as { y: number };
+    // STEER_ANGULAR_VELOCITY=1.4, speedFactor=clamp(12/6)=1, handbrake=1.5
+    // y = 1 * 1.4 * 1 * 1.5 = 2.1. Without shim: y = 1 * 1.4 * 1 * 1 = 1.4.
+    expect(angVelArg.y).toBeCloseTo(2.1, 1);
+  });
+
+  it('Plan-005 U2/AE3 — Space + D at speed boosts steering by 1.5×', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    // First: D alone, capture baseline y angular velocity.
+    keyboardObserver({ event: { key: 'd' }, type: 1 });
+    inputTick();
+    const baselineY = (
+      M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as { y: number }
+    ).y;
+
+    // Now add Space.
+    M.state.lastCarBody!.setAngularVelocity.mockClear();
+    keyboardObserver({ event: { key: ' ' }, type: 1 });
+    inputTick();
+    const handbrakeY = (
+      M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as { y: number }
+    ).y;
+
+    // The boost factor is exactly HANDBRAKE_STEER_MULTIPLIER (1.5).
+    expect(handbrakeY / baselineY).toBeCloseTo(1.5, 2);
+  });
+
+  it('Plan-005 U2/AE4 — Space at zero speed does NOT engage handbrake (no boost)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: ' ' }, type: 1 });
+    keyboardObserver({ event: { key: 'd' }, type: 1 });
+    inputTick();
+
+    // Gate off — y magnitude is the unboosted STEER_MIN_FACTOR rate.
+    // STEER_ANGULAR_VELOCITY=1.4, speedFactor=STEER_MIN_FACTOR=0.3, boost=1
+    // y = 1 * 1.4 * 0.3 * 1 = 0.42. NOT 0.42 * 1.5 = 0.63.
+    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock
+      .calls[0]![0] as { y: number };
+    expect(angVelArg.y).toBeCloseTo(0.42, 2);
+  });
+
+  it('Plan-005 U2/R7 — throttle still applies while handbrake is held', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    keyboardObserver({ event: { key: ' ' }, type: 1 });
+    keyboardObserver({ event: { key: 'w' }, type: 1 });
+    inputTick();
+
+    // Forward impulse must still fire — R7 explicitly says throttle is
+    // independent of handbrake state. applyImpulse called at least once
+    // (could be 2 if lateral grip also fires, but throttle is one of them).
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalled();
+    const impulses = M.state.lastCarBody!.applyImpulse.mock.calls.map(
+      (c) => c[0] as { z: number },
+    );
+    // At least one impulse should be in the forward (+z) direction.
+    expect(impulses.some((i) => i.z > 0)).toBe(true);
+  });
+
   // ─── U3: lap state machine + trigger wiring ───
 
   it('U3 — exposes a reset() method on the scene handles', async () => {
