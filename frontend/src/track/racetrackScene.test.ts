@@ -50,6 +50,7 @@ const M = vi.hoisted(() => {
     transformNodeCtor: vi.fn(),
     defaultRenderingPipelineCtor: vi.fn(),
     defaultRenderingPipelineDispose: vi.fn(),
+    skyMaterialCtor: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -97,6 +98,26 @@ const M = vi.hoisted(() => {
 });
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
+
+// Plan-006 U3 — SkyMaterial is loaded from @babylonjs/materials, which
+// internally extends @babylonjs/core base classes that the core mock
+// above replaces with no-op stubs. Importing the real SkyMaterial under
+// a stubbed core throws at module-eval time, so we mock the subpath here.
+// The SUT just assigns Preetham tunables to the instance — a plain
+// settable-properties class satisfies the wiring contract.
+vi.mock('@babylonjs/materials/sky/skyMaterial', () => ({
+  SkyMaterial: class {
+    backFaceCulling = true;
+    turbidity = 0;
+    luminance = 0;
+    inclination = 0;
+    azimuth = 0;
+    rayleigh = 0;
+    constructor(...args: unknown[]) {
+      M.skyMaterialCtor(...args);
+    }
+  },
+}));
 
 // Plan-005 U3 — mock skidMarks so wiring tests can spy on the lifecycle.
 const skidMarksSpy = vi.hoisted(() => ({
@@ -344,6 +365,7 @@ beforeEach(() => {
   M.transformNodeCtor.mockClear();
   M.defaultRenderingPipelineCtor.mockClear();
   M.defaultRenderingPipelineDispose.mockClear();
+  M.skyMaterialCtor.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
@@ -416,8 +438,9 @@ describe('createRacetrackScene', () => {
     });
     // Safety ground (R-r4b fallback floor) — 1 CreateGround call.
     expect(M.meshBuilderCreateGround).toHaveBeenCalledTimes(1);
-    // 24 outer + 24 inner barrier boxes following the curve tangent.
-    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(48);
+    // 24 outer + 24 inner barrier boxes following the curve tangent,
+    // plus 1 skybox (plan-006 U3 SkyMaterial host) = 49 total CreateBox calls.
+    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(49);
     // Road ribbon extruded once along the closed sample path.
     expect(M.meshBuilderExtrudeShape).toHaveBeenCalledTimes(1);
     // Total aggregates: 1 safety ground + 1 ribbon + 48 barriers + 1 car = 51.

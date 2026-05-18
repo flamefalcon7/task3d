@@ -41,6 +41,10 @@ import {
 import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import '@babylonjs/loaders/glTF/index.js';
 import HavokPhysics from '@babylonjs/havok';
+// Tree-shaken subpath import keeps bundle delta small — the @babylonjs/materials
+// library has dozens of materials we don't use (water, fire, fur, etc.).
+// See D-027 for adoption rationale.
+import { SkyMaterial } from '@babylonjs/materials/sky/skyMaterial';
 
 import {
   buildOvalControlPoints,
@@ -201,6 +205,18 @@ const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
 const BLOOM_THRESHOLD = 0.7;
 const BLOOM_WEIGHT = 0.3;
 const BLOOM_KERNEL = 64;
+// Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
+// Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
+// 0.45 puts the sun just above the horizon for visible directional warmth;
+// azimuth 0.25 places it forward-right of the chase camera at spawn so the
+// car's GLB picks up rim light from the same angle the player sees.
+// Tunables for in-browser tweaking; not asserted in tests (KTD).
+const SKY_TURBIDITY = 3;
+const SKY_LUMINANCE = 0.5;
+const SKY_INCLINATION = 0.45;
+const SKY_AZIMUTH = 0.25;
+const SKY_RAYLEIGH = 2;
+const SKYBOX_SIZE = 1000;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -227,6 +243,28 @@ export async function createRacetrackScene(
 
   // 2. Light
   new HemisphericLight('light', new Vector3(0, 1, 0), scene);
+
+  // Plan-006 U3 — SkyMaterial atmospheric sky on a large skybox cube.
+  // Replaces the flat clearColor (kept as fallback for the frame before
+  // the material's shader compiles). infiniteDistance=true makes the
+  // skybox track the camera so it appears infinitely far regardless of
+  // where the car drives. backFaceCulling=false renders the inside of
+  // the cube, which is the surface the camera sees from within.
+  // See D-027 for the @babylonjs/materials adoption rationale.
+  const skybox = MeshBuilder.CreateBox(
+    'skybox',
+    { size: SKYBOX_SIZE },
+    scene,
+  );
+  skybox.infiniteDistance = true;
+  const skyMaterial = new SkyMaterial('skyMaterial', scene);
+  skyMaterial.backFaceCulling = false;
+  skyMaterial.turbidity = SKY_TURBIDITY;
+  skyMaterial.luminance = SKY_LUMINANCE;
+  skyMaterial.inclination = SKY_INCLINATION;
+  skyMaterial.azimuth = SKY_AZIMUTH;
+  skyMaterial.rayleigh = SKY_RAYLEIGH;
+  skybox.material = skyMaterial;
 
   // 3. Safety ground — wide flat invisible-ish floor under the track.
   // R-r4b: the road ribbon's MESH collider is the primary driving surface;
