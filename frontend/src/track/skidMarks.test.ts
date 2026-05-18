@@ -84,21 +84,22 @@ describe('createSkidMarks', () => {
     // First above-threshold tick: path initialized to [rear], no mesh yet.
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
     expect(M.extrudeShape).not.toHaveBeenCalled();
-    // Second tick: car moved 1 u (> MIN_VERTEX_DISTANCE 0.5), path grows to
-    // 2 points, mesh is created.
-    sm.tick(v3(0, 0, 1), v3(0, 0, 1), 5);
+    // Second tick: car moved 1.5 u (> MIN_VERTEX_DISTANCE 1.0), path grows
+    // to 2 points, mesh is created.
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5);
     expect(M.extrudeShape).toHaveBeenCalledTimes(1);
     const opts = M.extrudeShape.mock.calls[0]![1] as { path: unknown[] };
     expect(opts.path).toHaveLength(2);
   });
 
   it('extends the active ribbon when car moves >= MIN_VERTEX_DISTANCE', () => {
+    // Each delta is 1.5 u (well above the 1.0 MIN_VERTEX_DISTANCE).
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5); // path=[(...)]
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5); // moved 0.6 > 0.5, path=2, mesh #1
-    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5); // moved 0.6 again, path=3, mesh #2 (recreate)
-    sm.tick(v3(0, 0, 1.8), v3(0, 0, 1), 5); // moved 0.6 again, path=4, mesh #3
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // path=2, mesh #1
+    sm.tick(v3(0, 0, 3.0), v3(0, 0, 1), 5); // path=3, mesh #2 (rebuild)
+    sm.tick(v3(0, 0, 4.5), v3(0, 0, 1), 5); // path=4, mesh #3
     expect(M.extrudeShape).toHaveBeenCalledTimes(3);
     const lastOpts = M.extrudeShape.mock.calls[2]![1] as { path: unknown[] };
     expect(lastOpts.path).toHaveLength(4);
@@ -108,10 +109,10 @@ describe('createSkidMarks', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5); // 1st mesh created
-    // Sub-threshold movement: 0.2 < 0.5, no growth.
-    sm.tick(v3(0, 0, 0.8), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.9), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // 1st mesh created at delta 1.5 > 1.0
+    // Sub-threshold movement: deltas of 0.4 and 0.3 — both < 1.0, no growth.
+    sm.tick(v3(0, 0, 1.9), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 2.2), v3(0, 0, 1), 5);
     // Still only ONE mesh recreation total.
     expect(M.extrudeShape).toHaveBeenCalledTimes(1);
   });
@@ -119,51 +120,52 @@ describe('createSkidMarks', () => {
   it('finalizes a segment when lateralSpeed drops below threshold; starts a new one on next crossing', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // Segment 1
+    // Segment 1: positions 0 → 1.5 (delta 1.5 > 1.0) creates mesh #1.
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5);
     const segment1Count = M.extrudeShape.mock.calls.length;
     // Drop below threshold — finalize.
-    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 0);
-    // Segment 2 (new path, defers mesh until 2nd point)
-    sm.tick(v3(0, 0, 2), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 0);
+    // Segment 2 (new path, defers mesh until 2nd point at delta >= 1.0).
+    sm.tick(v3(0, 0, 5), v3(0, 0, 1), 5);
     expect(M.extrudeShape.mock.calls.length).toBe(segment1Count); // no new mesh yet
-    sm.tick(v3(0, 0, 2.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // delta 1.5 from 5
     expect(M.extrudeShape.mock.calls.length).toBe(segment1Count + 1);
   });
 
   it('disposes the oldest segment when MAX_SEGMENTS cap is exceeded', () => {
     const sm = createSkidMarks(fakeScene(), 3);
     // Build up exactly MAX_SEGMENTS (12) finalized segments — no cap fire yet.
+    // Each segment uses positions i*3, i*3+1.5, i*3+2 (last is finalize tick).
     for (let i = 0; i < 12; i++) {
-      sm.tick(v3(0, 0, i * 2), v3(0, 0, 1), 5);
-      sm.tick(v3(0, 0, i * 2 + 0.6), v3(0, 0, 1), 5);
-      sm.tick(v3(0, 0, i * 2 + 1), v3(0, 0, 1), 0); // finalize
+      sm.tick(v3(0, 0, i * 3), v3(0, 0, 1), 5);
+      sm.tick(v3(0, 0, i * 3 + 1.5), v3(0, 0, 1), 5);
+      sm.tick(v3(0, 0, i * 3 + 2), v3(0, 0, 1), 0); // finalize
     }
     // Now clear the spy. The very next finalize MUST dispose exactly one
     // mesh (the FIFO-evicted oldest). The regrow-disposes during the
     // build-up phase happened before the clear, so the only dispose that
     // can land in this window is the cap-enforcement one.
     M.meshDispose.mockClear();
-    sm.tick(v3(0, 0, 24), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 24.6), v3(0, 0, 1), 5); // creates mesh #13's active form
-    M.meshDispose.mockClear(); // exclude the regrow-dispose
-    sm.tick(v3(0, 0, 25), v3(0, 0, 1), 0); // finalize → cap fires
+    sm.tick(v3(0, 0, 36), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 37.5), v3(0, 0, 1), 5); // creates mesh #13's active form
+    M.meshDispose.mockClear(); // exclude the rebuild-dispose
+    sm.tick(v3(0, 0, 38), v3(0, 0, 1), 0); // finalize → cap fires
     expect(M.meshDispose).toHaveBeenCalledTimes(1);
   });
 
   it('reset() disposes all segments AND the in-flight ribbon', () => {
     M.meshDispose.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // 2 finalized + 1 in-flight
+    // 2 finalized + 1 in-flight, each at deltas > 1.0
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5); // mesh 1
-    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 0); // finalize
-    sm.tick(v3(0, 0, 2), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 2.6), v3(0, 0, 1), 5); // mesh 2
-    sm.tick(v3(0, 0, 3.2), v3(0, 0, 1), 0); // finalize
-    sm.tick(v3(0, 0, 4), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 4.6), v3(0, 0, 1), 5); // in-flight mesh
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // mesh 1
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 0); // finalize
+    sm.tick(v3(0, 0, 5), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // mesh 2
+    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 0); // finalize
+    sm.tick(v3(0, 0, 10), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 11.5), v3(0, 0, 1), 5); // in-flight mesh
     const beforeReset = M.meshDispose.mock.calls.length;
 
     sm.reset();
@@ -178,7 +180,7 @@ describe('createSkidMarks', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
     expect(M.extrudeShape).toHaveBeenCalledTimes(1);
   });
 
@@ -186,7 +188,7 @@ describe('createSkidMarks', () => {
     M.meshDispose.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
     sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 0); // finalize 1 segment
     expect(M.meshDispose).not.toHaveBeenCalled(); // not yet disposed
     sm.reset();
@@ -197,7 +199,7 @@ describe('createSkidMarks', () => {
     M.materialDispose.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
     sm.dispose();
     expect(M.materialDispose).toHaveBeenCalledTimes(1);
     // Calling dispose() again is a no-op (disposed flag guards re-entry).
@@ -224,7 +226,7 @@ describe('createSkidMarks', () => {
     // Provide rearOffset = 2 — should use that.
     const sm = createSkidMarks(fakeScene(), 3, { rearOffset: 2 });
     sm.tick(v3(10, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(10, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(10, 0, 1.5), v3(0, 0, 1), 5);
     const path = (M.extrudeShape.mock.calls[0]![1] as { path: { x: number; z: number }[] }).path;
     // First point: rear = carPos - forward*rearOffset = (10, 0, 0) - (0,0,1)*2 = (10, 0, -2)
     expect(path[0]!.x).toBe(10);
@@ -234,7 +236,7 @@ describe('createSkidMarks', () => {
     M.extrudeShape.mockClear();
     const sm2 = createSkidMarks(fakeScene(), 3, { rearOffset: 0.05 });
     sm2.tick(v3(10, 0, 0), v3(0, 0, 1), 5);
-    sm2.tick(v3(10, 0, 0.6), v3(0, 0, 1), 5);
+    sm2.tick(v3(10, 0, 1.5), v3(0, 0, 1), 5);
     const path2 = (M.extrudeShape.mock.calls[0]![1] as { path: { z: number }[] }).path;
     // Should use REAR_OFFSET_FALLBACK (1.5): rear = (10, 0, 0) - (0,0,1)*1.5 = (10, 0, -1.5)
     expect(path2[0]!.z).toBe(-1.5);

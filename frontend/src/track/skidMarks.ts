@@ -31,9 +31,13 @@ const SEGMENT_WIDTH = 1.2;
 
 // Minimum distance the car must move before a new vertex is appended to
 // the active path. Prevents duplicate-point bloat when stationary at
-// threshold AND bounds the dispose/recreate cadence to ~30 Hz at max
-// speed (0.5 u / 0.3 u-per-frame ≈ every 2 frames).
-const MIN_VERTEX_DISTANCE = 0.5;
+// threshold AND bounds the dispose/recreate cadence — code-review #4
+// (PERF-002) flagged the original 0.5 producing ~30 Hz GC churn during
+// sustained drift; bumping to 1.0 halves it to ~15 Hz with no visible
+// quality loss at chase-cam distance (the car still emits 4-5 vertices
+// across a typical corner). At MAX_FORWARD_SPEED = 18 u/s and 60fps,
+// car moves 0.3 u/frame → vertex every ~3 frames.
+const MIN_VERTEX_DISTANCE = 1.0;
 
 // Tiny lift above road surface to avoid z-fighting with the asphalt
 // ribbon. The road sits at y=0; this lifts skid marks to y=0.05.
