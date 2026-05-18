@@ -48,6 +48,8 @@ const M = vi.hoisted(() => {
     color3Ctor: vi.fn(),
     loadAssetContainer: vi.fn(),
     transformNodeCtor: vi.fn(),
+    defaultRenderingPipelineCtor: vi.fn(),
+    defaultRenderingPipelineDispose: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -179,6 +181,26 @@ vi.mock('@babylonjs/core', () => {
       M.hemisphericLightCtor(...args);
     }
   }
+  // Plan-006 U2 — DefaultRenderingPipeline mock. The SUT reads back
+  // properties it just wrote (bloomThreshold etc.), so these are plain
+  // mutable fields, not vi.fn() setters. imageProcessing is a nested
+  // sub-object because the SUT writes to its toneMappingEnabled /
+  // toneMappingType properties. Dispose is tracked via M.defaultRenderingPipelineDispose
+  // so the teardown test can verify it ran before scene.dispose().
+  class DefaultRenderingPipeline {
+    bloomEnabled = false;
+    bloomThreshold = 0;
+    bloomWeight = 0;
+    bloomKernel = 0;
+    fxaaEnabled = false;
+    imageProcessing = { toneMappingEnabled: false, toneMappingType: 0 };
+    constructor(...args: unknown[]) {
+      M.defaultRenderingPipelineCtor(...args);
+    }
+    dispose() {
+      M.defaultRenderingPipelineDispose();
+    }
+  }
   class StandardMaterial {
     diffuseColor: unknown;
     specularColor: unknown;
@@ -290,6 +312,7 @@ vi.mock('@babylonjs/core', () => {
     Engine,
     Scene,
     ArcRotateCamera,
+    DefaultRenderingPipeline,
     HemisphericLight,
     StandardMaterial,
     Color3,
@@ -319,6 +342,8 @@ beforeEach(() => {
   M.color3Ctor.mockClear();
   M.loadAssetContainer.mockClear();
   M.transformNodeCtor.mockClear();
+  M.defaultRenderingPipelineCtor.mockClear();
+  M.defaultRenderingPipelineDispose.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;

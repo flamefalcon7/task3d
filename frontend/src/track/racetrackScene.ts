@@ -25,6 +25,7 @@
 import {
   ArcRotateCamera,
   Color3,
+  DefaultRenderingPipeline,
   Engine,
   HemisphericLight,
   KeyboardEventTypes,
@@ -192,6 +193,14 @@ const CHASE_ALPHA_LERP = 0.04;
 // Currently -90° — Tripo outputs face -X locally; rotate CW so -X aligns
 // with the pivot's +Z drive direction.
 const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
+// Plan-006 U2 — DefaultRenderingPipeline tunables. Ships first within
+// Batch 1 so subsequent visual units (SkyMaterial, kerb colors, emissive
+// stripe) land against the post-processed pipeline rather than raw WebGL.
+// Bloom threshold/weight/kernel + FXAA + ACES tonemap are intentionally
+// untested per plan KTDs — visual feel is judged on the dev server.
+const BLOOM_THRESHOLD = 0.7;
+const BLOOM_WEIGHT = 0.3;
+const BLOOM_KERNEL = 64;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -433,6 +442,28 @@ export async function createRacetrackScene(
     carPivot.position.clone(),
     scene,
   );
+
+  // Plan-006 U2 — DefaultRenderingPipeline (bloom + FXAA + ACES tonemap).
+  // Wired AFTER the camera exists so it can attach to the render path.
+  // Pipeline name is unique per scene; HDR enabled so bloom samples the
+  // float buffer (bloom on LDR makes the cutoff visibly hard).
+  const renderPipeline = new DefaultRenderingPipeline(
+    'racetrack-rendering',
+    true, // HDR — bloom needs the float buffer to look right
+    scene,
+    [camera],
+  );
+  renderPipeline.bloomEnabled = true;
+  renderPipeline.bloomThreshold = BLOOM_THRESHOLD;
+  renderPipeline.bloomWeight = BLOOM_WEIGHT;
+  renderPipeline.bloomKernel = BLOOM_KERNEL;
+  renderPipeline.fxaaEnabled = true;
+  // ACES Filmic tonemap. ImageProcessingConfiguration in @babylonjs/core
+  // exposes TONEMAPPING_ACES = 1 as a static const; using the numeric
+  // literal here so the test mock can stay shape-only (no enum import).
+  renderPipeline.imageProcessing.toneMappingEnabled = true;
+  renderPipeline.imageProcessing.toneMappingType = 1; // ImageProcessingConfiguration.TONEMAPPING_ACES
+
   scene.onBeforeRenderObservable.add(() => {
     camera.target.copyFrom(carPivot.position);
 
@@ -756,7 +787,10 @@ export async function createRacetrackScene(
       }
       // Dispose skidMarks before scene.dispose() so its material + meshes
       // unregister cleanly from the still-live scene rather than fighting
-      // the scene teardown.
+      // the scene teardown. Same posture for the render pipeline: detach
+      // it from the camera explicitly so a carousel switch doesn't leak
+      // the post-process render targets onto the next scene.
+      renderPipeline.dispose();
       skidMarks.dispose();
       carContainer.dispose();
       scene.dispose();
