@@ -1,6 +1,71 @@
 # Phase Progress
 
-## Last Updated: 2026-05-17 evening — **Plan-004 shipped end-to-end.** All 5 units (U1 car-physics fix, U2 extruded ribbon track, U3 lap state machine + triggers, U4 HUD + PB + retry, U5 carousel teardown) landed in 6 commits on `feat/phase-2-sui-integration`. Frontend tests: 159 → 214 (+55), backend 132, workspace typecheck clean. **Manual /track smoke remains user-driven** — drive a lap with the dev fixture, beat a PB, switch cars, confirm per-car PB isolation. See plan's §Verification.
+## Last Updated: 2026-05-18 morning — **Plan-005 shipped end-to-end.** All 3 units (U1 brake state machine, U2 handbrake mode, U3 skid mark ribbons) landed in 3 feature commits + 1 docs commit on `feat/phase-2-sui-integration`. Frontend tests: 217 → 241 (+24 new across U1/U2/U3), backend 132, workspace typecheck clean. /track now has W=throttle, S=brake-then-reverse (200ms hold gate), Space=Mario-Kart handbrake (grip drop + 1.5× steering), and visible skid mark trails when lateral velocity crosses threshold. **Manual /track smoke (plan-004 + plan-005 combined) remains user-driven.**
+
+## Session 2026-05-18 morning — Plan-005 throttle/brake/handbrake-drift
+
+### Commits this session
+
+```
+fa6eaa6 feat(track): plan-005 U3 — skid mark ribbons emitted on lateral-speed threshold
+4720ac3 feat(track): plan-005 U2 — handbrake mode (Space = grip drop + 1.5× steering)
+e3e4059 feat(track): plan-005 U1 — brake state machine (S = brake-then-reverse)
+dff33b4 docs(plan): brainstorm + plan-005 — throttle/brake/handbrake-drift for /track
+```
+
+### Workflow trace
+
+`/ce-brainstorm` (Standard tier, ~3 turns of focused dialogue) → 4-option scope synthesis confirmed → requirements doc written → `/ce-plan` (Standard tier, ~5 KTDs) → `/ce-doc-review` round 1 surfaced 7 blockers including the load-bearing F-FEAS-001 (Babylon 9.7.0's `MeshBuilder.ExtrudeShape({updatable, instance})` silently truncates path-length growth — KTD-3's primary path was broken as written) → user picked "fix all 7 blockers and re-run" → blocker-fix rewrite pass → `/ce-doc-review` round 2 returned APPROVE with all 7 blockers RESOLVED → user picked Done for Now → next session (now) → `/ce-work` dispatched plan-005 → 3 units implemented serially (all touch `frontend/src/track/racetrackScene.ts`, parallel safety check failed for shared file → serial execution).
+
+### Unit completion
+
+| Unit | Files added/modified | Tests delta | Commit |
+|---|---|---|---|
+| U1 | racetrackScene.ts + .test.ts | +5 (AE1, AE2, transition, exit, W-cancel) | `e3e4059` |
+| U2 | racetrackScene.ts + .test.ts | +4 (normalization regression, AE3 boost, AE4 gate-off, R7 throttle) | `4720ac3` |
+| U3 | skidMarks.ts (new) + .test.ts (new), racetrackScene.ts + .test.ts | +15 (11 module unit + 4 wiring) | `fa6eaa6` |
+
+### Key infrastructure facts surfaced + resolved
+
+- **F-FEAS-001 (KTD-3 broken)**: `MeshBuilder.ExtrudeShape({updatable, instance})` only supports same-length path updates in 9.7.0. Verified via `shapeBuilder.d.ts:15` ("Remember you can only change the shape or path point positions, not their number when updating an extruded shape") and `ribbonBuilder.js:277-314` (loops over `min(oldLen, newLen)` and silently truncates new vertices). KTD-3 rewritten to dispose-and-recreate per growth tick as the primary path. At MIN_VERTEX_DISTANCE=0.5 u and MAX_FORWARD_SPEED=18 u/s, this fires at ~30 Hz per active segment — Babylon handles trivially.
+- **F-FEAS-002 (space-key normalization)**: `KeyboardEvent.key` for the space bar is the literal `' '` character, not the string `'space'`. Without `if (k === ' ') k = 'space'` in the keyboard observer, U2's `keys.has('space')` check never matches and handbrake silently fails. Verified via UI Events spec; shipped with a regression test that fails loudly if the shim is removed.
+- **F-FEAS-003 (lateralSpeed sharing)**: chose recompute in the lap-state observer rather than introducing a cross-observer closure variable. 5-line decomposition, divergence-safe.
+- **DL-002 (REAR_OFFSET grounding)**: derived from `carGeometry.getBoundingInfo().boundingBox.extendSize.max(x,z) × 0.5` at scene init with REAR_OFFSET_FALLBACK=1.5 fallback if extents are degenerate.
+
+### Outstanding tunables (per plan-005 R-r4 — time-boxed to 2 in-browser iteration rounds)
+
+- `BRAKE_FORCE = 0.04` — starting guess; tune until decel feel is right
+- `SKID_LATERAL_SPEED_THRESHOLD = 3` — starting guess; tune until skid marks appear at the "actually drifting" feel point, not on every minor turn
+- `HANDBRAKE_STEER_MULTIPLIER = 1.5` — bracket 1.3-1.7× per DL-005; drop if it pirouettes, raise if it feels tame
+
+### Verification status
+
+- ✅ Frontend tests: 241 passed (217 → 241, +24 net new across U1/U2/U3)
+- ✅ Backend tests: 132 passed (no change — plan-005 was frontend-only)
+- ✅ Move tests: untouched (21 passed, no contract changes)
+- ✅ Workspace typecheck: clean
+- ⏳ **Manual /track smoke** combined for plan-004 + plan-005: drive a lap with W (throttle smooth taper), brake with S (then continue holding 200ms past stop to enter reverse), hold Space mid-corner for power-slide drift (see skid marks behind car), retry via R-key clears trails + teleports. Per CLAUDE.md "if you can't test the UI, say so explicitly" — this requires user.
+
+### In Progress
+
+- **Manual /track smoke for plan-004 + plan-005 combined** (user-driven).
+
+### Notes for Next Session
+
+- Plan-005 doc-review surfaced 6 advisory items (DL-006 alpha compositing, DL-007 stripe width, DL-008 dispose synchrony doc, COH-006 LinesMesh note, F-FEAS-009 2-point degenerate ribbon, DL-002 fallback value) — all tunable knobs or doc clarifications, none blocking. If in-browser smoke reveals issues, the constants to tune are documented inline in `frontend/src/track/skidMarks.ts` and `frontend/src/track/racetrackScene.ts`.
+- The user's hackathon priority order (stated 2026-05-17): finish features → deploy + record at end. Plan-005 was nice-to-have polish. Next priority remains Phase 4 (Sui Kiosk + TransferPolicy + mainnet redeploy) — biggest unstarted risk.
+- All plan-004 + plan-005 work is on `feat/phase-2-sui-integration`. Branch is 30+ commits since main; PR would bundle Phase 2 + Phase 3 + plan-005. Decision deferred until Phase 4 lands.
+- Skid mark colour (Color3(0.05, 0.05, 0.05) at alpha 0.8): if visible blotching at overlap points on demo recording (DL-006), drop alpha to ~0.55. One-line change.
+
+### Hackathon Tracker
+
+- Days to submission (6/21): **34 of 38**
+- Days to demo day (7/20–21): **63 of 67**
+- Days to winners (8/27): **101 of 105**
+
+---
+
+## Previously Last Updated: 2026-05-17 evening — **Plan-004 shipped end-to-end.** All 5 units (U1 car-physics fix, U2 extruded ribbon track, U3 lap state machine + triggers, U4 HUD + PB + retry, U5 carousel teardown) landed in 6 commits on `feat/phase-2-sui-integration`. Frontend tests: 159 → 214 (+55), backend 132, workspace typecheck clean. **Manual /track smoke remains user-driven** — drive a lap with the dev fixture, beat a PB, switch cars, confirm per-car PB isolation. See plan's §Verification.
 
 ## Session 2026-05-17 evening — Plan-004 tiny-racetrack game loop
 
