@@ -59,6 +59,7 @@ import {
   type LapState,
 } from './lapState';
 // Plan-006 U8 — cinematic intro: camera orbits while React countdown plays.
+import { createFoliage } from './foliage';
 import { createSkidMarks, type SkidMarks } from './skidMarks';
 import { createTireSmoke, type TireSmoke } from './tireSmoke';
 
@@ -257,8 +258,6 @@ const SKYBOX_SIZE = 1000;
 // objects rather than 48.
 const KERB_OUTER_PRIMARY: [number, number, number] = [0.85, 0.15, 0.15];   // red
 const KERB_OUTER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
-const KERB_INNER_PRIMARY: [number, number, number] = [0.2, 0.7, 0.25];     // green
-const KERB_INNER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
 // Plan-006 U5 — FOV pump tunables. Camera's field-of-view lerps toward
 // FOV_BASE + (forwardSpeed / MAX_FORWARD_SPEED) * FOV_PUMP_DELTA each
 // frame. Delta of 0.14 rad (~8°) is the cap recommended by the source
@@ -355,8 +354,19 @@ export async function createRacetrackScene(
     scene,
   );
   safetyGround.position = new Vector3(0, -0.5, 0);
+  // Grass texture (CC0, ambientCG Grass001). The safety ground is 200×200u
+  // so we tile 50× per side — each tile reads as ~4m of grass at chase-cam
+  // distance. Bump map adds subtle grain so the floor isn't a flat felt.
   const grassMat = new StandardMaterial('grassMat', scene);
-  grassMat.diffuseColor = new Color3(0.18, 0.32, 0.18);
+  const grassDiff = new Texture('/textures/grass/grass_diff.jpg', scene);
+  grassDiff.uScale = 50;
+  grassDiff.vScale = 50;
+  grassMat.diffuseTexture = grassDiff;
+  const grassNormal = new Texture('/textures/grass/grass_normal.jpg', scene);
+  grassNormal.uScale = 50;
+  grassNormal.vScale = 50;
+  grassMat.bumpTexture = grassNormal;
+  grassMat.specularColor = new Color3(0.03, 0.03, 0.03);
   safetyGround.material = grassMat;
   new PhysicsAggregate(safetyGround, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
@@ -434,11 +444,11 @@ export async function createRacetrackScene(
   stripeMat.emissiveColor = new Color3(...STRIPE_EMISSIVE);
   centerStripe.material = stripeMat;
 
-  // 5. Barrier walls — 24 outer + 24 inner, tangent-aligned. Replaces U6's
-  // 4 perimeter walls; gives the track visible rails on both sides.
-  // Plan-006 U4 — alternate primary/secondary band colors per segment so
-  // barriers read as racetrack kerbs. Materials are shared across all
-  // 48 barriers (one per band-color = 4 total StandardMaterial objects).
+  // 5. Outer barrier walls only — 24 tangent-aligned boxes. The visible
+  // mesh is hidden (createFoliage spawns Kenney trees at each slot to
+  // replace them visually); the box collider stays so the car bounces off
+  // the tree line. Inner-side kerbs were removed entirely — a car cutting
+  // the apex now rolls onto the infield grass (safety ground catches it).
   const makeKerbMat = (
     name: string,
     rgb: [number, number, number],
@@ -449,8 +459,6 @@ export async function createRacetrackScene(
   };
   const kerbOuterPrimaryMat = makeKerbMat('kerb-outer-primary', KERB_OUTER_PRIMARY);
   const kerbOuterSecondaryMat = makeKerbMat('kerb-outer-secondary', KERB_OUTER_SECONDARY);
-  const kerbInnerPrimaryMat = makeKerbMat('kerb-inner-primary', KERB_INNER_PRIMARY);
-  const kerbInnerSecondaryMat = makeKerbMat('kerb-inner-secondary', KERB_INNER_SECONDARY);
   for (let i = 0; i < BARRIER_COUNT; i++) {
     const sampleIdx = Math.floor((i * TRACK_SAMPLES) / BARRIER_COUNT);
     const center = samples[sampleIdx]!;
@@ -480,6 +488,10 @@ export async function createRacetrackScene(
       );
       box.rotation = new Vector3(0, yaw, 0);
       box.material = material;
+      // Outer barriers are visually replaced by Kenney tree instances
+      // (see createFoliage call below) — hide the box mesh but keep the
+      // PhysicsAggregate so the car still bounces off the tree line.
+      box.isVisible = false;
       new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 0 }, scene);
     };
 
@@ -489,12 +501,23 @@ export async function createRacetrackScene(
       outwardZ * BARRIER_OUTWARD_OFFSET,
       isPrimaryBand ? kerbOuterPrimaryMat : kerbOuterSecondaryMat,
     );
-    placeBarrier(
-      `barrier-inner-${i}`,
-      -outwardX * BARRIER_OUTWARD_OFFSET,
-      -outwardZ * BARRIER_OUTWARD_OFFSET,
-      isPrimaryBand ? kerbInnerPrimaryMat : kerbInnerSecondaryMat,
-    );
+  }
+
+  // Load Kenney Nature Kit foliage: trees at each outer-barrier position
+  // (visually replacing the now-hidden boxes), plus a deterministic scatter
+  // of grass tufts, flowers, and bushes across the infield and outfield.
+  // Failures don't block the scene — the race still works without foliage.
+  try {
+    await createFoliage({
+      scene,
+      samples,
+      trackSamples: TRACK_SAMPLES,
+      trackWidth: TRACK_WIDTH,
+      trackLength: TRACK_LENGTH,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[racetrack] createFoliage failed, continuing without foliage', err);
   }
 
   // 6. Start/finish line + checkpoint decals. Visual-only (no physics) —

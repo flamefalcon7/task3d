@@ -107,6 +107,12 @@ const M = vi.hoisted(() => {
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
+// Foliage loads 5 GLBs and creates instance meshes — none of which the scene
+// tests care about. A resolved no-op keeps createRacetrackScene awaitable.
+vi.mock('./foliage', () => ({
+  createFoliage: vi.fn(() => Promise.resolve()),
+}));
+
 // Plan-006 U3 — SkyMaterial is loaded from @babylonjs/materials, which
 // internally extends @babylonjs/core base classes that the core mock
 // above replaces with no-op stubs. Importing the real SkyMaterial under
@@ -476,7 +482,7 @@ describe('createRacetrackScene', () => {
     expect(gravity.y).toBeCloseTo(-9.81);
   });
 
-  it('U2 — builds safety ground + road ribbon + 48 barrier boxes as static aggregates', async () => {
+  it('U2 — builds safety ground + road ribbon + 24 outer barrier boxes as static aggregates', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
@@ -484,20 +490,22 @@ describe('createRacetrackScene', () => {
     });
     // Safety ground (R-r4b fallback floor) — 1 CreateGround call.
     expect(M.meshBuilderCreateGround).toHaveBeenCalledTimes(1);
-    // 24 outer + 24 inner barrier boxes following the curve tangent,
-    // plus 1 skybox (plan-006 U3 SkyMaterial host) = 49 total CreateBox calls.
-    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(49);
+    // 24 outer barrier boxes (visually hidden — replaced by tree instances
+    // in createFoliage; physics aggregate stays so the car still bounces).
+    // Inner-side kerbs were dropped entirely (apex cuts roll onto infield).
+    // Plus 1 skybox (plan-006 U3 SkyMaterial host) = 25 total CreateBox calls.
+    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(25);
     // Road ribbon extruded once along the closed sample path,
     // plus 1 center stripe ribbon (plan-006 U6) = 2 ExtrudeShape calls.
     expect(M.meshBuilderExtrudeShape).toHaveBeenCalledTimes(2);
     const extrudeNames = M.meshBuilderExtrudeShape.mock.calls.map((c) => c[0]);
     expect(extrudeNames).toContain('road-ribbon');
     expect(extrudeNames).toContain('center-stripe');
-    // Total aggregates: 1 safety ground + 1 ribbon + 48 barriers + 1 car = 51.
-    expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(51);
-    // First 50 (everything except the car) must all be mass:0 static.
+    // Total aggregates: 1 safety ground + 1 ribbon + 24 outer barriers + 1 car = 27.
+    expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(27);
+    // First 26 (everything except the car) must all be mass:0 static.
     const staticOptions = M.physicsAggregateCtor.mock.calls
-      .slice(0, 50)
+      .slice(0, 26)
       .map((args) => args[2]);
     for (const opts of staticOptions) {
       expect((opts as { mass: number }).mass).toBe(0);
@@ -556,7 +564,7 @@ describe('createRacetrackScene', () => {
     expect(M.loadAssetContainer.mock.calls[0]![0]).toBe('blob:mock');
     expect(M.state.lastCarContainer?.addAllToScene).toHaveBeenCalled();
     // Car body should be a DYNAMIC aggregate with non-zero mass. It's the
-    // LAST aggregate constructed (after safety ground + ribbon + 48 barriers).
+    // LAST aggregate constructed (after safety ground + ribbon + 24 outer barriers).
     const calls = M.physicsAggregateCtor.mock.calls;
     const carOpts = calls[calls.length - 1]![2] as { mass: number };
     expect(carOpts.mass).toBeGreaterThan(0);
@@ -624,7 +632,7 @@ describe('createRacetrackScene', () => {
     dev_skipIntro: true,
     });
     // Car aggregate is the LAST one constructed (after safety ground +
-    // road ribbon + 48 barriers). Its first arg must be the pivot.
+    // road ribbon + 24 outer barriers). Its first arg must be the pivot.
     expect(M.transformNodeCtor).toHaveBeenCalledWith('car-pivot', expect.anything());
     const calls = M.physicsAggregateCtor.mock.calls;
     const carAggregateArgs = calls[calls.length - 1]!;

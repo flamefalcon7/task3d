@@ -1,0 +1,9 @@
+Kenney Nature Kit (selected subset)
+Source: https://kenney.nl/assets/nature-kit
+License: CC0 1.0 Universal (public domain)
+Files used:
+  - tree_default.glb         (outer-ring trees, default variant)
+  - tree_cone.glb            (outer-ring trees, cone/pine variant)
+  - plant_bushDetailed.glb   (bushes, decorative scatter)
+  - grass.glb                (grass tufts, infield/outfield scatter)
+  - flower_yellowA.glb       (flower accents, infield scatter)
