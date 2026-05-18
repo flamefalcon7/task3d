@@ -217,6 +217,16 @@ const SKY_INCLINATION = 0.45;
 const SKY_AZIMUTH = 0.25;
 const SKY_RAYLEIGH = 2;
 const SKYBOX_SIZE = 1000;
+// Plan-006 U4 — kerb stripe colors. Alternate per-segment so barriers
+// read as racetrack kerbs rather than abstract walls. Outer kerbs red/
+// white (classic F1 kerb pattern); inner kerbs green/white so the player
+// can distinguish left/right at speed. Materials are shared instances
+// (one per band-color) so 48 barriers allocate exactly 4 StandardMaterial
+// objects rather than 48.
+const KERB_OUTER_PRIMARY: [number, number, number] = [0.85, 0.15, 0.15];   // red
+const KERB_OUTER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
+const KERB_INNER_PRIMARY: [number, number, number] = [0.2, 0.7, 0.25];     // green
+const KERB_INNER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -313,8 +323,21 @@ export async function createRacetrackScene(
 
   // 5. Barrier walls — 24 outer + 24 inner, tangent-aligned. Replaces U6's
   // 4 perimeter walls; gives the track visible rails on both sides.
-  const barrierMat = new StandardMaterial('barrierMat', scene);
-  barrierMat.diffuseColor = new Color3(0.7, 0.55, 0.25);
+  // Plan-006 U4 — alternate primary/secondary band colors per segment so
+  // barriers read as racetrack kerbs. Materials are shared across all
+  // 48 barriers (one per band-color = 4 total StandardMaterial objects).
+  const makeKerbMat = (
+    name: string,
+    rgb: [number, number, number],
+  ): StandardMaterial => {
+    const mat = new StandardMaterial(name, scene);
+    mat.diffuseColor = new Color3(rgb[0], rgb[1], rgb[2]);
+    return mat;
+  };
+  const kerbOuterPrimaryMat = makeKerbMat('kerb-outer-primary', KERB_OUTER_PRIMARY);
+  const kerbOuterSecondaryMat = makeKerbMat('kerb-outer-secondary', KERB_OUTER_SECONDARY);
+  const kerbInnerPrimaryMat = makeKerbMat('kerb-inner-primary', KERB_INNER_PRIMARY);
+  const kerbInnerSecondaryMat = makeKerbMat('kerb-inner-secondary', KERB_INNER_SECONDARY);
   for (let i = 0; i < BARRIER_COUNT; i++) {
     const sampleIdx = Math.floor((i * TRACK_SAMPLES) / BARRIER_COUNT);
     const center = samples[sampleIdx]!;
@@ -324,11 +347,13 @@ export async function createRacetrackScene(
     const outwardX = tangent.z;
     const outwardZ = -tangent.x;
     const yaw = Math.atan2(tangent.x, tangent.z);
+    const isPrimaryBand = i % 2 === 0;
 
     const placeBarrier = (
       name: string,
       offsetX: number,
       offsetZ: number,
+      material: StandardMaterial,
     ): void => {
       const box = MeshBuilder.CreateBox(
         name,
@@ -341,7 +366,7 @@ export async function createRacetrackScene(
         center.z + offsetZ,
       );
       box.rotation = new Vector3(0, yaw, 0);
-      box.material = barrierMat;
+      box.material = material;
       new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 0 }, scene);
     };
 
@@ -349,11 +374,13 @@ export async function createRacetrackScene(
       `barrier-outer-${i}`,
       outwardX * BARRIER_OUTWARD_OFFSET,
       outwardZ * BARRIER_OUTWARD_OFFSET,
+      isPrimaryBand ? kerbOuterPrimaryMat : kerbOuterSecondaryMat,
     );
     placeBarrier(
       `barrier-inner-${i}`,
       -outwardX * BARRIER_OUTWARD_OFFSET,
       -outwardZ * BARRIER_OUTWARD_OFFSET,
+      isPrimaryBand ? kerbInnerPrimaryMat : kerbInnerSecondaryMat,
     );
   }
 
