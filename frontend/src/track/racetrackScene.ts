@@ -52,6 +52,7 @@ import {
   type LapAction,
   type LapState,
 } from './lapState';
+import { createSkidMarks, type SkidMarks } from './skidMarks';
 
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
@@ -147,6 +148,11 @@ const STEER_MIN_FACTOR = 0.3;
 // 0 = no grip (full ice), 1 = perfect grip (no sliding ever).
 // 0.15 = realistic arcade feel — slight drift on hard corners.
 const LATERAL_GRIP_PER_FRAME = 0.15;
+// Plan-005 U3: |lateralSpeed| u/s above which skid marks are emitted.
+// 3 u/s = visible sliding but not every minor turn-in. Tune in-browser.
+// Passed to createSkidMarks at scene init so the module stays primitive-
+// agnostic (the threshold is a feel knob, not a ribbon geometry detail).
+const SKID_LATERAL_SPEED_THRESHOLD = 3;
 // Linear damping kept low — top-speed cap + grip handle deceleration.
 // Setting too high makes the car feel sticky.
 const LINEAR_DAMPING = 0.05;
@@ -386,6 +392,23 @@ export async function createRacetrackScene(
   // dynamic body — negligible — and makes mesh-driven teleports work.
   carBody.body.disablePreStep = false;
 
+  // Plan-005 U3: skid marks. Derive rear-offset from the car geometry's
+  // bounding box where possible — half the longest local axis gives a
+  // sensible point behind the chassis. Falls back to the module's
+  // REAR_OFFSET_FALLBACK if extents are degenerate (R-r6 defensive path).
+  let derivedRearOffset: number | null = null;
+  if (typeof carGeometry.getBoundingInfo === 'function') {
+    const bb = carGeometry.getBoundingInfo().boundingBox;
+    const extent = Math.max(
+      Math.abs(bb.extendSize.x),
+      Math.abs(bb.extendSize.z),
+    );
+    if (extent > 0.5) derivedRearOffset = extent * 0.5;
+  }
+  const skidMarks: SkidMarks = createSkidMarks(scene, SKID_LATERAL_SPEED_THRESHOLD, {
+    rearOffset: derivedRearOffset,
+  });
+
   // 8. Chase camera — ArcRotateCamera tracks the pivot each frame AND
   // orbits to sit behind the car's facing direction. Without the alpha
   // tracking, the camera stays at a world-fixed orbit angle and the WASD
@@ -617,6 +640,18 @@ export async function createRacetrackScene(
       dispatch({ type: 'checkpoint' });
     }
     insideCheckpointTrigger = insideCheckpointNow;
+
+    // Plan-005 U3: skid mark emission. Recompute lateralSpeed locally
+    // (per plan F-FEAS-003 — chose recompute over cross-observer closure
+    // var for divergence safety; the 5-line decomposition is cheap and
+    // co-located with usage).
+    const skidVelocity = carBody.body.getLinearVelocity();
+    const skidForward = carPivot.getDirection(Vector3.Forward());
+    const skidRightX = skidForward.z;
+    const skidRightZ = -skidForward.x;
+    const skidLateralSpeed =
+      skidVelocity.x * skidRightX + skidVelocity.z * skidRightZ;
+    skidMarks.tick(carPivot.position, skidForward, skidLateralSpeed);
   });
 
   const reset = (): void => {
@@ -645,6 +680,10 @@ export async function createRacetrackScene(
     // than assuming start-line entry.
     insideStartTrigger = true;
     insideCheckpointTrigger = false;
+    // Plan-005 U3 — clear all skid trails on Retry (R10 / AE6). Done before
+    // the lap-state dispatch so a downstream consumer that responds to the
+    // reset can rely on the visual state being clean.
+    skidMarks.reset();
     dispatch({ type: 'reset' });
     // Re-focus the canvas after Retry so scene.onKeyboardObservable resumes
     // receiving WASD. Clicking the Retry button moves focus off the canvas;
@@ -670,6 +709,10 @@ export async function createRacetrackScene(
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);
       }
+      // Dispose skidMarks before scene.dispose() so its material + meshes
+      // unregister cleanly from the still-live scene rather than fighting
+      // the scene teardown.
+      skidMarks.dispose();
       carContainer.dispose();
       scene.dispose();
       engine.dispose();

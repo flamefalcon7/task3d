@@ -95,6 +95,24 @@ const M = vi.hoisted(() => {
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
+// Plan-005 U3 — mock skidMarks so wiring tests can spy on the lifecycle.
+const skidMarksSpy = vi.hoisted(() => ({
+  ctor: vi.fn(),
+  tick: vi.fn(),
+  reset: vi.fn(),
+  dispose: vi.fn(),
+}));
+vi.mock('./skidMarks', () => ({
+  createSkidMarks: (scene: unknown, threshold: number, options: unknown) => {
+    skidMarksSpy.ctor(scene, threshold, options);
+    return {
+      tick: skidMarksSpy.tick,
+      reset: skidMarksSpy.reset,
+      dispose: skidMarksSpy.dispose,
+    };
+  },
+}));
+
 vi.mock('@babylonjs/havok', () => ({
   default: (...args: unknown[]) => {
     M.havokFactory(...args);
@@ -158,8 +176,13 @@ vi.mock('@babylonjs/core', () => {
   }
   class StandardMaterial {
     diffuseColor: unknown;
+    specularColor: unknown;
+    alpha = 1;
     constructor(...args: unknown[]) {
       M.standardMaterialCtor(...args);
+    }
+    dispose() {
+      // Mock — counts via the standardMaterialCtor spy isn't needed here.
     }
   }
   class Color3 {
@@ -295,6 +318,10 @@ beforeEach(() => {
   M.state.lastCarContainer = null;
   M.state.lastTransformNode = null;
   M.state.lastCarBody = null;
+  skidMarksSpy.ctor.mockClear();
+  skidMarksSpy.tick.mockClear();
+  skidMarksSpy.reset.mockClear();
+  skidMarksSpy.dispose.mockClear();
 
   // jsdom 25 ships URL but tests need deterministic createObjectURL output.
   vi.stubGlobal(
@@ -937,5 +964,60 @@ describe('createRacetrackScene', () => {
     );
     expect(resetCall).toBeDefined();
     expect((resetCall![0] as LapState).startedAtMs).toBeNull();
+  });
+
+  // ─── Plan-005 U3: skid marks wiring ───
+
+  it('Plan-005 U3 — instantiates skidMarks with the scene threshold + bounding-box rear offset', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    expect(skidMarksSpy.ctor).toHaveBeenCalledTimes(1);
+    const [scene, threshold, options] = skidMarksSpy.ctor.mock.calls[0]!;
+    expect(scene).toBeDefined();
+    expect(threshold).toBe(3); // SKID_LATERAL_SPEED_THRESHOLD
+    // Mock geometry mesh has no getBoundingInfo → rearOffset is null,
+    // module falls back to REAR_OFFSET_FALLBACK internally.
+    expect((options as { rearOffset?: unknown }).rearOffset).toBeNull();
+  });
+
+  it('Plan-005 U3 — lap-state observer ticks skidMarks each frame with car pos + forward + lateralSpeed', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    // [0] chase cam, [1] input observer, [2] lap-state + skidMarks tick.
+    expect(renderCallbacks).toHaveLength(3);
+    const lapTick = renderCallbacks[2] as () => void;
+    skidMarksSpy.tick.mockClear();
+    lapTick();
+    expect(skidMarksSpy.tick).toHaveBeenCalledTimes(1);
+    const [carPos, carForward, lateralSpeed] = skidMarksSpy.tick.mock.calls[0]!;
+    expect(carPos).toBeDefined();
+    expect(carForward).toBeDefined();
+    expect(typeof lateralSpeed).toBe('number');
+  });
+
+  it('Plan-005 U3/AE6 — scene.reset() invokes skidMarks.reset() before dispatching reset action', async () => {
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    skidMarksSpy.reset.mockClear();
+    handles.reset();
+    expect(skidMarksSpy.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('Plan-005 U3 — scene.dispose() invokes skidMarks.dispose()', async () => {
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    skidMarksSpy.dispose.mockClear();
+    handles.dispose();
+    expect(skidMarksSpy.dispose).toHaveBeenCalledTimes(1);
   });
 });
