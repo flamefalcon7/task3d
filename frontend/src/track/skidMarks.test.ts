@@ -16,6 +16,7 @@ const M = vi.hoisted(() => {
     extrudeShape: vi.fn(),
     meshDispose: vi.fn(),
     materialDispose: vi.fn(),
+    lastMaterial: null as null | { diffuseColor: { r: number; g: number; b: number } | unknown; alpha: number },
   };
 });
 
@@ -24,7 +25,9 @@ vi.mock('@babylonjs/core', () => {
     diffuseColor: unknown;
     specularColor: unknown;
     alpha = 1;
-    constructor(_name: string, _scene: unknown) {}
+    constructor(_name: string, _scene: unknown) {
+      M.lastMaterial = this;
+    }
     dispose() {
       M.materialDispose();
     }
@@ -130,18 +133,23 @@ describe('createSkidMarks', () => {
   });
 
   it('disposes the oldest segment when MAX_SEGMENTS cap is exceeded', () => {
-    M.meshDispose.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // Create 13 finalized segments (cap is 12).
-    for (let i = 0; i < 13; i++) {
+    // Build up exactly MAX_SEGMENTS (12) finalized segments — no cap fire yet.
+    for (let i = 0; i < 12; i++) {
       sm.tick(v3(0, 0, i * 2), v3(0, 0, 1), 5);
       sm.tick(v3(0, 0, i * 2 + 0.6), v3(0, 0, 1), 5);
       sm.tick(v3(0, 0, i * 2 + 1), v3(0, 0, 1), 0); // finalize
     }
-    // 13 finalizations + each pre-finalization regrowth disposed earlier
-    // meshes, but at minimum the oldest finalized segment must have been
-    // disposed when segment 13 finalized.
-    expect(M.meshDispose).toHaveBeenCalled();
+    // Now clear the spy. The very next finalize MUST dispose exactly one
+    // mesh (the FIFO-evicted oldest). The regrow-disposes during the
+    // build-up phase happened before the clear, so the only dispose that
+    // can land in this window is the cap-enforcement one.
+    M.meshDispose.mockClear();
+    sm.tick(v3(0, 0, 24), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 24.6), v3(0, 0, 1), 5); // creates mesh #13's active form
+    M.meshDispose.mockClear(); // exclude the regrow-dispose
+    sm.tick(v3(0, 0, 25), v3(0, 0, 1), 0); // finalize → cap fires
+    expect(M.meshDispose).toHaveBeenCalledTimes(1);
   });
 
   it('reset() disposes all segments AND the in-flight ribbon', () => {
@@ -159,8 +167,9 @@ describe('createSkidMarks', () => {
     const beforeReset = M.meshDispose.mock.calls.length;
 
     sm.reset();
-    // Reset should dispose 2 finalized + 1 in-flight = 3 more meshes.
-    expect(M.meshDispose.mock.calls.length - beforeReset).toBeGreaterThanOrEqual(3);
+    // Reset disposes exactly: 1 in-flight + 2 finalized = 3 meshes.
+    // Deterministic — anything other than 3 indicates a reset() bug.
+    expect(M.meshDispose.mock.calls.length - beforeReset).toBe(3);
   });
 
   it('AE5 — emits skid marks during natural drift (no handbrake context required)', () => {
@@ -194,6 +203,20 @@ describe('createSkidMarks', () => {
     // Calling dispose() again is a no-op (disposed flag guards re-entry).
     sm.dispose();
     expect(M.materialDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('skid material has the expected near-black color + alpha 0.8 (code-review #20 regression guard)', () => {
+    // A typo on the tunable alpha (0.08 instead of 0.8 → invisible trails)
+    // or a colour swap would silently ship without this assertion. The
+    // material is created at module-init time; createSkidMarks is enough
+    // to populate M.lastMaterial.
+    createSkidMarks(fakeScene(), 3);
+    expect(M.lastMaterial).not.toBeNull();
+    expect(M.lastMaterial!.alpha).toBeCloseTo(0.8, 2);
+    const color = M.lastMaterial!.diffuseColor as { r: number; g: number; b: number };
+    expect(color.r).toBeLessThan(0.15); // near-black, definitely darker than asphalt (0.18)
+    expect(color.g).toBeLessThan(0.15);
+    expect(color.b).toBeLessThan(0.15);
   });
 
   it('uses the provided rearOffset when non-degenerate, else falls back', () => {

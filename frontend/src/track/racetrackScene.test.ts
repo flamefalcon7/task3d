@@ -90,6 +90,11 @@ const M = vi.hoisted(() => {
         setLinearVelocity: ReturnType<typeof vi.fn>;
         getLinearVelocity: ReturnType<typeof vi.fn>;
       },
+      // Plan-005 code-review #13: per-test override for the geometry mesh's
+      // bounding-box extents. Default null = mesh has no getBoundingInfo,
+      // forcing the racetrackScene production code into the fallback path.
+      // Override before createRacetrackScene to exercise the BB derivation.
+      mockGeometryExtents: null as null | { x: number; y: number; z: number },
     },
   };
 });
@@ -259,6 +264,31 @@ vi.mock('@babylonjs/core', () => {
     // Simulate the typical Tripo/Babylon shape: __root__ TransformNode-ish
     // mesh at index 0 with 0 vertices, real geometry at index 1. KTD-2 says
     // we must pick the vertex-bearing one.
+    // Plan-005 code-review #13: when M.state.mockGeometryExtents is set,
+    // meshes[1] gets a getBoundingInfo() method returning those extents.
+    // Lets tests exercise the BB-derivation branch in racetrackScene.
+    const geometryMesh = {
+      position: new M.Vec3Mock(),
+      absolutePosition: new M.Vec3Mock(),
+      rotate: vi.fn(),
+      getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
+      getTotalVertices: vi.fn(() => 1024),
+      parent: null as unknown,
+    } as {
+      position: InstanceType<typeof M.Vec3Mock>;
+      absolutePosition: InstanceType<typeof M.Vec3Mock>;
+      rotate: ReturnType<typeof vi.fn>;
+      getDirection: ReturnType<typeof vi.fn>;
+      getTotalVertices: ReturnType<typeof vi.fn>;
+      parent: unknown;
+      getBoundingInfo?: () => { boundingBox: { extendSize: { x: number; y: number; z: number } } };
+    };
+    if (M.state.mockGeometryExtents) {
+      const extents = M.state.mockGeometryExtents;
+      geometryMesh.getBoundingInfo = () => ({
+        boundingBox: { extendSize: extents },
+      });
+    }
     const meshes = [
       {
         position: new M.Vec3Mock(),
@@ -268,14 +298,7 @@ vi.mock('@babylonjs/core', () => {
         getTotalVertices: vi.fn(() => 0),
         parent: null as unknown,
       },
-      {
-        position: new M.Vec3Mock(),
-        absolutePosition: new M.Vec3Mock(),
-        rotate: vi.fn(),
-        getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
-        getTotalVertices: vi.fn(() => 1024),
-        parent: null as unknown,
-      },
+      geometryMesh,
     ];
     const container = {
       meshes,
@@ -323,6 +346,7 @@ beforeEach(() => {
   M.state.lastCarContainer = null;
   M.state.lastTransformNode = null;
   M.state.lastCarBody = null;
+  M.state.mockGeometryExtents = null;
   skidMarksSpy.ctor.mockClear();
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
@@ -852,17 +876,26 @@ describe('createRacetrackScene', () => {
       .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
 
     // Dispatch literal-space key — what real browsers send for the space bar.
-    keyboardObserver({ event: { key: ' ' }, type: 1 /* KEYDOWN */ });
+    // Capture baseline D-only y magnitude first (D without Space).
     keyboardObserver({ event: { key: 'd' }, type: 1 });
     inputTick();
+    const baselineY = (
+      M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as { y: number }
+    ).y;
 
-    // If the shim works, D + handbrake → setAngularVelocity y magnitude is
-    // boosted by HANDBRAKE_STEER_MULTIPLIER. Without the shim, no boost.
-    const angVelArg = M.state.lastCarBody!.setAngularVelocity.mock
-      .calls[0]![0] as { y: number };
-    // STEER_ANGULAR_VELOCITY=1.4, speedFactor=clamp(12/6)=1, handbrake=1.5
-    // y = 1 * 1.4 * 1 * 1.5 = 2.1. Without shim: y = 1 * 1.4 * 1 * 1 = 1.4.
-    expect(angVelArg.y).toBeCloseTo(2.1, 1);
+    // Now add the literal ' ' (which the shim normalizes to 'space').
+    M.state.lastCarBody!.setAngularVelocity.mockClear();
+    keyboardObserver({ event: { key: ' ' }, type: 1 /* KEYDOWN */ });
+    inputTick();
+    const shimmedY = (
+      M.state.lastCarBody!.setAngularVelocity.mock.calls[0]![0] as { y: number }
+    ).y;
+
+    // If the shim works, ' ' → 'space' → handbrake active → 1.5× boost.
+    // Without the shim, 'space' never matches, no boost, ratio = 1.
+    // Asserting the RATIO (not the absolute value) decouples the test from
+    // STEER_ANGULAR_VELOCITY which is an explicit feel knob (code-review #9).
+    expect(shimmedY / baselineY).toBeCloseTo(1.5, 2);
   });
 
   it('Plan-005 U2/AE3 — Space + D at speed boosts steering by 1.5×', async () => {
@@ -920,11 +953,15 @@ describe('createRacetrackScene', () => {
     expect(angVelArg.y).toBeCloseTo(0.42, 2);
   });
 
-  it('Plan-005 U2/R7 — throttle still applies while handbrake is held', async () => {
+  it('Plan-005 U2/R7 — throttle still applies while handbrake is held (exactly one impulse, forward direction)', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
+    // Mock velocity (0,0,12): forwardSpeed=12, lateralSpeed=0 (rightX=1
+    // gives velocity.x*rightX = 0*1 = 0). Lateral-grip branch gates on
+    // |lateralSpeed| > 0.01, so it stays inactive. Only the throttle
+    // applyImpulse fires — exactly one call, deterministic.
     M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(0, 0, 12));
     const renderCallbacks =
       M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
@@ -936,15 +973,56 @@ describe('createRacetrackScene', () => {
     keyboardObserver({ event: { key: 'w' }, type: 1 });
     inputTick();
 
-    // Forward impulse must still fire — R7 explicitly says throttle is
-    // independent of handbrake state. applyImpulse called at least once
-    // (could be 2 if lateral grip also fires, but throttle is one of them).
-    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalled();
-    const impulses = M.state.lastCarBody!.applyImpulse.mock.calls.map(
-      (c) => c[0] as { z: number },
+    expect(M.state.lastCarBody?.applyImpulse).toHaveBeenCalledTimes(1);
+    const impulse = M.state.lastCarBody!.applyImpulse.mock.calls[0]![0] as { z: number };
+    expect(impulse.z).toBeGreaterThan(0); // forward direction
+  });
+
+  it('Plan-005 U2/AE3 — handbrake reduces lateral grip impulse magnitude by HANDBRAKE_GRIP_MULTIPLIER', async () => {
+    // Code-review #12: this scenario was in plan-005's U2 test list but
+    // never implemented. It guards the behavioral CORE of handbrake mode
+    // (the slide physics) — a regression that used the multiplier
+    // additively instead of multiplicatively would not be caught without it.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    // Set velocity (5, 0, 12): forwardSpeed=12 (above HANDBRAKE_MIN_SPEED),
+    // lateralSpeed = velocity.x * rightX + velocity.z * rightZ = 5*1 + 12*0 = 5.
+    // Lateral-grip branch fires.
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(5, 0, 12));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const inputTick = renderCallbacks[1] as () => void;
+    const keyboardObserver = M.state.lastScene!.onKeyboardObservable.add.mock
+      .calls[0]![0] as (info: { event: { key: string }; type: number }) => void;
+
+    // Capture baseline: no Space → full lateral grip impulse fires.
+    inputTick();
+    const baseline = M.state.lastCarBody!.applyImpulse.mock.calls.map(
+      (c) => c[0] as { x: number },
     );
-    // At least one impulse should be in the forward (+z) direction.
-    expect(impulses.some((i) => i.z > 0)).toBe(true);
+    // Lateral-grip impulse opposes the lateral velocity; with rightX=1 and
+    // lateralSpeed=5, impulse.x = -rightX * lateralSpeed * grip * mass < 0.
+    const baselineGripImpulse = baseline.find((i) => i.x < 0);
+    expect(baselineGripImpulse).toBeDefined();
+    const baselineMag = Math.abs(baselineGripImpulse!.x);
+
+    // Now Space held — grip multiplier kicks in.
+    keyboardObserver({ event: { key: ' ' }, type: 1 });
+    M.state.lastCarBody!.applyImpulse.mockClear();
+    inputTick();
+    const handbrake = M.state.lastCarBody!.applyImpulse.mock.calls.map(
+      (c) => c[0] as { x: number },
+    );
+    const handbrakeGripImpulse = handbrake.find((i) => i.x < 0);
+    expect(handbrakeGripImpulse).toBeDefined();
+    const handbrakeMag = Math.abs(handbrakeGripImpulse!.x);
+
+    // Ratio is HANDBRAKE_GRIP_MULTIPLIER (0.13). Multiplicative-vs-additive
+    // regression would either not fire (additive→same magnitude, ratio=1) or
+    // wildly miss (e.g., subtract instead of multiply).
+    expect(handbrakeMag / baselineMag).toBeCloseTo(0.13, 2);
   });
 
   // ─── U3: lap state machine + trigger wiring ───
@@ -1080,6 +1158,45 @@ describe('createRacetrackScene', () => {
     skidMarksSpy.reset.mockClear();
     handles.reset();
     expect(skidMarksSpy.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('Plan-005 U3 — bounding-box rear offset derivation uses max(extendSize.x, extendSize.z) * 0.5', async () => {
+    // Code-review #13: the wiring test above passes rearOffset=null because
+    // the default geometry mesh has no getBoundingInfo. This test sets the
+    // M.state.mockGeometryExtents flag so the meshes[1] mock gains a
+    // getBoundingInfo that returns extendSize x=2, z=3. Expected derived
+    // rearOffset = max(2, 3) * 0.5 = 1.5. Regression guard against axis
+    // swap (would give 1.0 instead) or drop of the *0.5 (would give 3.0).
+    M.state.mockGeometryExtents = { x: 2, y: 1, z: 3 };
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    expect(skidMarksSpy.ctor).toHaveBeenCalledTimes(1);
+    const [, , options] = skidMarksSpy.ctor.mock.calls[0]!;
+    expect((options as { rearOffset?: number }).rearOffset).toBeCloseTo(1.5, 2);
+  });
+
+  it('Plan-005 U3 — lap-state observer computes lateralSpeed from the lateral axis (not forward axis)', async () => {
+    // Code-review #14: previous wiring test only asserted typeof === 'number'.
+    // An axis swap (skidRightX ↔ skidRightZ) would produce skid marks on
+    // straights and not on slides — feature silently broken with passing test.
+    // This test sets velocity (5, 0, 0) and forward (0, 0, 1) so the
+    // expected lateralSpeed = velocity.x*rightX + velocity.z*rightZ
+    // = 5*1 + 0*0 = 5. Any axis swap yields a different value.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+    });
+    M.state.lastCarBody!.getLinearVelocity.mockReturnValue(new M.Vec3Mock(5, 0, 0));
+    const renderCallbacks =
+      M.state.lastScene!.onBeforeRenderObservable.add.mock.calls.map((c) => c[0]);
+    const lapTick = renderCallbacks[2] as () => void;
+    skidMarksSpy.tick.mockClear();
+    lapTick();
+    expect(skidMarksSpy.tick).toHaveBeenCalledTimes(1);
+    const [, , lateralSpeed] = skidMarksSpy.tick.mock.calls[0]!;
+    expect(lateralSpeed).toBeCloseTo(5, 2);
   });
 
   it('Plan-005 U3 — scene.dispose() invokes skidMarks.dispose()', async () => {
