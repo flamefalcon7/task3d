@@ -132,7 +132,7 @@ const BRAKE_TO_REVERSE_HOLD_MS = 200; // S must be held this long below speed th
 // power slide). Throttle and brake stay active during handbrake (R7).
 const HANDBRAKE_GRIP_MULTIPLIER = 0.13; // applied to LATERAL_GRIP_PER_FRAME (0.15 * 0.13 ≈ 0.02)
 const HANDBRAKE_STEER_MULTIPLIER = 1.5; // applied to final steering angular-velocity magnitude
-const HANDBRAKE_MIN_SPEED = 1.5; // |forwardSpeed| u/s below which handbrake stays disengaged
+const HANDBRAKE_SPEED_THRESHOLD = 1.5; // |forwardSpeed| u/s below which handbrake stays disengaged
 // Steering: rad/s at full effectiveness. Scaled per-frame by speed factor.
 // 1.4 = about 1 full rotation per 4.5 seconds at top scale. Lower numbers
 // = smoother, more car-like turns; higher numbers = arcade-snappy / kart.
@@ -566,7 +566,7 @@ export async function createRacetrackScene(
     // (would conflict with the parking-spot rotation behaviour at zero
     // speed). Derived ONCE here for use in both steering and grip branches.
     const handbrakeActive =
-      keys.has('space') && Math.abs(forwardSpeed) > HANDBRAKE_MIN_SPEED;
+      keys.has('space') && Math.abs(forwardSpeed) > HANDBRAKE_SPEED_THRESHOLD;
 
     // Steering — yaw rate scales with current speed. STEER_MIN_FACTOR
     // floor keeps parking-spot turning possible at zero speed (so the
@@ -651,17 +651,17 @@ export async function createRacetrackScene(
     }
     insideCheckpointTrigger = insideCheckpointNow;
 
-    // Plan-005 U3: skid mark emission. Recompute lateralSpeed locally
-    // (per plan F-FEAS-003 — chose recompute over cross-observer closure
-    // var for divergence safety; the 5-line decomposition is cheap and
-    // co-located with usage).
-    const skidVelocity = carBody.body.getLinearVelocity();
-    const skidForward = carPivot.getDirection(Vector3.Forward());
-    const skidRightX = skidForward.z;
-    const skidRightZ = -skidForward.x;
-    const skidLateralSpeed =
-      skidVelocity.x * skidRightX + skidVelocity.z * skidRightZ;
-    skidMarks.tick(carPivot.position, skidForward, skidLateralSpeed);
+    // Plan-005 U3: skid mark emission. Same velocity decomposition as the
+    // input observer above — recomputed locally rather than sharing a
+    // closure variable so one observer can be removed or refactored without
+    // breaking the other (the 5-line cost is cheap). Variable names match
+    // the input observer for visual parallel. Code-review #11.
+    const velocity = carBody.body.getLinearVelocity();
+    const forward = carPivot.getDirection(Vector3.Forward());
+    const rightX = forward.z;
+    const rightZ = -forward.x;
+    const lateralSpeed = velocity.x * rightX + velocity.z * rightZ;
+    skidMarks.tick(carPivot.position, forward, lateralSpeed);
   });
 
   const reset = (): void => {

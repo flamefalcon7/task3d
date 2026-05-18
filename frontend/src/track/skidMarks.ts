@@ -102,14 +102,18 @@ export function createSkidMarks(
     );
   }
 
-  function disposeCurrent(): void {
+  // Discards the in-flight mesh (typically right before rebuilding it with a
+  // longer path). Does NOT save to segments — caller wants the mesh gone.
+  function discardCurrentMesh(): void {
     if (currentMesh) {
       currentMesh.dispose();
       currentMesh = null;
     }
   }
 
-  function finalizeCurrent(): void {
+  // Commits the in-flight mesh to the segments array (preserving it for the
+  // remainder of the lap) and clears all in-flight state. Enforces FIFO cap.
+  function commitCurrentSegment(): void {
     if (currentMesh) {
       segments.push(currentMesh);
       currentMesh = null;
@@ -123,12 +127,14 @@ export function createSkidMarks(
     lastEmitPos = null;
   }
 
-  function regrowMesh(): void {
-    // Recreate the ribbon mesh from the current path. Disposes the previous
-    // mesh first so we don't leak — the per-tick churn is bounded at ~30 Hz
-    // per active segment (see header comment for math).
+  // Tear down the in-flight mesh (if any) and recreate it from the current
+  // path. "Rebuild" not "regrow" — the previous mesh is destroyed; Babylon
+  // 9.7.0's `MeshBuilder.ExtrudeShape({updatable, instance})` silently
+  // truncates path growth (see header comment). Per-tick churn is bounded
+  // at ~30 Hz per active segment by MIN_VERTEX_DISTANCE.
+  function rebuildCurrentMesh(): void {
     if (!currentPath || currentPath.length < 2) return;
-    disposeCurrent();
+    discardCurrentMesh();
     segmentCounter += 1;
     const mesh = MeshBuilder.ExtrudeShape(
       `skid-segment-${segmentCounter}`,
@@ -157,24 +163,33 @@ export function createSkidMarks(
         // Start a new segment. Mesh creation defers until path has 2 points.
         currentPath = [rear];
         lastEmitPos = rear;
-      } else if (lastEmitPos !== null) {
+      } else {
+        // Code-review #10 defensive assert: currentPath and lastEmitPos are
+        // set + cleared as a pair (here, in commitCurrentSegment, and in
+        // reset). If they ever desync, distance-gate math breaks silently.
+        // Throw loudly instead of falling through to a `return` branch.
+        if (lastEmitPos === null) {
+          throw new Error(
+            'skidMarks invariant violation: currentPath set but lastEmitPos is null',
+          );
+        }
         const dx = rear.x - lastEmitPos.x;
         const dz = rear.z - lastEmitPos.z;
         if (Math.hypot(dx, dz) >= MIN_VERTEX_DISTANCE) {
           currentPath.push(rear);
           lastEmitPos = rear;
-          regrowMesh();
+          rebuildCurrentMesh();
         }
       }
     } else if (currentPath !== null) {
-      finalizeCurrent();
+      commitCurrentSegment();
     }
   }
 
   function reset(): void {
-    // Dispose the in-flight segment (don't finalize — Retry shouldn't keep
-    // half-formed trails) and all finalized segments.
-    disposeCurrent();
+    // Discard the in-flight segment (don't commit — Retry shouldn't keep
+    // half-formed trails) and all committed segments.
+    discardCurrentMesh();
     currentPath = null;
     lastEmitPos = null;
     for (const seg of segments) seg.dispose();
