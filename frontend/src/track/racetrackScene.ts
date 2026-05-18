@@ -116,16 +116,30 @@ const CAR_MASS = 1500;
 // 4. Tight angular damping: when no steer key is held, the body decays
 //    its yaw rate fast so the car doesn't keep spinning after the input
 //    releases.
-const FORWARD_IMPULSE = 60;
+// Speed tuned so corner radius EXCEEDS the road's outside line, forcing
+// the player to brake or drift through corners rather than steering through
+// at full throttle. At MAX_FORWARD_SPEED / STEER_ANGULAR_VELOCITY = 28/1.4
+// = 20 u turning radius, vs ~14 u outside-line corner radius. Drift becomes
+// the high-skill option to maintain pace through corners.
+// FORWARD_IMPULSE scaled ~1.8× alongside the cap so 0→top still feels
+// brisk (~3-4 s on a straight) rather than asymptotic.
+const FORWARD_IMPULSE = 110;
 const REVERSE_IMPULSE = 32;
-const MAX_FORWARD_SPEED = 18; // units/sec; ~25s lap at average ~6 u/s
+const MAX_FORWARD_SPEED = 28; // units/sec — see comment above for drift-requires-speed math
 const MAX_REVERSE_SPEED = 8;
 // Plan-005 U1: brake state machine. S held while moving forward applies a
 // velocity-proportional brake force (mirrors lateral-grip pattern); after
 // the car comes to a near-stop, holding S for BRAKE_TO_REVERSE_HOLD_MS
 // switches into reverse mode. W cancels brake/reverse state.
-const BRAKE_FORCE = 0.04; // dimensionless multiplier — start here, tune in-browser
-const BRAKE_REVERSE_SPEED_THRESHOLD = 0.5; // |forwardSpeed| u/s at which brake hands off to reverse-prep timer
+// Manual smoke surfaced that 0.04 was too weak — brake decelerated
+// asymptotically and the car hovered just above the 0.5 threshold, so
+// Branch B (reverse-prep timer) never armed. 0.12 (3×) makes the brake
+// reach the threshold within ~1 second from MAX_FORWARD_SPEED. Also bumped
+// the threshold 0.5 → 1.0 to widen the "near stopped" band against
+// physics noise — the car frequently has 0.6-0.8 residual velocity from
+// Havok damping that previously kept Branch A firing forever.
+const BRAKE_FORCE = 0.12; // dimensionless multiplier — tune in-browser
+const BRAKE_REVERSE_SPEED_THRESHOLD = 1.0; // |forwardSpeed| u/s at which brake hands off to reverse-prep timer
 const BRAKE_TO_REVERSE_HOLD_MS = 200; // S must be held this long below speed threshold before reverse engages
 // Plan-005 U2: handbrake mode. Holding Space at speed drops lateral grip
 // (slide into corners) AND boosts the steering coefficient (Mario Kart
@@ -149,10 +163,11 @@ const STEER_MIN_FACTOR = 0.3;
 // 0.15 = realistic arcade feel — slight drift on hard corners.
 const LATERAL_GRIP_PER_FRAME = 0.15;
 // Plan-005 U3: |lateralSpeed| u/s above which skid marks are emitted.
-// 3 u/s = visible sliding but not every minor turn-in. Tune in-browser.
-// Passed to createSkidMarks at scene init so the module stays primitive-
-// agnostic (the threshold is a feel knob, not a ribbon geometry detail).
-const SKID_LATERAL_SPEED_THRESHOLD = 3;
+// Manual smoke revealed 3 was too high for the arcade-grip model — natural
+// drifts rarely sustain >3 u/s of lateral velocity (LATERAL_GRIP_PER_FRAME=
+// 0.15 kills sideways motion in 6-7 frames). 1.5 catches medium-aggressive
+// corners AND handbrake slides; lower if even gentle turn-in should paint.
+const SKID_LATERAL_SPEED_THRESHOLD = 1.5;
 // Linear damping kept low — top-speed cap + grip handle deceleration.
 // Setting too high makes the car feel sticky.
 const LINEAR_DAMPING = 0.05;
@@ -368,6 +383,11 @@ export async function createRacetrackScene(
   // FORWARD_IMPULSE pushes). Without this, the car drives backwards
   // visually — Tripo + most vehicle GLBs face -Z in their local frame.
   carGeometry.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
+  // Visual + physics scale-up. Applied BEFORE PhysicsAggregate so the BOX
+  // collider is computed from the scaled bounding box. Skid mark constants
+  // in skidMarks.ts are intentionally NOT scaled — adjust there separately
+  // if their proportion to the car needs tuning.
+  carGeometry.scaling = new Vector3(1.728, 1.728, 1.728);
   // U2: spawn on the start/finish line, facing the curve tangent so the
   // first W keypress drives along the track instead of sideways.
   carPivot.position = new Vector3(startSample.x, 1, startSample.z);
@@ -392,22 +412,11 @@ export async function createRacetrackScene(
   // dynamic body — negligible — and makes mesh-driven teleports work.
   carBody.body.disablePreStep = false;
 
-  // Plan-005 U3: skid marks. Derive rear-offset from the car geometry's
-  // bounding box where possible — half the longest local axis gives a
-  // sensible point behind the chassis. Falls back to the module's
-  // REAR_OFFSET_FALLBACK if extents are degenerate (R-r6 defensive path).
-  let derivedRearOffset: number | null = null;
-  if (typeof carGeometry.getBoundingInfo === 'function') {
-    const bb = carGeometry.getBoundingInfo().boundingBox;
-    const extent = Math.max(
-      Math.abs(bb.extendSize.x),
-      Math.abs(bb.extendSize.z),
-    );
-    if (extent > 0.5) derivedRearOffset = extent * 0.5;
-  }
-  const skidMarks: SkidMarks = createSkidMarks(scene, SKID_LATERAL_SPEED_THRESHOLD, {
-    rearOffset: derivedRearOffset,
-  });
+  // Plan-005 U3: skid marks. Sizing (TIRE_WIDTH, REAR_AXLE_HALF_TRACK,
+  // REAR_OFFSET) lives in skidMarks.ts — single source of truth. BB
+  // derivation was removed after Tripo GLBs returned unreliable extents
+  // (sub-meshes registered tiny BBs that didn't match the visual chassis).
+  const skidMarks: SkidMarks = createSkidMarks(scene, SKID_LATERAL_SPEED_THRESHOLD);
 
   // 8. Chase camera — ArcRotateCamera tracks the pivot each frame AND
   // orbits to sit behind the car's facing direction. Without the alpha
@@ -661,7 +670,19 @@ export async function createRacetrackScene(
     const rightX = forward.z;
     const rightZ = -forward.x;
     const lateralSpeed = velocity.x * rightX + velocity.z * rightZ;
-    skidMarks.tick(carPivot.position, forward, lateralSpeed);
+    // Velocity compensation: predict the car's position one frame ahead so
+    // the trail vertex lands where the rear wheel WILL be when render fires,
+    // not where it WAS when the physics step finished. At 60fps, dt = 1/60s.
+    // Without this, the trail visibly lags by one frame's worth of motion
+    // (~0.47 u at MAX_FORWARD_SPEED=28) — the trail emits "behind" the car
+    // instead of "from" the wheels.
+    const FRAME_DT = 1 / 60;
+    const predictedPos = new Vector3(
+      carPivot.position.x + velocity.x * FRAME_DT,
+      carPivot.position.y,
+      carPivot.position.z + velocity.z * FRAME_DT,
+    );
+    skidMarks.tick(predictedPos, forward, lateralSpeed);
   });
 
   const reset = (): void => {

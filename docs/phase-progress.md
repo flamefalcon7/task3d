@@ -1,6 +1,64 @@
 # Phase Progress
 
-## Last Updated: 2026-05-18 morning — **Plan-005 shipped end-to-end.** All 3 units (U1 brake state machine, U2 handbrake mode, U3 skid mark ribbons) landed in 3 feature commits + 1 docs commit on `feat/phase-2-sui-integration`. Frontend tests: 217 → 241 (+24 new across U1/U2/U3), backend 132, workspace typecheck clean. /track now has W=throttle, S=brake-then-reverse (200ms hold gate), Space=Mario-Kart handbrake (grip drop + 1.5× steering), and visible skid mark trails when lateral velocity crosses threshold. **Manual /track smoke (plan-004 + plan-005 combined) remains user-driven.**
+## Last Updated: 2026-05-18 afternoon — **Manual /track smoke iteration loop (post-plan-005 tuning).**
+
+User ran the /track combined smoke and reported real defects across multiple short cycles. Worked through them with tight back-and-forth. Net result: car has stronger throttle + higher top speed (drift-required cornering), car visual scaled 1.728× from spawn size, skid marks rewritten as twin tire ribbons emitted **in front of** the car (per user request), velocity-predicted to land under the wheels live. All BB derivation removed after Tripo GLBs returned unreliable extents — sizing is now hardcoded constants in `skidMarks.ts` as single source of truth.
+
+**Files touched this session (uncommitted)**: `frontend/src/track/racetrackScene.ts`, `frontend/src/track/racetrackScene.test.ts`, `frontend/src/track/skidMarks.ts`, `frontend/src/track/skidMarks.test.ts`. Frontend tests in `src/track/`: 107 passing (suite restructured — fewer tests because BB derivation paths + test infrastructure deleted, each remaining test is sharper). Typecheck clean.
+
+### What got fixed / tuned this session
+
+1. **Brake-then-reverse never engaged** (root cause: asymptotic brake math). Originally flagged in plan-005 code-review #17 (PERF-003) as "feel-tuning" and deferred — user hit it in real testing. `BRAKE_FORCE` 0.04 → **0.12** (3× decel) and `BRAKE_REVERSE_SPEED_THRESHOLD` 0.5 → **1.0 u/s** (widens "near stopped" band against physics noise).
+2. **Skid marks not visible**. `SKID_LATERAL_SPEED_THRESHOLD` 3 → **1.5 u/s** (3 u/s was unreachable with the arcade-grip model — `LATERAL_GRIP_PER_FRAME = 0.15` kills lateral motion in 6-7 frames).
+3. **Drift not required at top speed** (user-requested feel). `MAX_FORWARD_SPEED` 18 → **28 u/s**, `FORWARD_IMPULSE` 60 → **110**. At 28 u/s with steering rate 1.4 rad/s, turning radius (20 u) exceeds the track's outside-line corner radius — must brake or drift to stay on the road. Drift becomes a strategic tool, not optional.
+4. **Skid marks looked like one fat shadow stripe**, not real tire marks. Rewrote `skidMarks.ts` as **twin parallel rear-axle ribbons** (left + right wheels), each `TIRE_WIDTH = 0.10` u wide, separated by `REAR_AXLE_HALF_TRACK × 2`. Each "segment" is now a pair of meshes that FIFO together atomically.
+5. **Skid trail visibly lagged behind the car** (vertex-emission lag from `MIN_VERTEX_DISTANCE`). Dropped 1.0 → **0.3 u** (trail-end stays within ~7% of car length of the rear wheels). Plus per-frame **velocity-predicted position** in racetrackScene tick — adds `pivot.position + velocity / 60` to land vertex where the wheel WILL be after one render frame, compensating render lag at high speed.
+6. **Two failed attempts at BB-derived skid dimensions**, then **deleted entirely** after the user's "I feel like your code is error prone, talk to me not doing first" feedback. Console.log inside `createSkidMarks` revealed Tripo GLB BB was returning halfWidth ≤ 0.3 u (failing guard) and halfLength = 0.5 u (vs visually-normal car size) — sub-mesh selection issue. BB-derivation became a dual-source-of-truth bug factory (multipliers in racetrack + fallback constants in skidMarks + hardcoded values in tests, all needing manual sync). Picked **Option A**: hardcode in `skidMarks.ts` as the only place. Removed `SkidMarksOptions` interface, all BB-derivation code in racetrackScene, and 3 BB-related tests. Cleaner mental model going forward.
+7. **Skid marks moved to front of car** per user request. Renamed `REAR_OFFSET` → `WHEEL_OFFSET` (semantics: positive = in front of pivot, negative = behind). Flipped the sign in `axleCenter`. User can revert to rear by negating the constant.
+8. **Car scaled up** 1.0 → 1.2 → 1.44 → **1.728** total (3 user-requested +20% bumps). Applied to `carGeometry.scaling` before PhysicsAggregate so collider matches visual. Skid mark constants intentionally NOT auto-scaled (user picked Option a for this).
+
+### Current `skidMarks.ts` tunables (single source of truth)
+
+```typescript
+const TIRE_WIDTH = 0.10;            // each stripe width
+const REAR_AXLE_HALF_TRACK = 0.35;  // stripe separation = × 2 = 0.7u
+const WHEEL_OFFSET = 0.5;           // positive = in front of pivot; negative = behind
+const MIN_VERTEX_DISTANCE = 0.3;    // trail-end follow tightness
+const MAX_SEGMENT_PAIRS = 12;       // FIFO cap
+```
+
+### Process / collaboration learnings (worth holding)
+
+- **User explicitly pushed back on speculative code complexity** ("I feel like your code is error prone, talk to me not doing first"). Two-source-of-truth (BB-derived multipliers in one file + fallback constants in another + hardcoded test values) was the concrete failure mode. Going forward: when adding fallback paths or "just in case" defensive code, justify the case is real-not-imagined; otherwise pick a single path and let it fail loudly. CLAUDE.md says this; I drifted from it during the BB-derivation attempts and got bit.
+- **Plan-005 code-review #17 (asymptotic brake) was wrongly deferred** as "feel-tuning". It was math, not preference — user hit it on day-1 smoke. Lesson: when a reviewer flags PERF/correctness math, treat as defect by default; only defer with explicit user sign-off.
+- **Manual smoke catches bugs unit tests can't** (vertex-emission cadence visibility, BB-derivation mismatch, sub-mesh selection in Tripo GLBs). 107 passing tests + UI smoke = real coverage; tests alone wouldn't have surfaced any of this session's fixes.
+
+### In Progress
+
+- **Manual smoke verification** — user iterating on visual feel. Last unresolved item: scale 1.728 + WHEEL_OFFSET = 0.5 + tire size to verify after Hard refresh.
+- **Code-review residual items from plan-005** still open: #3 plan-vs-impl handbrake-in-reverse (product call), #5 racetrackScene.ts split (refactor — file now ~770+ LOC), #15/16 agent-native tunables export (design call), AN-004/AN-005 agent-native data attrs (design call), project-standards reviewer never returned (could re-dispatch).
+
+### Next Concrete Step
+
+- User to Hard refresh /track and confirm final visual feel
+- If satisfied: commit the 4 uncommitted files as a single tuning/refactor commit (`feat(track): hardcode skid mark sizing + scale car 1.728× + emit in front`)
+- Then **Phase 4 (Sui Kiosk + TransferPolicy + mainnet redeploy)** — biggest unstarted risk, per the user's hackathon priority order
+
+### Notes for Next Session
+
+- If user wants skid marks back behind car: change `WHEEL_OFFSET = 0.5` → `WHEEL_OFFSET = -0.5` (one constant, one line).
+- If skid marks ever need to auto-scale with car size: add a `SKID_SCALE` constant in `skidMarks.ts` and multiply the 3 dimension constants by it (still single source). Don't re-introduce BB derivation — it failed twice this session.
+- Velocity compensation in racetrackScene uses `1 / 60` hardcoded for dt. If the game ever drops below 60fps consistently, replace with `engine.getDeltaTime() / 1000` for honest predictions. Currently safe assumption.
+
+### Hackathon Tracker
+
+- Days to submission (6/21): **34 of 38**
+- Days to demo day (7/20–21): **63 of 67**
+- Days to winners (8/27): **101 of 105**
+
+---
+
+## Previously Last Updated: 2026-05-18 morning — **Plan-005 shipped end-to-end.** All 3 units (U1 brake state machine, U2 handbrake mode, U3 skid mark ribbons) landed in 3 feature commits + 1 docs commit on `feat/phase-2-sui-integration`. Frontend tests: 217 → 241 (+24 new across U1/U2/U3), backend 132, workspace typecheck clean. /track now has W=throttle, S=brake-then-reverse (200ms hold gate), Space=Mario-Kart handbrake (grip drop + 1.5× steering), and visible skid mark trails when lateral velocity crosses threshold. **Manual /track smoke (plan-004 + plan-005 combined) remains user-driven.**
 
 ## Session 2026-05-18 morning — Plan-005 throttle/brake/handbrake-drift
 

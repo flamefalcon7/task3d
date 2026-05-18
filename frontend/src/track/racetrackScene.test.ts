@@ -90,11 +90,6 @@ const M = vi.hoisted(() => {
         setLinearVelocity: ReturnType<typeof vi.fn>;
         getLinearVelocity: ReturnType<typeof vi.fn>;
       },
-      // Plan-005 code-review #13: per-test override for the geometry mesh's
-      // bounding-box extents. Default null = mesh has no getBoundingInfo,
-      // forcing the racetrackScene production code into the fallback path.
-      // Override before createRacetrackScene to exercise the BB derivation.
-      mockGeometryExtents: null as null | { x: number; y: number; z: number },
     },
   };
 });
@@ -264,9 +259,6 @@ vi.mock('@babylonjs/core', () => {
     // Simulate the typical Tripo/Babylon shape: __root__ TransformNode-ish
     // mesh at index 0 with 0 vertices, real geometry at index 1. KTD-2 says
     // we must pick the vertex-bearing one.
-    // Plan-005 code-review #13: when M.state.mockGeometryExtents is set,
-    // meshes[1] gets a getBoundingInfo() method returning those extents.
-    // Lets tests exercise the BB-derivation branch in racetrackScene.
     const geometryMesh = {
       position: new M.Vec3Mock(),
       absolutePosition: new M.Vec3Mock(),
@@ -274,21 +266,7 @@ vi.mock('@babylonjs/core', () => {
       getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
       getTotalVertices: vi.fn(() => 1024),
       parent: null as unknown,
-    } as {
-      position: InstanceType<typeof M.Vec3Mock>;
-      absolutePosition: InstanceType<typeof M.Vec3Mock>;
-      rotate: ReturnType<typeof vi.fn>;
-      getDirection: ReturnType<typeof vi.fn>;
-      getTotalVertices: ReturnType<typeof vi.fn>;
-      parent: unknown;
-      getBoundingInfo?: () => { boundingBox: { extendSize: { x: number; y: number; z: number } } };
     };
-    if (M.state.mockGeometryExtents) {
-      const extents = M.state.mockGeometryExtents;
-      geometryMesh.getBoundingInfo = () => ({
-        boundingBox: { extendSize: extents },
-      });
-    }
     const meshes = [
       {
         position: new M.Vec3Mock(),
@@ -346,7 +324,6 @@ beforeEach(() => {
   M.state.lastCarContainer = null;
   M.state.lastTransformNode = null;
   M.state.lastCarBody = null;
-  M.state.mockGeometryExtents = null;
   skidMarksSpy.ctor.mockClear();
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
@@ -1117,18 +1094,15 @@ describe('createRacetrackScene', () => {
 
   // ─── Plan-005 U3: skid marks wiring ───
 
-  it('Plan-005 U3 — instantiates skidMarks with the scene threshold + bounding-box rear offset', async () => {
+  it('Plan-005 U3 — instantiates skidMarks with the scene threshold', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
     expect(skidMarksSpy.ctor).toHaveBeenCalledTimes(1);
-    const [scene, threshold, options] = skidMarksSpy.ctor.mock.calls[0]!;
+    const [scene, threshold] = skidMarksSpy.ctor.mock.calls[0]!;
     expect(scene).toBeDefined();
-    expect(threshold).toBe(3); // SKID_LATERAL_SPEED_THRESHOLD
-    // Mock geometry mesh has no getBoundingInfo → rearOffset is null,
-    // module falls back to REAR_OFFSET_FALLBACK internally.
-    expect((options as { rearOffset?: unknown }).rearOffset).toBeNull();
+    expect(threshold).toBe(1.5); // SKID_LATERAL_SPEED_THRESHOLD
   });
 
   it('Plan-005 U3 — lap-state observer ticks skidMarks each frame with car pos + forward + lateralSpeed', async () => {
@@ -1158,23 +1132,6 @@ describe('createRacetrackScene', () => {
     skidMarksSpy.reset.mockClear();
     handles.reset();
     expect(skidMarksSpy.reset).toHaveBeenCalledTimes(1);
-  });
-
-  it('Plan-005 U3 — bounding-box rear offset derivation uses max(extendSize.x, extendSize.z) * 0.5', async () => {
-    // Code-review #13: the wiring test above passes rearOffset=null because
-    // the default geometry mesh has no getBoundingInfo. This test sets the
-    // M.state.mockGeometryExtents flag so the meshes[1] mock gains a
-    // getBoundingInfo that returns extendSize x=2, z=3. Expected derived
-    // rearOffset = max(2, 3) * 0.5 = 1.5. Regression guard against axis
-    // swap (would give 1.0 instead) or drop of the *0.5 (would give 3.0).
-    M.state.mockGeometryExtents = { x: 2, y: 1, z: 3 };
-    await createRacetrackScene({
-      canvas: fakeCanvas(),
-      carGlbBytes: fakeGlb(),
-    });
-    expect(skidMarksSpy.ctor).toHaveBeenCalledTimes(1);
-    const [, , options] = skidMarksSpy.ctor.mock.calls[0]!;
-    expect((options as { rearOffset?: number }).rearOffset).toBeCloseTo(1.5, 2);
   });
 
   it('Plan-005 U3 — lap-state observer computes lateralSpeed from the lateral axis (not forward axis)', async () => {

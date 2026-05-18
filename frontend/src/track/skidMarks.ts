@@ -1,14 +1,24 @@
-// Plan-005 U3 — dispose-and-recreate ribbon trails behind the car when
-// lateral velocity exceeds a threshold. Emission is gated by lateral speed
-// (not handbrake state) so natural-drift hot corners produce marks too.
+// Plan-005 U3 — twin rear-tire ribbons. Two narrow parallel stripes (left and
+// right rear wheel) behind the car when lateral velocity exceeds a threshold.
 //
 // Why dispose-and-recreate (KTD-3): `MeshBuilder.ExtrudeShape({updatable,
-// instance})` in @babylonjs/core@9.7.0 only supports same-length path
-// updates — `ribbonBuilder.js:277-314` loops over `min(oldLen, newLen)`,
-// silently truncating new vertices. Growing a ribbon by appending points
-// requires recreating the mesh each growth tick. At MIN_VERTEX_DISTANCE =
-// 0.5 u and MAX_FORWARD_SPEED = 18 u/s, the gate fires at ~30 Hz per active
-// segment — Babylon handles this trivially.
+// instance})` in @babylonjs/core@9.7.0 only supports same-length path updates
+// (`ribbonBuilder.js:277-314` loops over `min(oldLen, newLen)`, silently
+// truncating new vertices). Growing a ribbon by appending points requires
+// recreating the mesh each growth tick.
+//
+// SIZING — single source of truth. Adjust these three constants to dial in
+// the look; no BB derivation, no fallback layer, no options struct. Tripo
+// GLB bounding boxes were unreliable in practice (sub-meshes returned tiny
+// extents that didn't match the visual chassis), so we hardcode values
+// matched to the typical visual car size at this scene scale.
+const TIRE_WIDTH = 0.10;
+const REAR_AXLE_HALF_TRACK = 0.35;
+// Distance from pivot center where the trail is emitted, measured along the
+// car's forward direction. POSITIVE = in front of pivot, NEGATIVE = behind.
+// User-requested: positive value to emit in front of the car (under "front
+// wheels"); flip to negative if rear-wheel trails are wanted.
+const WHEEL_OFFSET = 0.5;
 
 import {
   Color3,
@@ -19,34 +29,17 @@ import {
   Vector3,
 } from '@babylonjs/core';
 
-// FIFO cap; when finalizing would push the array past the cap, dispose
-// the oldest. 12 segments comfortably covers a drift-heavy lap without
-// accumulating mesh count.
-const MAX_SEGMENTS = 12;
+// FIFO cap on segment PAIRS (each pair = one left + one right ribbon).
+const MAX_SEGMENT_PAIRS = 12;
 
-// Ribbon cross-section width (rear-axle approximation). 1.2 u over a 14 u
-// road reads as a single rear-axle stripe rather than per-wheel trails.
-// Per-wheel trails are deferred to v1.1 per plan-005 KTD-5.
-const SEGMENT_WIDTH = 1.2;
+// Min distance the car must move before appending a new locked vertex.
+// Tracked at the axle CENTER so both stripes get vertices in lockstep and
+// stay visually parallel. 0.3 u keeps the trail-end within ~7% of car
+// length of the current rear wheel position.
+const MIN_VERTEX_DISTANCE = 0.3;
 
-// Minimum distance the car must move before a new vertex is appended to
-// the active path. Prevents duplicate-point bloat when stationary at
-// threshold AND bounds the dispose/recreate cadence — code-review #4
-// (PERF-002) flagged the original 0.5 producing ~30 Hz GC churn during
-// sustained drift; bumping to 1.0 halves it to ~15 Hz with no visible
-// quality loss at chase-cam distance (the car still emits 4-5 vertices
-// across a typical corner). At MAX_FORWARD_SPEED = 18 u/s and 60fps,
-// car moves 0.3 u/frame → vertex every ~3 frames.
-const MIN_VERTEX_DISTANCE = 1.0;
-
-// Tiny lift above road surface to avoid z-fighting with the asphalt
-// ribbon. The road sits at y=0; this lifts skid marks to y=0.05.
+// Tiny lift above road surface to avoid z-fighting with the asphalt ribbon.
 const SKID_Y_OFFSET = 0.05;
-
-// Fallback rear-offset (distance behind car center where the trail
-// originates) when bounding-box inspection fails or returns degenerate
-// extents. ~1.5 u puts the trail behind a typical Tripo car's chassis.
-const REAR_OFFSET_FALLBACK = 1.5;
 
 export interface SkidMarks {
   tick(carPosition: Vector3, carForward: Vector3, lateralSpeed: number): void;
@@ -54,103 +47,104 @@ export interface SkidMarks {
   dispose(): void;
 }
 
-export interface SkidMarksOptions {
-  /**
-   * If provided AND non-degenerate, this is used as the rear-offset
-   * distance. The orchestrator computes it from the car's bounding box
-   * at scene init (e.g., `~0.5 × carGeometry.getBoundingInfo().boundingBox.extendSize.z`)
-   * and passes it in. Pass `null` or omit to use REAR_OFFSET_FALLBACK.
-   */
-  rearOffset?: number | null;
-}
-
 export function createSkidMarks(
   scene: Scene,
   lateralSpeedThreshold: number,
-  options: SkidMarksOptions = {},
 ): SkidMarks {
-  // Validate the optional rear-offset against degenerate extents (R-r6).
-  const rearOffset =
-    options.rearOffset != null &&
-    Number.isFinite(options.rearOffset) &&
-    options.rearOffset > 0.1
-      ? options.rearOffset
-      : REAR_OFFSET_FALLBACK;
-
-  // Shared material so finalized segments don't churn GPU state.
+  // Flat black for tire-rubber realism, fully opaque for chase-cam visibility.
   const skidMat = new StandardMaterial('skidMat', scene);
   skidMat.diffuseColor = new Color3(0.05, 0.05, 0.05);
   skidMat.specularColor = new Color3(0, 0, 0);
-  skidMat.alpha = 0.8;
+  skidMat.alpha = 1.0;
 
-  // Cross-section for the ribbon: a horizontal 2-point line in local X.
-  // Extruded along the dynamic path, this gives us a flat ribbon SEGMENT_WIDTH
-  // wide hugging the road surface.
+  // Cross-section for each tire ribbon: a 2-point line in local X.
   const shape = [
-    new Vector3(-SEGMENT_WIDTH / 2, 0, 0),
-    new Vector3(SEGMENT_WIDTH / 2, 0, 0),
+    new Vector3(-TIRE_WIDTH / 2, 0, 0),
+    new Vector3(TIRE_WIDTH / 2, 0, 0),
   ];
 
-  const segments: Mesh[] = [];
-  let currentPath: Vector3[] | null = null;
-  let currentMesh: Mesh | null = null;
-  let lastEmitPos: Vector3 | null = null;
-  let segmentCounter = 0; // monotonic id for mesh names (debugging aid)
+  // Committed pairs. Each entry is [leftMesh, rightMesh] so FIFO disposes
+  // both at once — they're visually coupled and never live half-alive.
+  const segmentPairs: Array<[Mesh, Mesh]> = [];
+  let currentPaths: [Vector3[], Vector3[]] | null = null;
+  let currentMeshes: [Mesh, Mesh] | null = null;
+  let lastEmitPos: Vector3 | null = null; // axle center, not per-tire
+  let segmentCounter = 0;
   let disposed = false;
 
-  function rearPoint(carPosition: Vector3, carForward: Vector3): Vector3 {
+  function axleCenter(carPosition: Vector3, carForward: Vector3): Vector3 {
+    // Positive WHEEL_OFFSET emits in front of pivot; negative emits behind.
     return new Vector3(
-      carPosition.x - carForward.x * rearOffset,
+      carPosition.x + carForward.x * WHEEL_OFFSET,
       SKID_Y_OFFSET,
-      carPosition.z - carForward.z * rearOffset,
+      carPosition.z + carForward.z * WHEEL_OFFSET,
     );
   }
 
-  // Discards the in-flight mesh (typically right before rebuilding it with a
-  // longer path). Does NOT save to segments — caller wants the mesh gone.
-  function discardCurrentMesh(): void {
-    if (currentMesh) {
-      currentMesh.dispose();
-      currentMesh = null;
+  function rearPoints(
+    carPosition: Vector3,
+    carForward: Vector3,
+  ): [Vector3, Vector3] {
+    const center = axleCenter(carPosition, carForward);
+    // Right vector in XZ (Babylon left-handed, +X right, +Z forward).
+    // forward=(0,0,1) → right=(1,0,0).
+    const rightX = carForward.z;
+    const rightZ = -carForward.x;
+    return [
+      new Vector3(
+        center.x - rightX * REAR_AXLE_HALF_TRACK,
+        SKID_Y_OFFSET,
+        center.z - rightZ * REAR_AXLE_HALF_TRACK,
+      ),
+      new Vector3(
+        center.x + rightX * REAR_AXLE_HALF_TRACK,
+        SKID_Y_OFFSET,
+        center.z + rightZ * REAR_AXLE_HALF_TRACK,
+      ),
+    ];
+  }
+
+  function discardCurrentMeshes(): void {
+    if (currentMeshes) {
+      currentMeshes[0].dispose();
+      currentMeshes[1].dispose();
+      currentMeshes = null;
     }
   }
 
-  // Commits the in-flight mesh to the segments array (preserving it for the
-  // remainder of the lap) and clears all in-flight state. Enforces FIFO cap.
   function commitCurrentSegment(): void {
-    if (currentMesh) {
-      segments.push(currentMesh);
-      currentMesh = null;
-      // FIFO cap — if pushing put us past MAX_SEGMENTS, dispose the oldest.
-      if (segments.length > MAX_SEGMENTS) {
-        const oldest = segments.shift();
-        if (oldest) oldest.dispose();
+    if (currentMeshes) {
+      segmentPairs.push(currentMeshes);
+      currentMeshes = null;
+      if (segmentPairs.length > MAX_SEGMENT_PAIRS) {
+        const oldest = segmentPairs.shift();
+        if (oldest) {
+          oldest[0].dispose();
+          oldest[1].dispose();
+        }
       }
     }
-    currentPath = null;
+    currentPaths = null;
     lastEmitPos = null;
   }
 
-  // Tear down the in-flight mesh (if any) and recreate it from the current
-  // path. "Rebuild" not "regrow" — the previous mesh is destroyed; Babylon
-  // 9.7.0's `MeshBuilder.ExtrudeShape({updatable, instance})` silently
-  // truncates path growth (see header comment). Per-tick churn is bounded
-  // at ~30 Hz per active segment by MIN_VERTEX_DISTANCE.
-  function rebuildCurrentMesh(): void {
-    if (!currentPath || currentPath.length < 2) return;
-    discardCurrentMesh();
+  function rebuildCurrentMeshes(): void {
+    if (!currentPaths || currentPaths[0].length < 2) return;
+    discardCurrentMeshes();
     segmentCounter += 1;
-    const mesh = MeshBuilder.ExtrudeShape(
-      `skid-segment-${segmentCounter}`,
-      {
-        shape,
-        path: currentPath,
-        sideOrientation: 2 /* DOUBLESIDE */,
-      },
+    const left = MeshBuilder.ExtrudeShape(
+      `skid-segment-${segmentCounter}-L`,
+      { shape, path: currentPaths[0], sideOrientation: 2 /* DOUBLESIDE */ },
       scene,
     );
-    mesh.material = skidMat;
-    currentMesh = mesh;
+    const right = MeshBuilder.ExtrudeShape(
+      `skid-segment-${segmentCounter}-R`,
+      { shape, path: currentPaths[1], sideOrientation: 2 /* DOUBLESIDE */ },
+      scene,
+    );
+    left.material = skidMat;
+    right.material = skidMat;
+    currentMeshes = [left, right];
   }
 
   function tick(
@@ -160,44 +154,42 @@ export function createSkidMarks(
   ): void {
     if (disposed) return;
     const emitting = Math.abs(lateralSpeed) > lateralSpeedThreshold;
-    const rear = rearPoint(carPosition, carForward);
 
     if (emitting) {
-      if (currentPath === null) {
-        // Start a new segment. Mesh creation defers until path has 2 points.
-        currentPath = [rear];
-        lastEmitPos = rear;
+      const [leftRear, rightRear] = rearPoints(carPosition, carForward);
+      const center = axleCenter(carPosition, carForward);
+      if (currentPaths === null) {
+        currentPaths = [[leftRear], [rightRear]];
+        lastEmitPos = center;
       } else {
-        // Code-review #10 defensive assert: currentPath and lastEmitPos are
-        // set + cleared as a pair (here, in commitCurrentSegment, and in
-        // reset). If they ever desync, distance-gate math breaks silently.
-        // Throw loudly instead of falling through to a `return` branch.
         if (lastEmitPos === null) {
           throw new Error(
-            'skidMarks invariant violation: currentPath set but lastEmitPos is null',
+            'skidMarks invariant violation: currentPaths set but lastEmitPos is null',
           );
         }
-        const dx = rear.x - lastEmitPos.x;
-        const dz = rear.z - lastEmitPos.z;
+        const dx = center.x - lastEmitPos.x;
+        const dz = center.z - lastEmitPos.z;
         if (Math.hypot(dx, dz) >= MIN_VERTEX_DISTANCE) {
-          currentPath.push(rear);
-          lastEmitPos = rear;
-          rebuildCurrentMesh();
+          currentPaths[0].push(leftRear);
+          currentPaths[1].push(rightRear);
+          lastEmitPos = center;
+          rebuildCurrentMeshes();
         }
       }
-    } else if (currentPath !== null) {
+    } else if (currentPaths !== null) {
       commitCurrentSegment();
     }
   }
 
   function reset(): void {
-    // Discard the in-flight segment (don't commit — Retry shouldn't keep
-    // half-formed trails) and all committed segments.
-    discardCurrentMesh();
-    currentPath = null;
+    discardCurrentMeshes();
+    currentPaths = null;
     lastEmitPos = null;
-    for (const seg of segments) seg.dispose();
-    segments.length = 0;
+    for (const [l, r] of segmentPairs) {
+      l.dispose();
+      r.dispose();
+    }
+    segmentPairs.length = 0;
   }
 
   function dispose(): void {

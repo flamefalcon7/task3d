@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 // Plan-005 U3 — skidMarks unit tests. Mock @babylonjs/core surface used by
 // the module: Vector3, Color3, StandardMaterial, Mesh.dispose, and
 // MeshBuilder.ExtrudeShape (which we want to count + capture path lengths).
+//
+// Twin-ribbon refactor (post manual-smoke): each growth tick now creates
+// TWO meshes (left + right rear tire), so count assertions are 2× the
+// single-ribbon counterpart.
 
 const M = vi.hoisted(() => {
   class Vec3Mock {
@@ -38,7 +42,6 @@ vi.mock('@babylonjs/core', () => {
   const MeshBuilder = {
     ExtrudeShape: (name: string, opts: { path: unknown[] }, _scene: unknown) => {
       M.extrudeShape(name, opts);
-      // Return a fake mesh; track disposal via the hoisted spy.
       const mesh = {
         material: null as unknown,
         dispose: vi.fn(() => M.meshDispose()),
@@ -55,133 +58,133 @@ vi.mock('@babylonjs/core', () => {
   };
 });
 
-// Import AFTER vi.mock so the SUT picks up the mocks.
 import { createSkidMarks } from './skidMarks';
 import type { Vector3, Scene } from '@babylonjs/core';
 
 function fakeScene(): Scene {
-  return {} as Scene; // mocks ignore scene anyway
+  return {} as Scene;
 }
 
-// Cast Vec3Mock to Vector3 — at runtime the @babylonjs/core module mock
-// replaces Vector3 with Vec3Mock, but TS doesn't know that.
 const v3 = (x = 0, y = 0, z = 0): Vector3 =>
   new M.Vec3Mock(x, y, z) as unknown as Vector3;
+
+// Twin-ribbon constants — kept in sync with skidMarks.ts hardcoded values.
+// Used in path-position assertions where the left/right offset and forward
+// distance matter.
+const REAR_AXLE_HALF_TRACK = 0.35;
+const WHEEL_OFFSET = 0.5; // positive = in front of pivot
 
 describe('createSkidMarks', () => {
   it('does not create any mesh while lateralSpeed stays below threshold', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    sm.tick(v3(0, 0, 0), v3(0, 0, 1), 0); // lateralSpeed=0 < threshold=3
+    sm.tick(v3(0, 0, 0), v3(0, 0, 1), 0);
     sm.tick(v3(0, 0, 1), v3(0, 0, 1), 2);
     sm.tick(v3(0, 0, 2), v3(0, 0, 1), 2.9);
     expect(M.extrudeShape).not.toHaveBeenCalled();
   });
 
-  it('starts a segment on first above-threshold tick, but defers mesh until 2nd point is pushed', () => {
+  it('starts a pair on first above-threshold tick, but defers mesh until 2nd point is pushed', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // First above-threshold tick: path initialized to [rear], no mesh yet.
+    // First above-threshold tick: paths initialized to [[leftRear], [rightRear]], no mesh yet.
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
     expect(M.extrudeShape).not.toHaveBeenCalled();
-    // Second tick: car moved 1.5 u (> MIN_VERTEX_DISTANCE 1.0), path grows
-    // to 2 points, mesh is created.
+    // Second tick: car moved 1.5 u (> MIN_VERTEX_DISTANCE 1.0), each path
+    // grows to 2 points, BOTH meshes (left + right) are created.
     sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5);
-    expect(M.extrudeShape).toHaveBeenCalledTimes(1);
-    const opts = M.extrudeShape.mock.calls[0]![1] as { path: unknown[] };
-    expect(opts.path).toHaveLength(2);
+    expect(M.extrudeShape).toHaveBeenCalledTimes(2);
+    const leftOpts = M.extrudeShape.mock.calls[0]![1] as { path: unknown[] };
+    const rightOpts = M.extrudeShape.mock.calls[1]![1] as { path: unknown[] };
+    expect(leftOpts.path).toHaveLength(2);
+    expect(rightOpts.path).toHaveLength(2);
   });
 
-  it('extends the active ribbon when car moves >= MIN_VERTEX_DISTANCE', () => {
-    // Each delta is 1.5 u (well above the 1.0 MIN_VERTEX_DISTANCE).
+  it('extends BOTH ribbons when car moves >= MIN_VERTEX_DISTANCE', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5); // path=[(...)]
-    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // path=2, mesh #1
-    sm.tick(v3(0, 0, 3.0), v3(0, 0, 1), 5); // path=3, mesh #2 (rebuild)
-    sm.tick(v3(0, 0, 4.5), v3(0, 0, 1), 5); // path=4, mesh #3
-    expect(M.extrudeShape).toHaveBeenCalledTimes(3);
-    const lastOpts = M.extrudeShape.mock.calls[2]![1] as { path: unknown[] };
-    expect(lastOpts.path).toHaveLength(4);
+    sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5); // paths=[[L],[R]]
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // paths grow to 2 — 2 meshes
+    sm.tick(v3(0, 0, 3.0), v3(0, 0, 1), 5); // paths grow to 3 — 2 more meshes
+    sm.tick(v3(0, 0, 4.5), v3(0, 0, 1), 5); // paths grow to 4 — 2 more meshes
+    // 3 rebuilds × 2 meshes/rebuild = 6 ExtrudeShape calls.
+    expect(M.extrudeShape).toHaveBeenCalledTimes(6);
+    const lastLeft = M.extrudeShape.mock.calls[4]![1] as { path: unknown[] };
+    const lastRight = M.extrudeShape.mock.calls[5]![1] as { path: unknown[] };
+    expect(lastLeft.path).toHaveLength(4);
+    expect(lastRight.path).toHaveLength(4);
   });
 
   it('does NOT push a duplicate point when car barely moved (< MIN_VERTEX_DISTANCE)', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // 1st mesh created at delta 1.5 > 1.0
-    // Sub-threshold movement: deltas of 0.4 and 0.3 — both < 1.0, no growth.
-    sm.tick(v3(0, 0, 1.9), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 2.2), v3(0, 0, 1), 5);
-    // Still only ONE mesh recreation total.
-    expect(M.extrudeShape).toHaveBeenCalledTimes(1);
+    sm.tick(v3(0, 0, 0.5), v3(0, 0, 1), 5); // first pair at delta 0.5 (> 0.3)
+    // Sub-threshold movement: deltas of 0.1 and 0.1 — both < 0.3, no growth.
+    sm.tick(v3(0, 0, 0.6), v3(0, 0, 1), 5);
+    sm.tick(v3(0, 0, 0.7), v3(0, 0, 1), 5);
+    // Still only ONE rebuild → 2 meshes total.
+    expect(M.extrudeShape).toHaveBeenCalledTimes(2);
   });
 
-  it('finalizes a segment when lateralSpeed drops below threshold; starts a new one on next crossing', () => {
+  it('finalizes a pair when lateralSpeed drops below threshold; starts a new one on next crossing', () => {
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // Segment 1: positions 0 → 1.5 (delta 1.5 > 1.0) creates mesh #1.
+    // Pair 1: positions 0 → 1.5 creates 2 meshes (left + right).
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
     sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5);
-    const segment1Count = M.extrudeShape.mock.calls.length;
-    // Drop below threshold — finalize.
-    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 0);
-    // Segment 2 (new path, defers mesh until 2nd point at delta >= 1.0).
+    const segment1Count = M.extrudeShape.mock.calls.length; // 2
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 0); // finalize
+    // Pair 2 (new paths, defers meshes until 2nd point at delta >= 1.0).
     sm.tick(v3(0, 0, 5), v3(0, 0, 1), 5);
-    expect(M.extrudeShape.mock.calls.length).toBe(segment1Count); // no new mesh yet
-    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // delta 1.5 from 5
-    expect(M.extrudeShape.mock.calls.length).toBe(segment1Count + 1);
+    expect(M.extrudeShape.mock.calls.length).toBe(segment1Count); // no new meshes yet
+    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // delta 1.5 from 5 → 2 more meshes
+    expect(M.extrudeShape.mock.calls.length).toBe(segment1Count + 2);
   });
 
-  it('disposes the oldest segment when MAX_SEGMENTS cap is exceeded', () => {
+  it('disposes the oldest pair (2 meshes) when MAX_SEGMENT_PAIRS cap is exceeded', () => {
     const sm = createSkidMarks(fakeScene(), 3);
-    // Build up exactly MAX_SEGMENTS (12) finalized segments — no cap fire yet.
-    // Each segment uses positions i*3, i*3+1.5, i*3+2 (last is finalize tick).
+    // Build up exactly MAX_SEGMENT_PAIRS (12) finalized pairs — no cap fire yet.
     for (let i = 0; i < 12; i++) {
       sm.tick(v3(0, 0, i * 3), v3(0, 0, 1), 5);
       sm.tick(v3(0, 0, i * 3 + 1.5), v3(0, 0, 1), 5);
       sm.tick(v3(0, 0, i * 3 + 2), v3(0, 0, 1), 0); // finalize
     }
-    // Now clear the spy. The very next finalize MUST dispose exactly one
-    // mesh (the FIFO-evicted oldest). The regrow-disposes during the
-    // build-up phase happened before the clear, so the only dispose that
-    // can land in this window is the cap-enforcement one.
+    // The 13th pair triggers the FIFO eviction of the oldest pair = 2 meshes.
     M.meshDispose.mockClear();
     sm.tick(v3(0, 0, 36), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 37.5), v3(0, 0, 1), 5); // creates mesh #13's active form
-    M.meshDispose.mockClear(); // exclude the rebuild-dispose
-    sm.tick(v3(0, 0, 38), v3(0, 0, 1), 0); // finalize → cap fires
-    expect(M.meshDispose).toHaveBeenCalledTimes(1);
+    sm.tick(v3(0, 0, 37.5), v3(0, 0, 1), 5); // creates pair #13 (active)
+    M.meshDispose.mockClear(); // exclude rebuild-disposes from the count
+    sm.tick(v3(0, 0, 38), v3(0, 0, 1), 0); // finalize → cap fires, disposes pair = 2 meshes
+    expect(M.meshDispose).toHaveBeenCalledTimes(2);
   });
 
-  it('reset() disposes all segments AND the in-flight ribbon', () => {
+  it('reset() disposes all pairs AND the in-flight pair', () => {
     M.meshDispose.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
-    // 2 finalized + 1 in-flight, each at deltas > 1.0
+    // 2 finalized pairs + 1 in-flight pair, each at deltas > 1.0
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // mesh 1
+    sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 5); // pair 1
     sm.tick(v3(0, 0, 1.5), v3(0, 0, 1), 0); // finalize
     sm.tick(v3(0, 0, 5), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // mesh 2
+    sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 5); // pair 2
     sm.tick(v3(0, 0, 6.5), v3(0, 0, 1), 0); // finalize
     sm.tick(v3(0, 0, 10), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 11.5), v3(0, 0, 1), 5); // in-flight mesh
+    sm.tick(v3(0, 0, 11.5), v3(0, 0, 1), 5); // in-flight pair
     const beforeReset = M.meshDispose.mock.calls.length;
 
     sm.reset();
-    // Reset disposes exactly: 1 in-flight + 2 finalized = 3 meshes.
-    // Deterministic — anything other than 3 indicates a reset() bug.
-    expect(M.meshDispose.mock.calls.length - beforeReset).toBe(3);
+    // 3 pairs × 2 meshes/pair = 6 disposals on reset.
+    expect(M.meshDispose.mock.calls.length - beforeReset).toBe(6);
   });
 
   it('AE5 — emits skid marks during natural drift (no handbrake context required)', () => {
-    // The module is handbrake-agnostic: emission gates on lateralSpeed only.
-    // This test verifies no hidden coupling to a handbrake signal.
     M.extrudeShape.mockClear();
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
     sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
-    expect(M.extrudeShape).toHaveBeenCalledTimes(1);
+    // One growth tick = one pair = 2 ExtrudeShape calls.
+    expect(M.extrudeShape).toHaveBeenCalledTimes(2);
   });
 
   it('AE6 — reset() clears trails (analog of Retry teardown)', () => {
@@ -189,10 +192,10 @@ describe('createSkidMarks', () => {
     const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(0, 0, 0), v3(0, 0, 1), 5);
     sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
-    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 0); // finalize 1 segment
-    expect(M.meshDispose).not.toHaveBeenCalled(); // not yet disposed
+    sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 0); // finalize 1 pair
+    expect(M.meshDispose).not.toHaveBeenCalled();
     sm.reset();
-    expect(M.meshDispose).toHaveBeenCalled(); // now disposed
+    expect(M.meshDispose).toHaveBeenCalled();
   });
 
   it('dispose() disposes the material AND becomes idempotent', () => {
@@ -202,43 +205,38 @@ describe('createSkidMarks', () => {
     sm.tick(v3(0, 0, 1.2), v3(0, 0, 1), 5);
     sm.dispose();
     expect(M.materialDispose).toHaveBeenCalledTimes(1);
-    // Calling dispose() again is a no-op (disposed flag guards re-entry).
     sm.dispose();
     expect(M.materialDispose).toHaveBeenCalledTimes(1);
   });
 
-  it('skid material has the expected near-black color + alpha 0.8 (code-review #20 regression guard)', () => {
-    // A typo on the tunable alpha (0.08 instead of 0.8 → invisible trails)
-    // or a colour swap would silently ship without this assertion. The
-    // material is created at module-init time; createSkidMarks is enough
-    // to populate M.lastMaterial.
+  it('skid material has the expected flat-black color + alpha 1.0', () => {
     createSkidMarks(fakeScene(), 3);
     expect(M.lastMaterial).not.toBeNull();
-    expect(M.lastMaterial!.alpha).toBeCloseTo(0.8, 2);
+    expect(M.lastMaterial!.alpha).toBeCloseTo(1.0, 2);
     const color = M.lastMaterial!.diffuseColor as { r: number; g: number; b: number };
-    expect(color.r).toBeLessThan(0.15); // near-black, definitely darker than asphalt (0.18)
+    // Flat black for tire-rubber realism — twin-stripe layout reads correctly
+    // at this color without the earlier warm-brown visibility hack.
+    expect(color.r).toBeLessThan(0.15);
     expect(color.g).toBeLessThan(0.15);
     expect(color.b).toBeLessThan(0.15);
   });
 
-  it('uses the provided rearOffset when non-degenerate, else falls back', () => {
+  it('places left/right ribbons symmetrically about the axle center using the hardcoded sizing constants', () => {
     M.extrudeShape.mockClear();
-    // Provide rearOffset = 2 — should use that.
-    const sm = createSkidMarks(fakeScene(), 3, { rearOffset: 2 });
+    const sm = createSkidMarks(fakeScene(), 3);
     sm.tick(v3(10, 0, 0), v3(0, 0, 1), 5);
     sm.tick(v3(10, 0, 1.5), v3(0, 0, 1), 5);
-    const path = (M.extrudeShape.mock.calls[0]![1] as { path: { x: number; z: number }[] }).path;
-    // First point: rear = carPos - forward*rearOffset = (10, 0, 0) - (0,0,1)*2 = (10, 0, -2)
-    expect(path[0]!.x).toBe(10);
-    expect(path[0]!.z).toBe(-2);
-
-    // Provide degenerate rearOffset (0.05 — below threshold), should fall back.
-    M.extrudeShape.mockClear();
-    const sm2 = createSkidMarks(fakeScene(), 3, { rearOffset: 0.05 });
-    sm2.tick(v3(10, 0, 0), v3(0, 0, 1), 5);
-    sm2.tick(v3(10, 0, 1.5), v3(0, 0, 1), 5);
-    const path2 = (M.extrudeShape.mock.calls[0]![1] as { path: { z: number }[] }).path;
-    // Should use REAR_OFFSET_FALLBACK (1.5): rear = (10, 0, 0) - (0,0,1)*1.5 = (10, 0, -1.5)
-    expect(path2[0]!.z).toBe(-1.5);
+    // Two calls per growth: [0] = left ribbon, [1] = right ribbon.
+    // Axle center for the first emit: (10, *, 0) + (0,0,1) × WHEEL_OFFSET
+    //   = (10, *, +WHEEL_OFFSET)
+    // Right vector for forward=(0,0,1) is (1,0,0).
+    // Left wheel:  x = 10 - REAR_AXLE_HALF_TRACK, z = +WHEEL_OFFSET
+    // Right wheel: x = 10 + REAR_AXLE_HALF_TRACK, z = +WHEEL_OFFSET
+    const leftPath = (M.extrudeShape.mock.calls[0]![1] as { path: { x: number; z: number }[] }).path;
+    const rightPath = (M.extrudeShape.mock.calls[1]![1] as { path: { x: number; z: number }[] }).path;
+    expect(leftPath[0]!.x).toBeCloseTo(10 - REAR_AXLE_HALF_TRACK, 5);
+    expect(rightPath[0]!.x).toBeCloseTo(10 + REAR_AXLE_HALF_TRACK, 5);
+    expect(leftPath[0]!.z).toBeCloseTo(WHEEL_OFFSET, 5);
+    expect(rightPath[0]!.z).toBeCloseTo(WHEEL_OFFSET, 5);
   });
 });
