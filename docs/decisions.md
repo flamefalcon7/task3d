@@ -1359,6 +1359,52 @@ All production-deploy and demo-capture work is deferred to Phase 5. Until then, 
 
 ---
 
+## D-027: Adopt `@babylonjs/materials` for SkyMaterial procedural sky
+
+**Status**: Accepted
+**Date**: 2026-05-18
+**Phase**: 3 (Tiny Racetrack scene polish — plan-006)
+
+### Context
+
+Plan-006 U3 (R1) replaces the racetrack scene's flat `clearColor` sky with an atmospheric sky that fills the frame intentionally. The racetrack is one of two screen-recorded surfaces in the Sui Overflow 2026 pitch (the other is the NFT mint flow), and a uniform sky color reads as placeholder against the post-processed (U2 bloom/FXAA/tonemap) scene. Babylon's first-party `@babylonjs/materials` package ships `SkyMaterial`, a Preetham atmospheric-scattering shader configurable via turbidity, luminance, inclination, azimuth, and rayleigh — i.e., physical sun-position control rather than a baked texture.
+
+### Decision
+
+Add `@babylonjs/materials` (pinned `^9.6.0` to match `@babylonjs/core`) as a `frontend` runtime dependency. Import `SkyMaterial` via the tree-shakable subpath `@babylonjs/materials/sky/skyMaterial` to avoid pulling unused materials (water, fire, fur, etc.) into the bundle. Use it on a 1000u skybox cube with `infiniteDistance: true`.
+
+### Rationale
+
+- Procedural sky is the canonical Babylon pattern for racing-style demos (Art of Rally / Forza-likes use the same Preetham approach). Babylon-team-supported shader = least integration friction.
+- Dynamic sun-position control (`inclination`, `azimuth`) means a future `DirectionalLight` can be aligned to the sun without re-baking a texture — supports the deferred "shadows" follow-up in plan-006 cleanly.
+- Bundle cost ~50KB after tree-shaking; well under the budget for one visual upgrade on a lazy `/track` route (Havok WASM already dominates the route at ~500KB per D-022).
+- Building the Preetham shader from scratch is days of GLSL work for identical output — no informational value over using the package.
+
+### Alternatives Considered
+
+- **Static cube-map skybox** — load 6 textures into a `CubeTexture`. Rejected: texture sourcing burden, no dynamic sun, fixed art direction; also fights the low-poly aesthetic by introducing photographic detail.
+- **Custom Preetham GLSL shader** — write the scattering shader by hand. Rejected: multi-day effort to reach parity with a battle-tested first-party implementation.
+- **Flat gradient mesh** (vertex-color quad above horizon) — Rejected: looks visibly cheap, no sun, no atmospheric depth, defeats the entire point of the upgrade.
+- **Keep flat `clearColor`** — Rejected by ideation pass (origin doc): a uniform sky reads as placeholder in a screen-recorded demo.
+
+### Consequences
+
+- ✅ U3 can ship procedural sky in one mesh + one material attach; no shader authoring.
+- ✅ Tree-shaken import path keeps bundle delta small (~50KB).
+- ✅ Sun direction is parameterizable for a future `DirectionalLight` alignment (deferred to follow-up work per plan-006).
+- ⚠️ Adds one runtime dependency that must stay in sync with `@babylonjs/core` major versions; pin both to the same major.
+- ⚠️ Skybox mesh adds one draw call per frame — trivial on modern hardware, but the dispose path must be exercised in `racetrackScene.ts`'s existing teardown to avoid GPU memory leaks on carousel switches.
+- 🔮 The same `@babylonjs/materials` package gates future visual upgrades (e.g., `WaterMaterial` if we ever add a wet-track demo) without a new dependency decision.
+
+### Related
+
+- spec.md section: §6 Phase 3 (sample game scene)
+- plan-006: `docs/plans/2026-05-18-006-feat-racetrack-scene-polish-plan.md` — U1 (this ADR) gates U3 (SkyMaterial import)
+- Related decisions: [[D-022]] (Havok adoption — same lazy-load-on-`/track` posture), [[D-007]] (imperative Babylon — SkyMaterial wiring stays in `racetrackScene.ts`, not a React wrapper)
+- Babylon docs: https://doc.babylonjs.com/toolsAndResources/assetLibraries/materialsLibrary/skyMat
+
+---
+
 # Reserved Decision Numbers
 
-D-027 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-028 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
