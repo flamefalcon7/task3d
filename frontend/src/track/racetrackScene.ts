@@ -979,7 +979,13 @@ export async function createRacetrackScene(
     // Plan-006 U7 — tire smoke shares the same anchor + lateral-speed
     // signal as the skid marks above. Uses the predicted position so the
     // smoke origin tracks the wheel rather than lagging one frame behind.
-    tireSmoke.tick(skidPredictedPos, forward, lateralSpeed);
+    // The 4th arg is the "intentional drift" gate: Space pressed AND
+    // moving. Without this, smoke kept spawning for ~1s after the player
+    // released Space because the car's physical lateralSpeed takes time
+    // to settle below threshold. Skid marks intentionally don't share this
+    // gate — physical tire scrub is exactly when marks SHOULD appear.
+    const intentionalDrift = keys.has('space');
+    tireSmoke.tick(skidPredictedPos, forward, lateralSpeed, intentionalDrift);
   });
 
   const reset = (): void => {
