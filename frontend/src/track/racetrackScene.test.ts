@@ -137,6 +137,23 @@ vi.mock('./skidMarks', () => ({
   },
 }));
 
+// Plan-006 U7 — mock tireSmoke (same shape as skidMarks). The wiring tests
+// assert it gets the same lateral-speed threshold and runs on each frame.
+const tireSmokeSpy = vi.hoisted(() => ({
+  ctor: vi.fn(),
+  tick: vi.fn(),
+  dispose: vi.fn(),
+}));
+vi.mock('./tireSmoke', () => ({
+  createTireSmoke: (scene: unknown, threshold: number) => {
+    tireSmokeSpy.ctor(scene, threshold);
+    return {
+      tick: tireSmokeSpy.tick,
+      dispose: tireSmokeSpy.dispose,
+    };
+  },
+}));
+
 vi.mock('@babylonjs/havok', () => ({
   default: (...args: unknown[]) => {
     M.havokFactory(...args);
@@ -375,6 +392,9 @@ beforeEach(() => {
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
   skidMarksSpy.dispose.mockClear();
+  tireSmokeSpy.ctor.mockClear();
+  tireSmokeSpy.tick.mockClear();
+  tireSmokeSpy.dispose.mockClear();
 
   // jsdom 25 ships URL but tests need deterministic createObjectURL output.
   vi.stubGlobal(

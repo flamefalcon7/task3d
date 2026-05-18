@@ -58,6 +58,7 @@ import {
   type LapState,
 } from './lapState';
 import { createSkidMarks, type SkidMarks } from './skidMarks';
+import { createTireSmoke, type TireSmoke } from './tireSmoke';
 
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
@@ -577,6 +578,12 @@ export async function createRacetrackScene(
   // derivation was removed after Tripo GLBs returned unreliable extents
   // (sub-meshes registered tiny BBs that didn't match the visual chassis).
   const skidMarks: SkidMarks = createSkidMarks(scene, SKID_LATERAL_SPEED_THRESHOLD);
+  // Plan-006 U7: GPU tire-smoke plume. Shares the skid lateral-speed
+  // threshold so smoke and skid marks appear together — single visual
+  // signal "the player is drifting." Sizing lives in tireSmoke.ts (same
+  // top-of-file hardcoded-constant convention as skidMarks; no BB
+  // derivation per project memory).
+  const tireSmoke: TireSmoke = createTireSmoke(scene, SKID_LATERAL_SPEED_THRESHOLD);
 
   // 8. Chase camera — ArcRotateCamera tracks the pivot each frame AND
   // orbits to sit behind the car's facing direction. Without the alpha
@@ -879,6 +886,10 @@ export async function createRacetrackScene(
       carPivot.position.z + velocity.z * FRAME_DT,
     );
     skidMarks.tick(predictedPos, forward, lateralSpeed);
+    // Plan-006 U7 — tire smoke shares the same anchor + lateral-speed
+    // signal as the skid marks above. Uses the predicted position so the
+    // smoke origin tracks the wheel rather than lagging one frame behind.
+    tireSmoke.tick(predictedPos, forward, lateralSpeed);
   });
 
   const reset = (): void => {
@@ -957,6 +968,7 @@ export async function createRacetrackScene(
       // the post-process render targets onto the next scene.
       renderPipeline.dispose();
       skidMarks.dispose();
+      tireSmoke.dispose();
       carContainer.dispose();
       scene.dispose();
       engine.dispose();
