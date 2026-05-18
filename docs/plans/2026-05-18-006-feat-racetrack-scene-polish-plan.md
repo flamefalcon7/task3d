@@ -2,7 +2,7 @@
 title: feat: Racetrack Scene Polish (7 High-ROI Items for Demo)
 date: 2026-05-18
 type: feat
-status: active
+status: completed
 depth: standard
 phase: 3
 origin: docs/ideation/2026-05-18-racetrack-polish-ideation.md
