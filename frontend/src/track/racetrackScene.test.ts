@@ -441,8 +441,12 @@ describe('createRacetrackScene', () => {
     // 24 outer + 24 inner barrier boxes following the curve tangent,
     // plus 1 skybox (plan-006 U3 SkyMaterial host) = 49 total CreateBox calls.
     expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(49);
-    // Road ribbon extruded once along the closed sample path.
-    expect(M.meshBuilderExtrudeShape).toHaveBeenCalledTimes(1);
+    // Road ribbon extruded once along the closed sample path,
+    // plus 1 center stripe ribbon (plan-006 U6) = 2 ExtrudeShape calls.
+    expect(M.meshBuilderExtrudeShape).toHaveBeenCalledTimes(2);
+    const extrudeNames = M.meshBuilderExtrudeShape.mock.calls.map((c) => c[0]);
+    expect(extrudeNames).toContain('road-ribbon');
+    expect(extrudeNames).toContain('center-stripe');
     // Total aggregates: 1 safety ground + 1 ribbon + 48 barriers + 1 car = 51.
     expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(51);
     // First 50 (everything except the car) must all be mass:0 static.
@@ -469,11 +473,16 @@ describe('createRacetrackScene', () => {
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     });
-    // Exactly 2 plane creates (start/finish + checkpoint), neither aggregated.
-    expect(M.meshBuilderCreatePlane).toHaveBeenCalledTimes(2);
+    // Plan-006 U6 replaced the single white start-finish plane with a 4×2
+    // checker grid (8 cells), so plane creates are now 8 checker + 1
+    // checkpoint = 9. None of them are physics-aggregated.
+    expect(M.meshBuilderCreatePlane).toHaveBeenCalledTimes(9);
     const planeNames = M.meshBuilderCreatePlane.mock.calls.map((c) => c[0]);
-    expect(planeNames).toContain('start-finish');
     expect(planeNames).toContain('checkpoint');
+    const checkerNames = planeNames.filter((n) =>
+      typeof n === 'string' && n.startsWith('start-checker-'),
+    );
+    expect(checkerNames).toHaveLength(8);
   });
 
   it('U2 — car spawns on the start/finish line (samples[0]), lifted to Y=1', async () => {

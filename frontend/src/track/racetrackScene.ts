@@ -238,6 +238,25 @@ const KERB_INNER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // wh
 // creation lets a future per-car FOV tweak work without re-tuning here.
 const FOV_PUMP_DELTA = 0.14; // radians; added on top of base FOV at MAX_FORWARD_SPEED
 const FOV_LERP_RATE = 0.05;  // per-frame catch-up factor
+// Plan-006 U6 — emissive center stripe + checker start line.
+// Stripe is a single continuous ribbon along the road centerline (not a
+// dashed pattern). Reasoning: a continuous emissive yellow line under
+// U2's bloom reads more sharply at race speed than alternating dashes
+// (dashes would strobe at the player's eye-traversal frequency), and
+// single-mesh keeps the draw-call count down. Stripe is offset 0.02u
+// above the road to avoid z-fight; KTD-2 in the plan documents that this
+// is a parallel mesh, not UV-segmented into the road material.
+const STRIPE_SAMPLES = 160; // 2× road samples for smooth centerline
+const STRIPE_WIDTH = 0.3;
+const STRIPE_HEIGHT_OFFSET = 0.02;
+const STRIPE_EMISSIVE: [number, number, number] = [1.0, 0.85, 0.15]; // warm yellow
+// Checker start line: 4 columns × 2 rows of small alternating black/white
+// cells covering the same footprint the single white plane previously had
+// (ROAD_WIDTH × 2u). Cell width = ROAD_WIDTH / 4, cell height = 1u.
+const CHECKER_COLS = 4;
+const CHECKER_ROWS = 2;
+const CHECKER_LIGHT: [number, number, number] = [0.95, 0.95, 0.95];
+const CHECKER_DARK: [number, number, number] = [0.08, 0.08, 0.08];
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -332,6 +351,36 @@ export async function createRacetrackScene(
   // the car's BOX collider, the safety ground above still catches the car.
   new PhysicsAggregate(roadRibbon, PhysicsShapeType.MESH, { mass: 0 }, scene);
 
+  // Plan-006 U6 — center stripe. Sample the same oval at 2× density so
+  // the stripe path curves smoothly between road samples, then extrude
+  // a thin profile along it. No physics aggregate (visual only). The
+  // stripe relies on U2's bloom to glow — the emissive color stays high
+  // (1.0, 0.85, 0.15) so the bloom threshold (0.7) catches it cleanly.
+  const stripeSamples = sampleOvalCurve(controlPoints, STRIPE_SAMPLES);
+  const stripeProfile = [
+    new Vector3(-STRIPE_WIDTH / 2, 0, 0),
+    new Vector3(STRIPE_WIDTH / 2, 0, 0),
+  ];
+  const stripeClosedPath = [...stripeSamples, stripeSamples[0]!];
+  const centerStripe = MeshBuilder.ExtrudeShape(
+    'center-stripe',
+    {
+      shape: stripeProfile,
+      path: stripeClosedPath,
+      sideOrientation: 2 /* DOUBLESIDE */,
+    },
+    scene,
+  );
+  centerStripe.position = new Vector3(0, STRIPE_HEIGHT_OFFSET, 0);
+  const stripeMat = new StandardMaterial('center-stripe-mat', scene);
+  stripeMat.diffuseColor = new Color3(
+    STRIPE_EMISSIVE[0] * 0.5,
+    STRIPE_EMISSIVE[1] * 0.5,
+    STRIPE_EMISSIVE[2] * 0.5,
+  );
+  stripeMat.emissiveColor = new Color3(...STRIPE_EMISSIVE);
+  centerStripe.material = stripeMat;
+
   // 5. Barrier walls — 24 outer + 24 inner, tangent-aligned. Replaces U6's
   // 4 perimeter walls; gives the track visible rails on both sides.
   // Plan-006 U4 — alternate primary/secondary band colors per segment so
@@ -397,22 +446,48 @@ export async function createRacetrackScene(
 
   // 6. Start/finish line + checkpoint decals. Visual-only (no physics) —
   // U3 wires the lap-detection trigger volumes separately.
-  const startFinish = MeshBuilder.CreatePlane(
-    'start-finish',
-    { width: ROAD_WIDTH, height: 2 },
-    scene,
-  );
+  // Plan-006 U6 — checker start line: 4×2 grid of alternating black/white
+  // planes covering the original ROAD_WIDTH × 2u footprint. Two shared
+  // materials (light/dark) keep allocation flat. Cells are placed in
+  // local-space offsets relative to the start sample, then rotated together
+  // by yaw so the grid stays aligned with the road tangent.
   const startSample = samples[0]!;
   const startTangent = tangentAt(samples, 0);
-  startFinish.position = new Vector3(startSample.x, 0.02, startSample.z);
-  startFinish.rotation = new Vector3(
-    Math.PI / 2,
-    Math.atan2(startTangent.x, startTangent.z),
-    0,
-  );
-  const startMat = new StandardMaterial('startMat', scene);
-  startMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
-  startFinish.material = startMat;
+  const startYaw = Math.atan2(startTangent.x, startTangent.z);
+  const checkerLightMat = new StandardMaterial('checker-light-mat', scene);
+  checkerLightMat.diffuseColor = new Color3(...CHECKER_LIGHT);
+  const checkerDarkMat = new StandardMaterial('checker-dark-mat', scene);
+  checkerDarkMat.diffuseColor = new Color3(...CHECKER_DARK);
+  const cellWidth = ROAD_WIDTH / CHECKER_COLS;
+  const cellHeight = 2 / CHECKER_ROWS; // total band depth = 2u, like original plane
+  // Place each cell relative to the road tangent: stripeAxisX/Z is the
+  // road's "across" direction (perpendicular to tangent), and depthAxisX/Z
+  // is along the tangent. Cell index → (col, row) offset in local space.
+  const acrossX = startTangent.z;
+  const acrossZ = -startTangent.x;
+  const depthX = startTangent.x;
+  const depthZ = startTangent.z;
+  for (let row = 0; row < CHECKER_ROWS; row++) {
+    for (let col = 0; col < CHECKER_COLS; col++) {
+      const cellIdx = row * CHECKER_COLS + col;
+      // Standard checkerboard parity: dark when (col + row) is even.
+      const isDark = (col + row) % 2 === 0;
+      const localAcross = (col - (CHECKER_COLS - 1) / 2) * cellWidth;
+      const localDepth = (row - (CHECKER_ROWS - 1) / 2) * cellHeight;
+      const cell = MeshBuilder.CreatePlane(
+        `start-checker-${cellIdx}`,
+        { width: cellWidth, height: cellHeight },
+        scene,
+      );
+      cell.position = new Vector3(
+        startSample.x + acrossX * localAcross + depthX * localDepth,
+        0.02,
+        startSample.z + acrossZ * localAcross + depthZ * localDepth,
+      );
+      cell.rotation = new Vector3(Math.PI / 2, startYaw, 0);
+      cell.material = isDark ? checkerDarkMat : checkerLightMat;
+    }
+  }
 
   const checkpointIdx = Math.floor(TRACK_SAMPLES / 2);
   const checkpoint = MeshBuilder.CreatePlane(
