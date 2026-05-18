@@ -1,0 +1,7 @@
+Asphalt012 — ambientCG
+Source: https://ambientcg.com/view?id=Asphalt012
+License: CC0 1.0 Universal (public domain)
+Used as: diffuse + normal map on the track ribbon mesh.
+Files:
+  - asphalt_diff.jpg   (Color, 1K)
+  - asphalt_normal.jpg (NormalGL, 1K)

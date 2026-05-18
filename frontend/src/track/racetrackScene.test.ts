@@ -269,6 +269,14 @@ vi.mock('@babylonjs/core', () => {
       M.color3Ctor(r, g, b);
     }
   }
+  // Plan-006 polish — asphalt diffuse + normal map. Track-scene loads two
+  // Texture instances and assigns uScale/vScale; tests only need the class
+  // to exist as a constructor so the assignments don't throw.
+  class Texture {
+    uScale = 1;
+    vScale = 1;
+    constructor(public url: string, _scene: unknown) {}
+  }
   const MeshBuilder = {
     CreateGround: (...args: unknown[]) => {
       M.meshBuilderCreateGround(...args);
@@ -367,6 +375,7 @@ vi.mock('@babylonjs/core', () => {
     DefaultRenderingPipeline,
     HemisphericLight,
     StandardMaterial,
+    Texture,
     Color3,
     MeshBuilder,
     PhysicsAggregate,

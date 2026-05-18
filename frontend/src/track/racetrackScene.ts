@@ -35,6 +35,7 @@ import {
   PhysicsShapeType,
   Scene,
   StandardMaterial,
+  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core';
@@ -382,8 +383,22 @@ export async function createRacetrackScene(
     { shape: roadProfile, path: closedPath, sideOrientation: 2 /* DOUBLESIDE */ },
     scene,
   );
+  // Asphalt texture (CC0, ambientCG Asphalt012). ExtrudeShape generates UVs
+  // with u running along the path (0→1 around the closed loop) and v across
+  // the cross-section (0→1 across ROAD_WIDTH). Track perimeter ≈ 153u and
+  // ROAD_WIDTH = 14u; the chosen uScale/vScale give roughly 4×3.5m per tile,
+  // which reads as believable race-grade asphalt without obvious repetition
+  // at chase-cam distance.
   const asphaltMat = new StandardMaterial('asphaltMat', scene);
-  asphaltMat.diffuseColor = new Color3(0.18, 0.18, 0.2);
+  const asphaltDiff = new Texture('/textures/asphalt/asphalt_diff.jpg', scene);
+  asphaltDiff.uScale = 15;
+  asphaltDiff.vScale = 2;
+  asphaltMat.diffuseTexture = asphaltDiff;
+  const asphaltNormal = new Texture('/textures/asphalt/asphalt_normal.jpg', scene);
+  asphaltNormal.uScale = 15;
+  asphaltNormal.vScale = 2;
+  asphaltMat.bumpTexture = asphaltNormal;
+  asphaltMat.specularColor = new Color3(0.05, 0.05, 0.05);
   roadRibbon.material = asphaltMat;
   // MESH collider for the road. R-r4b mitigation: if this judders against
   // the car's BOX collider, the safety ground above still catches the car.
