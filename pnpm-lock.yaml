@@ -53,6 +53,9 @@ importers:
       '@babylonjs/loaders':
         specifier: ^9.6.0
         version: 9.7.0(@babylonjs/core@9.7.0)(babylonjs-gltf2interface@9.7.0)
+      '@babylonjs/materials':
+        specifier: ^9.6.0
+        version: 9.7.0(@babylonjs/core@9.7.0)
       '@mysten/dapp-kit':
         specifier: 1.0.6
         version: 1.0.6(@mysten/sui@2.16.2)(@tanstack/react-query@5.100.10)(@types/react-dom@19.2.3)(@types/react@19.2.14)(react-dom@19.2.6)(react@19.2.6)(typescript@5.8.3)
@@ -209,6 +212,14 @@ packages:
     dependencies:
       '@babylonjs/core': 9.7.0
       babylonjs-gltf2interface: 9.7.0
+    dev: false
+
+  /@babylonjs/materials@9.7.0(@babylonjs/core@9.7.0):
+    resolution: {integrity: sha512-oRCgHhPGxa2k6enZNzawgNSb6yJCh2JvvNhKvVQ/OEAp92MjPpyP9fxpm3FUYQsV916eY3Zy3vdM4BqyBcMeJQ==}
+    peerDependencies:
+      '@babylonjs/core': ^9.0.0
+    dependencies:
+      '@babylonjs/core': 9.7.0
     dev: false
 
   /@csstools/color-helpers@5.1.0:

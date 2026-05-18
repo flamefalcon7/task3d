@@ -6,10 +6,11 @@ import { useOwnedVariants } from './useOwnedVariants';
 import { CarCarousel } from './carCarousel';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
-import { initialLapState, type LapState } from './lapState';
+import { initialLapState, waitingLapState, type LapState } from './lapState';
 import { getPb, setPb } from './personalBest';
 import { ResultOverlay } from './ResultOverlay';
 import { formatHudTime } from './formatLapTime';
+import { Countdown } from './Countdown';
 
 // Phase 3 U6 — /track page. Wraps the Babylon scene in a React shell:
 // query owned variants → render carousel + canvas → rebuild scene each time
@@ -49,6 +50,10 @@ export function TrackPage() {
   // U4 — populated when the lap state transitions to `finished`. Drives
   // the ResultOverlay modal. Cleared on Retry (lap state back to waiting).
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
+  // Plan-006 U8 — gates the countdown overlay. Scene fires onOrbitComplete
+  // when the camera orbit finishes; that flips this flag and the
+  // <Countdown /> mounts. Reset on each scene rebuild (carousel switch).
+  const [orbitDone, setOrbitDone] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<RacetrackSceneHandles | null>(null);
 
@@ -62,9 +67,12 @@ export function TrackPage() {
 
   // U4/U5 — when the selected variant changes (carousel switch), reset
   // React-side game state and re-read the PB for the new car.
+  // Plan-006 U8 — also reset orbitDone so the new scene's intro plays from
+  // the top (camera orbit + countdown overlay reset).
   useEffect(() => {
     setLapState(initialLapState());
     setLastResult(null);
+    setOrbitDone(false);
     setPbState(selected ? getPb(selected.objectId) : null);
   }, [selected]);
 
@@ -91,11 +99,25 @@ export function TrackPage() {
         if (cancelled) return;
         sceneRef.current?.dispose();
         sceneRef.current = null;
+        // Plan-006 U8 — onIntroSkipRequested is wired through a mutable ref
+        // box rather than sceneRef so it survives the render-loop-starts-
+        // before-await-returns window. Without this, the first 5-10 frames
+        // of intro can fire onIntroSkipRequested while sceneRef is still
+        // null (silent ?. drop) and the hold-W gesture is permanently
+        // disarmed for that scene instance.
+        const introSkipBox: { dispatch: (() => void) | null } = { dispatch: null };
         const handles = await createRacetrackScene({
           canvas,
           carGlbBytes,
           onLapStateChange: setLapState,
+          // Plan-006 U8 — show the countdown once the orbit completes.
+          onOrbitComplete: () => setOrbitDone(true),
+          // Hold-W during intro = jump straight to waiting. Route the
+          // request back as an introSkip dispatch on the scene we just
+          // built (still in scope here).
+          onIntroSkipRequested: () => introSkipBox.dispatch?.(),
         });
+        introSkipBox.dispatch = handles.dispatchIntroSkip;
         if (cancelled) {
           handles.dispose();
           return;
@@ -106,6 +128,11 @@ export function TrackPage() {
         if (cancelled) return;
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setSceneError(e instanceof Error ? e.message : String(e));
+        // Plan-006 U8 — if scene init failed, lapState is still 'intro'
+        // (from the carousel-switch reset) and no scene exists to dispatch
+        // introComplete/Skip. Recover to 'waiting' so the player isn't
+        // wedged behind a phantom intro state.
+        setLapState(waitingLapState());
       } finally {
         if (!cancelled) setSceneLoading(false);
       }
@@ -158,6 +185,12 @@ export function TrackPage() {
     sceneRef.current?.reset();
   }, []);
 
+  // Plan-006 U8 — stable reference so Countdown's effect doesn't reset its
+  // setTimeout chain on every parent re-render.
+  const handleCountdownComplete = useCallback(() => {
+    sceneRef.current?.dispatchIntroComplete();
+  }, []);
+
   // Clear the modal when state machine returns to waiting (post-reset).
   useEffect(() => {
     if (lapState.status === 'waiting') setLastResult(null);
@@ -169,6 +202,9 @@ export function TrackPage() {
   // Skip when a modifier is held (Cmd-R hard-reload, Cmd-Shift-R, Ctrl-R)
   // and when focus is in a text-entry field so future inputs on /track
   // (search box, comment field, etc.) don't trigger retry while typing.
+  //
+  // Skip during 'intro' too — pressing R mid-orbit would silently dispatch
+  // reset and abort the cinematic without the player seeing a countdown.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== 'r') return;
@@ -182,7 +218,7 @@ export function TrackPage() {
       ) {
         return;
       }
-      if (lapState.status === 'waiting') return;
+      if (lapState.status === 'waiting' || lapState.status === 'intro') return;
       handleRetry();
     };
     window.addEventListener('keydown', handler);
@@ -294,6 +330,16 @@ export function TrackPage() {
             Couldn't load this variant: {sceneError}
           </div>
         )}
+        {/* Plan-006 U8 — countdown overlay. Mounts only when the camera
+            orbit completes AND the lap state is still 'intro' (i.e. user
+            hasn't skipped via hold-W). On GO step, fires onComplete →
+            scene.dispatchIntroComplete → lapState transitions to waiting
+            → this overlay unmounts. */}
+        {!sceneError &&
+          orbitDone &&
+          lapState.status === 'intro' && (
+            <Countdown onComplete={handleCountdownComplete} />
+          )}
         {/* U4 — HUD overlay (KTD-3, React not Babylon GUI). Stays mounted
             during scene reload so the values for the new car are immediately
             visible behind the loading overlay (no flash on carousel switch). */}

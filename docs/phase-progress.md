@@ -1,6 +1,97 @@
 # Phase Progress
 
-## Last Updated: 2026-05-18 afternoon — **Manual /track smoke iteration loop (post-plan-005 tuning).**
+## Last Updated: 2026-05-18 late afternoon — **Plan-006 racetrack scene polish shipped end-to-end on `feat/racetrack-scene-polish`.**
+
+### Current Phase
+
+Phase 3 — Sample Game Scene (Tiny Racetrack polish complete; Phase 4 Kiosk + mainnet pending)
+
+### Hackathon Tracker
+
+- Days to submission (6/21): **34 of 38**
+- Days to demo day (7/20–21): **63 of 67**
+- Days to winners (8/27): **101 of 105**
+
+### Completed This Session
+
+- Shipped plan-006 (8 implementation units, 10 commits)
+- See "Unit completion table" below for per-unit details
+- All 7 visual + game-feel polish items landed (R1–R7 plus D-027 ADR)
+
+### Blockers / Open Questions
+
+- None.
+
+All 8 implementation units of plan-006 landed in 8 feature commits (+1 docs commit for ideation/plan files). Branch `feat/racetrack-scene-polish` is forked from `feat/phase-2-sui-integration` and ready to merge back. Frontend test count: **246 → 276 (+30)**; typecheck clean across the workspace.
+
+### Commits this session
+
+```
+9b47fc1 feat(track): plan-006 U8 — cinematic intro: orbit + countdown (R7)
+76a8349 feat(track): plan-006 U7 — GPU tire-smoke when drifting (R6)
+b24acb5 feat(track): plan-006 U6 — emissive center stripe + checker start line (R4)
+b0219cc feat(track): plan-006 U5 — FOV pump on acceleration (R5)
+d1d8b24 feat(track): plan-006 U4 — alternating kerb stripes on barriers (R3)
+ba4816d feat(track): plan-006 U3 — SkyMaterial procedural sky (R1)
+ab8492a feat(track): plan-006 U2 — DefaultRenderingPipeline (bloom + FXAA + ACES tonemap)
+04e9469 feat(track): plan-006 U1 — D-027 ADR + install @babylonjs/materials
++ docs(plan): plan-006 racetrack scene polish — ideation + plan
+```
+
+### What ships visually
+
+- **Sky**: warm golden-hour Preetham atmosphere via `@babylonjs/materials/sky/skyMaterial` (D-027)
+- **Post-processing**: bloom + FXAA + ACES tonemap pipeline lifts every subsequent visual upgrade
+- **Track surface**: yellow emissive center stripe (continuous, picks up bloom); checker grid start line replaces the single white plane
+- **Barriers**: alternating F1-style kerbs — red/white outer, green/white inner
+- **Camera**: FOV expands ~8° as you approach top speed (clamped, reverse-safe)
+- **Drift FX**: GPU tire smoke from both rear wheels when lateral speed crosses the skid threshold; mirrors the skidMarks.ts hardcoded-sizing pattern (no BB derivation per project memory)
+- **Cinematic intro**: 2s camera orbit → React countdown overlay (3→2→1→GO) → input unlocks. Hold W >200ms to skip.
+
+### Unit completion table
+
+| Unit | Files | Tests delta | Commit |
+|---|---|---|---|
+| U1 | docs/decisions.md (D-027), frontend/package.json | none — config/ADR | `04e9469` |
+| U2 | racetrackScene.ts + .test.ts | +0 (existing 38 still pass; mock factory extended for DefaultRenderingPipeline) | `ab8492a` |
+| U3 | racetrackScene.ts + .test.ts | +0 (barrier-count assertion updated 48 → 49 for skybox) | `ba4816d` |
+| U4 | racetrackScene.ts | +0 | `d1d8b24` |
+| U5 | racetrackScene.ts | +0 | `b0219cc` |
+| U6 | racetrackScene.ts + .test.ts | +0 (ExtrudeShape/CreatePlane assertions updated for stripe + checker) | `b24acb5` |
+| U7 | tireSmoke.ts (NEW) + .test.ts (NEW) + racetrackScene wiring | +9 (tireSmoke unit tests) | `76a8349` |
+| U8 | lapState.ts/.test.ts, Countdown.tsx (NEW) + .test.tsx (NEW), racetrackScene.ts/.test.ts, TrackPage.tsx/.test.tsx | +18 lapState + 4 Countdown + 5 racetrackScene U8 + 4 TrackPage U8 = +21 net (lapState gained 7 new + 11 updated to use waitingLapState) | `9b47fc1` |
+
+### Key technical decisions captured
+
+- **D-027**: `@babylonjs/materials` adopted for SkyMaterial. Tree-shakable subpath import keeps bundle delta ~50KB. Pinned to `^9.6.0` to track `@babylonjs/core` majors.
+
+### Process / collaboration notes
+
+- **Test-first executed correctly for U8 per plan execution note**: wrote 18 lapState reducer tests (intro lifecycle + race transitions retrofit to `waitingLapState()`), confirmed RED, then implemented the reducer changes. All went GREEN on first run.
+- **Parallel safety check applied per ce-work**: all 8 units serialize because they share `racetrackScene.ts`. No worktree isolation; serial-subagent equivalent (inline) was the right call given strong plan metadata.
+- **U6 design simplified vs plan**: plan suggested optional dashed stripe; chose single continuous emissive ribbon instead (sharper at race speed, no strobing, fewer drawcalls). Documented in commit body.
+
+### In Progress
+
+- Branch `feat/racetrack-scene-polish` ready to merge back to `feat/phase-2-sui-integration`.
+- Manual /track smoke verification (visual polish judged by eye per plan KTDs) — user can spin up dev server and judge.
+
+### Next Concrete Step
+
+- User Hard-refreshes `/track` and confirms the visual upgrade (sky, bloom, kerbs, stripe, FOV pump, tire smoke, intro orbit, countdown)
+- If satisfied: merge `feat/racetrack-scene-polish` into `feat/phase-2-sui-integration`
+- Then **Phase 4 (Sui Kiosk + TransferPolicy + mainnet redeploy)** — biggest unstarted risk per the user's hackathon priority order
+
+### Notes for Next Session
+
+- Intro orbit duration is `INTRO_ORBIT_DURATION_MS = 2000` in racetrackScene.ts; bump for more dramatic intro or shorten for fast iteration.
+- Hold-W skip threshold is `INTRO_HOLD_W_SKIP_MS = 200`; can be lowered if dev-mode skip feels sluggish.
+- `Countdown.tsx` accepts an injectable `scheduler` prop — used in tests for deterministic timing, ignored in prod.
+- Deferred follow-ups per plan: engine audio, skid-mark emissive material, DirectionalLight + shadows. All gated on perf budget after pitch video direction is set.
+
+---
+
+## Previously Last Updated: 2026-05-18 afternoon — **Manual /track smoke iteration loop (post-plan-005 tuning).**
 
 User ran the /track combined smoke and reported real defects across multiple short cycles. Worked through them with tight back-and-forth. Net result: car has stronger throttle + higher top speed (drift-required cornering), car visual scaled 1.728× from spawn size, skid marks rewritten as twin tire ribbons emitted **in front of** the car (per user request), velocity-predicted to land under the wheels live. All BB derivation removed after Tripo GLBs returned unreliable extents — sizing is now hardcoded constants in `skidMarks.ts` as single source of truth.
 

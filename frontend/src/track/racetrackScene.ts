@@ -25,6 +25,7 @@
 import {
   ArcRotateCamera,
   Color3,
+  DefaultRenderingPipeline,
   Engine,
   HemisphericLight,
   KeyboardEventTypes,
@@ -40,6 +41,10 @@ import {
 import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import '@babylonjs/loaders/glTF/index.js';
 import HavokPhysics from '@babylonjs/havok';
+// Tree-shaken subpath import keeps bundle delta small — the @babylonjs/materials
+// library has dozens of materials we don't use (water, fire, fur, etc.).
+// See D-027 for adoption rationale.
+import { SkyMaterial } from '@babylonjs/materials/sky/skyMaterial';
 
 import {
   buildOvalControlPoints,
@@ -52,7 +57,9 @@ import {
   type LapAction,
   type LapState,
 } from './lapState';
+// Plan-006 U8 — cinematic intro: camera orbits while React countdown plays.
 import { createSkidMarks, type SkidMarks } from './skidMarks';
+import { createTireSmoke, type TireSmoke } from './tireSmoke';
 
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
@@ -64,6 +71,24 @@ export interface RacetrackSceneOptions {
    * TrackPage (U4) mirrors this into React state for the HUD overlay.
    */
   onLapStateChange?: (state: LapState) => void;
+  /**
+   * Plan-006 U8 — fired once when the intro camera orbit completes.
+   * TrackPage uses this to show the countdown overlay.
+   */
+  onOrbitComplete?: () => void;
+  /**
+   * Plan-006 U8 — fired when the player holds W/up-arrow for longer than
+   * INTRO_HOLD_W_SKIP_MS during the intro phase. TrackPage responds by
+   * dispatching introSkip (which TrackPage routes back via handles.dispatchIntroSkip).
+   */
+  onIntroSkipRequested?: () => void;
+  /**
+   * Test/dev convenience: when true, the scene mounts already in the
+   * `waiting` state — no orbit, no countdown wait, input is immediately
+   * enabled. Production paths leave this false. The `dev_` prefix makes
+   * accidental production use visible at a glance.
+   */
+  dev_skipIntro?: boolean;
 }
 
 export interface RacetrackSceneHandles {
@@ -76,6 +101,17 @@ export interface RacetrackSceneHandles {
    * the lap state machine returns to `waiting`.
    */
   reset: () => void;
+  /**
+   * Plan-006 U8 — TrackPage calls this when the countdown overlay's GO
+   * step finishes. Dispatches introComplete into the scene's reducer so
+   * input unblocks.
+   */
+  dispatchIntroComplete: () => void;
+  /**
+   * Plan-006 U8 — TrackPage calls this in response to onIntroSkipRequested.
+   * Dispatches introSkip into the scene's reducer.
+   */
+  dispatchIntroSkip: () => void;
 }
 
 // Tunables — kept as named constants so future polish (Phase 5) can tweak
@@ -192,6 +228,73 @@ const CHASE_ALPHA_LERP = 0.04;
 // Currently -90° — Tripo outputs face -X locally; rotate CW so -X aligns
 // with the pivot's +Z drive direction.
 const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
+// Plan-006 U2 — DefaultRenderingPipeline tunables. Ships first within
+// Batch 1 so subsequent visual units (SkyMaterial, kerb colors, emissive
+// stripe) land against the post-processed pipeline rather than raw WebGL.
+// Bloom threshold/weight/kernel + FXAA + ACES tonemap are intentionally
+// untested per plan KTDs — visual feel is judged on the dev server.
+const BLOOM_THRESHOLD = 0.7;
+const BLOOM_WEIGHT = 0.3;
+const BLOOM_KERNEL = 64;
+// Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
+// Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
+// 0.45 puts the sun just above the horizon for visible directional warmth;
+// azimuth 0.25 places it forward-right of the chase camera at spawn so the
+// car's GLB picks up rim light from the same angle the player sees.
+// Tunables for in-browser tweaking; not asserted in tests (KTD).
+const SKY_TURBIDITY = 3;
+const SKY_LUMINANCE = 0.5;
+const SKY_INCLINATION = 0.45;
+const SKY_AZIMUTH = 0.25;
+const SKY_RAYLEIGH = 2;
+const SKYBOX_SIZE = 1000;
+// Plan-006 U4 — kerb stripe colors. Alternate per-segment so barriers
+// read as racetrack kerbs rather than abstract walls. Outer kerbs red/
+// white (classic F1 kerb pattern); inner kerbs green/white so the player
+// can distinguish left/right at speed. Materials are shared instances
+// (one per band-color) so 48 barriers allocate exactly 4 StandardMaterial
+// objects rather than 48.
+const KERB_OUTER_PRIMARY: [number, number, number] = [0.85, 0.15, 0.15];   // red
+const KERB_OUTER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
+const KERB_INNER_PRIMARY: [number, number, number] = [0.2, 0.7, 0.25];     // green
+const KERB_INNER_SECONDARY: [number, number, number] = [0.95, 0.95, 0.95]; // white
+// Plan-006 U5 — FOV pump tunables. Camera's field-of-view lerps toward
+// FOV_BASE + (forwardSpeed / MAX_FORWARD_SPEED) * FOV_PUMP_DELTA each
+// frame. Delta of 0.14 rad (~8°) is the cap recommended by the source
+// (threejs-speedup-effect) — wider feels nauseating; narrower is
+// imperceptible. Lerp rate 0.05 means the FOV catches up with ~95% of
+// the target over ~60 frames (1s @ 60fps), slow enough that the camera
+// "leans into" speed gradually instead of snapping. Babylon default FOV
+// is 0.8 rad (Math.PI/4 ≈ 45°); capturing the live value at camera
+// creation lets a future per-car FOV tweak work without re-tuning here.
+const FOV_PUMP_DELTA = 0.14; // radians; added on top of base FOV at MAX_FORWARD_SPEED
+const FOV_LERP_RATE = 0.05;  // per-frame catch-up factor
+// Plan-006 U6 — emissive center stripe + checker start line.
+// Stripe is a single continuous ribbon along the road centerline (not a
+// dashed pattern). Reasoning: a continuous emissive yellow line under
+// U2's bloom reads more sharply at race speed than alternating dashes
+// (dashes would strobe at the player's eye-traversal frequency), and
+// single-mesh keeps the draw-call count down. Stripe is offset 0.02u
+// above the road to avoid z-fight; KTD-2 in the plan documents that this
+// is a parallel mesh, not UV-segmented into the road material.
+const STRIPE_SAMPLES = 160; // 2× road samples for smooth centerline
+const STRIPE_WIDTH = 0.3;
+const STRIPE_HEIGHT_OFFSET = 0.02;
+const STRIPE_EMISSIVE: [number, number, number] = [1.0, 0.85, 0.15]; // warm yellow
+// Checker start line: 4 columns × 2 rows of small alternating black/white
+// cells covering the same footprint the single white plane previously had
+// (ROAD_WIDTH × 2u). Cell width = ROAD_WIDTH / 4, cell height = 1u.
+const CHECKER_COLS = 4;
+const CHECKER_ROWS = 2;
+const CHECKER_LIGHT: [number, number, number] = [0.95, 0.95, 0.95];
+const CHECKER_DARK: [number, number, number] = [0.08, 0.08, 0.08];
+// Plan-006 U8 — intro orbit + countdown timing. Camera revolves once
+// around the car over INTRO_ORBIT_DURATION_MS; React countdown then plays
+// before input enables. Hold-W >INTRO_HOLD_W_SKIP_MS dispatches introSkip
+// (dev/agent shortcut). Pure lerp-per-frame in the chase observer keeps
+// the test mock surface flat — no Babylon Animation API to stub.
+const INTRO_ORBIT_DURATION_MS = 2000;
+const INTRO_HOLD_W_SKIP_MS = 200;
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -218,6 +321,28 @@ export async function createRacetrackScene(
 
   // 2. Light
   new HemisphericLight('light', new Vector3(0, 1, 0), scene);
+
+  // Plan-006 U3 — SkyMaterial atmospheric sky on a large skybox cube.
+  // Replaces the flat clearColor (kept as fallback for the frame before
+  // the material's shader compiles). infiniteDistance=true makes the
+  // skybox track the camera so it appears infinitely far regardless of
+  // where the car drives. backFaceCulling=false renders the inside of
+  // the cube, which is the surface the camera sees from within.
+  // See D-027 for the @babylonjs/materials adoption rationale.
+  const skybox = MeshBuilder.CreateBox(
+    'skybox',
+    { size: SKYBOX_SIZE },
+    scene,
+  );
+  skybox.infiniteDistance = true;
+  const skyMaterial = new SkyMaterial('skyMaterial', scene);
+  skyMaterial.backFaceCulling = false;
+  skyMaterial.turbidity = SKY_TURBIDITY;
+  skyMaterial.luminance = SKY_LUMINANCE;
+  skyMaterial.inclination = SKY_INCLINATION;
+  skyMaterial.azimuth = SKY_AZIMUTH;
+  skyMaterial.rayleigh = SKY_RAYLEIGH;
+  skybox.material = skyMaterial;
 
   // 3. Safety ground — wide flat invisible-ish floor under the track.
   // R-r4b: the road ribbon's MESH collider is the primary driving surface;
@@ -264,10 +389,53 @@ export async function createRacetrackScene(
   // the car's BOX collider, the safety ground above still catches the car.
   new PhysicsAggregate(roadRibbon, PhysicsShapeType.MESH, { mass: 0 }, scene);
 
+  // Plan-006 U6 — center stripe. Sample the same oval at 2× density so
+  // the stripe path curves smoothly between road samples, then extrude
+  // a thin profile along it. No physics aggregate (visual only). The
+  // stripe relies on U2's bloom to glow — the emissive color stays high
+  // (1.0, 0.85, 0.15) so the bloom threshold (0.7) catches it cleanly.
+  const stripeSamples = sampleOvalCurve(controlPoints, STRIPE_SAMPLES);
+  const stripeProfile = [
+    new Vector3(-STRIPE_WIDTH / 2, 0, 0),
+    new Vector3(STRIPE_WIDTH / 2, 0, 0),
+  ];
+  const stripeClosedPath = [...stripeSamples, stripeSamples[0]!];
+  const centerStripe = MeshBuilder.ExtrudeShape(
+    'center-stripe',
+    {
+      shape: stripeProfile,
+      path: stripeClosedPath,
+      sideOrientation: 2 /* DOUBLESIDE */,
+    },
+    scene,
+  );
+  centerStripe.position = new Vector3(0, STRIPE_HEIGHT_OFFSET, 0);
+  const stripeMat = new StandardMaterial('center-stripe-mat', scene);
+  stripeMat.diffuseColor = new Color3(
+    STRIPE_EMISSIVE[0] * 0.5,
+    STRIPE_EMISSIVE[1] * 0.5,
+    STRIPE_EMISSIVE[2] * 0.5,
+  );
+  stripeMat.emissiveColor = new Color3(...STRIPE_EMISSIVE);
+  centerStripe.material = stripeMat;
+
   // 5. Barrier walls — 24 outer + 24 inner, tangent-aligned. Replaces U6's
   // 4 perimeter walls; gives the track visible rails on both sides.
-  const barrierMat = new StandardMaterial('barrierMat', scene);
-  barrierMat.diffuseColor = new Color3(0.7, 0.55, 0.25);
+  // Plan-006 U4 — alternate primary/secondary band colors per segment so
+  // barriers read as racetrack kerbs. Materials are shared across all
+  // 48 barriers (one per band-color = 4 total StandardMaterial objects).
+  const makeKerbMat = (
+    name: string,
+    rgb: [number, number, number],
+  ): StandardMaterial => {
+    const mat = new StandardMaterial(name, scene);
+    mat.diffuseColor = new Color3(rgb[0], rgb[1], rgb[2]);
+    return mat;
+  };
+  const kerbOuterPrimaryMat = makeKerbMat('kerb-outer-primary', KERB_OUTER_PRIMARY);
+  const kerbOuterSecondaryMat = makeKerbMat('kerb-outer-secondary', KERB_OUTER_SECONDARY);
+  const kerbInnerPrimaryMat = makeKerbMat('kerb-inner-primary', KERB_INNER_PRIMARY);
+  const kerbInnerSecondaryMat = makeKerbMat('kerb-inner-secondary', KERB_INNER_SECONDARY);
   for (let i = 0; i < BARRIER_COUNT; i++) {
     const sampleIdx = Math.floor((i * TRACK_SAMPLES) / BARRIER_COUNT);
     const center = samples[sampleIdx]!;
@@ -277,11 +445,13 @@ export async function createRacetrackScene(
     const outwardX = tangent.z;
     const outwardZ = -tangent.x;
     const yaw = Math.atan2(tangent.x, tangent.z);
+    const isPrimaryBand = i % 2 === 0;
 
     const placeBarrier = (
       name: string,
       offsetX: number,
       offsetZ: number,
+      material: StandardMaterial,
     ): void => {
       const box = MeshBuilder.CreateBox(
         name,
@@ -294,7 +464,7 @@ export async function createRacetrackScene(
         center.z + offsetZ,
       );
       box.rotation = new Vector3(0, yaw, 0);
-      box.material = barrierMat;
+      box.material = material;
       new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 0 }, scene);
     };
 
@@ -302,32 +472,60 @@ export async function createRacetrackScene(
       `barrier-outer-${i}`,
       outwardX * BARRIER_OUTWARD_OFFSET,
       outwardZ * BARRIER_OUTWARD_OFFSET,
+      isPrimaryBand ? kerbOuterPrimaryMat : kerbOuterSecondaryMat,
     );
     placeBarrier(
       `barrier-inner-${i}`,
       -outwardX * BARRIER_OUTWARD_OFFSET,
       -outwardZ * BARRIER_OUTWARD_OFFSET,
+      isPrimaryBand ? kerbInnerPrimaryMat : kerbInnerSecondaryMat,
     );
   }
 
   // 6. Start/finish line + checkpoint decals. Visual-only (no physics) —
   // U3 wires the lap-detection trigger volumes separately.
-  const startFinish = MeshBuilder.CreatePlane(
-    'start-finish',
-    { width: ROAD_WIDTH, height: 2 },
-    scene,
-  );
+  // Plan-006 U6 — checker start line: 4×2 grid of alternating black/white
+  // planes covering the original ROAD_WIDTH × 2u footprint. Two shared
+  // materials (light/dark) keep allocation flat. Cells are placed in
+  // local-space offsets relative to the start sample, then rotated together
+  // by yaw so the grid stays aligned with the road tangent.
   const startSample = samples[0]!;
   const startTangent = tangentAt(samples, 0);
-  startFinish.position = new Vector3(startSample.x, 0.02, startSample.z);
-  startFinish.rotation = new Vector3(
-    Math.PI / 2,
-    Math.atan2(startTangent.x, startTangent.z),
-    0,
-  );
-  const startMat = new StandardMaterial('startMat', scene);
-  startMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
-  startFinish.material = startMat;
+  const startYaw = Math.atan2(startTangent.x, startTangent.z);
+  const checkerLightMat = new StandardMaterial('checker-light-mat', scene);
+  checkerLightMat.diffuseColor = new Color3(...CHECKER_LIGHT);
+  const checkerDarkMat = new StandardMaterial('checker-dark-mat', scene);
+  checkerDarkMat.diffuseColor = new Color3(...CHECKER_DARK);
+  const cellWidth = ROAD_WIDTH / CHECKER_COLS;
+  const cellHeight = 2 / CHECKER_ROWS; // total band depth = 2u, like original plane
+  // Place each cell relative to the road tangent: stripeAxisX/Z is the
+  // road's "across" direction (perpendicular to tangent), and depthAxisX/Z
+  // is along the tangent. Cell index → (col, row) offset in local space.
+  const acrossX = startTangent.z;
+  const acrossZ = -startTangent.x;
+  const depthX = startTangent.x;
+  const depthZ = startTangent.z;
+  for (let row = 0; row < CHECKER_ROWS; row++) {
+    for (let col = 0; col < CHECKER_COLS; col++) {
+      const cellIdx = row * CHECKER_COLS + col;
+      // Standard checkerboard parity: dark when (col + row) is even.
+      const isDark = (col + row) % 2 === 0;
+      const localAcross = (col - (CHECKER_COLS - 1) / 2) * cellWidth;
+      const localDepth = (row - (CHECKER_ROWS - 1) / 2) * cellHeight;
+      const cell = MeshBuilder.CreatePlane(
+        `start-checker-${cellIdx}`,
+        { width: cellWidth, height: cellHeight },
+        scene,
+      );
+      cell.position = new Vector3(
+        startSample.x + acrossX * localAcross + depthX * localDepth,
+        0.02,
+        startSample.z + acrossZ * localAcross + depthZ * localDepth,
+      );
+      cell.rotation = new Vector3(Math.PI / 2, startYaw, 0);
+      cell.material = isDark ? checkerDarkMat : checkerLightMat;
+    }
+  }
 
   const checkpointIdx = Math.floor(TRACK_SAMPLES / 2);
   const checkpoint = MeshBuilder.CreatePlane(
@@ -417,6 +615,12 @@ export async function createRacetrackScene(
   // derivation was removed after Tripo GLBs returned unreliable extents
   // (sub-meshes registered tiny BBs that didn't match the visual chassis).
   const skidMarks: SkidMarks = createSkidMarks(scene, SKID_LATERAL_SPEED_THRESHOLD);
+  // Plan-006 U7: GPU tire-smoke plume. Shares the skid lateral-speed
+  // threshold so smoke and skid marks appear together — single visual
+  // signal "the player is drifting." Sizing lives in tireSmoke.ts (same
+  // top-of-file hardcoded-constant convention as skidMarks; no BB
+  // derivation per project memory).
+  const tireSmoke: TireSmoke = createTireSmoke(scene, SKID_LATERAL_SPEED_THRESHOLD);
 
   // 8. Chase camera — ArcRotateCamera tracks the pivot each frame AND
   // orbits to sit behind the car's facing direction. Without the alpha
@@ -433,8 +637,55 @@ export async function createRacetrackScene(
     carPivot.position.clone(),
     scene,
   );
+  // Plan-006 U5 — capture base FOV so the per-frame pump lerps relative
+  // to whatever Babylon (or a future per-car override) set at creation.
+  const fovBase = camera.fov ?? Math.PI / 4;
+
+  // Plan-006 U2 — DefaultRenderingPipeline (bloom + FXAA + ACES tonemap).
+  // Wired AFTER the camera exists so it can attach to the render path.
+  // Pipeline name is unique per scene; HDR enabled so bloom samples the
+  // float buffer (bloom on LDR makes the cutoff visibly hard).
+  const renderPipeline = new DefaultRenderingPipeline(
+    'racetrack-rendering',
+    true, // HDR — bloom needs the float buffer to look right
+    scene,
+    [camera],
+  );
+  renderPipeline.bloomEnabled = true;
+  renderPipeline.bloomThreshold = BLOOM_THRESHOLD;
+  renderPipeline.bloomWeight = BLOOM_WEIGHT;
+  renderPipeline.bloomKernel = BLOOM_KERNEL;
+  renderPipeline.fxaaEnabled = true;
+  // ACES Filmic tonemap. ImageProcessingConfiguration in @babylonjs/core
+  // exposes TONEMAPPING_ACES = 1 as a static const; using the numeric
+  // literal here so the test mock can stay shape-only (no enum import).
+  renderPipeline.imageProcessing.toneMappingEnabled = true;
+  renderPipeline.imageProcessing.toneMappingType = 1; // ImageProcessingConfiguration.TONEMAPPING_ACES
+
+  // Plan-006 U8 — intro orbit observer state. introOrbitDone fires the
+  // onOrbitComplete callback exactly once when the elapsed orbit time
+  // exceeds the configured duration. introOrbitStartAlpha snapshots the
+  // camera's initial alpha so the orbit rotates relative to the framing
+  // chosen at scene init (rather than a hardcoded baseline).
+  let introOrbitDone = opts.dev_skipIntro === true;
+  const introOrbitStartAlpha = camera.alpha;
+
   scene.onBeforeRenderObservable.add(() => {
     camera.target.copyFrom(carPivot.position);
+
+    // Intro phase: orbit the camera once around the car, then notify TrackPage.
+    // During intro the chase-cam tracking is suspended — the car is
+    // stationary anyway (input gated below).
+    if (lapState.status === 'intro') {
+      const elapsed = performance.now() - introStartMs;
+      const progress = Math.min(elapsed / INTRO_ORBIT_DURATION_MS, 1);
+      camera.alpha = introOrbitStartAlpha + progress * Math.PI * 2;
+      if (progress >= 1 && !introOrbitDone) {
+        introOrbitDone = true;
+        opts.onOrbitComplete?.();
+      }
+      return;
+    }
 
     // Compute the alpha that puts the camera directly behind the car.
     // ArcRotateCamera alpha: when car forward = (sin θ, 0, cos θ), the
@@ -480,6 +731,12 @@ export async function createRacetrackScene(
   // W press clears both. S release clears both.
   let brakeHeldMs = 0;
   let reverseMode = false;
+  // Plan-006 U8 — hold-W detection during intro. Accumulates frame-delta
+  // ONLY while status === 'intro' AND the player holds W/up. Crossing
+  // INTRO_HOLD_W_SKIP_MS fires onIntroSkipRequested once; the flag
+  // introSkipRequested prevents repeated fires within the same hold.
+  let introWHeldMs = 0;
+  let introSkipRequested = false;
   scene.onKeyboardObservable.add((kbInfo) => {
     let k = kbInfo.event.key.toLowerCase();
     // Plan-005 U2: KeyboardEvent.key for the space bar is the literal ' '
@@ -491,6 +748,25 @@ export async function createRacetrackScene(
     else if (kbInfo.type === KeyboardEventTypes.KEYUP) keys.delete(k);
   });
   scene.onBeforeRenderObservable.add(() => {
+    // Plan-006 U8 — intro input gate. While the camera is orbiting and
+    // the countdown is playing, all driving actions are suppressed.
+    // Hold-W detection runs HERE (not in the keyboard observer) so we
+    // accumulate per-frame delta rather than wall-clock; matches the
+    // brake-state-machine posture documented in plan-005 code-review #2.
+    if (lapState.status === 'intro') {
+      if (keys.has('w') || keys.has('arrowup')) {
+        introWHeldMs += engine.getDeltaTime();
+        if (!introSkipRequested && introWHeldMs >= INTRO_HOLD_W_SKIP_MS) {
+          introSkipRequested = true;
+          opts.onIntroSkipRequested?.();
+        }
+      } else {
+        introWHeldMs = 0;
+        introSkipRequested = false;
+      }
+      return; // no driving impulses, no FOV pump, no grip — car is parked.
+    }
+
     const forward = carPivot.getDirection(Vector3.Forward());
     // "Right" axis = forward rotated 90° CW in XZ plane (Y up). Derived
     // inline so the mocked test surface doesn't need Vector3.Right() and
@@ -615,13 +891,30 @@ export async function createRacetrackScene(
       );
       carBody.body.applyImpulse(lateralImpulse, carPivot.absolutePosition);
     }
+
+    // Plan-006 U5 — FOV pump. Lerp camera FOV toward base + (speedRatio *
+    // delta) so the camera kinetically "leans into" speed. clamp(speedRatio)
+    // keeps reverse contribution out of the pump (negative speeds reduce
+    // FOV which feels wrong). Sits at the tail of this observer so it
+    // shares the already-computed forwardSpeed; no second velocity read.
+    if (camera.fov !== undefined) {
+      const speedRatio = Math.min(Math.max(forwardSpeed / MAX_FORWARD_SPEED, 0), 1);
+      const targetFov = fovBase + speedRatio * FOV_PUMP_DELTA;
+      camera.fov = camera.fov + (targetFov - camera.fov) * FOV_LERP_RATE;
+    }
   });
 
   // 10. U3 — lap state machine + per-frame trigger volume checks.
   // KTD-4 fallback (R-r4/AA-3): distance-based plane-intersection rather
   // than Havok trigger-volume observers. Cheaper to wire, deterministic,
   // works the same downstream.
-  let lapState: LapState = initialLapState();
+  // Plan-006 U8: mount in `intro` state (or skip to `waiting` for tests
+  // that pass dev_skipIntro). introStartedAtMs is set so the React layer
+  // can display elapsed time.
+  const introStartMs = performance.now();
+  let lapState: LapState = opts.dev_skipIntro
+    ? lapReducer(initialLapState(introStartMs), { type: 'introComplete' })
+    : initialLapState(introStartMs);
   // Car spawns ON the start line, so flag start trigger as "inside" from
   // the start — only fires when the car LEAVES and RE-ENTERS the zone.
   let insideStartTrigger = true;
@@ -635,6 +928,8 @@ export async function createRacetrackScene(
     }
   }
 
+  // Plan-006 review — hoisted scratch buffer to avoid 60 allocs/sec.
+  const skidPredictedPos = new Vector3(0, 0, 0);
   scene.onBeforeRenderObservable.add(() => {
     const now = performance.now();
     dispatch({ type: 'tick', nowMs: now });
@@ -677,12 +972,14 @@ export async function createRacetrackScene(
     // (~0.47 u at MAX_FORWARD_SPEED=28) — the trail emits "behind" the car
     // instead of "from" the wheels.
     const FRAME_DT = 1 / 60;
-    const predictedPos = new Vector3(
-      carPivot.position.x + velocity.x * FRAME_DT,
-      carPivot.position.y,
-      carPivot.position.z + velocity.z * FRAME_DT,
-    );
-    skidMarks.tick(predictedPos, forward, lateralSpeed);
+    skidPredictedPos.x = carPivot.position.x + velocity.x * FRAME_DT;
+    skidPredictedPos.y = carPivot.position.y;
+    skidPredictedPos.z = carPivot.position.z + velocity.z * FRAME_DT;
+    skidMarks.tick(skidPredictedPos, forward, lateralSpeed);
+    // Plan-006 U7 — tire smoke shares the same anchor + lateral-speed
+    // signal as the skid marks above. Uses the predicted position so the
+    // smoke origin tracks the wheel rather than lagging one frame behind.
+    tireSmoke.tick(skidPredictedPos, forward, lateralSpeed);
   });
 
   const reset = (): void => {
@@ -747,7 +1044,21 @@ export async function createRacetrackScene(
     engine,
     scene,
     reset,
+    // Plan-006 U8 — TrackPage dispatches these in response to the React
+    // countdown's onComplete and to onIntroSkipRequested. The scene owns
+    // the reducer; TrackPage is just relaying user/timer events into it.
+    dispatchIntroComplete: () => {
+      dispatch({ type: 'introComplete' });
+    },
+    dispatchIntroSkip: () => {
+      dispatch({ type: 'introSkip' });
+    },
     dispose: () => {
+      // Plan-006 review fix — stop the render loop FIRST so no frame fires
+      // against a half-disposed pipeline / particle system / scene. The
+      // implicit stop inside engine.dispose() at the end of this block
+      // happens too late.
+      engine.stopRenderLoop();
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', onResize);
       }
@@ -756,8 +1067,12 @@ export async function createRacetrackScene(
       }
       // Dispose skidMarks before scene.dispose() so its material + meshes
       // unregister cleanly from the still-live scene rather than fighting
-      // the scene teardown.
+      // the scene teardown. Same posture for the render pipeline: detach
+      // it from the camera explicitly so a carousel switch doesn't leak
+      // the post-process render targets onto the next scene.
+      renderPipeline.dispose();
       skidMarks.dispose();
+      tireSmoke.dispose();
       carContainer.dispose();
       scene.dispose();
       engine.dispose();
