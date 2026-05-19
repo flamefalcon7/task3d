@@ -198,6 +198,29 @@ import { SLUSH_WALLET_NAME } from '@mysten/slush-wallet';
 
 ---
 
+## OQ-017: Phase 3 stale frontend callers — delete before U4 republishes
+
+**Why this matters**: plan-007 U2 stripped the Phase 3 Move surface (`Collection`, `VariantSpec`, `publish_collection`, `mint_variant`, `share_collection`, `publish_and_share`, `purchase_model_access`, `mint_model_access`). Frontend code that still imports / calls those entry fns:
+
+- `frontend/src/sui/publishPtb.ts` + `publishPtb.test.ts` — calls `model3d::publish_and_share` / `publish_collection`
+- `frontend/src/sui/purchaseAccessPtb.ts` + `purchaseAccessPtb.test.ts` — calls `model3d::purchase_model_access`
+- `frontend/src/sui/spike-b-ptb-shape.test.ts` — Phase 3 PTB spike test for `publish_collection` / `mint_variant` / `share_collection`
+- `frontend/src/forge/buildCollectionPtb.ts` + `buildCollectionPtb.test.ts` — Collection-mint PTB builder
+- `frontend/src/collection/CollectionDetailPage.tsx` + `useCollectionBySlug.ts` + test — Collection browse page
+- `frontend/src/creator/CreatorFlow.tsx` — imports `buildPublishPtb` from `publishPtb.ts`
+- `frontend/src/buy/BuyAccessButton.tsx` — imports `buildPurchaseAccessPtb` from `purchaseAccessPtb.ts`
+- `frontend/src/App.tsx` — registers `/collection/:slug` route
+
+`pnpm typecheck` still passes — TypeScript only validates the JS surface, not the on-chain Move entry-fn names. `pnpm test` likely passes too (PTB tests assert string-template targets against a placeholder `MODEL3D_PACKAGE_ID`). After U4 republishes under the new `original-id`, any of these surviving callers will runtime-fail with `FunctionNotFound`. CI false-greens this.
+
+**To resolve**: before U4's testnet republish, delete (or quarantine behind a build-time error) every file in the list above. U6 (ForgePage refactor) + U7 (BrowsePage rewrite) + U10 (TrackPage Kiosk-protocol KTD) collectively replace the functionality these callers held; the deletions are scoped to those units' Files lists.
+
+**Blocker level**: 🟡 Blocks U4 testnet republish from being demo-safe. Plan-007 U4's deploy verification step does not currently include a "frontend cascade is bounded" check — add one. Recommend: U6 first dispatch carries the deletion of `CreatorFlow.tsx` import + `publishPtb.ts` (+ tests); U7 carries `CollectionDetailPage.tsx` + `useCollectionBySlug.ts` + `buildCollectionPtb.ts` (+ tests) + the `/collection/:slug` route in `App.tsx` + `spike-b-ptb-shape.test.ts`; U6 or U9 carries `BuyAccessButton.tsx` + `purchaseAccessPtb.ts` (+ tests).
+
+**Sources**: plan-007 U2 adversarial-reviewer finding (`ce-adversarial-reviewer` 2026-05-19); spawned during U2 commit prep.
+
+---
+
 ## OQ-016: Phase 5 submission asset checklist — items spawned by plan-007 U1 handbook capture
 
 **Why this matters**: 2026-05-19 handbook verbatim capture surfaced submission requirements not previously tracked. Both are Phase 5 work; recording here so they aren't forgotten when Phase 5 starts.

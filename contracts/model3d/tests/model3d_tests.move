@@ -4,8 +4,8 @@ module model3d::model3d_tests;
 
 use std::string;
 use sui::clock;
-use sui::coin;
-use sui::sui::SUI;
+use sui::event;
+use sui::package::Publisher;
 use sui::test_scenario as ts;
 use sui::tx_context;
 use walrus::blob::{Self, Blob};
@@ -13,32 +13,22 @@ use walrus::encoding;
 use walrus::storage_resource::Storage;
 use walrus::system::{Self, System};
 use wal::wal::WAL;
+use sui::coin;
 use model3d::model3d::{
     Self,
-    Collection,
     Model3D,
     new_license_terms,
     policy_permissionless,
     policy_restricted,
     max_derivative_royalty_bps,
-    max_variants,
-    max_slug_len,
-    max_variant_params_json_len,
     validate_publish_inputs,
-    validate_collection_inputs,
-    new_variant_spec,
-    publish_collection,
-    mint_variant,
-    share_collection,
-    mint_model_access,
+    new_model,
     destroy_model_for_testing,
-    destroy_collection_for_testing,
-    destroy_access_for_testing,
+    init_for_testing,
+    emit_royalty_paid,
 };
 
 const CREATOR: address = @0xC0FFEE;
-const BUYER:   address = @0xBABE;
-const OTHER:   address = @0xBADBAD;
 
 const BLOB_SIZE: u64 = 1024;
 const EPOCHS_AHEAD: u32 = 3;
@@ -50,7 +40,6 @@ const ASCII_A: u8 = 97;
 const ASCII_N: u8 = 110;
 const ASCII_X: u8 = 120;
 const ASCII_B: u8 = 98;
-const ASCII_S: u8 = 115;
 
 // === Helpers ===
 
@@ -101,44 +90,202 @@ fun mint_blob(system: &mut System, ctx: &mut tx_context::TxContext): Blob {
     b
 }
 
-// Build a Collection + a single Model3D variant using the Phase 3 flow. Used by
-// Phase 2 ABI compatibility tests + access purchase tests that don't care about
-// the variant-level details.
-fun mint_collection_and_one_model(
-    system: &mut System,
-    clk: &clock::Clock,
-    ctx: &mut tx_context::TxContext,
-    direct_access_price: u64,
-): (Collection, Model3D) {
-    let b = mint_blob(system, ctx);
-    let mut coll = publish_collection(
-        b,
-        s(b"Cube"),
-        s(b"cube-set"),
-        default_license(),
-        clk,
-        ctx,
-    );
-    let spec = new_variant_spec(
-        s(b"patch-0"),
-        s(b"{}"),
-        s(b"Cube"),
-        empty_tags(),
-        direct_access_price,
-    );
-    let model = mint_variant(
-        &mut coll,
-        spec,
-        s(b"cube"),
-        s(b"lin1"),
-        false,
-        clk,
-        ctx,
-    );
-    (coll, model)
+// === init: Publisher creation ===
+
+#[test]
+fun init_creates_exactly_one_publisher_owned_by_sender() {
+    let mut sc = ts::begin(CREATOR);
+    init_for_testing(sc.ctx());
+
+    // Advance to the next tx so transferred objects become visible in the
+    // sender's inbox via `take_from_sender`.
+    sc.next_tx(CREATOR);
+    let publisher = sc.take_from_sender<Publisher>();
+
+    // Stronger "exactly one" check (plan-007 U2 review): after taking the
+    // single Publisher, the sender's inbox must hold zero more. If init were
+    // ever to claim Publisher twice (e.g., a regression duplicating
+    // `package::claim`), this assertion would fail.
+    assert!(!ts::has_most_recent_for_sender<Publisher>(&sc), 110);
+
+    sc.return_to_sender(publisher);
+    sc.end();
 }
 
-// === Validation tests (no Blob needed) ===
+// === Model3D ability validation: key + store ===
+//
+// `key` is required by `object::new`. `store` is required by `transfer::public_transfer`
+// and by Kiosk's `place<T>` (U4). We exercise both abilities by:
+//   1. Constructing a Model3D (requires `key` — object::new),
+//   2. Calling `transfer::public_transfer` on it (requires `T: store`),
+//   3. Re-taking it from the address (round-trip proves transfer succeeded).
+// If `store` were absent from Model3D the `public_transfer` call would not
+// type-check at compile time.
+
+#[test]
+fun model3d_has_key_and_store_abilities() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let b = mint_blob(&mut system, sc.ctx());
+    let clk = clock::create_for_testing(sc.ctx());
+
+    let model = new_model(
+        b,
+        s(b"sword"),
+        s(b"{\"length\":1.0}"),
+        s(b"Excalibur"),
+        make_tags(2),
+        s(b"lineageBlobIdABC"),
+        false,
+        default_license(),
+        &clk,
+        sc.ctx(),
+    );
+
+    assert!(model3d::creator(&model) == CREATOR, 100);
+    assert!(*string::as_bytes(model3d::name(&model)) == b"Excalibur", 101);
+    assert!(model3d::is_encrypted(&model) == false, 102);
+
+    // Exercise `store` ability — `public_transfer` requires `T: store`.
+    transfer::public_transfer(model, CREATOR);
+
+    sc.next_tx(CREATOR);
+    let received = sc.take_from_sender<Model3D>();
+    destroy_model_for_testing(received);
+
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// === RoyaltyPaid event: compiles + emits with expected fields ===
+//
+// U4 will emit this from `purchase_with_kiosk` after the RoyaltyRule pays
+// the creator. U2's responsibility is the struct definition; U8's overlay
+// joins on `tx_digest` (per U1.f spike — option (a), byte-equal to off-chain
+// digest). This test proves the field shape compiles and the emit path works.
+
+#[test]
+fun royalty_paid_event_can_be_emitted_with_expected_fields() {
+    let mut sc = ts::begin(CREATOR);
+    sc.next_tx(CREATOR);
+
+    let model_id = object::id_from_address(@0xDEAD);
+    let kiosk_id = object::id_from_address(@0xCAFE);
+    let expected_digest: vector<u8> = *tx_context::digest(sc.ctx());
+
+    emit_royalty_paid(
+        @0xBABE,    // buyer
+        CREATOR,    // creator
+        1_000_000,  // amount
+        model_id,
+        kiosk_id,
+        500,        // royalty_bps (5%)
+        sc.ctx(),
+    );
+
+    // event::num_events() returns count of events emitted in the current tx
+    // scope. Must check BEFORE advancing to the next tx — the per-tx event
+    // buffer is consumed at tx boundary.
+    assert!(event::num_events() == 1, 200);
+
+    // Plan-007 U2 review: assert each field byte-for-byte, especially
+    // tx_digest. emit_royalty_paid captures the digest internally via
+    // `tx_context::digest(ctx)`; the emitted event MUST carry the exact
+    // bytes from the SAME ctx. U8's frontend filter joins on this exact
+    // payload (after base58/base64 normalization).
+    let events = event::events_by_type<model3d::RoyaltyPaid>();
+    assert!(vector::length(&events) == 1, 201);
+    let e = vector::borrow(&events, 0);
+    assert!(model3d::royalty_paid_buyer(e) == @0xBABE, 202);
+    assert!(model3d::royalty_paid_creator(e) == CREATOR, 203);
+    assert!(model3d::royalty_paid_amount(e) == 1_000_000, 204);
+    assert!(model3d::royalty_paid_model_id(e) == model_id, 205);
+    assert!(model3d::royalty_paid_kiosk_id(e) == kiosk_id, 206);
+    assert!(model3d::royalty_paid_royalty_bps(e) == 500, 207);
+    assert!(model3d::royalty_paid_tx_digest(e) == expected_digest, 208);
+
+    sc.end();
+}
+
+// === new_model: 3 observable side effects (event + Blob transfer + field set) ===
+//
+// Plan-007 U2 review (2026-05-19): without this test, a regression that
+// dropped `event::emit(ModelPublished{...})` or that misrouted the Blob
+// would pass all of the prior 18 tests.
+
+#[test]
+fun new_model_emits_model_published_and_transfers_blob() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let b = mint_blob(&mut system, sc.ctx());
+    let clk = clock::create_for_testing(sc.ctx());
+
+    let model = new_model(
+        b,
+        s(b"car"),
+        s(b"{\"variant\":3}"),
+        s(b"Aero"),
+        make_tags(1),
+        s(b"lineageBlobZ"),
+        false,
+        default_license(),
+        &clk,
+        sc.ctx(),
+    );
+    let expected_model_id = object::id(&model);
+
+    // (a) ModelPublished event fires with the right payload — regression
+    // guard if a future refactor drops the `event::emit(...)` line.
+    // Type-filtered count (NOT `num_events()`) — Walrus `mint_blob` helpers
+    // also emit events into the same tx scope, so a global count would
+    // include those. We assert exactly-one ModelPublished, not exactly-one
+    // event overall.
+    let events = event::events_by_type<model3d::ModelPublished>();
+    assert!(vector::length(&events) == 1, 301);
+    let ep = vector::borrow(&events, 0);
+    assert!(model3d::model_published_model_id(ep) == expected_model_id, 302);
+    assert!(model3d::model_published_creator(ep) == CREATOR, 303);
+    assert!(model3d::model_published_policy(ep) == policy_permissionless(), 304);
+
+    // (b) Field assignments — every constructor input lands in the right place.
+    assert!(model3d::creator(&model) == CREATOR, 305);
+    assert!(*string::as_bytes(model3d::shape_type(&model)) == b"car", 306);
+    assert!(*string::as_bytes(model3d::params_json(&model)) == b"{\"variant\":3}", 307);
+    assert!(*string::as_bytes(model3d::name(&model)) == b"Aero", 308);
+    assert!(model3d::is_encrypted(&model) == false, 309);
+    assert!(*string::as_bytes(model3d::lineage_blob_id(&model)) == b"lineageBlobZ", 310);
+
+    transfer::public_transfer(model, CREATOR);
+    sc.next_tx(CREATOR);
+
+    // (c) Blob landed at ctx.sender() — proves the public_transfer side
+    // effect inside new_model (lifecycle-fixed-to-sender per source comment).
+    // take + return-to-sender is the existence-only check; consuming the
+    // Blob via test would require a Walrus burn helper not used elsewhere
+    // in this suite.
+    let blob_in_inbox = sc.take_from_sender<Blob>();
+    sc.return_to_sender(blob_in_inbox);
+
+    let received_model = sc.take_from_sender<Model3D>();
+    destroy_model_for_testing(received_model);
+
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// === Phase 2 entry-fn removal — implicit at compile-time ===
+//
+// `publish_and_share` and `purchase_model_access` no longer exist in the
+// module. Any reference here would fail compilation; their absence from
+// this test file is the verification artifact. Same for Phase 3 Collection
+// plumbing (`publish_collection`, `mint_variant`, `share_collection`,
+// `Collection`, `VariantSpec`).
+
+// === LicenseTerms validation — assertion-ladder coverage (Phase 2 carryover) ===
 
 #[test]
 fun validate_inputs_happy_minimum() {
@@ -258,584 +405,7 @@ fun validate_inputs_accepts_lineage_blob_id_128() {
     );
 }
 
-// === Phase 3 — Collection validation tests (no Blob needed) ===
-
-#[test, expected_failure(abort_code = model3d::ESlugMalformed)]
-fun validate_collection_inputs_rejects_empty_slug() {
-    validate_collection_inputs(&s(b"Cube"), &s(b""), &default_license());
-}
-
-#[test, expected_failure(abort_code = model3d::ESlugTooLong)]
-fun publish_collection_rejects_slug_too_long() {
-    validate_collection_inputs(
-        &s(b"Cube"),
-        &repeat_byte(ASCII_S, max_slug_len() + 1),
-        &default_license(),
-    );
-}
-
-#[test]
-fun validate_collection_inputs_accepts_slug_at_cap() {
-    validate_collection_inputs(
-        &s(b"Cube"),
-        &repeat_byte(ASCII_S, max_slug_len()),
-        &default_license(),
-    );
-}
-
-#[test, expected_failure(abort_code = model3d::ENameTooLong)]
-fun validate_collection_inputs_rejects_name_too_long() {
-    validate_collection_inputs(
-        &repeat_byte(ASCII_N, 129),
-        &s(b"cube-set"),
-        &default_license(),
-    );
-}
-
-#[test, expected_failure(abort_code = model3d::ERoyaltyTooHigh)]
-fun validate_collection_inputs_rejects_royalty_over_cap() {
-    let bad = new_license_terms(policy_permissionless(), 0, max_derivative_royalty_bps() + 1, true, true);
-    validate_collection_inputs(&s(b"Cube"), &s(b"cube-set"), &bad);
-}
-
-// === Phase 3 — Collection + variant end-to-end tests ===
-
-#[test]
-fun publish_collection_happy_path_sets_creator_and_fields() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let coll = publish_collection(
-        b,
-        s(b"Excalibur Set"),
-        s(b"excalibur"),
-        default_license(),
-        &clk,
-        sc.ctx(),
-    );
-
-    assert!(model3d::collection_creator(&coll) == CREATOR, 1000);
-    assert!(*string::as_bytes(model3d::collection_name(&coll)) == b"Excalibur Set", 1001);
-    assert!(*string::as_bytes(model3d::collection_slug(&coll)) == b"excalibur", 1002);
-    assert!(model3d::collection_variant_count(&coll) == 0, 1003);
-
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun mint_variant_creates_model3d_referencing_collection() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b,
-        s(b"Set"),
-        s(b"set"),
-        default_license(),
-        &clk,
-        sc.ctx(),
-    );
-    let expected_collection_id = object::id(&coll);
-
-    let spec = new_variant_spec(
-        s(b"patch-42"),
-        s(b"{\"length\":1.0}"),
-        s(b"Variant A"),
-        make_tags(2),
-        1_000_000,
-    );
-    let model = mint_variant(
-        &mut coll,
-        spec,
-        s(b"sword"),
-        s(b"lineageBlobIdABC"),
-        false,
-        &clk,
-        sc.ctx(),
-    );
-
-    assert!(model3d::collection_id(&model) == expected_collection_id, 1100);
-    assert!(*string::as_bytes(model3d::patch_id(&model)) == b"patch-42", 1101);
-    assert!(model3d::creator(&model) == CREATOR, 1102);
-    assert!(model3d::direct_access_price(&model) == 1_000_000, 1103);
-    assert!(*string::as_bytes(model3d::name(&model)) == b"Variant A", 1104);
-    assert!(*string::as_bytes(model3d::lineage_blob_id(&model)) == b"lineageBlobIdABC", 1105);
-    assert!(model3d::collection_variant_count(&coll) == 1, 1106);
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun mint_variant_carries_per_variant_pricing() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-
-    let spec_a = new_variant_spec(
-        s(b"a"), s(b"{}"), s(b"A"), empty_tags(), 100,
-    );
-    let spec_b = new_variant_spec(
-        s(b"b"), s(b"{}"), s(b"B"), empty_tags(), 5_000,
-    );
-    let model_a = mint_variant(&mut coll, spec_a, s(b"cube"), s(b"linA"), false, &clk, sc.ctx());
-    let model_b = mint_variant(&mut coll, spec_b, s(b"cube"), s(b"linB"), false, &clk, sc.ctx());
-
-    assert!(model3d::direct_access_price(&model_a) == 100, 1200);
-    assert!(model3d::direct_access_price(&model_b) == 5_000, 1201);
-    assert!(model3d::collection_variant_count(&coll) == 2, 1202);
-
-    destroy_model_for_testing(model_a);
-    destroy_model_for_testing(model_b);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun mint_variant_accepts_16_variants_boundary() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-
-    let mut models = vector::empty<Model3D>();
-    let mut i = 0;
-    while (i < max_variants()) {
-        let spec = new_variant_spec(s(b"p"), s(b"{}"), s(b"V"), empty_tags(), 0);
-        let m = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-        vector::push_back(&mut models, m);
-        i = i + 1;
-    };
-
-    assert!(model3d::collection_variant_count(&coll) == 16, 1300);
-
-    while (!vector::is_empty(&models)) {
-        destroy_model_for_testing(vector::pop_back(&mut models));
-    };
-    vector::destroy_empty(models);
-
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test, expected_failure(abort_code = model3d::ETooManyVariants)]
-fun mint_variant_aborts_when_17th_call_exceeds_cap() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-
-    let mut models = vector::empty<Model3D>();
-    let mut i = 0;
-    while (i < max_variants()) {
-        let spec = new_variant_spec(s(b"p"), s(b"{}"), s(b"V"), empty_tags(), 0);
-        let m = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-        vector::push_back(&mut models, m);
-        i = i + 1;
-    };
-
-    // 17th call — must abort
-    let overflow_spec = new_variant_spec(s(b"p"), s(b"{}"), s(b"V"), empty_tags(), 0);
-    let overflow_model = mint_variant(
-        &mut coll, overflow_spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx(),
-    );
-
-    // Cleanup unreachable on the abort path; required for type-checking the test.
-    destroy_model_for_testing(overflow_model);
-    while (!vector::is_empty(&models)) {
-        destroy_model_for_testing(vector::pop_back(&mut models));
-    };
-    vector::destroy_empty(models);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test, expected_failure(abort_code = model3d::ENotCollectionCreator)]
-fun mint_variant_rejects_non_creator_sender() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-
-    sc.next_tx(OTHER);
-    let spec = new_variant_spec(s(b"p"), s(b"{}"), s(b"V"), empty_tags(), 0);
-    let model = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test, expected_failure(abort_code = model3d::EVariantParamsJsonTooLong)]
-fun variant_spec_rejects_params_json_over_1024_chars() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-
-    let spec = new_variant_spec(
-        s(b"p"),
-        repeat_byte(ASCII_X, max_variant_params_json_len() + 1),
-        s(b"V"),
-        empty_tags(),
-        0,
-    );
-    let model = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun variant_spec_accepts_params_json_at_1024() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-    let spec = new_variant_spec(
-        s(b"p"),
-        repeat_byte(ASCII_X, max_variant_params_json_len()),
-        s(b"V"),
-        empty_tags(),
-        0,
-    );
-    let model = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun publish_collection_then_3_variants_then_share_collection() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), default_license(), &clk, sc.ctx(),
-    );
-    let coll_id = object::id(&coll);
-
-    let m1 = mint_variant(
-        &mut coll,
-        new_variant_spec(s(b"p0"), s(b"{}"), s(b"V0"), empty_tags(), 10),
-        s(b"cube"), s(b"l0"), false, &clk, sc.ctx(),
-    );
-    let m2 = mint_variant(
-        &mut coll,
-        new_variant_spec(s(b"p1"), s(b"{}"), s(b"V1"), empty_tags(), 20),
-        s(b"cube"), s(b"l1"), false, &clk, sc.ctx(),
-    );
-    let m3 = mint_variant(
-        &mut coll,
-        new_variant_spec(s(b"p2"), s(b"{}"), s(b"V2"), empty_tags(), 30),
-        s(b"cube"), s(b"l2"), false, &clk, sc.ctx(),
-    );
-
-    assert!(model3d::collection_variant_count(&coll) == 3, 1500);
-    assert!(model3d::collection_id(&m1) == coll_id, 1501);
-    assert!(model3d::collection_id(&m2) == coll_id, 1502);
-    assert!(model3d::collection_id(&m3) == coll_id, 1503);
-
-    // Models go to shared (Phase 3 frontend will do this in the PTB).
-    transfer::public_share_object(m1);
-    transfer::public_share_object(m2);
-    transfer::public_share_object(m3);
-    share_collection(coll);
-
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun publish_and_share_phase2_compatibility() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    model3d::publish_and_share(
-        b,
-        s(b"sword"),
-        s(b"{\"length\":1.0}"),
-        s(b"Excalibur"),
-        make_tags(2),
-        s(b"lineageBlobId123"),
-        1_000_000,
-        false,
-        default_license(),
-        &clk,
-        sc.ctx(),
-    );
-
-    // Verify the shared Model3D matches Phase 2 expectations.
-    sc.next_tx(CREATOR);
-    let shared_model = sc.take_shared<Model3D>();
-    assert!(model3d::creator(&shared_model) == CREATOR, 1600);
-    assert!(model3d::direct_access_price(&shared_model) == 1_000_000, 1601);
-    assert!(*string::as_bytes(model3d::name(&shared_model)) == b"Excalibur", 1602);
-    assert!(*string::as_bytes(model3d::shape_type(&shared_model)) == b"sword", 1603);
-    assert!(*string::as_bytes(model3d::lineage_blob_id(&shared_model)) == b"lineageBlobId123", 1604);
-    // Degenerate Collection has empty patch_id (whole blob).
-    assert!(*string::as_bytes(model3d::patch_id(&shared_model)) == b"", 1605);
-    ts::return_shared(shared_model);
-
-    // Verify the degenerate Collection was also shared.
-    let shared_coll = sc.take_shared<Collection>();
-    assert!(model3d::collection_creator(&shared_coll) == CREATOR, 1610);
-    assert!(*string::as_bytes(model3d::collection_slug(&shared_coll)) == b"_legacy", 1611);
-    assert!(model3d::collection_variant_count(&shared_coll) == 1, 1612);
-    ts::return_shared(shared_coll);
-
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun validate_collection_inputs_royalty_carryover() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let b = mint_blob(&mut system, sc.ctx());
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let license = new_license_terms(policy_restricted(), 0, 2500, true, false);
-    let mut coll = publish_collection(
-        b, s(b"Set"), s(b"set"), license, &clk, sc.ctx(),
-    );
-    assert!(
-        model3d::license_derivative_royalty_bps(model3d::collection_license(&coll)) == 2500,
-        1700,
-    );
-
-    let spec = new_variant_spec(s(b"p"), s(b"{}"), s(b"V"), empty_tags(), 0);
-    let model = mint_variant(&mut coll, spec, s(b"cube"), s(b"lin"), false, &clk, sc.ctx());
-
-    // Royalty carries over from Collection to each Model3D's inherited license.
-    assert!(
-        model3d::license_derivative_royalty_bps(model3d::license(&model)) == 2500,
-        1701,
-    );
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-// === End-to-end publish + purchase tests (real Walrus Blob) ===
-// These exercise the Phase 2 purchase flow under the new struct shape.
-
-#[test]
-fun publish_happy_path_sets_creator_and_fields() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let clk = clock::create_for_testing(sc.ctx());
-
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 1_000_000);
-
-    assert!(model3d::creator(&model) == CREATOR, 100);
-    assert!(model3d::direct_access_price(&model) == 1_000_000, 101);
-    assert!(model3d::is_encrypted(&model) == false, 102);
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun purchase_model_access_permanent_pays_creator() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let clk = clock::create_for_testing(sc.ctx());
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 500);
-
-    sc.next_tx(BUYER);
-    let payment = coin::mint_for_testing<SUI>(500, sc.ctx());
-    let access = mint_model_access(&model, payment, 0, &clk, sc.ctx());
-
-    assert!(model3d::access_holder(&access) == BUYER, 200);
-    assert!(model3d::access_expires_at_ms(&access) == 0, 201);
-    assert!(model3d::access_target_id(&access) == object::id(&model), 202);
-
-    destroy_access_for_testing(access);
-
-    sc.next_tx(CREATOR);
-    let received = sc.take_from_sender<coin::Coin<SUI>>();
-    assert!(coin::value(&received) == 500, 203);
-    sc.return_to_sender(received);
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun purchase_model_access_subscription_sets_expiry() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let mut clk = clock::create_for_testing(sc.ctx());
-    clock::set_for_testing(&mut clk, 1_000_000);
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 100);
-
-    sc.next_tx(BUYER);
-    let payment = coin::mint_for_testing<SUI>(100, sc.ctx());
-    let access = mint_model_access(&model, payment, 86_400_000, &clk, sc.ctx());
-
-    assert!(model3d::access_expires_at_ms(&access) == 1_000_000 + 86_400_000, 300);
-
-    destroy_access_for_testing(access);
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun purchase_model_access_free_with_zero_coin() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let clk = clock::create_for_testing(sc.ctx());
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 0);
-
-    sc.next_tx(BUYER);
-    let payment = coin::zero<SUI>(sc.ctx());
-    let access = mint_model_access(&model, payment, 0, &clk, sc.ctx());
-    assert!(model3d::access_holder(&access) == BUYER, 400);
-    destroy_access_for_testing(access);
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test]
-fun purchase_model_access_exact_payment_succeeds() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let clk = clock::create_for_testing(sc.ctx());
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 777);
-
-    sc.next_tx(BUYER);
-    let payment = coin::mint_for_testing<SUI>(777, sc.ctx());
-    let access = mint_model_access(&model, payment, 0, &clk, sc.ctx());
-    destroy_access_for_testing(access);
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
-
-#[test, expected_failure(abort_code = model3d::EInsufficientPayment)]
-fun purchase_model_access_insufficient_payment_aborts() {
-    let mut sc = ts::begin(CREATOR);
-    let mut system = system::new_for_testing(sc.ctx());
-    sc.next_tx(CREATOR);
-    let clk = clock::create_for_testing(sc.ctx());
-    let (coll, model) = mint_collection_and_one_model(&mut system, &clk, sc.ctx(), 1_000);
-
-    sc.next_tx(BUYER);
-    let payment = coin::mint_for_testing<SUI>(999, sc.ctx());
-    let access = mint_model_access(&model, payment, 0, &clk, sc.ctx());
-    destroy_access_for_testing(access);
-
-    destroy_model_for_testing(model);
-    let recovered = destroy_collection_for_testing(coll);
-    blob::burn(recovered);
-    clock::destroy_for_testing(clk);
-    system.destroy_for_testing();
-    sc.end();
-}
+// === Royalty cap policy constants ===
 
 #[test]
 fun policy_constants_match_spec() {
@@ -843,7 +413,5 @@ fun policy_constants_match_spec() {
     assert!(model3d::policy_allow_list() == 1, 2);
     assert!(policy_permissionless() == 2, 3);
     assert!(max_derivative_royalty_bps() == 3000, 4);
-    assert!(max_variants() == 16, 5);
-    assert!(max_slug_len() == 64, 6);
-    assert!(max_variant_params_json_len() == 1024, 7);
 }
+
