@@ -1,6 +1,80 @@
 # Phase Progress
 
-## Last Updated: 2026-05-19 evening — **3 manual decisions resolved + Kiosk multi-beneficiary research captured. Plan is implementation-ready; next is `/ce-work` U1.**
+## Last Updated: 2026-05-19 night — **`/ce-work` plan-007 U1 + U2 + U3 all landed. 3/14 units complete; U4 (mint_and_list + purchase_with_kiosk) unblocked. 24/24 Move tests + frontend typecheck green.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **33 of 38**
+- Days to shortlist announcement (7/8): **50 of 55**
+- Days to Demo Day live virtual present-back (7/20–21): **62 of 67**
+- Days to winners (8/27): **100 of 105**
+
+### Current Phase
+
+**Phase 4 — Kiosk integration + race-on-mint demo centerpiece** (`docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`). 14 implementation units (U1–U14). Today landed U1–U3 = ~21% of Phase 4 unit count, but disproportionate share of Move foundation risk.
+
+### Completed This Session — U1 + U2 + U3 ship trilogy
+
+#### U1 — Day-1 verifications + tooling (commit `a4bcdf9`)
+
+- §1 R1 public visibility check → **GO**. No GitHub remote yet; 7 in-repo references to Phase 2 testnet package ID (`0x18a480b3ff…`) are documentation only, no external CTAs.
+- §2 Phase 3 racetrack mount sanity → **GO** (user confirmed via normal `/track` lap).
+- §3 U1-prelim `?model=<id>` route prototype → **GO**. `frontend/src/track/TrackPage.tsx` + new `frontend/src/track/stubListingLookup.ts`; override mode bypasses `useOwnedVariants` + wallet gates entirely. `?blob=` dev escape hatch lets end-to-end Babylon scene-mount be tested before U7's real listings API.
+- §4 Slush switch latency → **DEFERRED** to U12 demo prep (re-fires when U6+U7+U10 mergeable; measurement in vacuum doesn't predict recording-day behavior). Memory `feedback_defer_synthetic_measurements` captures the principle.
+- §5 Handbook verbatim → **GO**. All 4 load-bearing claims confirmed (6/21 submission, 8/27 winners, mainnet 100% prize, Walrus track $35K). 5 discoveries spawned: 7/8 shortlist + 7/20–21 live virtual Demo Day milestones added to CLAUDE.md + tracker; OQ-016 opened for Phase 5 submission asset checklist; plan-007 U14 README must include Phase 2 → Phase 4 migration note.
+- §6 tx_digest Move spike → **GO option (a)**. Published throwaway-spike to testnet at `0x6f3fc901…3101673`. TestEvent.tx_digest byte-equal to RPC-returned CALL_DIGEST after base58/base64 normalization. U2 `RoyaltyPaid.tx_digest: vector<u8>` locked. U8 must ship encoding normalization helper.
+
+#### U2 — Move v2 foundation (commit `1a6e291`)
+
+- `Model3D has key, store` (was `key` only — Kiosk-placeable per R1 + D-013).
+- Stripped Phase 2 entry fns + Phase 3 Collection/VariantSpec plumbing. v2 diagram is authoritative.
+- `MODEL3D` OTW + `fun init` claims Publisher and transfers to deployer.
+- `RoyaltyPaid` struct extended from `{ buyer, creator, amount, model_id, tx_digest }` to also include `kiosk_id: ID` + `royalty_bps: u16` (per U2 review — UPGRADE.md says copy+drop events can't evolve later; fix now while testnet-disposable).
+- `public(package) emit_royalty_paid(...ctx)` captures tx_digest internally — callers cannot fabricate the U8 join key.
+- `public(package) new_model(...)` pure constructor with FIXED Blob lifecycle (transfer to ctx.sender()). U4 mint_and_list wraps it + kiosk::place + kiosk::list.
+- 19 tests + 4-reviewer parallel pass + 10 review-driven revisions applied in same commit.
+- NEW `contracts/UPGRADE.md` (60 lines) + first R12 `docs/solutions/kiosk-ptb-patterns/model3d-key-store-migration.md`.
+
+#### U3 — TransferPolicy bootstrap with 3 rules (commit `561137b`)
+
+- `ensure_transfer_policy(publisher: &Publisher, ctx)` creates `TransferPolicy<Model3D>` and attaches **three built-in rules** in one entry fn (rules-before-share fail-safe by construction):
+  1. `royalty_rule::add` with `AMOUNT_BP_DEFAULT=500` bps + `MIN_ROYALTY_AMOUNT_MIST=1_000_000` mist floor
+  2. `kiosk_lock_rule::add` (forces post-purchase lock — required for resale royalty enforcement)
+  3. `personal_kiosk_rule::add` (buyer must use PersonalKiosk; frontend U5/U6 must `kiosk::personal_new`)
+- `EWrongPublisher = 20` abort on wrong-type Publisher.
+- Mysten apps/kiosk dep pinned to commit SHA `7a07937149c0af057be8f6747e60d0f1acd88fde` (NOT `main`).
+- 24 tests + 4-reviewer parallel pass + 10 review-driven revisions applied in same commit (R12 doc text fixes, true e2e EWrongPublisher abort via NEW `contracts/foreign-witness/` sibling Move package, MIN floor semantics correction, AMOUNT_BP_DEFAULT vs MAX_DERIVATIVE_ROYALTY_BPS naming clarity, Cap-custody mainnet TODO, idempotency clarification).
+- Second R12 doc: `docs/solutions/kiosk-ptb-patterns/transfer-policy-before-place.md`.
+
+### Spawned / open items requiring future action
+
+- **OQ-016** (Phase 5 submission asset checklist) — live virtual Demo Day prep + project logo (1:1 JPG/PNG). Fires at Phase 5 kickoff.
+- **OQ-017** (Phase 3 stale frontend callers) — 8 files in `frontend/src/{sui,collection,creator,buy,forge}/` typecheck-pass but will runtime-fail after U4 republishes. U6 / U7 / U9 own deletion before U4 testnet republish so CI doesn't false-green.
+- **U13 deploy script idempotency** — must pin `policy_id` in `networks/{net}.json` and refuse to re-call `ensure_transfer_policy` if populated. Documented in `ensure_transfer_policy` source comment + UPGRADE.md.
+- **Re-audit Kiosk @ SHA before mainnet** — `TODO(mainnet, U13)` in Move.toml; diff apps/main vs pinned SHA, re-test, bump.
+- **TransferPolicyCap mainnet custody** — `TODO(mainnet, U13)` in `ensure_transfer_policy` source. Move Cap to hardware wallet / multisig immediately after mainnet publish; cap-compromise cascade explained.
+
+### Next Concrete Step
+
+`/ce-work` on plan-007 **U4 (mint_and_list + purchase_with_kiosk entry functions + rule-driven royalty)**:
+
+- U4 adds `ensure_creator_kiosk`, `mint_and_list` (flat 13-param entry fn per resolved decision D1), `purchase_with_kiosk` returning `(Model3D, TransferRequest)`.
+- Royalty is NOT computed in Move — RoyaltyRule handles payment via `royalty_rule::pay` at the frontend builder layer (U5). U4 just returns the hot-potato TransferRequest and emits `RoyaltyPaid` after the PTB chain completes.
+- Same pattern: subagent → 4-reviewer parallel → revise → commit.
+- U4 verification includes the REAL testnet publish (Phase 4's first non-throwaway deploy of model3d v2). Writes new package ID to `networks/testnet.json`.
+- After U4: U5/U6/U7/U8/U9/U10/U11/U12/U13/U14 unblocked in dependency order per plan-007.
+
+### Notes for Next Session
+
+- **Frontend cascade is locked in**: OQ-017 lists every file U4-republish would break. U6/U7/U9 must delete these in their respective commits before U4's `sui client publish` lands the new package ID. Otherwise CI green / runtime broken.
+- **`emit_royalty_paid` is `public(package)`** — U4's `purchase_with_kiosk` body (same package) calls it directly. No PTB-layer emit needed.
+- **`new_model` Blob lifecycle is fixed** — U4 must accept that the Blob goes to `ctx.sender()` (the creator); U4 cannot redirect to a buyer or Kiosk without changing U2's constructor signature. Comment in source clarifies.
+- **U4 test-first execution note** (plan-007 U4 Approach) — write the Move integration test (Tom mints+lists, Marcus purchases via builder, RoyaltyPaid emitted, royalty arrived at creator address) BEFORE implementing entry functions.
+- **U5 dry-run-from-day-1 discipline** — when we get to U5 (typed PTB wrapper), every new builder ships with a `client.dryRunTransactionBlock` smoke test against LIVE testnet. Fallback PROVISIONAL marker if testnet RPC unavailable.
+- **Memory** `feedback_defer_synthetic_measurements` is now load-bearing: future units that include latency-style pre-flight measurements should consult this before scheduling them.
+
+---
+
+## Previously Last Updated: 2026-05-19 evening — **3 manual decisions resolved + Kiosk multi-beneficiary research captured. Plan is implementation-ready; next is `/ce-work` U1.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): **33 of 38**
