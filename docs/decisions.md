@@ -1405,6 +1405,67 @@ Add `@babylonjs/materials` (pinned `^9.6.0` to match `@babylonjs/core`) as a `fr
 
 ---
 
+## D-028: Mainnet deploy is milestone-gated, not date-gated (supersedes D-009's implicit calendar gating)
+
+**Status**: Proposed
+**Date**: 2026-05-19
+**Phase**: Phase 4 (Kiosk + race-on-mint demo) — strategic reread surfaced during ce-brainstorm + ce-doc-review
+**Relates to**: D-009 (testnet 6/21, mainnet 8/27 for 100% prize — this ADR refines the post-7/22 gate), D-013 (Kiosk + TransferPolicy must-have v1 — the testnet ship that this gate protects)
+
+### Context
+
+D-009 reads "testnet OK for 6/21, mainnet by 8/27 for 100% prize" — which implicitly suggests calendar-based mainnet shipping (i.e., "deploy on or before 8/27 to qualify for the 100% prize tier"). Dialogue during ce-brainstorm + adversarial pressure during ce-doc-review surfaced that pure calendar gating creates a perverse incentive: a buggy mainnet deploy on 8/26 ships to qualify for the prize tier but loses the trust + judging optics that the testnet-soak window was supposed to protect.
+
+The original requirements doc captured this implicitly in AE5 ("Given the milestone trigger has NOT been met and the date is 8/26, the mainnet deploy is still NOT executed; the team accepts a missed 8/27 mainnet eligibility rather than ship buggy"). But this was an acceptance example for an undefined trigger, with no ADR documenting the strategic reversal of D-009's implicit calendar default. Reviewers (coherence + adversarial, anchor 100) flagged: the team is committing to forfeit 50% of the prize pool without an explicit decision record explaining why.
+
+### Decision
+
+Mainnet deploy execution between 7/22 and 8/26 is **milestone-gated on demo stability per the bug severity matrix in `docs/runbooks/mainnet-deploy.md`**. Calendar pressure does NOT override the gate. If the milestone is not met by 8/26, the deploy is deferred; the team accepts missing 8/27 winners-tier eligibility rather than ship a buggy mainnet contract.
+
+Milestone trigger (full definition in the runbook):
+- ≥ 20 distinct testnet session recordings of the complete purchase→drive arc
+- ≥ 10 unique buyer addresses across those 20 sessions
+- Zero P0 bugs (funds lost / wallet stuck / royalty wrong recipient — see runbook severity matrix)
+- Zero overlay render timeouts > 2s per AE3
+- Zero racetrack scene mount failures
+
+P1 bugs (1-in-N reliability flakes, wrong-but-recoverable behavior) ship with documented known-issues in README. P2 bugs (cosmetic) ship without comment.
+
+WAL acquisition must complete by 8/19 at latest (8 days before 8/27) to remove "missed deadline because the swap took longer than expected" as a separate failure mode (see runbook §WAL acquisition timing).
+
+### Rationale
+
+- **Deploying buggy mainnet code is worse than missing the prize tier.** A P0 bug on mainnet (royalty paid to wrong recipient, funds stuck) damages trust + judging perception + post-hackathon ecosystem standing more than forfeiting the 100% upfront prize. The 50% retained at the milestone-met case is itself only paid if the project wins.
+- **Calendar pressure is a known failure mode** — hackathon teams routinely ship buggy code on deadline day because the deadline is the loudest signal. Naming a milestone trigger that's loudly more important than the date removes that pressure.
+- **Bug severity matrix makes the decision mechanical, not psychological.** Without it, the user argues with themselves at 11pm on 8/26; with it, the matrix dictates the answer.
+- **WAL acquisition cliff is a separate concern.** Lumping "did we get WAL?" with "is the contract stable?" into one 8/26 decision conflates two independent failure modes. Separating them (WAL by 8/19, milestone gate at execution time) removes false coupling.
+
+### Alternatives Considered
+
+- **Pure calendar gating (D-009's implicit default)** — rejected because it creates the perverse incentive described above.
+- **Calendar gating with a "skip-if-known-blocker" override** — rejected because "known blocker" is vague; the user-at-11pm-on-8/26 has no objective criterion to apply.
+- **Earlier earliest-execution date (e.g., 7/15)** — considered; rejected because 7/15 gives no soak time after Phase 4 closes (6/20). 7/22 = ~1 month of testnet exposure.
+- **Hard requirement of external auditor sign-off before deploy** — rejected as overkill for hackathon scope + cost; the milestone gate + bug severity matrix is the proportional alternative.
+
+### Consequences
+
+- ✅ Decision rule at 11pm on 8/26 is mechanical (matrix lookup), not psychological
+- ✅ Mainnet deploy quality is gated on the same evidence the trigger evaluates (no "we'll fix it after" pressure)
+- ✅ WAL acquisition timing isolated from milestone decision (one less coupled failure mode)
+- ✅ Strategic reversal of D-009's calendar default is recorded, not implicit
+- ⚠️ Team must accept that ~50% of the prize pool is at risk if the milestone fails — explicit trade-off the runbook documents
+- ⚠️ External tester recruitment becomes a Phase 5 dependency (5+ unique buyer addresses), with 1-week recruitment window starting 7/15
+- 🔮 Post-hackathon: the milestone-gate pattern + bug severity matrix become a reusable artifact for any future mainnet redeploy (e.g., v1.1 L2 Derivative ship)
+
+### Related
+
+- spec.md section: §6 Phase 4 — Kiosk integration + mainnet switch (the original calendar-default framing this ADR refines)
+- `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md` — R13 + R14 (Phase 4 pre-bake the runbook executes); Key Decisions (this ADR cited inline)
+- `docs/runbooks/mainnet-deploy.md` — the operational runbook this ADR governs (milestone trigger, bug severity matrix, WAL timing, execution playbook)
+- Related decisions: [[D-009]] (this ADR refines), [[D-013]] (Kiosk must-have v1 — the testnet ship the gate protects)
+
+---
+
 # Reserved Decision Numbers
 
-D-028 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-029 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

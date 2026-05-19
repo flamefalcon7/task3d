@@ -1,6 +1,95 @@
 # Phase Progress
 
-## Last Updated: 2026-05-18 late afternoon — **Plan-006 racetrack scene polish shipped end-to-end on `feat/racetrack-scene-polish`.**
+## Last Updated: 2026-05-19 evening — **3 manual decisions resolved + Kiosk multi-beneficiary research captured. Plan is implementation-ready; next is `/ce-work` U1.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **33 of 38**
+- Days to demo day (7/20–21): **62 of 67**
+- Days to winners (8/27): **100 of 105**
+
+### Completed This Session
+
+1. **Sui Kiosk multi-beneficiary royalty research** (ce-framework-docs-researcher) — confirmed forward-compatibility of Phase 4 single-beneficiary built-in `royalty_rule` with v1.1 multi-beneficiary custom rule via UpgradeCap hot-swap. Pattern documented in `docs/solutions/architecture-patterns/sui-kiosk-multi-beneficiary-royalty-2026-05-19.md` with Move code sketch, footgun list, and Phase 4 forward-compat constraints (keep Derivative as separate struct; preserve UpgradeCap + TransferPolicyCap custody).
+2. **3 manual decisions resolved** (walked through with the user, written into plan-007 Resolved Decisions section + synced into brainstorm AE3 line):
+   - **D1 → `mint_and_list` = flat 13-param**. PTB struct-arg-pitfall reasoning reversed: pitfall applies to passing existing on-chain struct refs, not constructing fresh structs from primitives. Split-via-`Model3DMetadata` would actually introduce a Result-handle struct-arg risk.
+   - **D2 → AE3 = 5s** (raised from 2s). Honest math: Sui finality 1.5-3s + backend poll 1s + frontend poll 1s = 3-6s worst case. Polling cadences unchanged (1s/1s). Demo timing rationale: overlay landing at 3-5s mark co-locates with buyer driving the bought car — narrative-positive.
+   - **D3 → Cascade U13 → U11 → U7 with U11 hard floor.** Original order kept; added rule that U11 (demo recording capture-replay) is the last to drop because 6/19-20 recording is the root deliverable for pitch + video.
+
+### Artifacts updated this session
+
+- `docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md` — Outstanding Questions section replaced with Resolved Decisions; 6 in-line references (AE3, mint_and_list, risks) synced
+- `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md` — AE3 changed from 2s to 5s
+- `docs/solutions/architecture-patterns/sui-kiosk-multi-beneficiary-royalty-2026-05-19.md` (NEW)
+
+### Next Concrete Step
+
+`/ce-work` against plan-007 U1 day-1:
+1. Pre-flight verifications: R1 (Kiosk SDK package install + import smoke) + R11a (Phase 3 `/track` racetrack mount with carousel variant) + R11 (Slush wallet switcher latency measurement)
+2. Handbook verbatim quote capture
+3. `tx_digest` Move spike (gates U2 RoyaltyPaid event schema design — 3 fallback paths identified: event_seq+sender / nonce / buyer-only filter)
+4. U1-prelim `?model=<id>` route prototype on `/track`
+
+### Notes for Next Session
+
+- All 3 Outstanding Question blockers are now closed; no more "Resolve Before Implementation" items
+- Kiosk research note (`docs/solutions/architecture-patterns/sui-kiosk-multi-beneficiary-royalty-2026-05-19.md`) is v1.1's primary reference for the `split_royalty_rule` custom rule. Don't re-research.
+- U5 PTB wrapper design choice: if generic (royalty-pay step is an injectable PTB segment), v1.1 custom rule swap is one-line config; if hardcoded `royalty_rule::pay`, refactor needed at v1.1. Not Phase 4 work to plumb the abstraction, but worth flagging at U5 implementation.
+
+---
+
+## Previously Last Updated: 2026-05-19 late — **Phase 4 planning chain complete: ce-ideate → ce-brainstorm → ce-doc-review → ce-plan → ce-doc-review (round 2 walkthrough). Plan ready; 3 manual decisions queued for ce-work day 1.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **33 of 38**
+- Days to demo day (7/20–21): **62 of 67**
+- Days to winners (8/27): **100 of 105**
+
+### Current Phase
+
+Phase 4 — Kiosk integration + race-on-mint demo (planning complete; implementation pending). Window 6/11–6/20.
+
+### Completed This Session (planning, no code)
+
+Full compound-engineering workflow chain for Phase 4:
+
+1. **`/ce-ideate`** (run-id 69f67b9e) — 48 raw ideas → 7 survivors → `docs/ideation/2026-05-18-phase-4-kiosk-mainnet-demo-ideation.md`. 5 cross-cutting convergences identified; S1 ("D-009 reread: 6/21 = pitch artifact, 8/27 = mainnet tier") picked as next-step seed.
+2. **`/ce-brainstorm`** — seeded by S1 → variant A locked (mainnet completely deferred to 7/22-8/27 window) → A1+A3 精選 hybrid (Kiosk integration depth pruned to PersonalKioskRule + LockRule + RoyaltyRule; race-on-mint demo arc as Phase 4 centerpiece) → `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md`.
+3. **`/ce-doc-review`** round 1 on requirements (7 personas interactive) — 47 raw findings → 23 applied / 2 skipped. R15+AE5+F3 extracted to new runbook; D-028 ADR added.
+4. **`/ce-plan`** — 14 implementation units (U1-U14) → `docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`. KTDs include event polling cadences, in-memory ring buffer, typed PTB wrapper, Kiosk-protocol-level architectural principle.
+5. **`/ce-doc-review`** round 2 on plan (6 personas headless then interactive walkthrough + bulk auto-resolve) — 27 actionable findings → 24 applied / 3 deferred to Outstanding Questions / 0 skipped. Plan rewritten end-to-end with Kiosk-protocol KTD, fixed file ownership (U10 = TrackPage.tsx not racetrackScene.ts), royalty mechanism switched to rule-driven (no manual coin::split), tx_digest spike moved to U1 day-1, U13 separate rehearsal key env var, full security hygiene.
+
+### Artifacts created / updated this session
+
+- `docs/ideation/2026-05-18-phase-4-kiosk-mainnet-demo-ideation.md` (new)
+- `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md` (new, twice-reviewed)
+- `docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md` (new, twice-reviewed; final rewrite includes Kiosk-protocol architectural KTD)
+- `docs/runbooks/mainnet-deploy.md` (new — extracted post-Phase-4 mainnet deploy policy + bug severity matrix + WAL acquisition timing)
+- `docs/decisions.md` — D-028 added (mainnet milestone-gated, supersedes D-009 implicit calendar gating)
+
+### Blockers / Open Questions
+
+**3 manual decisions in plan's Outstanding Questions → Resolve Before Implementation section (resolve at ce-work day 1 before U2/U4/U8 start):**
+
+1. **`mint_and_list` 13-param entry function**: split via a `Model3DMetadata` constructor entry fn (lower struct-arg-pitfall risk) OR accept 13-param (U5 wrapper test scope grows). Affects U4 + U5.
+2. **AE3 end-to-end latency math**: (a) websocket scoped to 90s recording window, (b) backend royaltyIndexer poll → 500ms during recording, (c) accept 3-6s worst case + raise AE3 to 5s. Affects U8.
+3. **10-day budget descope cascade**: pre-decide cut order if reserve consumed → U13 rehearsal → U11 capture-replay → U7 CreatorDetail. Affects schedule.
+
+### Next Concrete Step
+
+`/ce-work` against `docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md` — but FIRST resolve the 3 Outstanding Questions above. U1 day 1 includes the tx_digest Move spike that gates U2 RoyaltyPaid event schema design. Budget for day 1: pre-flight verifications (R1 + R11a + R11) + handbook quote capture + tx_digest spike + U1-prelim `?model=` route prototype.
+
+### Notes for Next Session
+
+- Plan deliberately uses Kiosk SDK's `royalty_rule::pay` for royalty payment, NOT manual `coin::split + transfer` in entry fn. Architectural principle in KTDs.
+- `useOwnedVariants.ts` is marked REWRITE (not preserve) — Access-based discovery deleted; Kiosk-protocol query OR delete entirely if `?model=` covers all paths.
+- BrowsePage.tsx is REWRITE not NEW (existing useModelIndex/CollectionCard structure replaces Kiosk-listings grid).
+- Mainnet rehearsal key MUST be separate from production deploy key: `SUI_MAINNET_REHEARSAL_KEY` vs `SUI_MAINNET_DEPLOY_KEY`.
+- Polling cadences split: frontend royalty = 1s, backend royaltyIndexer = 1s (recording window), backend listingIndexer = 2s, frontend BrowsePage = 5s. Each has its rationale in KTDs.
+- 9 FYI observations in round-2 review report — none required action; revisit if time permits.
+
+---
+
+## Previously Last Updated: 2026-05-18 late afternoon — **Plan-006 racetrack scene polish shipped end-to-end on `feat/racetrack-scene-polish`.**
 
 ### Current Phase
 
