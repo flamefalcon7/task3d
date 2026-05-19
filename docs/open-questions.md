@@ -262,3 +262,17 @@ Phase 5 polish window — write `docs/solutions/integration-issues/babylon-plugi
 4. The dependency on D-006 (GLB-only) — when v1.1 introduces FBX/USDZ, the unconditional pattern silently breaks for new formats
 
 Not blocking; informational follow-up.
+
+---
+
+## OQ-018: Move 2024 rejects `#[expected_failure]` on un-droppable hot-potato leak (compile-time)
+
+**Why this matters**: Plan-007 U4 R2 wanted a runtime test proving "leaving a `TransferRequest<Model3D>` hot potato unconsumed aborts the tx". The test was intended to complement test 4 (`confirm_request_aborts_when_receipts_missing_rules`) which catches the runtime `EPolicyNotSatisfied` after a `confirm_request` call with empty receipts.
+
+**Status**: Cannot write the runtime test as designed. Move 2024 statically rejects any function that binds a non-`drop` value without consuming it. The compiler emits `E06001: unused value without 'drop'` and the bytecode never reaches the VM — there is no Move-VM-level abort code to assert against, because the program never compiles.
+
+This is actually a **stronger** guarantee than runtime would be: the rejection happens at every callsite at every compile, not just at tx time. But it means the plan's wording ("the test asserts the tx aborts") is impossible to satisfy.
+
+**Resolution**: Documented in test file comment block (replacing the would-be test 9 body). Test 4 retains the runtime confirm_request behavior; the compile-fail attempt itself is the framework guarantee. No action needed.
+
+**Blocker level**: 🟢 Resolved — N/A by design.

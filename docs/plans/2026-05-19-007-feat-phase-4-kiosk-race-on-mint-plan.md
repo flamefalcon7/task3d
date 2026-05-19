@@ -112,7 +112,7 @@ contracts/model3d/sources/model3d.move (v2)
 ├── public entry ensure_creator_kiosk(...)  // PersonalKiosk helper, one-time per creator
 ├── public entry ensure_transfer_policy(publisher, ctx)  // attaches all three rules
 ├── public entry mint_and_list(...)         // R3: atomic mint+place+list, ONE wallet popup
-├── public entry purchase_with_kiosk(...)   // R5: returns (Model3D, TransferRequest)
+├── public fun   purchase_with_kiosk(...)   // R5: returns (Model3D, TransferRequest) — NOT entry (return type non-droppable)
 │                                            //      NO manual royalty split — RoyaltyRule handles it (per Kiosk-protocol KTD)
 └── (Phase 2 publish_and_share + purchase_model_access REMOVED — testnet abandoned per R1)
 ```
@@ -312,7 +312,7 @@ README.md                                         (update — U14 mainnet hedge 
 
 ---
 
-### U4. `mint_and_list` + `purchase_with_kiosk` entry functions (rule-driven royalty)
+### U4. `mint_and_list` (entry) + `purchase_with_kiosk` (public fun) (rule-driven royalty)
 
 **Goal:** `mint_and_list` constructs + places + lists in one PTB (one popup). `purchase_with_kiosk` returns `(Model3D, TransferRequest)`. **Royalty is NOT computed/split in Move** — RoyaltyRule handles payment via `royalty_rule::pay` at the frontend builder layer (U5). Follows the Kiosk-protocol-level principle in KTDs.
 
@@ -321,7 +321,7 @@ README.md                                         (update — U14 mainnet hedge 
 **Dependencies:** U3
 
 **Files:**
-- `contracts/model3d/sources/model3d.move` (add `ensure_creator_kiosk`, `mint_and_list`, `purchase_with_kiosk` entry functions)
+- `contracts/model3d/sources/model3d.move` (add `ensure_creator_kiosk` + `mint_and_list` entry fns and `purchase_with_kiosk` public fn — the last one is non-entry because its return type contains the non-droppable `TransferRequest` hot potato)
 - `contracts/model3d/tests/model3d_tests.move` (add purchase happy-path + missing-confirm_request abort + atomicity tests)
 - `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md` (NEW — R12 capture: TransferRequest hot-potato semantics + Move-side vs frontend-side responsibilities)
 
@@ -329,6 +329,7 @@ README.md                                         (update — U14 mainnet hedge 
 - `ensure_creator_kiosk(ctx) → (Kiosk, PersonalKioskCap)`: PersonalKiosk helper for first-time creators
 - `mint_and_list(...)`: **flat 13-param entry fn** (resolved decision; primitive args only — no struct-arg-pitfall exposure since no on-chain struct refs are passed in. PTB call site wraps args via TS named-object `Object.values()` for readability.)
 - `purchase_with_kiosk(kiosk, payment: Coin<SUI>, model_id, ctx) → (Model3D, TransferRequest<Model3D>)`:
+  - `public fun` (NOT `entry`) because it returns the non-droppable hot-potato `TransferRequest`. Frontend PTB chains the 5 calls; R3 "ONE wallet popup" is enforced by PTB composition, not by entry-fn boundary.
   - Calls `kiosk::purchase`
   - Returns the hot potato TransferRequest (does NOT split payment / does NOT transfer to creator — those are RoyaltyRule's job, satisfied by U5's PTB chain)
   - Emits `RoyaltyPaid` event with field shape per U1 spike
@@ -345,7 +346,6 @@ README.md                                         (update — U14 mainnet hedge 
 - LockRule prevents `take` after purchase
 - PersonalKioskRule prevents Cap transfer (soulbound at type level)
 - `royalty_bps > 3000` in `mint_and_list` aborts
-- `duration_ms` plumbed (frontend always 0 in Phase 4 per D-016)
 
 **Verification:** `sui move test` green; testnet `sui client publish` succeeds (real v2 publish); manual end-to-end mint + purchase succeeds with royalty flowing through rule; new testnet package ID written to `networks/testnet.json`; third R12 doc landed.
 

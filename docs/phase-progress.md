@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-19 night — **`/ce-work` plan-007 U1 + U2 + U3 all landed. 3/14 units complete; U4 (mint_and_list + purchase_with_kiosk) unblocked. 24/24 Move tests + frontend typecheck green.**
+## Last Updated: 2026-05-19 night — **plan-007 U4 landed. 4/14 units complete; testnet v2 package live; U5 (kioskTxBuilders.ts PTB wrapper) unblocked. 36/36 Move tests + on-chain TransferPolicy bootstrap verified (3 rules attached).**
 
 ### Hackathon Tracker
 - Days to submission (6/21): **33 of 38**
@@ -10,9 +10,38 @@
 
 ### Current Phase
 
-**Phase 4 — Kiosk integration + race-on-mint demo centerpiece** (`docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`). 14 implementation units (U1–U14). Today landed U1–U3 = ~21% of Phase 4 unit count, but disproportionate share of Move foundation risk.
+**Phase 4 — Kiosk integration + race-on-mint demo centerpiece** (`docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`). 14 implementation units (U1–U14). After U4 landed: 4/14 units complete (~29%); Move foundation fully bootstrapped on testnet with three entry/public fns + TransferPolicy live.
 
-### Completed This Session — U1 + U2 + U3 ship trilogy
+### Completed This Session — U4 (mint_and_list + purchase_with_kiosk + testnet v2 deploy)
+
+#### U4 — `mint_and_list` + `purchase_with_kiosk` entry/public fns + testnet republish (commit: _this commit_)
+
+- `ensure_creator_kiosk(ctx)` — creates PersonalKiosk + PersonalKioskCap for first-time creators. NOT idempotent (matches U3's `ensure_transfer_policy` pattern; frontend U6 pins via `networks/testnet.json`).
+- `mint_and_list(13 params)` — flat-primitive entry fn (Kiosk + PersonalKioskCap refs + Blob + 8 Model3D fields + Clock + price). Calls `new_model` → `kiosk::place_and_list`. Single-popup R3 satisfied. License-cap aborts inherit from `validate_publish_inputs` via `new_model`.
+- `purchase_with_kiosk(kiosk, policy, model_id, payment, ctx) → (Model3D, TransferRequest<Model3D>)` — `public fun` NOT `entry` (TransferRequest has no `drop`; entry requires droppable returns). Returns the hot potato so frontend PTB chains `kiosk::lock → royalty_rule::pay → personal_kiosk_rule::prove → tp::confirm_request`. Reads royalty amount via `royalty_rule::fee_amount` + emits `RoyaltyPaid` atomically inside the call. R6 guard `assert!(fee_amount(policy, 1e9) * 10_000 / 1e9 == AMOUNT_BP_DEFAULT, EWrongRoyaltyRate)` (code 21) catches cap-compromise + legitimate rate drift before lying-event emission.
+- 12 new tests (was 24, now 36 total). Includes AE1/AE2/lock/personal_kiosk/floor-branch/payment-too-low/policy-drift/soulbound-owner-pinning coverage. `expected_failure(abort_code = ::module::ECONST)` syntax used throughout for source-discriminated abort matching.
+- 4-reviewer parallel pass (correctness + framework-docs + testing + adversarial) → 15 R-revisions applied in this commit (2 P0 from testing + 1 P1 from framework-docs + 12 P1/P2 cluster). Notable: F-P1 confirmed `::`-qualified abort_code IS Move 2024 supported (subagent originally misdiagnosed as parser bug); T-002 PersonalKioskCap soulbound test added (compile-fail pattern); R6 guard pattern + ADV-002 second-policy attack documented at `purchase_with_kiosk` header.
+- **Testnet v2 republish (FRESH package, NOT upgrade — `key`→`key+store` is breaking per UPGRADE.md):**
+  - PackageID: `0x563ab54bf9b6e76d6e61a7f0c8be3157e354750e8e435814dfa0b5232f4b0893`
+  - UpgradeCap: `0xdff36101c84bff6c3d2d0a781bbb89f263da85e5aefcb43c42cc08773dd7ef2b`
+  - Publisher: `0x740773948b164712f622aabe503545de118dceea132cf165883e97a0a8dbc6f1`
+  - TransferPolicy<Model3D> (shared): `0x198bfe335f7844b117cc1cb3f38e9f99956259bb21bacce07490dc31e7bc3735` — verified 3 rules attached on-chain (royalty_rule, kiosk_lock_rule, personal_kiosk_rule).
+  - TransferPolicyCap: `0xb673e31b2e03d8e599b51b7e729a4243c136f27c6f1bae8716b955258d6cc906`
+  - Publish tx: `DkEopatczgtrZWBzRHr9Ei9yXNsyvMGnN7NQSkf9rXvL`
+  - ensure_transfer_policy tx: `BKxYvbRmrFmEJmmH57o6GKugD1pZ3hTHEkTZdmMYKXK2`
+  - Phase 3 v1 package (`0x18a480b3…`) superseded; Phase 3 mints stay abandoned on chain per D-016.
+- NEW `contracts/networks/testnet.json` — single source of truth for the v2 deploy artifacts; U5+ frontend imports.
+- NEW `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md` (third R12 doc) — TransferRequest hot-potato semantics + Move-side vs frontend-side responsibilities; documents why `purchase_with_kiosk` is `public fun` (drop-check) + the buyer's 5-call PTB chain that enforces R3.
+- OQ-018 opened — Move 2024 statically rejects the would-be runtime test for hot-potato un-droppability (the compile-time rejection IS the framework guarantee).
+- Plan-007 §U4 edits: deleted `duration_ms` bullet (stale Phase 2 carryover per D-016); updated `purchase_with_kiosk` from `entry fn` to `public fun` in 3 spots.
+
+### Next Concrete Step
+
+**U5: typed `kioskTxBuilders.ts` PTB wrapper module.** Frontend module that composes the canonical 5-call buyer chain (purchase_with_kiosk → kiosk::lock → royalty_rule::pay → personal_kiosk_rule::prove → tp::confirm_request) as a typed PTB. Pins `model3d_package_id` + `transfer_policy_id` from `networks/testnet.json`. Per plan-007 U5 execution note: dry-run discipline from day 1 against live testnet (Sui CLI `--dry-run`) to catch PTB struct-arg pitfalls and confirm_request cardinality at build time.
+
+OQ-017 frontend cleanup (8 stale Phase 3 files) becomes load-bearing once U5 imports the new package ID — U6/U9 must delete or rewrite them before the frontend typechecks against v2.
+
+### Earlier in session — U1 + U2 + U3 ship trilogy
 
 #### U1 — Day-1 verifications + tooling (commit `a4bcdf9`)
 

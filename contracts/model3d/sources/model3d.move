@@ -24,12 +24,16 @@ module model3d::model3d;
 
 use std::string::{Self, String};
 use sui::clock::Clock;
+use sui::coin::Coin;
 use sui::event;
+use sui::kiosk::{Self, Kiosk};
 use sui::package::{Self, Publisher};
-use sui::transfer_policy::{Self as tp, TransferPolicy, TransferPolicyCap};
+use sui::sui::SUI;
+use sui::transfer_policy::{Self as tp, TransferPolicy, TransferPolicyCap, TransferRequest};
 use walrus::blob::Blob;
 use kiosk::royalty_rule;
 use kiosk::kiosk_lock_rule;
+use kiosk::personal_kiosk::{Self, PersonalKioskCap};
 use kiosk::personal_kiosk_rule;
 
 // === Constants ===
@@ -89,6 +93,13 @@ const EBlobIdMalformed:     u64 = 14;
 // (preserves the contiguous 10-14 block above for related family).
 // Phase 4 codes start at 20.
 const EWrongPublisher:      u64 = 20;
+// R6 — defensive guard in `purchase_with_kiosk`: if the live RoyaltyRule's
+// configured bps differs from AMOUNT_BP_DEFAULT (the value the RoyaltyPaid
+// event hardcodes), the event would lie. Probe the rule via fee_amount on
+// a high-priced sentinel that escapes the floor regime; abort if drift.
+// Triggered by a legitimate rate change (TransferPolicyCap holder removed
+// + re-added rule with different bps) OR by cap compromise (ADV-002).
+const EWrongRoyaltyRate:    u64 = 21;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -168,9 +179,15 @@ public struct ModelPublished has copy, drop {
 //     inside `emit_royalty_paid` so callers cannot supply a fabricated digest.
 //   - kiosk_id: identifies the Kiosk the purchase flowed through, so U8 can
 //     cross-reference Listing events without parsing the PTB.
-//   - royalty_bps: snapshot of the rule's basis points at emit time, so
-//     `amount * 10_000 / price == royalty_bps` is verifiable from the event
-//     alone (U8 sanity check + U11 replay parity).
+//   - royalty_bps: snapshot of the rule's basis points at emit time. The
+//     invariant `amount * 10_000 / price == royalty_bps` holds ONLY when
+//     `price > MIN_ROYALTY_AMOUNT_MIST * 10_000 / AMOUNT_BP_DEFAULT`
+//     (0.02 SUI for the current config; see constants block lines 67-79).
+//     Below the crossover, `amount == MIN_ROYALTY_AMOUNT_MIST` (floor
+//     regime) and the bps formula breaks. Division by zero for price=0 is
+//     the floor regime's degenerate case (also returns MIN_ROYALTY_AMOUNT_MIST).
+//     U8 indexer must implement BOTH branches; otherwise sub-0.02-SUI sales
+//     trip false-positive replay-mismatch alerts (R11D).
 public struct RoyaltyPaid has copy, drop {
     buyer: address,
     creator: address,
@@ -357,6 +374,12 @@ public(package) fun validate_publish_inputs(
 // in the Kiosk or in a buyer's wallet, the constructor signature must add a
 // `blob_recipient: address` parameter (additive — fine under UPGRADE.md rules
 // for new public fn signatures, but the OLD signature stays for compat).
+//
+// **R12 — Sponsored-tx constraint**: `ctx.sender()` is recorded as `creator`.
+// Caller MUST NOT wrap `mint_and_list` in a sponsored PTB unless the sponsor
+// IS the intended creator (otherwise the creator address recorded on-chain
+// would be the sponsor, not the user). Phase 4 zkLogin flow signs directly;
+// this constraint is documentary for any future sponsored-mint path.
 public(package) fun new_model(
     blob: Blob,
     shape_type: String,
@@ -429,6 +452,184 @@ public(package) fun emit_royalty_paid(
         royalty_bps,
         tx_digest: *tx_context::digest(ctx),
     })
+}
+
+// === Phase 4 U4 — `ensure_creator_kiosk` / `mint_and_list` / `purchase_with_kiosk` ===
+
+// `ensure_creator_kiosk(ctx)` is the first-time creator helper. It:
+//   1. Creates a fresh `Kiosk` + `KioskOwnerCap` via `sui::kiosk::new`,
+//   2. Wraps the `KioskOwnerCap` in a `PersonalKioskCap` via
+//      `kiosk::personal_kiosk::new` (this also sets the OwnerMarker dynamic
+//      field on the Kiosk so `personal_kiosk_rule::prove` will pass for
+//      any future Model3D landed in this Kiosk),
+//   3. Shares the Kiosk (Kiosks are intended to be shared so other callers
+//      can read listings and execute `purchase` against them),
+//   4. Transfers the `PersonalKioskCap` (key-only, soulbound by the Move
+//      type system) to `ctx.sender()`.
+//
+// Once `personal_kiosk::new` runs, the underlying `KioskOwnerCap` cannot be
+// extracted as a freely-transferable value (only `borrow` / `borrow_mut` /
+// the hot-potato `borrow_val`/`return_val` pair). This is what makes the
+// Kiosk "personal" — it can never change owner.
+//
+// **NOT idempotent.** As with `ensure_transfer_policy`, the contract does
+// not refuse a second invocation; calling twice yields two Kiosks + two
+// PersonalKioskCaps. The frontend (U6) is responsible for pinning the
+// creator's "primary" Kiosk via `useOwnedVariants` / network config and
+// avoiding a second call.
+public entry fun ensure_creator_kiosk(ctx: &mut TxContext) {
+    let (mut kiosk_obj, owner_cap) = kiosk::new(ctx);
+    // `personal_kiosk::new` consumes the KioskOwnerCap and returns a
+    // PersonalKioskCap wrapping it. Mutates the Kiosk to add the OwnerMarker
+    // dynamic field (the receipt personal_kiosk_rule checks at purchase).
+    let personal_cap = personal_kiosk::new(&mut kiosk_obj, owner_cap, ctx);
+    transfer::public_share_object(kiosk_obj);
+    personal_kiosk::transfer_to_sender(personal_cap, ctx);
+}
+
+// `mint_and_list` — atomic mint + place + list in one PTB → one wallet
+// popup (R3 / AE1). 13 primitive-or-struct-by-value params (license is a
+// by-value struct constructed in the same PTB via `new_license_terms`;
+// PTB struct-arg pitfall does NOT apply since LicenseTerms is a result
+// handle, not an on-chain object ref).
+//
+// Order of side effects in one tx:
+//   1. `new_model(...)` — emits `ModelPublished`, transfers Blob to ctx.sender().
+//   2. `kiosk::place_and_list<Model3D>(kiosk, &KioskOwnerCap, model, price)` —
+//      internally places then lists; emits exactly one
+//      `sui::kiosk::ItemListed<Model3D>` and no separate place event
+//      (the framework's bundled wrapper makes atomicity self-documenting).
+//
+// Per-tx event cardinality (asserted by `mint_and_list_emits_one_mint_one_place_one_list_event`):
+//   - exactly 1 `ModelPublished`
+//   - exactly 1 `kiosk::ItemListed<Model3D>`
+//
+// The creator's `&PersonalKioskCap` is borrowed (not consumed) — soulbound
+// invariant preserved across the call.
+public entry fun mint_and_list(
+    kiosk_obj: &mut Kiosk,
+    personal_cap: &PersonalKioskCap,
+    blob: Blob,
+    shape_type: String,
+    params_json: String,
+    name: String,
+    tags: vector<String>,
+    lineage_blob_id: String,
+    is_encrypted: bool,
+    license: LicenseTerms,
+    clock: &Clock,
+    price: u64,
+    ctx: &mut TxContext,
+) {
+    // `new_model` runs the full input validator (validate_publish_inputs);
+    // license.derivative_royalty_bps > MAX_DERIVATIVE_ROYALTY_BPS aborts
+    // here with ERoyaltyTooHigh, so mint_and_list cannot bypass the cap.
+    let model = new_model(
+        blob,
+        shape_type,
+        params_json,
+        name,
+        tags,
+        lineage_blob_id,
+        is_encrypted,
+        license,
+        clock,
+        ctx,
+    );
+    let owner_cap = personal_kiosk::borrow(personal_cap);
+    // place_and_list is the framework's bundled `place` + `list`; using it
+    // (instead of separate calls) makes the atomicity self-documenting.
+    // Emits `sui::kiosk::ItemListed<Model3D>` with `price` payload.
+    kiosk::place_and_list<Model3D>(kiosk_obj, owner_cap, model, price);
+}
+
+// `purchase_with_kiosk` wraps `kiosk::purchase<Model3D>` and emits
+// `RoyaltyPaid` so U8's indexer + overlay can join on `tx_digest`. Returns
+// the hot-potato `TransferRequest<Model3D>` so the buyer's PTB MUST:
+//   1. Lock the item into a PersonalKiosk via `kiosk::lock<Model3D>` (or
+//      `kiosk::place` + force-lock pattern) → satisfies `kiosk_lock_rule`.
+//   2. Call `royalty_rule::pay(policy, request, royalty_coin)` →
+//      satisfies the built-in royalty rule by adding `Rule {}` receipt +
+//      moving the royalty SUI into the policy's internal balance.
+//   3. Call `personal_kiosk_rule::prove(kiosk, request)` → satisfies
+//      personal-kiosk rule.
+//   4. Call `tp::confirm_request(policy, request)` to consume the hot
+//      potato. If omitted, the tx aborts because `TransferRequest<T>`
+//      has no `drop` ability.
+//
+// `policy` arg is REQUIRED to enable `royalty_rule::fee_amount` for the
+// event payload's `amount` field. Without it, the indexer would have to
+// recompute the rate off-chain. Decision rationale: a 5-arg signature is
+// cheaper than fragmenting the emit step across two Move calls (which
+// would also break the "purchase_with_kiosk emits RoyaltyPaid" contract
+// the U8 indexer subscribes to).
+//
+// **POLICY-PINNING CONSTRAINT (R7 / ADV-002)**: the `policy` arg MUST be
+// the canonical `TransferPolicy<Model3D>` ID pinned in
+// `networks/{net}.json`. Secondary policies created by extra
+// `ensure_transfer_policy` calls (or by an attacker with leaked Publisher
+// access) are protocol violations. This contract does NOT enforce policy
+// identity — it cannot, because TransferPolicy IDs are not known at Move
+// build time. The R6 `EWrongRoyaltyRate` guard catches one symptom (drifted
+// bps) but a parallel attacker policy with bps=AMOUNT_BP_DEFAULT but a
+// different recipient Balance would slip past. The frontend (U5
+// `kioskTxBuilders.ts`) MUST hard-code the policy_id from the network
+// config, NEVER take it as user input.
+//
+// `payment` must EXACTLY equal the listing price (`kiosk::purchase`
+// asserts `price == payment.value()` → abort `sui::kiosk::EIncorrectAmount`).
+// The buyer's PTB should `splitCoins` to the exact amount before this call.
+//
+// **NOT entry (R11C / ADV-007)**: this is `public fun` (NOT `public entry`)
+// because `TransferRequest<Model3D>` has no `drop` ability — entry fns
+// require droppable return types. The buyer PTB MUST compose 5 calls
+// (purchase_with_kiosk → kiosk::lock → royalty_rule::pay →
+// personal_kiosk_rule::prove → tp::confirm_request) in a single PTB to
+// satisfy R3's "ONE wallet popup" contract. See U5 `kioskTxBuilders.ts`
+// for the canonical chain.
+//
+// **R11B** — Framework-side event noise: `kiosk::purchase` also emits
+// `sui::kiosk::ItemPurchased<Model3D> { kiosk, id, price }`. The U8
+// indexer ignores it (joins on `RoyaltyPaid` instead) — but cross-system
+// correlation tools should be aware both events fire per purchase tx.
+public fun purchase_with_kiosk(
+    kiosk_obj: &mut Kiosk,
+    policy: &TransferPolicy<Model3D>,
+    model_id: ID,
+    payment: Coin<SUI>,
+    ctx: &mut TxContext,
+): (Model3D, TransferRequest<Model3D>) {
+    // Capture price BEFORE consuming the payment Coin.
+    let price = payment.value();
+
+    // R6 guard: the RoyaltyPaid event hardcodes `royalty_bps =
+    // AMOUNT_BP_DEFAULT`. If a TransferPolicyCap holder reconfigured the
+    // RoyaltyRule (legitimate rate change OR cap compromise per UPGRADE.md
+    // item 8), that hardcoded payload would lie. Probe the rule's effective
+    // bps via `fee_amount` on a sentinel price that escapes the floor regime.
+    //
+    // Math: at price = 1 SUI (1_000_000_000 mist) and bps = 500, bps_path =
+    // 50_000_000. Floor = 1_000_000. max(50_000_000, 1_000_000) = 50_000_000
+    // — the bps branch dominates by 50x, so fee_amount(policy, 1_000_000_000)
+    // recovers AMOUNT_BP_DEFAULT exactly via `amount * 10_000 / price`.
+    assert!(
+        royalty_rule::fee_amount<Model3D>(policy, 1_000_000_000) * 10_000 / 1_000_000_000
+            == AMOUNT_BP_DEFAULT as u64,
+        EWrongRoyaltyRate
+    );
+
+    let (item, request) = kiosk::purchase<Model3D>(kiosk_obj, model_id, payment);
+    let amount = royalty_rule::fee_amount<Model3D>(policy, price);
+    emit_royalty_paid(
+        ctx.sender(),
+        item.creator,
+        amount,
+        model_id,
+        object::id(kiosk_obj),
+        AMOUNT_BP_DEFAULT,
+        ctx,
+    );
+    (item, request)
 }
 
 // === RoyaltyPaid accessors (test-only — production indexers parse via BCS) ===
