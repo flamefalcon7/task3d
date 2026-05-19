@@ -174,11 +174,19 @@ The "deep Kiosk integration" framing was pressure-tested in dialogue and most de
 
 ## Dependencies / Assumptions
 
-- **Sui Overflow 2026 handbook clauses (verbatim quote required — TODO: paste from handbook URL during Phase 4 day-1):**
-  - *Final submission date:* `[paste exact handbook text confirming 6/21 = submission close]`
-  - *Winners date + mainnet eligibility:* `[paste exact handbook text confirming 8/27 = winners + mainnet tier for 100% prize]`
-  - *Source URL:* https://mystenlabs.notion.site/overflow-2026-handbook (replace with the canonical link captured during reread)
-  - *Note:* If handbook clauses surface nuance (e.g., "testnet-only submissions scored lower in technical category"), revisit Variant A. Currently treated as confirmed per user's prior reread.
+- **Sui Overflow 2026 handbook clauses (verbatim, captured 2026-05-19 at plan-007 U1):**
+  - *Source URL:* https://mystenlabs.notion.site/overflow-2026-handbook
+  - *Final submission date:* "June 21 - Submission Deadline. Final deadline for all project submissions. After the deadline, you can continue to make changes to your project but it may not be reflected in the shortlisting process"
+  - *Shortlisting:* "July 8 - Shortlisted Teams Announcement. Shortlisted teams announced. The shortlisted teams will present live on Demo Day." **(new milestone not previously tracked in CLAUDE.md or phase-progress)**
+  - *Demo Day:* "July 20-21 - Demo Day. Shortlisted teams will present their projects live virtually to our panel of judges" **(live virtual present-back, not just recorded — new requirement)**
+  - *Winners date:* "August 27 - Winners Announcement. Final winners announced and will be invited to pitch during Sui Basecamp 2026."
+  - *Mainnet 100% prize tier:* "50% of the prize will be awarded upon announcement of winners. 50% of the prize will be awarded after successful mainnet deployment. If a winning team has already deployed their project to mainnet by the time winners are announced in August, they will receive 100% of the prize upfront." (D-009 + D-028 ground truth confirmed)
+  - *Mainnet functional requirement:* "Mainnet deployment must meet the minimum functional requirements as defined by the Sui team and/or track sponsors."
+  - *Deployment eligibility:* "The project must be deployed to Sui mainnet or testnet by the time of shortlisting and demo day." (testnet sufficient at every gate; mainnet only affects prize split)
+  - *Repo visibility:* "Public GitHub Repo | Required to be public during judging period" (R1 implication: in-repo Phase 2 testnet references become public at GitHub push; U14 README hedge addresses this)
+  - *Submission assets:* Project Logo 1:1 JPG/PNG; Demo Video ≤5 min YouTube preferred. (Phase 5 checklist)
+  - *Walrus track prize pool:* 1st $35K / 2nd $15K / 3rd $7.5K / 4th $5K + $7.5K honorable mentions.
+  - *Judging criteria:* Product & UX 20% / Real-World Application 50% / Technical Implementation 20% / Presentation & Vision 10%. (long-tail check for Phase 5 pitch deck framing)
 - Sui Kiosk SDK builder API (`KioskTransaction`, `TransferPolicyTransaction`) is the canonical 2026 path; pre-2026 standalone function API not used
 - `@mysten/sui@2.16.x` JSON-RPC client path (per D-019); no gRPC migration in Phase 4
 - Walrus testnet upload relay remains operational through 6/21 (R11a pre-bake mitigates relay outage at take time)

@@ -750,6 +750,7 @@ Check the Move abort path, not just the outer PTB status (SEC-006 — security c
   ```
 - Build fails if `VITE_NETWORK` unset OR mainnet config empty (build:mainnet pre-deploy fails intentionally)
 - **README hedge (per F17 Success Criteria)**: "Mainnet deploy is one command + ~10 WAL away, gated on demo stability per `docs/runbooks/mainnet-deploy.md`. Post-7/22 execution is milestone-gated per D-028 ADR."
+- **Phase 2 → Phase 4 migration note (added 2026-05-19 from plan-007 U1 handbook check)**: README must explicitly state that the old testnet package `0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3` (referenced in `contracts/model3d/Published.toml`, `docs/process.md`, `docs/phase-progress.md`, prior README versions) is **Phase 2 work, deliberately abandoned** when Phase 4 republished under the `key + store` schema. The current Phase 4 testnet package ID (from `networks/testnet.json`) is the only one judges should test against. This is judging-period clarity, not historical revisionism — the old package remains on chain.
 
 **Test scenarios:**
 - `pnpm build:testnet` succeeds (assuming networks/testnet.json populated) → dist produced; `config.package_id` matches testnet

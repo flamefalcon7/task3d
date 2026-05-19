@@ -27,7 +27,20 @@ Then ask the user to confirm direction before proceeding.
 
 ## ⏰ Hackathon Reality Check
 
-This is a **38-day Sui Overflow 2026 sprint**. User-stated preference: **finish early, leave time for pitch deck + demo video polish**. Use these heuristics to balance protocol discipline with shipping speed:
+This is a **38-day Sui Overflow 2026 sprint**. User-stated preference: **finish early, leave time for pitch deck + demo video polish**.
+
+### Milestones (Pacific Time, verbatim from handbook captured at plan-007 U1)
+
+- **June 21** — Submission deadline (testnet OR mainnet deployment is sufficient at this stage)
+- **July 8** — Shortlisted teams announcement
+- **July 20–21** — Demo Day — **virtual live present-back**; shortlisted teams pitch + Q&A (NOT just submitting the 6/21 recording — separate work item)
+- **August 27** — Winners announcement; mainnet-deployed by this date = **100% prize upfront**, else 50% on announcement + 50% on mainnet deploy
+
+Source: `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md` Dependencies/Assumptions (verbatim handbook clauses).
+
+### Decision discipline
+
+Use these heuristics to balance protocol discipline with shipping speed:
 
 | Change type | What to do |
 |---|---|

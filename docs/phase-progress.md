@@ -4,8 +4,11 @@
 
 ### Hackathon Tracker
 - Days to submission (6/21): **33 of 38**
-- Days to demo day (7/20–21): **62 of 67**
+- Days to shortlist announcement (7/8): **50 of 55**
+- Days to Demo Day live virtual present-back (7/20–21): **62 of 67**
 - Days to winners (8/27): **100 of 105**
+
+(7/8 + 7/20–21 milestones added 2026-05-19 from plan-007 U1 handbook verbatim capture — they are not new dates, just newly tracked. Demo Day requires live virtual pitch, not just submission of the 6/21 video.)
 
 ### Completed This Session
 

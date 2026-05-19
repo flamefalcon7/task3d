@@ -198,6 +198,22 @@ import { SLUSH_WALLET_NAME } from '@mysten/slush-wallet';
 
 ---
 
+## OQ-016: Phase 5 submission asset checklist — items spawned by plan-007 U1 handbook capture
+
+**Why this matters**: 2026-05-19 handbook verbatim capture surfaced submission requirements not previously tracked. Both are Phase 5 work; recording here so they aren't forgotten when Phase 5 starts.
+
+**Items**:
+
+1. **Live virtual demo prep for 7/20–21 Demo Day** (only fires if shortlisted on 7/8). Distinct from the 6/21 recorded video — this is a live present-back to judges over Zoom (or equivalent). Needs: short slide deck (3-5 slides max — track framing + problem + Kiosk royalty enforcement demo + closing CTA), runnable demo end-to-end on testnet (or mainnet if deployed by then), Q&A prep covering judging criteria axes (Product/UX 20%, Real-World Application 50%, Technical 20%, Vision 10%). Estimated 1-2 dev-days during the 7/8–7/20 window.
+
+2. **Project Logo (1:1 ratio JPG/PNG)** — submission package required field. Can be simple wordmark or generated via the project's own model3d Forge as a meta-touch. Estimated 30 minutes.
+
+**Blocker level**: 🟢 Not blocking Phase 4. Re-fires when Phase 5 starts (planned 6/20 if Phase 4 ships on schedule).
+
+**To resolve**: at Phase 5 kickoff, add both as Phase 5 plan units. If shortlisting on 7/8 is positive, item 1 becomes urgent immediately. If not shortlisted, item 1 doesn't fire.
+
+---
+
 ## OQ-015: Babylon `pluginExtension` + blob: URL gotcha — write up as solutions doc
 
 **Status**: ✅ RESOLVED (workaround in place); follow-up: write `docs/solutions/integration-issues/` entry.

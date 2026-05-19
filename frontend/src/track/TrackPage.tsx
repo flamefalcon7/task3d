@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useOwnedVariants } from './useOwnedVariants';
+import { stubListingLookup } from './stubListingLookup';
 import { CarCarousel } from './carCarousel';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
@@ -36,8 +37,27 @@ interface LastResult {
 
 export function TrackPage() {
   const account = useCurrentAccount();
-  const { variants, loading: variantsLoading, error: variantsError } =
-    useOwnedVariants(account?.address);
+  // Phase 4 U1-prelim — `?model=<id>` bypass: when present, resolve the model
+  // through a stub (U10 will swap for `GET /api/listings/:id`) and skip the
+  // Phase-3 useOwnedVariants/Access-based discovery path entirely. The race-
+  // on-mint demo arc auto-navigates here with `?model=` set, and the buyer
+  // does NOT also hold an Access object (Kiosk-protocol KTD).
+  const [searchParams] = useSearchParams();
+  const modelParam = searchParams.get('model');
+  const blobOverride = searchParams.get('blob');
+  const overrideVariant = useMemo(
+    () => (modelParam ? stubListingLookup(modelParam, blobOverride) : null),
+    [modelParam, blobOverride],
+  );
+  const isOverrideMode = overrideVariant !== null;
+  const {
+    variants: queriedVariants,
+    loading: variantsLoading,
+    error: variantsError,
+  } = useOwnedVariants(isOverrideMode ? undefined : account?.address);
+  const variants: Model3DSummary[] = overrideVariant
+    ? [overrideVariant]
+    : queriedVariants;
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
@@ -234,7 +254,9 @@ export function TrackPage() {
     };
   }, []);
 
-  if (!account) {
+  // U1-prelim — in override mode, skip wallet/owned-variants gating. Render
+  // straight through with the stubbed variant as the only carousel entry.
+  if (!isOverrideMode && !account) {
     return (
       <div style={{ padding: 32 }} data-testid="track-needs-signin">
         <h2>Tiny Racetrack</h2>
@@ -242,14 +264,14 @@ export function TrackPage() {
       </div>
     );
   }
-  if (variantsLoading) {
+  if (!isOverrideMode && variantsLoading) {
     return (
       <div style={{ padding: 32 }} data-testid="track-loading-variants">
         Loading your variants…
       </div>
     );
   }
-  if (variantsError) {
+  if (!isOverrideMode && variantsError) {
     return (
       <div style={{ padding: 32, color: 'crimson' }} data-testid="track-variants-error">
         Couldn't load your variants: {variantsError.message}
