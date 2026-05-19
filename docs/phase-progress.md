@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-19 night — **plan-007 U4 landed. 4/14 units complete; testnet v2 package live; U5 (kioskTxBuilders.ts PTB wrapper) unblocked. 36/36 Move tests + on-chain TransferPolicy bootstrap verified (3 rules attached).**
+## Last Updated: 2026-05-19 late — **plan-007 U5 landed (commit `20ec24d`). 5/14 units complete; typed PTB builder ships 6-call chain (was claimed 5; framework-docs review caught missing `kiosk_lock_rule::prove` + PersonalKioskCap `borrow_val`/`return_val` wrapping → 8 PTB Move calls total). 298/298 frontend tests + tsc clean + live testnet dry-run green.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): **33 of 38**
@@ -10,9 +10,47 @@
 
 ### Current Phase
 
-**Phase 4 — Kiosk integration + race-on-mint demo centerpiece** (`docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`). 14 implementation units (U1–U14). After U4 landed: 4/14 units complete (~29%); Move foundation fully bootstrapped on testnet with three entry/public fns + TransferPolicy live.
+**Phase 4 — Kiosk integration + race-on-mint demo centerpiece** (`docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`). 14 implementation units (U1–U14). After U5 landed: 5/14 units complete (~36%). Move foundation + typed frontend PTB wrapper both shipped against testnet v2; U6 (ForgePage refactor) is the next unblocked unit and inherits an OQ-019 cleanup obligation.
 
-### Completed This Session — U4 (mint_and_list + purchase_with_kiosk + testnet v2 deploy)
+### Completed This Session — U5 (typed `kioskTxBuilders.ts` PTB wrapper)
+
+#### U5 — `kioskTxBuilders.ts` + 6-call PTB chain + parity test (commit: `20ec24d`)
+
+- **`buildMintAndListPtb(args)`** — atomic mint + place + list. Single popup (R3 / AE1). Wraps `model3d::mint_and_list` (13 params) + same-PTB `new_license_terms` for the LicenseTerms struct-arg (learnings #1 discipline — struct args via on-chain construction, NOT BCS).
+- **`buildPurchaseWithKioskPtb(args)`** — buyer's full PTB chain. Plan + R12 doc originally claimed 5 calls; framework-docs review caught 2 omissions, real chain is **8 PTB Move calls + 1 splitCoins**:
+  1. `model3d::purchase_with_kiosk` → `(item, request)`
+  2. `personal_kiosk::borrow_val` → `(OwnerCap, Borrow)` — wraps step 3 because PersonalKioskCap stores `Option<KioskOwnerCap>` internally (no standalone OwnerCap object)
+  3. `kiosk::lock<Model3D>` (consumes item)
+  4. `kiosk_lock_rule::prove(request, kiosk)` — receipt; `kiosk::lock` alone doesn't add one (this was the silent-bug catch)
+  5. `splitCoins(tx.gas, royaltyAmount)` (PTB primitive — non-MoveCall)
+  6. `royalty_rule::pay`
+  7. `personal_kiosk_rule::prove`
+  8. `transfer_policy::confirm_request` (consumes request hot-potato)
+  9. `personal_kiosk::return_val` (consumes Borrow hot-potato)
+- **`policyId` hardcoded** to `TESTNET.transferPolicyId` per ADV-001 mitigation (model3d.move:567-577 explicitly delegates policy-pinning to this builder; accepting it as a caller arg would enable parallel-policy attacks).
+- **`KIOSK_APPS_PACKAGE` discovery** — pinned to `0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d` in `contracts/networks/testnet.json::kiosk_apps_package_id`. This DIFFERS from the `@mysten/kiosk` SDK's testnet defaults (`0xbd8fc194…` + `0x06f6bdd3…`). Discovery method: read the deployed TransferPolicy<Model3D>'s rules VecSet; all three rule TypeNames resolved to the same `0xe308…555d` package. Raw `tx.moveCall` approach bypasses SDK resolver (which would have picked the WRONG default address).
+- **`networkConfig.ts`** — frontend-local typed mirror of `contracts/networks/testnet.json`. Justified because `tsconfig.app.json::include: ["src"]` doesn't reach `contracts/`. R4 parity test `networkConfig.test.ts` imports BOTH files + asserts field equality — drift guard for U13 mainnet ceremony.
+- **R12 doc updated** — `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md` now describes the 6-call rule/confirm chain + 2 borrow/return wrappers (8 total). Plan-007 Mermaid diagram + U4 Approach + U5 Approach + U5 test scenario all corrected to match.
+- **Plan §U5 line 365**: `@mysten/kiosk ^0.x` → `^1.2` (0.x peer-deps `@mysten/sui@1.x`, incompatible with our `@mysten/sui@2.16.2`).
+- **OQ-019 opened** — Phase 3 legacy PTBs (`publishPtb.ts`, `purchaseAccessPtb.ts`) NOT deleted this session per agreement; still imported by `CreatorFlow.tsx` + `BuyAccessButton.tsx` + `buildCollectionPtb.ts`. `.env.local` still pins superseded v1 package `0x18a480b3…`. **U6 must refactor consumers and delete the 4 Phase 3 files** — gating release.
+- 4-reviewer parallel review (correctness + framework-docs + testing + adversarial) → 15 R-revisions applied in this commit. Notable: F-001/F-002 = the missing `kiosk_lock_rule::prove` + borrow/return wrappers; ADV-001 = policy-pinning; ADV-007 = networkConfig parity test; T-001 = `tsc -b` wired into `npm test` so `@ts-expect-error` directives are now load-bearing.
+- Verification: **36/36 frontend test files; 298/298 tests; `tsc -b` clean; live testnet dry-run green** against `fullnode.testnet.sui.io:443`.
+
+### Next Concrete Step
+
+**U6: ForgePage refactor — mint flow + purchase trigger** (plan-007 §U6). Replaces the Phase 3 2-popup writeFilesFlow with the U5 `buildMintAndListPtb` single-popup flow. **Must also satisfy OQ-019 cleanup**:
+1. Refactor `CreatorFlow.tsx` to call `buildMintAndListPtb` (needs PersonalKiosk + LicenseTerms + Walrus Blob inputs already produced by upstream forge state).
+2. Refactor `BuyAccessButton.tsx` to call `buildPurchaseWithKioskPtb` (needs buyer PersonalKioskCap + royaltyAmount pre-query via `royalty_rule::fee_amount`).
+3. Delete `frontend/src/sui/publishPtb.ts` + `purchaseAccessPtb.ts` + their .test.ts companions.
+4. Update `.env.local`: either remove `VITE_MODEL3D_PACKAGE_ID` (frontend should source via `networkConfig.ts`) OR update to the v2 ID `0x563ab54b…`.
+5. Acceptance: `grep -rn "publishPtb\|purchaseAccessPtb" frontend/src/` returns zero hits.
+
+Per plan §U6 patterns + the U5 `TxResult<T>` envelope shape. Recommended invocation after compact:
+```
+/ce-work docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md skip to U6
+```
+
+### Earlier in session — U4 (mint_and_list + purchase_with_kiosk + testnet v2 deploy)
 
 #### U4 — `mint_and_list` + `purchase_with_kiosk` entry/public fns + testnet republish (commit: _this commit_)
 
