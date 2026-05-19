@@ -25,8 +25,12 @@ module model3d::model3d;
 use std::string::{Self, String};
 use sui::clock::Clock;
 use sui::event;
-use sui::package;
+use sui::package::{Self, Publisher};
+use sui::transfer_policy::{Self as tp, TransferPolicy, TransferPolicyCap};
 use walrus::blob::Blob;
+use kiosk::royalty_rule;
+use kiosk::kiosk_lock_rule;
+use kiosk::personal_kiosk_rule;
 
 // === Constants ===
 
@@ -34,7 +38,43 @@ const POLICY_RESTRICTED:     u8 = 0;
 const POLICY_ALLOW_LIST:     u8 = 1;
 const POLICY_PERMISSIONLESS: u8 = 2;
 
+// Cap on the per-license `derivative_royalty_bps` field (D-004: 30%).
+// This is L2 derivative-royalty territory, deferred to v1.1. It is NOT
+// the Phase 4 primary-sale royalty rate — see AMOUNT_BP_DEFAULT below.
+// Two constants, two different concerns; do not unify.
 const MAX_DERIVATIVE_ROYALTY_BPS: u16 = 3000;
+
+// Phase 4 U3 — TransferPolicy royalty rule configuration.
+//
+// Naming relationship to MAX_DERIVATIVE_ROYALTY_BPS above: NONE. That is
+// the per-license cap on the deferred L2-derivative royalty field;
+// AMOUNT_BP_DEFAULT below is the live Phase 4 primary-sale royalty rate
+// applied by the built-in RoyaltyRule. Phase 4 sales pay AMOUNT_BP_DEFAULT;
+// L2 derivative creators (v1.1) will pay their own per-derivative bps
+// capped by MAX_DERIVATIVE_ROYALTY_BPS via a custom split rule.
+//
+// AMOUNT_BP_DEFAULT (5% = 500 bps) is the single global royalty rate applied
+// to every Model3D listing in Phase 4. Per-listing variation is out of scope
+// here — RoyaltyRule's Config has no setter, and changing the rate requires
+// remove_rule + re-add (TransferPolicyCap-holder authority). v1.1's
+// multi-beneficiary case will swap the built-in rule for a custom
+// `split_royalty_rule` on the same policy ID (see
+// `docs/solutions/architecture-patterns/sui-kiosk-multi-beneficiary-royalty-2026-05-19.md`).
+//
+// MIN_ROYALTY_AMOUNT_MIST (0.001 SUI = 1_000_000 mist) is the **floor**
+// (not a rounding tiebreaker) applied by the built-in royalty_rule:
+// `royalty_owed = max(price * amount_bp / 10_000, MIN_ROYALTY_AMOUNT_MIST)`.
+// Consequences:
+//   - 0-price listing (free) → buyer still pays 1_000_000 mist royalty.
+//   - 1-mist listing → buyer pays 1_000_001 mist total; effective rate
+//     vastly exceeds amount_bp until price ≥ 0.02 SUI (the crossover).
+//   - The `amount * 10_000 / price == royalty_bps` invariant claimed in
+//     `RoyaltyPaid`'s comment holds ONLY when
+//     `price * amount_bp / 10_000 >= MIN_ROYALTY_AMOUNT_MIST`. U8 indexer
+//     must implement both branches; otherwise sub-0.02-SUI sales trip
+//     false-positive replay-mismatch alerts.
+const AMOUNT_BP_DEFAULT:     u16 = 500;
+const MIN_ROYALTY_AMOUNT_MIST: u64 = 1_000_000;
 
 // === Errors ===
 
@@ -45,6 +85,10 @@ const ETagTooLong:          u64 = 11;
 const EParamsJsonTooLong:   u64 = 12;
 const ENameTooLong:         u64 = 13;
 const EBlobIdMalformed:     u64 = 14;
+// Codes 15-19 reserved for future Phase 2-style input validations
+// (preserves the contiguous 10-14 block above for related family).
+// Phase 4 codes start at 20.
+const EWrongPublisher:      u64 = 20;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -148,6 +192,80 @@ fun init(otw: MODEL3D, ctx: &mut TxContext) {
     transfer::public_transfer(publisher, ctx.sender());
 }
 
+// === Phase 4 U3 — TransferPolicy bootstrap ===
+
+// Creates the `TransferPolicy<Model3D>`, attaches three built-in rules
+// (`royalty_rule` + `kiosk_lock_rule` + `personal_kiosk_rule`), shares the
+// policy as a shared object, and transfers the `TransferPolicyCap<Model3D>`
+// to the caller.
+//
+// Ordering invariant (R12 capture —
+// `docs/solutions/kiosk-ptb-patterns/transfer-policy-before-place.md`):
+// rules MUST be attached BEFORE the policy is shared (and before any
+// `kiosk::place<Model3D>` runs anywhere). Doing this all inside a single
+// entry fn makes the order fail-safe by construction — there is no window
+// in which a caller could share a half-configured policy.
+//
+// Publisher type check: `package::from_package<Model3D>` asserts the
+// supplied Publisher was claimed by THIS package (and that `Model3D` is
+// a type defined here). A foreign Publisher (e.g. from a malicious package
+// imitating the layout) aborts with `EWrongPublisher`.
+//
+// Phase 4 wires a single global royalty (500 bps / 0.001 SUI min). v1.1's
+// multi-beneficiary case removes the built-in rule and adds a custom
+// `split_royalty_rule` on the same policy ID (`TransferPolicyCap` holder
+// authority required) — see
+// `docs/solutions/architecture-patterns/sui-kiosk-multi-beneficiary-royalty-2026-05-19.md`.
+//
+// One entry fn vs N: an alternative `create_policy` + N `add_rule` entry fns
+// would let the deployer share the policy before all rules are attached. The
+// monolithic shape eliminates that footgun.
+//
+// **NOT idempotent despite the `ensure_` prefix.** Each successful call
+// creates a fresh `TransferPolicy<Model3D>` shared object + a fresh
+// `TransferPolicyCap<Model3D>` transferred to the caller. There is no
+// sentinel guard; the contract does not refuse a second invocation.
+// Calling twice produces two competing shared policies of the same type,
+// at which point U4/U5 frontend MUST resolve by the specific policy ID
+// captured at first deploy (`networks/testnet.json` field). The U13
+// deploy script enforces this externally: it pins the policy ID at first
+// run and aborts if asked to call `ensure_transfer_policy` again with
+// a populated `networks/{net}.json`. See `contracts/UPGRADE.md`.
+public entry fun ensure_transfer_policy(publisher: &Publisher, ctx: &mut TxContext) {
+    assert!(package::from_package<Model3D>(publisher), EWrongPublisher);
+
+    let (mut policy, cap) = tp::new<Model3D>(publisher, ctx);
+
+    // Rule 1: built-in royalty_rule — collects `AMOUNT_BP_DEFAULT` bps of
+    // every sale into the TransferPolicy's internal Balance<SUI>. Cap holder
+    // (creator/deployer) withdraws via `transfer_policy::withdraw`.
+    royalty_rule::add<Model3D>(&mut policy, &cap, AMOUNT_BP_DEFAULT, MIN_ROYALTY_AMOUNT_MIST);
+
+    // Rule 2: built-in kiosk_lock_rule — forces purchased items to be
+    // `lock`'d in the buyer's Kiosk (no post-purchase `kiosk::take`).
+    // Required by D-013 for protocol-level royalty enforcement on resale.
+    kiosk_lock_rule::add<Model3D>(&mut policy, &cap);
+
+    // Rule 3: built-in personal_kiosk_rule — restricts purchases to
+    // PersonalKiosk-typed Kiosks. Frontend (U5/U6) must build buyer-side
+    // Kiosks via `kiosk::personal_new`, never `kiosk::new`.
+    personal_kiosk_rule::add<Model3D>(&mut policy, &cap);
+
+    // Share the now fully-configured policy. TransferPolicy is intended to
+    // be a shared object (every buyer reads its `rules` set during
+    // `confirm_request`).
+    transfer::public_share_object(policy);
+    // TODO(mainnet, U13): TransferPolicyCap is the single point of authority
+    // for `withdraw` + `remove_rule` + `add_rule`. Testnet hands it to
+    // `ctx.sender()` (deployer's hot wallet) for the demo; mainnet ceremony
+    // must move it to a hardware wallet or multisig immediately after this
+    // call lands. See `contracts/UPGRADE.md` §"Before any upgrade — checklist"
+    // item 8. Cap-compromise scenario: attacker removes RoyaltyRule and
+    // future RoyaltyPaid events keep claiming `royalty_bps=500` while no
+    // royalty flows, because `emit_royalty_paid` hardcodes the bps field.
+    transfer::public_transfer(cap, ctx.sender());
+}
+
 // === LicenseTerms constructor ===
 
 public fun new_license_terms(
@@ -170,6 +288,8 @@ public fun policy_restricted(): u8 { POLICY_RESTRICTED }
 public fun policy_allow_list(): u8 { POLICY_ALLOW_LIST }
 public fun policy_permissionless(): u8 { POLICY_PERMISSIONLESS }
 public fun max_derivative_royalty_bps(): u16 { MAX_DERIVATIVE_ROYALTY_BPS }
+public fun amount_bp_default(): u16 { AMOUNT_BP_DEFAULT }
+public fun min_royalty_amount_mist(): u64 { MIN_ROYALTY_AMOUNT_MIST }
 
 // === Read-only accessors (used by Phase 4 frontend + indexers + tests) ===
 

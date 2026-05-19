@@ -5,8 +5,9 @@ module model3d::model3d_tests;
 use std::string;
 use sui::clock;
 use sui::event;
-use sui::package::Publisher;
+use sui::package::{Self as pkg, Publisher};
 use sui::test_scenario as ts;
+use sui::transfer_policy::{Self as tp, TransferPolicy, TransferPolicyCap};
 use sui::tx_context;
 use walrus::blob::{Self, Blob};
 use walrus::encoding;
@@ -14,6 +15,10 @@ use walrus::storage_resource::Storage;
 use walrus::system::{Self, System};
 use wal::wal::WAL;
 use sui::coin;
+use kiosk::royalty_rule::{Self, Rule as RoyaltyRule};
+use kiosk::kiosk_lock_rule::Rule as LockRule;
+use kiosk::personal_kiosk_rule::Rule as PersonalKioskRule;
+use foreign_witness::foreign_witness;
 use model3d::model3d::{
     Self,
     Model3D,
@@ -21,10 +26,13 @@ use model3d::model3d::{
     policy_permissionless,
     policy_restricted,
     max_derivative_royalty_bps,
+    amount_bp_default,
+    min_royalty_amount_mist,
     validate_publish_inputs,
     new_model,
     destroy_model_for_testing,
     init_for_testing,
+    ensure_transfer_policy,
     emit_royalty_paid,
 };
 
@@ -412,6 +420,166 @@ fun policy_constants_match_spec() {
     assert!(policy_restricted() == 0, 1);
     assert!(model3d::policy_allow_list() == 1, 2);
     assert!(policy_permissionless() == 2, 3);
+    // L2 derivative-royalty cap (D-004 — deferred to v1.1).
     assert!(max_derivative_royalty_bps() == 3000, 4);
+    // Phase 4 primary-sale royalty rate (5% — single global value).
+    assert!(amount_bp_default() == 500, 5);
+    // Phase 4 minimum royalty floor (0.001 SUI — kicks in below 0.02 SUI price).
+    assert!(min_royalty_amount_mist() == 1_000_000, 6);
+}
+
+// === Phase 4 U3 — TransferPolicy bootstrap ===
+//
+// `ensure_transfer_policy` creates `TransferPolicy<Model3D>`, attaches the
+// three built-in rules (RoyaltyRule + LockRule + PersonalKioskRule), shares
+// the policy, and returns the Cap to the caller. The R12 capture
+// `transfer-policy-before-place.md` documents the rules-before-share-before-
+// place ordering invariant.
+
+// EWrongPublisher abort coverage (3 layers, complementary):
+//   - `ensure_transfer_policy_succeeds_*` (positive happy path)
+//   - `from_package_check_rejects_foreign_type` (pkg-discrimination sanity)
+//   - `ensure_transfer_policy_aborts_on_foreign_publisher` (true e2e abort
+//     via the `foreign_witness` dev-dep sibling Move package). The third
+//     test closes the gap flagged in plan-007 U3 review (correctness +
+//     testing + adversarial 3-hit P1).
+
+// Happy path: correct Publisher → policy shared, Cap returned, three rules
+// attached.
+#[test]
+fun ensure_transfer_policy_succeeds_with_correct_publisher_and_attaches_three_rules() {
+    let mut sc = ts::begin(CREATOR);
+    init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+
+    // init transferred Publisher to CREATOR; take it out of the inbox.
+    let publisher = sc.take_from_sender<Publisher>();
+    ensure_transfer_policy(&publisher, sc.ctx());
+    sc.return_to_sender(publisher);
+
+    // Cross tx boundary so the shared TransferPolicy and transferred Cap
+    // both surface to the next tx's takers.
+    sc.next_tx(CREATOR);
+
+    // (a) Policy is a shared object — take_shared must find exactly one.
+    let policy = ts::take_shared<TransferPolicy<Model3D>>(&sc);
+
+    // (b) All three rules attached. `has_rule` introspects the policy's
+    // `rules: VecSet<TypeName>`; witness types are Move-VM-distinct even
+    // though all three are named `Rule` (different containing modules).
+    assert!(tp::has_rule<Model3D, RoyaltyRule>(&policy), 401);
+    assert!(tp::has_rule<Model3D, LockRule>(&policy), 402);
+    assert!(tp::has_rule<Model3D, PersonalKioskRule>(&policy), 403);
+
+    // (c) Cap was transferred to the caller (CREATOR == ctx.sender()).
+    let cap = sc.take_from_sender<TransferPolicyCap<Model3D>>();
+    sc.return_to_sender(cap);
+
+    ts::return_shared(policy);
+    sc.end();
+}
+
+// Pins the package-discrimination semantics of the `EWrongPublisher`
+// guard. `pkg::from_package<T>(publisher)` returns true only when `T`'s
+// package matches the Publisher's package. The legitimate `model3d`
+// Publisher must reject `sui::sui::SUI` (sui-framework package) when asked.
+// Composed with the happy-path test above (which proves the positive
+// branch reaches share + transfer), this fully constrains the assertion.
+#[test]
+fun from_package_check_rejects_foreign_type() {
+    let mut sc = ts::begin(CREATOR);
+    init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+
+    let publisher = sc.take_from_sender<Publisher>();
+    // True branch — sanity: Model3D lives in the same package as the
+    // Publisher we just minted.
+    assert!(pkg::from_package<Model3D>(&publisher), 410);
+    // False branch — Wrong package (sui framework). Mirrors the negative
+    // case `ensure_transfer_policy` aborts on.
+    assert!(!pkg::from_package<sui::sui::SUI>(&publisher), 411);
+
+    sc.return_to_sender(publisher);
+    sc.end();
+}
+
+// True end-to-end EWrongPublisher abort, via a Publisher claimed under the
+// foreign_witness dev-dep package (different package address than model3d).
+// Plan-007 U3 review (correctness + testing + adversarial 3-hit P1).
+#[test, expected_failure(abort_code = model3d::EWrongPublisher)]
+fun ensure_transfer_policy_aborts_on_foreign_publisher() {
+    let mut sc = ts::begin(CREATOR);
+    foreign_witness::init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let foreign_publisher = sc.take_from_sender<Publisher>();
+    // Aborts here: from_package<Model3D>(&foreign_publisher) == false.
+    ensure_transfer_policy(&foreign_publisher, sc.ctx());
+    // Unreachable — function aborts above. Lines below silence linter.
+    sc.return_to_sender(foreign_publisher);
+    sc.end();
+}
+
+// Royalty rule's Config (bps + min_amount) is not directly readable from
+// outside the `kiosk::royalty_rule` module (no public accessor on Config).
+// Instead, pin both values through the public `fee_amount<T>(policy, paid)`
+// helper that implements the rule's floor math:
+//   royalty_owed = max(price * amount_bp / 10_000, min_amount)
+// A regression that swapped the two args at `royalty_rule::add` call site
+// (e.g., passed MIN_ROYALTY_AMOUNT_MIST as bps) would silently pass the
+// has_rule check; this test breaks it.
+#[test]
+fun royalty_rule_config_pinned_via_fee_amount() {
+    let mut sc = ts::begin(CREATOR);
+    init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let publisher = sc.take_from_sender<Publisher>();
+    ensure_transfer_policy(&publisher, sc.ctx());
+    sc.return_to_sender(publisher);
+    sc.next_tx(CREATOR);
+    let policy = ts::take_shared<TransferPolicy<Model3D>>(&sc);
+
+    // 1 SUI price → 500 bps × 1_000_000_000 mist = 50_000_000 mist owed.
+    // Well above the 1_000_000 mist floor; this pins amount_bp == 500.
+    assert!(royalty_rule::fee_amount<Model3D>(&policy, 1_000_000_000) == 50_000_000, 420);
+    // 0-price listing → bps math returns 0 → floor 1_000_000 kicks in.
+    // Pins min_amount == 1_000_000.
+    assert!(royalty_rule::fee_amount<Model3D>(&policy, 0) == 1_000_000, 421);
+
+    ts::return_shared(policy);
+    let cap = sc.take_from_sender<TransferPolicyCap<Model3D>>();
+    sc.return_to_sender(cap);
+    sc.end();
+}
+
+// Documents current behavior: `ensure_transfer_policy` is NOT idempotent.
+// A second invocation with the same Publisher creates a SECOND shared
+// TransferPolicy<Model3D> + a SECOND Cap. Per plan-007 U3 review, the
+// production guarantee that only one policy exists is enforced externally
+// by U13's deploy script (pins policy_id in networks/{net}.json and refuses
+// to re-call if populated). This test pins the contract-level behavior so a
+// future change to add an internal sentinel guard would surface as a test
+// failure rather than silently changing semantics.
+#[test]
+fun ensure_transfer_policy_called_twice_creates_two_distinct_caps() {
+    let mut sc = ts::begin(CREATOR);
+    init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let publisher = sc.take_from_sender<Publisher>();
+
+    ensure_transfer_policy(&publisher, sc.ctx());
+    sc.next_tx(CREATOR);
+    let cap1 = sc.take_from_sender<TransferPolicyCap<Model3D>>();
+
+    ensure_transfer_policy(&publisher, sc.ctx());
+    sc.next_tx(CREATOR);
+    let cap2 = sc.take_from_sender<TransferPolicyCap<Model3D>>();
+
+    // Two distinct Caps → two distinct shared policies of the same type T.
+    assert!(object::id(&cap1) != object::id(&cap2), 430);
+
+    sc.return_to_sender(cap1);
+    sc.return_to_sender(cap2);
+    sc.return_to_sender(publisher);
+    sc.end();
 }
 

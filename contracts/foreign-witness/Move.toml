@@ -1,0 +1,19 @@
+[package]
+name = "foreign_witness"
+edition = "2024.beta"
+license = "Apache-2.0"
+authors = ["overflow2026 hackathon team"]
+
+# Test-only dev-dep for model3d. Provides a Publisher claimed under a
+# different package address so plan-007 U3 tests can exercise the
+# `EWrongPublisher` abort branch in `model3d::ensure_transfer_policy`.
+# Not deployed; not referenced by production code. See sources/foreign_witness.move.
+
+[dependencies]
+
+[addresses]
+foreign_witness = "0x0"
+
+[dev-dependencies]
+
+[dev-addresses]

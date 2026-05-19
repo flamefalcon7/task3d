@@ -12,10 +12,31 @@ authors = ["overflow2026 hackathon team"]
 # WAL flows transitively from the same subtree.
 [dependencies]
 Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
+# Mysten apps Kiosk package — exposes the built-in TransferPolicy rules
+# (`royalty_rule`, `kiosk_lock_rule`, `personal_kiosk_rule`) used by U3's
+# `ensure_transfer_policy`. Package name is `Kiosk` (per the apps repo
+# Move.toml); module addresses live under `kiosk::*`.
+#
+# Pinned to a specific commit SHA (NOT `main`) so that semantic changes to
+# the built-in rules between dev and mainnet republish can be reviewed
+# before adoption. Per plan-007 U3 review (adversarial reviewer P1): a
+# mutable branch ref creates a silent-divergence risk between testnet
+# (published with old apps@main) and mainnet republish (links new
+# apps@main). Re-audit + bump SHA before U13 mainnet ceremony.
+# TODO(mainnet, U13): diff apps/main vs this SHA, re-test, then bump.
+Kiosk = { git = "https://github.com/MystenLabs/apps.git", subdir = "kiosk", rev = "7a07937149c0af057be8f6747e60d0f1acd88fde" }
 
 [addresses]
 model3d = "0x0"
 
 [dev-dependencies]
+# Sibling test-only Move package providing a Publisher claimed for a
+# DIFFERENT package address than `model3d::Model3D`. Lets U3's tests
+# exercise the `EWrongPublisher` abort branch in `ensure_transfer_policy`
+# end-to-end. A same-package `#[test_only]` module is insufficient
+# because `package::from_package<Model3D>` checks the publisher's package
+# address — same-package witnesses all yield the same address. Per
+# plan-007 U3 review (correctness + testing + adversarial 3-hit P1).
+foreign_witness = { local = "../foreign-witness" }
 
 [dev-addresses]
