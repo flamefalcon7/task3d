@@ -59,7 +59,7 @@ sequenceDiagram
     FE-->>M: renders card grid (R8 + F16 "Who made this?" affordance)
     M->>FE: clicks Buy on Tom's car
     FE->>SUI: signAndExecuteTransaction(purchase_with_kiosk PTB chain)
-    Note right of SUI: PTB 5-call chain (built by U5): purchase_with_kiosk →<br/>kiosk::lock → royalty_rule::pay → personal_kiosk_rule::prove →<br/>transfer_policy::confirm_request (all 3 rule receipts satisfy cardinality)
+    Note right of SUI: PTB 6-Move-call chain (built by U5): purchase_with_kiosk →<br/>kiosk::lock → kiosk_lock_rule::prove → royalty_rule::pay → personal_kiosk_rule::prove →<br/>transfer_policy::confirm_request (all 3 rule receipts satisfy cardinality;<br/>wrapped in personal_kiosk::borrow_val / return_val for OwnerCap = 8 PTB cmds)
     SUI-->>M: wallet popup (real gas, per R9)
     M-->>SUI: signs
     SUI-->>FE: tx digest
@@ -333,7 +333,7 @@ README.md                                         (update — U14 mainnet hedge 
   - Calls `kiosk::purchase`
   - Returns the hot potato TransferRequest (does NOT split payment / does NOT transfer to creator — those are RoyaltyRule's job, satisfied by U5's PTB chain)
   - Emits `RoyaltyPaid` event with field shape per U1 spike
-- Frontend (U5) PTB 5-call chain: `purchase_with_kiosk → kiosk::lock(buyer_kiosk, buyer_cap, policy, item) → royalty_rule::pay(policy, &mut request, royalty_coin) → personal_kiosk_rule::prove(&buyer_kiosk, &mut request) → transfer_policy::confirm_request(policy, request)`. All 3 rules attached at U3 (royalty + lock + personal_kiosk) each require their own receipt; `confirm_request` asserts `receipts.length() == rules.length()` (cardinality) AND each receipt's `TypeName ∈ rules` (membership). Skipping any receipt step aborts `EPolicyNotSatisfied`; omitting `confirm_request` itself fails at compile time via Move 2024's drop-check on the un-droppable `TransferRequest`. See `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md` (R12 capture).
+- Frontend (U5) PTB 6-Move-call chain: `purchase_with_kiosk → kiosk::lock(buyer_kiosk, buyer_cap, policy, item) → kiosk_lock_rule::prove(request, buyer_kiosk) → royalty_rule::pay(policy, &mut request, royalty_coin) → personal_kiosk_rule::prove(&buyer_kiosk, &mut request) → transfer_policy::confirm_request(policy, request)`. All 3 rules attached at U3 (royalty + lock + personal_kiosk) each require their own receipt — note `kiosk::lock` only sets the `is_locked` flag, the receipt for the lock rule comes from a separate `kiosk_lock_rule::prove` call. `confirm_request` asserts `receipts.length() == rules.length()` (cardinality) AND each receipt's `TypeName ∈ rules` (membership). Skipping any receipt step aborts `EPolicyNotSatisfied`; omitting `confirm_request` itself fails at compile time via Move 2024's drop-check on the un-droppable `TransferRequest`. The U5 builder additionally wraps the buyer's OwnerCap in `personal_kiosk::borrow_val` / `return_val` (2 extra Move calls — total 8 PTB commands) because PersonalKioskCap stores `Option<KioskOwnerCap>` internally; there is no standalone OwnerCap object to surface from the wallet. See `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md` (R12 capture).
 - Atomicity test: `mint_and_list` tx contains exactly one Mint + one Place + one List event
 
 **Execution note:** Test-first. Write Move integration test (Tom mints+lists, Marcus purchases via builder, RoyaltyPaid emitted, royalty arrived at creator address through RoyaltyRule mechanism) BEFORE implementing entry functions. Test-first surfaces Move-side bugs (event payload shape, abort code wiring, atomicity) at Move-compile time. PTB struct-arg pitfall (learnings #1) is mitigated separately by U5's dry-run-from-day-1 discipline.
@@ -362,13 +362,13 @@ README.md                                         (update — U14 mainnet hedge 
 **Files:**
 - `frontend/src/sui/kioskTxBuilders.ts` (NEW)
 - `frontend/src/sui/kioskTxBuilders.test.ts` (NEW)
-- `frontend/package.json` (add `@mysten/kiosk` ^0.x dep)
+- `frontend/package.json` (add `@mysten/kiosk` ^1.2 dep — 0.x peer-dep'd to @mysten/sui@1.x; 1.x is peer-compat with @mysten/sui@2.16.2)
 - `docs/reports/phase-4-provisional-builders.md` (NEW — testnet-RPC-outage fallback tracker per F26)
 - `docs/solutions/kiosk-ptb-patterns/event-poller-base-pattern.md` (NEW — R12 capture for backend polling pattern; landed during U7 actually but listed here for cross-reference)
 
 **Approach:**
 - `buildMintAndListPtb(args)`: wraps `tx.moveCall('model3d::model3d::mint_and_list', ...)`. ALL struct args via `tx.object(objectId)`, NEVER `tx.pure.*`.
-- `buildPurchaseWithKioskPtb(args)`: emits FULL 5-call chain: `purchase_with_kiosk` → `kiosk::lock` (against buyer's PersonalKiosk, with `policy` reference) → `royalty_rule::pay(policy, request, royalty_coin)` → `personal_kiosk_rule::prove(buyer_kiosk, request)` → `transfer_policy::confirm_request(policy, request)`. All five calls internal to the builder — frontend callers cannot accidentally omit any step. Per-call rationale + cross-references in `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`. The 5-call shape (not 3) is dictated by U3's policy bootstrap which attaches three rules.
+- `buildPurchaseWithKioskPtb(args)`: emits FULL 6-Move-call chain: `purchase_with_kiosk` → `kiosk::lock` (against buyer's PersonalKiosk, with `policy` reference) → `kiosk_lock_rule::prove(request, buyer_kiosk)` → `royalty_rule::pay(policy, request, royalty_coin)` → `personal_kiosk_rule::prove(buyer_kiosk, request)` → `transfer_policy::confirm_request(policy, request)`. All six calls internal to the builder, plus `personal_kiosk::borrow_val` / `return_val` wrappers for the OwnerCap (= 8 PTB Move calls total) — frontend callers cannot accidentally omit any step. Per-call rationale + cross-references in `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`. The 6-call shape (not 3) is dictated by U3's policy bootstrap which attaches three rules; `kiosk::lock` itself only flips `is_locked` and a separate `kiosk_lock_rule::prove` call is required for the rule receipt.
 - `TxResult<T>`: `{ tx, handles: T, metadata: { target, expectedEvents } }`
 - Dry-run-from-day-1: every new builder ships with a `client.dryRunTransactionBlock` smoke test against LIVE testnet. **Fallback when testnet RPC unavailable**: builder lands marked PROVISIONAL in `docs/reports/phase-4-provisional-builders.md`; CANNOT merge to main until dry-run green. Multiple RPC endpoints configured in test runner (Mysten public + 1 backup).
 
@@ -376,7 +376,7 @@ README.md                                         (update — U14 mainnet hedge 
 
 **Test scenarios:**
 - `buildMintAndListPtb` valid args → dry-run on testnet succeeds; simulated tx contains exactly one Move call
-- `buildPurchaseWithKioskPtb` → tx contains FIVE Move calls in order: `purchase_with_kiosk` → `kiosk::lock` → `royalty_rule::pay` → `personal_kiosk_rule::prove` → `confirm_request`
+- `buildPurchaseWithKioskPtb` → tx contains SIX Move calls in order: `purchase_with_kiosk` → `kiosk::lock` → `kiosk_lock_rule::prove` → `royalty_rule::pay` → `personal_kiosk_rule::prove` → `confirm_request` (plus `personal_kiosk::borrow_val` / `return_val` wrappers for the OwnerCap; 8 PTB Move calls total)
 - Dry-run shows simulated `RoyaltyPaid` event in effects
 - TypeScript: passing a string where ObjectRef is expected fails at compile time
 - `metadata.expectedEvents` correctly lists `['model3d::model3d::RoyaltyPaid']` for purchase

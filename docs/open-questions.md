@@ -276,3 +276,21 @@ This is actually a **stronger** guarantee than runtime would be: the rejection h
 **Resolution**: Documented in test file comment block (replacing the would-be test 9 body). Test 4 retains the runtime confirm_request behavior; the compile-fail attempt itself is the framework guarantee. No action needed.
 
 **Blocker level**: 🟢 Resolved — N/A by design.
+
+---
+
+## OQ-019: Phase 3 legacy PTB routes still wired to superseded v1 package
+
+**Status**: Deferred to U6
+**Surfaced**: 2026-05-19 (U5 review, ADV-002)
+**Blocking**: U6 (per plan-007)
+
+`frontend/src/sui/publishPtb.ts` + `purchaseAccessPtb.ts` are still imported by `CreatorFlow.tsx`, `BuyAccessButton.tsx`, and `buildCollectionPtb.ts`. The `VITE_MODEL3D_PACKAGE_ID` in `frontend/.env.local` pins the SUPERSEDED Phase 3 package (`0x18a480b3…`), explicitly marked `supersedes_phase3_package_id` in `contracts/networks/testnet.json`. Phase 4 v2 package is `0x563ab54b…`.
+
+**Demo-day risk**: A user navigating to `/generate` (CreatorFlow) or `/buy/*` (BuyAccessButton) between now and U6's landing would mint to the dead v1 package or attempt a v1 purchase that the v2 indexer can't process.
+
+**U6 must**: refactor `CreatorFlow.tsx` + `BuyAccessButton.tsx` + `buildCollectionPtb.ts` to use `kioskTxBuilders.ts`, then delete the 4 Phase 3 PTB files + update `.env.local` to reference v2 IDs (or remove the env var entirely, sourcing from `networkConfig.ts`).
+
+**Acceptance**: U6 cannot ship until `grep -rn "publishPtb\|purchaseAccessPtb" frontend/src/` returns zero hits and the 4 files are deleted.
+
+**Blocker level**: 🟡 Held — U6 must clear before that unit ships.
