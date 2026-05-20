@@ -21,17 +21,20 @@ export async function generate(
   params: GenerateParams,
   // Backend prompt mode (shape='tripo' with a prompt body) is JWT-gated;
   // slider mode (procedural shapes) is anonymous. Caller is responsible
-  // for passing the session.jwt when invoking prompt mode — see
-  // ForgePage.onGenerateBase + CreatorFlow.
+  // for passing the session.jwt when invoking prompt mode.
   authToken?: string,
+  // D-034: prompt-mode SUI service-fee proof (tx digest). Merged into the body
+  // so the backend pay-gate can verify it before calling Tripo.
+  paymentDigest?: string,
 ): Promise<GenerateResult> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+  const requestBody = paymentDigest ? { ...params, paymentDigest } : params;
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers,
-    body: JSON.stringify(params),
+    body: JSON.stringify(requestBody),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

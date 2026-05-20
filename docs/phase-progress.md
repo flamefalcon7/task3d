@@ -1,5 +1,24 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U10 DONE) — **/create mint wizard shipped. Next = U9 (procedural teardown) then U11/U12.**
+
+### U10 chunk 2 — the `/create` wizard (done, green)
+- **`frontend/src/creator/CreateModelPage.tsx`** (+test, 4✓) — two sources: Tripo prompt (pay 0.1 SUI → `buildPayForApiCallPtb` → sign → `/api/generate` with `paymentDigest` → preview → regen/confirm) | upload `.glb` (magic-byte + 12MB validation). Then name/tags/`license.policy` radio + derivative fee/royalty → `useWalrusUpload` → `buildPublishPtb` → sign. Reuses `MintButton` (3-popup labels), `PreviewCanvas`, `useSession`, the `useDappKitSigner` Walrus bridge.
+- `App.tsx`: `/generate`→`/create` (CreatorFlow no longer routed; U9 deletes the file). `lib/api.ts` `generate()` gains `paymentDigest`.
+- **Removed obsolete `sui/kioskTxBuilders.ts` + test** (dead Model3D-Kiosk purchase builder, D-032; its live-RPC leg broke once v3 dropped `purchase_with_kiosk`). No external importers.
+- **Full frontend suite 302/302; tsc -b clean.**
+
+### ⚠️ Honest caveat
+The wizard is **component-tested only** (mocked Tripo/Walrus/sign). The real pay→Tripo→Walrus→publish E2E was **not browser-tested** (can't here). Click through `/create` live (both sources) before the demo.
+
+### Next Concrete Step
+**U9 — procedural teardown** (now safe; `/create` replaces it). Delete `CreatorFlow`/`ShapePicker`/`backend generators`/`/api/shapes`; rewrite `generate.ts` prompt-only (drop slider/`ShapeId`/`GenerateParams`/`paramRanges`); ripple through `shared/types.ts` + `lib/lineage.ts`/`catalog.ts`/`schema.ts`. Grep-gate empty + suites green. (Then U11 /track, U12 nft-creator page, etc.)
+
+### Blockers / Open Questions
+- Uncommitted (U10 chunk 2): `CreateModelPage.tsx`(+test), `App.tsx`, `lib/api.ts`, deleted `kioskTxBuilders.*`, this file. Suggest commit.
+
+---
+
 ## Last Updated: 2026-05-20 (U10 in progress — chunk 1 done) — **L1 builders + Tripo pay-gate done. Next = U10 chunk 2 (the /create wizard UI).**
 
 ### Hackathon Tracker

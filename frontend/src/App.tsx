@@ -1,6 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { BrowsePage } from './browse/BrowsePage';
-import { CreatorFlow } from './creator/CreatorFlow';
+import { CreateModelPage } from './creator/CreateModelPage';
 import { ModelDetailPage } from './buy/ModelDetailPage';
 import { ForgePage } from './forge/ForgePage';
 import { CollectionDetailPage } from './collection/CollectionDetailPage';
@@ -18,7 +18,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<BrowsePage />} />
-        <Route path="/generate" element={<CreatorFlow />} />
+        <Route path="/create" element={<CreateModelPage />} />
         <Route path="/model/:objectId" element={<ModelDetailPage />} />
         <Route path="/forge" element={<ForgePage />} />
         <Route path="/collection/:slug" element={<CollectionDetailPage />} />
