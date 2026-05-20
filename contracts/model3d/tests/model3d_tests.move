@@ -34,6 +34,7 @@ use model3d::model3d::{
     new_license_terms,
     policy_permissionless,
     policy_restricted,
+    policy_allow_list,
     max_derivative_royalty_bps,
     amount_bp_default,
     min_royalty_amount_mist,
@@ -48,11 +49,16 @@ use model3d::model3d::{
     purchase_with_kiosk,
     launch_collection,
     set_register_fee,
+    set_integration_policy,
     ensure_collection_policy,
     mint_nft_token,
+    register_integration,
     destroy_collection_for_testing,
     destroy_collection_cap_for_testing,
+    remove_integration_for_testing,
 };
+
+const GAMEDEV: address = @0x6A3E;
 
 const NFT_CREATOR: address = @0xD15C0;
 
@@ -1434,13 +1440,24 @@ fun launch_collection_creates_collection_and_soulbound_cap() {
     let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
     launch_collection(&model, payment, sc.ctx());
 
+    // CollectionLaunched fires in this tx — assert its fields before next_tx
+    // consumes the event buffer.
+    let launched = event::events_by_type<model3d::CollectionLaunched>();
+    assert!(vector::length(&launched) == 1, 307);
+    let le = vector::borrow(&launched, 0);
+    assert!(model3d::collection_launched_base_model_id(le) == model_id, 308);
+    assert!(model3d::collection_launched_nft_creator(le) == NFT_CREATOR, 309);
+
     sc.next_tx(NFT_CREATOR);
     let cap = sc.take_from_sender<NftCollectionCreatorCap>();
     let collection = sc.take_shared<NftCollection>();
 
     assert!(model3d::collection_base_model_id(&collection) == model_id, 300);
     assert!(model3d::collection_base_creator(&collection) == CREATOR, 301);
-    assert!(model3d::collection_base_policy(&collection) == policy_permissionless(), 302);
+    // base_creator (mesh creator) and nft_creator (cap holder) are distinct.
+    assert!(model3d::collection_nft_creator(&collection) == NFT_CREATOR, 306);
+    // integration_policy defaults to PERMISSIONLESS at launch (D-030).
+    assert!(model3d::collection_integration_policy(&collection) == policy_permissionless(), 302);
     assert!(model3d::collection_base_royalty_bps(&collection) == 500, 303);
     assert!(model3d::collection_register_fee(&collection) == 0, 304);
     assert!(model3d::cap_collection_id(&cap) == object::id(&collection), 305);
@@ -1495,27 +1512,77 @@ fun launch_collection_routes_derive_fee_to_base_creator() {
     sc.end();
 }
 
-// Covers AE7: a restricted base records base_policy == POLICY_RESTRICTED (0).
+// D-030: integration_policy is collection-level, set by the nft creator via the
+// cap (NOT snapshotted from the base model). Default is PERMISSIONLESS; the cap
+// holder can close (and reopen) the collection to integrations.
 #[test]
-fun launch_collection_snapshots_restricted_policy() {
+fun set_integration_policy_opens_and_closes_collection() {
     let mut sc = ts::begin(CREATOR);
     let mut system = system::new_for_testing(sc.ctx());
     sc.next_tx(CREATOR);
     let clk = clock::create_for_testing(sc.ctx());
+    // Base model is RESTRICTED at the L1 license — proving the collection's
+    // integration_policy does NOT inherit it (defaults open regardless).
     let license = new_license_terms(policy_restricted(), 0, 0, false, false);
     let model = mint_base_model(&mut system, &clk, license, sc.ctx());
 
     sc.next_tx(NFT_CREATOR);
-    let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
-    launch_collection(&model, payment, sc.ctx());
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
 
     sc.next_tx(NFT_CREATOR);
-    let collection = sc.take_shared<NftCollection>();
-    assert!(model3d::collection_base_policy(&collection) == policy_restricted(), 320);
     let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let mut collection = sc.take_shared<NftCollection>();
+    // Default open, even though the base model is restricted.
+    assert!(model3d::collection_integration_policy(&collection) == policy_permissionless(), 320);
+
+    // Close it.
+    set_integration_policy(&cap, &mut collection, policy_restricted());
+    assert!(model3d::collection_integration_policy(&collection) == policy_restricted(), 321);
+    // Reopen it.
+    set_integration_policy(&cap, &mut collection, policy_permissionless());
+    assert!(model3d::collection_integration_policy(&collection) == policy_permissionless(), 322);
 
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// A cap from a DIFFERENT collection cannot set this collection's
+// integration_policy (parity with set_register_fee's cap-mismatch guard).
+#[test]
+#[expected_failure(abort_code = model3d::EWrongCollectionCap)]
+fun set_integration_policy_with_mismatched_cap_aborts() {
+    let second_creator: address = @0xBEEF;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+    sc.next_tx(second_creator);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let cap_a = sc.take_from_sender<NftCollectionCreatorCap>();
+    sc.next_tx(second_creator);
+    let cap_b = sc.take_from_sender<NftCollectionCreatorCap>();
+
+    let id_b = model3d::cap_collection_id(&cap_b);
+    let mut collection_b = ts::take_shared_by_id<NftCollection>(&sc, id_b);
+
+    // cap_a does NOT authorize collection_b → abort EWrongCollectionCap.
+    set_integration_policy(&cap_a, &mut collection_b, policy_restricted());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap_a);
+    destroy_collection_cap_for_testing(cap_b);
+    destroy_collection_for_testing(collection_b);
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
@@ -1538,6 +1605,71 @@ fun launch_collection_aborts_when_payment_below_fee() {
     launch_collection(&model, payment, sc.ctx()); // aborts
 
     // Unreachable — kept so the borrow checker is satisfied.
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Exact-fee path (fee > 0, payment == fee): base creator gets the fee and the
+// zero remainder is destroyed (no change coin lands in the caller's inbox).
+#[test]
+fun launch_collection_exact_fee_destroys_zero_remainder() {
+    let fee: u64 = 1_500_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_permissionless(), fee, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(fee, sc.ctx()), sc.ctx());
+
+    sc.next_tx(CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&fee_coin) == fee, 330);
+    coin::burn_for_testing(fee_coin);
+
+    // No change coin for the caller (remainder was destroy_zero'd).
+    sc.next_tx(NFT_CREATOR);
+    assert!(!ts::has_most_recent_for_sender<coin::Coin<SUI>>(&sc), 331);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Zero-fee path (fee == 0) with an overpaying coin: the whole payment is
+// returned to the caller (no split).
+#[test]
+fun launch_collection_zero_fee_returns_overpayment() {
+    let overpay: u64 = 600_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(overpay, sc.ctx()), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let refund = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&refund) == overpay, 332);
+    coin::burn_for_testing(refund);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
@@ -1675,6 +1807,8 @@ fun mint_nft_token_places_lists_with_three_rule_policy() {
     let me = vector::borrow(&minted, 0);
     let token_id = model3d::nft_token_minted_token_id(me);
     assert!(model3d::nft_token_minted_collection_id(me) == object::id(&collection), 341);
+    assert!(model3d::nft_token_minted_base_model_id(me) == object::id(&model), 346);
+    assert!(model3d::nft_token_minted_nft_creator(me) == NFT_CREATOR, 347);
 
     // Token is placed + listed in the creator Kiosk.
     assert!(kiosk::has_item(&kiosk, token_id), 342);
@@ -1784,6 +1918,286 @@ fun mint_nft_token_with_mismatched_cap_aborts() {
     destroy_model_for_testing(model);
     ts::return_shared(kiosk);
     ts::return_shared(policy);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// mint_nft_token enforces its own name length bound (ENameTooLong) — a 129-char
+// name aborts. (Distinct code path from validate_publish_inputs.)
+#[test]
+#[expected_failure(abort_code = model3d::ENameTooLong)]
+fun mint_nft_token_name_too_long_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, policy, collection, cap, mut kiosk, personal_cap) =
+        nfttoken_bootstrap(&mut sc);
+
+    sc.next_tx(NFT_CREATOR);
+    let long_name = repeat_byte(ASCII_A, 129); // MAX_NAME_LEN is 128
+    mint_nft_token(&cap, &collection, &mut kiosk, &personal_cap, long_name, 1, sc.ctx());
+
+    // Unreachable.
+    sc.return_to_sender(personal_cap);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    ts::return_shared(kiosk);
+    ts::return_shared(policy);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// ensure_collection_policy rejects a Publisher from a different package
+// (parity with ensure_transfer_policy's EWrongPublisher guard).
+#[test]
+#[expected_failure(abort_code = model3d::EWrongPublisher)]
+fun ensure_collection_policy_aborts_on_foreign_publisher() {
+    let mut sc = ts::begin(CREATOR);
+    foreign_witness::init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let foreign_publisher = sc.take_from_sender<Publisher>();
+    // Aborts: from_package<NftToken>(&foreign_publisher) == false.
+    ensure_collection_policy(&foreign_publisher, sc.ctx());
+    sc.return_to_sender(foreign_publisher);
+    sc.end();
+}
+
+// === D-029 U4 — register_integration (B2B integration registry) ===
+
+// Launch a collection from a base model with the given license; nft_creator =
+// NFT_CREATOR. No Publisher/init needed (register_integration is policy-free).
+#[test_only]
+fun launch_for_test(
+    sc: &mut ts::Scenario,
+    license: model3d::LicenseTerms,
+): (system::System, clock::Clock, Model3D, NftCollection, NftCollectionCreatorCap) {
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = ts::take_shared<NftCollection>(sc);
+    (system, clk, model, collection, cap)
+}
+
+const APP_META: vector<u8> = b"{\"name\":\"TinyRacetrack\",\"url\":\"https://example.com\"}";
+
+// Covers AE2 (happy half) + R16 emit: fee routed to nft_creator, change returned
+// to integrator, record stored, IntegrationRegistered emitted with the pair.
+#[test]
+fun register_integration_routes_fee_records_and_emits() {
+    let fee: u64 = 3_000_000;
+    let extra: u64 = 1_000_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    sc.next_tx(NFT_CREATOR);
+    set_register_fee(&cap, &mut collection, fee);
+
+    sc.next_tx(GAMEDEV);
+    let payment = coin::mint_for_testing<SUI>(fee + extra, sc.ctx());
+    register_integration(&mut collection, payment, APP_META, &clk, sc.ctx());
+
+    // Registry holds the pair + the exact app_metadata bytes.
+    assert!(model3d::collection_has_integration(&collection, GAMEDEV), 360);
+    assert!(*model3d::collection_integration_app_metadata(&collection, GAMEDEV) == APP_META, 361);
+
+    // Exactly one IntegrationRegistered, carrying (collection, integrator).
+    let evs = event::events_by_type<model3d::IntegrationRegistered>();
+    assert!(vector::length(&evs) == 1, 362);
+    let e = vector::borrow(&evs, 0);
+    assert!(model3d::integration_registered_collection_id(e) == object::id(&collection), 363);
+    assert!(model3d::integration_registered_integrator(e) == GAMEDEV, 364);
+    // Event timestamp matches the clock (same source as the stored record's).
+    assert!(model3d::integration_registered_at_ms(e) == clk.timestamp_ms(), 367);
+
+    // nft_creator received the fee; integrator got the change.
+    sc.next_tx(NFT_CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&fee_coin) == fee, 365);
+    coin::burn_for_testing(fee_coin);
+    sc.next_tx(GAMEDEV);
+    let change = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&change) == extra, 366);
+    coin::burn_for_testing(change);
+
+    remove_integration_for_testing(&mut collection, GAMEDEV);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Exact-fee boundary (payment == register_fee) succeeds; zero change.
+#[test]
+fun register_integration_exact_fee_succeeds() {
+    let fee: u64 = 2_500_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+    sc.next_tx(NFT_CREATOR);
+    set_register_fee(&cap, &mut collection, fee);
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(fee, sc.ctx()), APP_META, &clk, sc.ctx());
+    assert!(model3d::collection_has_integration(&collection, GAMEDEV), 370);
+
+    remove_integration_for_testing(&mut collection, GAMEDEV);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Covers AE2 (abort half): payment < register_fee aborts EFeeTooLow.
+#[test]
+#[expected_failure(abort_code = model3d::EFeeTooLow)]
+fun register_integration_below_fee_aborts() {
+    let fee: u64 = 5_000_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+    sc.next_tx(NFT_CREATOR);
+    set_register_fee(&cap, &mut collection, fee);
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(fee - 1, sc.ctx()), APP_META, &clk, sc.ctx());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Covers AE3 (D-030): when the nft creator has CLOSED the collection
+// (integration_policy = RESTRICTED), register_integration aborts
+// EIntegrationsClosed and emits nothing (emit is after every assert).
+#[test]
+#[expected_failure(abort_code = model3d::EIntegrationsClosed)]
+fun register_integration_when_closed_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    // nft creator closes the collection to integrations.
+    sc.next_tx(NFT_CREATOR);
+    set_integration_policy(&cap, &mut collection, policy_restricted());
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), APP_META, &clk, sc.ctx());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// ALLOW_LIST is also non-permissionless → register_integration aborts
+// EIntegrationsClosed (the gate is strictly == PERMISSIONLESS).
+#[test]
+#[expected_failure(abort_code = model3d::EIntegrationsClosed)]
+fun register_integration_when_allow_list_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    sc.next_tx(NFT_CREATOR);
+    set_integration_policy(&cap, &mut collection, policy_allow_list());
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), APP_META, &clk, sc.ctx());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Free integration (register_fee == 0, the default) with an overpaying coin:
+// the whole payment is returned to the integrator (fee==0 → no split).
+#[test]
+fun register_integration_zero_fee_returns_overpayment() {
+    let overpay: u64 = 750_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(overpay, sc.ctx()), APP_META, &clk, sc.ctx());
+    assert!(model3d::collection_has_integration(&collection, GAMEDEV), 380);
+
+    // fee==0 → the full overpayment comes back to GAMEDEV.
+    sc.next_tx(GAMEDEV);
+    let refund = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&refund) == overpay, 381);
+    coin::burn_for_testing(refund);
+
+    remove_integration_for_testing(&mut collection, GAMEDEV);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Covers AE5: the same integrator registering twice aborts EAlreadyRegistered.
+#[test]
+#[expected_failure(abort_code = model3d::EAlreadyRegistered)]
+fun register_integration_duplicate_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+    // register_fee stays 0 (free) — isolates the uniqueness gate.
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), APP_META, &clk, sc.ctx());
+
+    sc.next_tx(GAMEDEV);
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), APP_META, &clk, sc.ctx());
+
+    // Unreachable.
+    remove_integration_for_testing(&mut collection, GAMEDEV);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// app_metadata longer than APP_METADATA_MAX (512) aborts EAppMetadataTooLong.
+#[test]
+#[expected_failure(abort_code = model3d::EAppMetadataTooLong)]
+fun register_integration_metadata_too_long_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    sc.next_tx(GAMEDEV);
+    // 513 bytes — one over the cap.
+    let oversized = *string::as_bytes(&repeat_byte(ASCII_A, 513));
+    register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), oversized, &clk, sc.ctx());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
     sc.end();

@@ -41,7 +41,7 @@ Position project as **Composable Creator Economy for 3D / Programmable IP Layer*
 
 ## D-002: 3-tier Move architecture (Model3D + Access + Derivative)
 
-**Status**: Accepted
+**Status**: Partially superseded by D-029/D-030 — the `Access` struct was deleted in v3 (2026-05-20); its soulbound-receipt role is re-anchored to `NftCollectionCreatorCap`. The Model3D base + composable-derivative intent stand.
 **Date**: 2026-05-14
 **Phase**: Pre-Phase-1 architecture
 
@@ -1525,6 +1525,54 @@ Coupled decisions folded into this ADR:
 
 ---
 
+## D-030: Integration gate is collection-level (`NftCollection.integration_policy`), not a model-license snapshot
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Refines**: D-029 (corrects point 4 — the integration gate's level)
+
+### Context
+
+D-029 point 4 said "`license.policy` … gating whether a collection accepts integrations," and plan-008 U1/U4 implemented this by snapshotting `model.license.policy` into `NftCollection.base_policy` and gating `register_integration` on that snapshot. During the U1–U4 code review the user flagged a **level mismatch**: `register_integration` is an L2 (NFT-collection) action whose fee accrues to the **nft creator**, but the gate was driven by the **mesh creator's** L1 model license. Whether a collection accepts gameDev integrations is the nft creator's business decision, so it belongs at the collection level, set by the cap holder — not inherited from the base model.
+
+### Decision
+
+The integration gate lives on the collection and is owned by the nft creator:
+
+1. `NftCollection` carries `integration_policy: u8` (reusing the `POLICY_*` constants); the `base_policy` snapshot field is **removed**.
+2. `integration_policy` defaults to `POLICY_PERMISSIONLESS` (open) at `launch_collection`.
+3. The nft creator (cap holder) sets it via a new cap-gated `set_integration_policy(cap, &mut collection, policy)` (mirrors `set_register_fee`).
+4. `register_integration` gates on `collection.integration_policy == POLICY_PERMISSIONLESS`; the abort code is renamed `ELicenseRestricted` → **`EIntegrationsClosed`** (it now means "this collection is closed to integrations," and also fires for `ALLOW_LIST`, not just `RESTRICTED`).
+5. The base model's `license.policy` is **not** consulted for derivation or integration: derivation (`launch_collection`) is gated purely by the pay-to-derive fee; the model policy is display/Browse metadata only (path **ii** of the review's Decision A — a `RESTRICTED` model can still be forked, by design).
+6. The Browse "available for integration" filter (U8/U14) reads the **collection's** `integration_policy`, not the model's `license.policy`.
+
+### Rationale
+
+- Each layer's policy is owned by the actor who earns from it: mesh creator's L1 license governs base display; nft creator's L2 `integration_policy` governs integrations (their `register_fee` revenue).
+- Removing the `base_policy` snapshot also removes dead/duplicated state and a cross-layer coupling.
+- Free now: the v3 republish has not happened (U5 pending), so the struct change costs nothing on-chain.
+
+### Alternatives Considered
+
+- **Keep the model-license snapshot as the gate** (D-029 as written) — rejected: wrong actor controls the nft creator's integration policy.
+- **Gate `launch_collection` on model policy too** (review Decision A path i) — rejected by user (path ii): derivation stays fee-gated; model policy is informational.
+
+### Consequences
+
+- ✅ Clean L1/L2 separation; the nft creator controls their own collection's openness.
+- ✅ Removes dead `base_policy` state and a cross-layer dependency.
+- ⚠️ U8/U14 (not yet built) must read collection `integration_policy`, not model policy — plan-008 updated accordingly.
+- ⚠️ A `RESTRICTED` base model can be forked into a sellable collection (consent = the derive fee only). Accepted for v1; revisit if creators need fork-level restriction.
+
+### Related
+
+- Refines: [[D-029]]
+- Related decisions: [[D-002]], [[D-003]] (license.policy now display-only at L1), [[D-004]]
+- plan: `docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md` (U1/U4/U8/U14 updated)
+
+---
+
 # Reserved Decision Numbers
 
-D-030 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-031 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

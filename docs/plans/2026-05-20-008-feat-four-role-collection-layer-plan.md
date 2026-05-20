@@ -17,6 +17,8 @@ Reverse D-013 and ship the NFT collection layer as real v1 surface (per **D-029*
 
 **Locked decision (2026-05-20):** the Move delta lands as a **v3 republish** (fresh PackageID), not an in-place upgrade — because physically deleting the public `Access` struct + accessors (R22) breaks compatible-upgrade rules. Republishing now is low-cost: the frontend is not yet migrated and no demo pre-bake exists, so there is no v2 on-chain state to protect.
 
+> **⚠️ D-030 amendment (2026-05-20, post U1–U4 code review).** The integration gate is **collection-level, not a model-license snapshot.** `NftCollection` carries `integration_policy: u8` (set by the nft creator via cap-gated `set_integration_policy`, default `POLICY_PERMISSIONLESS`); the old `base_policy` snapshot field is **removed**. `register_integration` gates on `collection.integration_policy`; abort `ELicenseRestricted` → **`EIntegrationsClosed`**. The base model's `license.policy` is **display/Browse metadata only** — derivation (`launch_collection`) is gated purely by the pay-to-derive fee (a `RESTRICTED` base can still be forked, by design). Wherever this plan says "integration gate = `base_policy`/`license.policy`," read `collection.integration_policy`. The Browse integration filter (U8/U14) reads the **collection's** `integration_policy`, not the model's. See D-030.
+
 ---
 
 ## Problem Frame
@@ -56,7 +58,7 @@ NftCollection (shared)                     ← nft creator, via launch_collectio
   ├─ base_model_id: ID                     ← snapshot link to the Model3D
   ├─ base_creator: address                 ← royalty + derive-fee payee
   ├─ base_royalty_bps: u16                  ← snapshot of license.derivative_royalty_bps (≤ 3000, D-004)
-  ├─ base_policy: u8                        ← snapshot of license.policy (the integration gate)
+  ├─ integration_policy: u8                 ← nft creator's L2 gate (set_integration_policy; default PERMISSIONLESS). NOT a model-license snapshot (D-030)
   ├─ register_fee: u64                      ← set via set_register_fee (cap-gated)
   └─ integrations: Table<address, IntegrationRecord>   ← per-(integrator) uniqueness + "Used by" source
 
@@ -73,7 +75,7 @@ NftToken (key, store)                      ← Fork B tradeable token minted fro
 
 ```
 register_integration(collection, payment: Coin<SUI>, app_metadata: vector<u8>, ctx)
-  1. assert base_policy == POLICY_PERMISSIONLESS         else abort ELicenseRestricted (30), emit nothing
+  1. assert collection.integration_policy == POLICY_PERMISSIONLESS  else abort EIntegrationsClosed (30), emit nothing
   2. assert payment.value() >= collection.register_fee   else abort EFeeTooLow (31)
   3. assert !collection.integrations.contains(sender)     else abort EAlreadyRegistered (32)  [per-pair anti-spam]
   4. assert app_metadata.length() <= APP_METADATA_MAX     else abort EAppMetadataTooLong (33)
@@ -314,21 +316,21 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 ---
 
-### U8. Browse query carries `license.policy` (Browse filter enabler — client-side)
+### U8. Browse query carries collection `integration_policy` (Browse filter enabler — client-side)
 
-**Goal:** Surface `license.policy` on each browsed model so the "available for integration" filter (U14) can show only `POLICY_PERMISSIONLESS` collections. **There is no backend listing indexer — Browse is client-side GraphQL today** — so this is a small client query change, NOT a backend build.
+**Goal (D-030 corrected):** Surface each **collection's** `integration_policy` so the "available for integration" filter (U14) shows only collections the nft creator has left open (`POLICY_PERMISSIONLESS`). The integration filter is about *collections accepting integrations*, which is the collection-level `integration_policy` — **not** the base model's `license.policy`. **There is no backend listing indexer — Browse is client-side GraphQL today** — so this is a small client query change, NOT a backend build.
 
 **Requirements:** R17 (data half)
 
-**Dependencies:** U5 (v3 package), U10 (publish writes policy)
+**Dependencies:** U5 (v3 package), U12 (launch writes collections)
 
-**Files:** `frontend/src/browse/useModelIndex.ts` (extend the GraphQL/object query to read the `Model3D.license.policy` field — already on-chain since D-003) + test.
+**Files:** `frontend/src/browse/useModelIndex.ts` (extend the client query to read `NftCollection.integration_policy` for browsed collections; the public accessor is `collection_integration_policy`) + test.
 
-**Approach:** `Model3D.license` is a public struct field carrying `policy` (contract lines 118–124, 139); fetch it in the existing browse query and expose it on the model DTO the frontend already builds. No new backend, no indexer. (If a later phase introduces a backend listing index, the filter can move server-side then — YAGNI now.)
+**Approach:** `NftCollection.integration_policy` is a public field (read via `collection_integration_policy` / object field); fetch it in the browse query and expose it on the collection DTO. No new backend, no indexer. (Model `license.policy` may still be surfaced separately as display metadata — U10's mint radio — but it does NOT drive the integration filter.) (If a later phase introduces a backend listing index, the filter can move server-side then — YAGNI now.)
 
 **Test scenarios:**
-- Browse DTO includes `policy` matching each model's on-chain `license.policy`.
-- Permissionless vs restricted models surface distinct `policy` values to the filter (U14).
+- Browse DTO includes `integration_policy` matching each collection's on-chain value.
+- Open (PERMISSIONLESS) vs closed (RESTRICTED/ALLOW_LIST) collections surface distinct values to the filter (U14).
 
 **Verification:** tests green; browse model objects carry `policy`; U14 filter consumes it.
 
@@ -449,7 +451,7 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 **Files:** `frontend/src/browse/BrowsePage.tsx` (amend — `?filter=integration` shows only `policy == PERMISSIONLESS`); `frontend/src/collection/CollectionDetailPage.tsx` (NEW or amend existing) + test; `frontend/src/collection/UsedBySection.tsx` (NEW) + test.
 
-**Approach:** filter reads `policy` from the U8-enriched listing DTO. "Used by" calls `GET /api/collections/:id/integrations`; render `name` + `url` via React text children + a sanitized `<a href>` (scheme-allowlisted) — never `dangerouslySetInnerHTML`. States: loading skeleton / "No integrations yet" / "Not accepting integrations" (restricted base).
+**Approach:** filter reads the collection's `integration_policy` from the U8-enriched DTO (D-030 — not the model `license.policy`). "Used by" calls `GET /api/collections/:id/integrations`; render `name` + `url` via React text children + a sanitized `<a href>` (scheme-allowlisted) — never `dangerouslySetInnerHTML`. States: loading skeleton / "No integrations yet" / "Not accepting integrations" (collection `integration_policy` ≠ permissionless).
 
 **Test scenarios:**
 - **Covers AE6.** Permissionless collection with one integration → "Used by" lists the app; Browse `?filter=integration` includes it; restricted collection excluded from filter.
@@ -497,16 +499,16 @@ These plan-007 units were **never built** (only U1–U5 shipped). They remain in
 
 - **v3 republish, not in-place upgrade (locked 2026-05-20).** Deleting the public `Access` struct + accessors breaks compatible-upgrade rules → fresh PackageID. Low-cost now (no migrated frontend, no pre-bake to lose). All Move delta lands in one publish (U5).
 - **register_fee + integration registry live on `NftCollection` / its key-only cap, never on `Model3D`** (D-029). Fee is collection-level. No `Model3D` field change → the existing struct is untouched even though we republish for other reasons.
-- **`base_royalty_bps` + `base_policy` are snapshots taken at `launch_collection`** from `license.derivative_royalty_bps` / `license.policy`. ≤ 30% cap (D-004).
+- **`base_royalty_bps` is a snapshot taken at `launch_collection`** from `license.derivative_royalty_bps`. ≤ 30% cap (D-004). *(D-030: the old `base_policy` snapshot is removed; the integration gate is the collection's own `integration_policy`, default PERMISSIONLESS, cap-set via `set_integration_policy` — not a model-license snapshot.)*
 - **Pay-to-derive (Fork A), not buy-to-own.** nft creator pays `derivative_mint_fee` to the mesh creator at launch; mesh creator keeps the base + earns royalty. Preserves the perpetual-royalty story.
 - **L1 + L2 coexist (Fork B).** L1 `purchase_with_kiosk` (Model3D) unchanged; L2 `NftToken` (`key+store`) is additive with its own `TransferPolicy<NftToken>` (per-type).
 - **`Access` cut (Fork B'); "soulbound by Move ability" re-anchors to the key-only `NftCollectionCreatorCap`** (spec.md §1.7 #3).
 - **`register_integration` is fee-gated, not ownership-coupled (Fork C).** B2B license at collection level; gameDev need not own a token. Anti-spam = fee + per-(integrator,collection) uniqueness.
-- **New abort codes start at 30** (`ELicenseRestricted=30, EFeeTooLow=31, EAlreadyRegistered=32, EAppMetadataTooLong=33, EWrongCollectionCap=34`) — existing range is `0,10–14,20,21`.
+- **New abort codes start at 30** (`EIntegrationsClosed=30` [renamed from `ELicenseRestricted` per D-030]`, EFeeTooLow=31, EAlreadyRegistered=32, EAppMetadataTooLong=33, EWrongCollectionCap=34, EInsufficientDeriveFee=35`) — existing range is `0,10–14,20,21`.
 - **`IntegrationRegistered` emitted inside the call frame** so an aborted fee-routing/uniqueness tx rolls back the event (pattern from `RoyaltyPaid`).
 - **`app_metadata`: on-chain length-bounded; backend schema-validates (UTF-8 JSON `name`+`url` only, URL scheme allowlist); frontend renders text-nodes-only.** Defense in depth (R14, AE4).
 - **Backend uses `SuiJsonRpcClient` (D-019)** for the 6/21 indexer. *Noted tension with CLAUDE.md's gRPC stack line — following the ADR; gRPC migration is post-submission.*
-- **No backend listing indexer is built; Browse stays client-side GraphQL (`useModelIndex`).** plan-007's backend `eventPollerBase`/listing-indexer was never built; rather than build that whole subsystem, the only new backend is a single-topic `IntegrationRegistered` indexer (U7) for "Used by". The Browse integration filter reads `license.policy` client-side (U8). Scope-reducing, codebase-grounded; a server-side index can come later (YAGNI).
+- **No backend listing indexer is built; Browse stays client-side GraphQL (`useModelIndex`).** plan-007's backend `eventPollerBase`/listing-indexer was never built; rather than build that whole subsystem, the only new backend is a single-topic `IntegrationRegistered` indexer (U7) for "Used by". The Browse integration filter reads the collection's `integration_policy` client-side (U8, per D-030). Scope-reducing, codebase-grounded; a server-side index can come later (YAGNI).
 - **Coin fee routing uses dust-to-last-beneficiary** if ever split (learnings #4) to avoid stranded mist.
 
 ---

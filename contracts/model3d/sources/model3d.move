@@ -104,7 +104,7 @@ const EWrongRoyaltyRate:    u64 = 21;
 
 // D-029 — NFT collection layer + integration registry. Existing range is
 // 0,10-14,20,21; this block starts at 30 (no collision).
-const ELicenseRestricted:    u64 = 30; // register_integration on a non-permissionless base
+const EIntegrationsClosed:   u64 = 30; // register_integration when collection integration_policy != permissionless
 const EFeeTooLow:            u64 = 31; // register_integration payment < register_fee
 const EAlreadyRegistered:    u64 = 32; // per-(integrator,collection) uniqueness
 const EAppMetadataTooLong:   u64 = 33; // app_metadata exceeds APP_METADATA_MAX
@@ -173,14 +173,26 @@ public struct IntegrationRecord has store {
 // `launch_collection` (pay-to-derive, Fork A). Shared so `register_integration`
 // callers (gameDevs) can mutate the registry without owning it.
 //
-// `base_royalty_bps` + `base_policy` are SNAPSHOTS taken at launch from the
-// base model's `license` — they do not track later base-license edits.
+// `base_royalty_bps` is a SNAPSHOT taken at launch from the base model's
+// `license` (does not track later base-license edits).
 public struct NftCollection has key {
     id: UID,
     base_model_id: ID,
     base_creator: address,
+    // The nft creator (cap holder) who launched this collection. Recorded at
+    // launch so `register_integration` can route the register_fee to them
+    // without needing the soulbound cap as an argument (the integrator/gameDev
+    // who pays does not hold it). Distinct from `base_creator` (mesh creator,
+    // who is paid the derive fee + secondary royalty).
+    nft_creator: address,
     base_royalty_bps: u16,
-    base_policy: u8,
+    // L2 integration gate, set by the nft creator (cap holder) via
+    // `set_integration_policy`; defaults to POLICY_PERMISSIONLESS at launch.
+    // Whether gameDevs may `register_integration` against THIS collection is a
+    // collection-level (L2) decision — NOT inherited from the L1 model license
+    // (D-030 refines D-029: the integration gate lives at the level whose owner
+    // earns the register fee).
+    integration_policy: u8,
     register_fee: u64,
     integrations: Table<address, IntegrationRecord>,
 }
@@ -229,6 +241,18 @@ public struct NftTokenMinted has copy, drop {
     collection_id: ID,
     base_model_id: ID,
     nft_creator: address,
+}
+
+// D-029 — emitted by `register_integration` (inside the call frame, so an
+// aborted registration rolls the event back atomically). Deliberately LEAN:
+// `app_metadata` is NOT carried here — the collection's `integrations` Table is
+// the single source of truth. The U7 indexer reads this event to learn a
+// (collection, integrator) pair registered, then resolves `app_metadata` from
+// the Table via `getDynamicFieldObject`. No data is duplicated on-chain.
+public struct IntegrationRegistered has copy, drop {
+    collection_id: ID,
+    integrator: address,
+    registered_at_ms: u64,
 }
 
 // Phase 4: emitted by U4 `purchase_with_kiosk` (via `emit_royalty_paid` below)
@@ -420,8 +444,12 @@ public fun license_derivative_royalty_bps(license: &LicenseTerms): u16 {
 
 public fun collection_base_model_id(c: &NftCollection): ID { c.base_model_id }
 public fun collection_base_creator(c: &NftCollection): address { c.base_creator }
+public fun collection_nft_creator(c: &NftCollection): address { c.nft_creator }
+public fun collection_integration_app_metadata(c: &NftCollection, who: address): &vector<u8> {
+    &c.integrations.borrow(who).app_metadata
+}
 public fun collection_base_royalty_bps(c: &NftCollection): u16 { c.base_royalty_bps }
-public fun collection_base_policy(c: &NftCollection): u8 { c.base_policy }
+public fun collection_integration_policy(c: &NftCollection): u8 { c.integration_policy }
 public fun collection_register_fee(c: &NftCollection): u64 { c.register_fee }
 public fun collection_has_integration(c: &NftCollection, who: address): bool {
     c.integrations.contains(who)
@@ -743,9 +771,13 @@ public fun purchase_with_kiosk(
 // creator and receives a soulbound `NftCollectionCreatorCap`. The base creator
 // keeps the Model3D and the perpetual-royalty story (`base_royalty_bps` snapshot).
 //
-// `base_royalty_bps` + `base_policy` are SNAPSHOTS read here from the base
-// model's live `license`; later edits to the base license do not propagate.
-// `register_fee` starts at 0 — the cap holder sets it via `set_register_fee` (U2).
+// `base_royalty_bps` is a SNAPSHOT read here from the base model's live
+// `license`; later edits to the base license do not propagate. The collection's
+// own `integration_policy` defaults to POLICY_PERMISSIONLESS (open) and
+// `register_fee` to 0 — both are the nft creator's to set afterward via
+// `set_integration_policy` / `set_register_fee` (D-030). The base model's
+// `license.policy` is NOT consulted here: derivation is gated by the
+// pay-to-derive fee, integration by the collection-level policy.
 //
 // No `clock` param: the collection carries no timestamp and `CollectionLaunched`
 // has no `ts` field. Per-integration timestamps are set in `register_integration`.
@@ -778,8 +810,9 @@ public entry fun launch_collection(
         id: object::new(ctx),
         base_model_id: object::id(model),
         base_creator: model.creator,
+        nft_creator: ctx.sender(),
         base_royalty_bps,
-        base_policy: model.license.policy,
+        integration_policy: POLICY_PERMISSIONLESS,
         register_fee: 0,
         integrations: table::new(ctx),
     };
@@ -811,6 +844,21 @@ public entry fun set_register_fee(
 ) {
     assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
     collection.register_fee = fee;
+}
+
+// Cap holder opens/closes their collection to gameDev integrations (D-030).
+// The integration gate is a collection-level (L2) decision owned by the nft
+// creator — independent of the base model's L1 `license.policy`. Pass a
+// POLICY_* constant: PERMISSIONLESS opens it, anything else closes it
+// (register_integration aborts EIntegrationsClosed). Defaults PERMISSIONLESS at
+// launch. Authority is the matching soulbound cap.
+public entry fun set_integration_policy(
+    cap: &NftCollectionCreatorCap,
+    collection: &mut NftCollection,
+    policy: u8,
+) {
+    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+    collection.integration_policy = policy;
 }
 
 // Cap holder mints an `NftToken` from their collection and atomically
@@ -849,6 +897,65 @@ public entry fun mint_nft_token(
     kiosk::place_and_list<NftToken>(kiosk_obj, owner_cap, token, price);
 }
 
+// === D-029 U4 — register_integration (B2B integration registry) ===
+//
+// A gameDev attests an on-chain integration with a collection: fee-gated,
+// license-gated, and anti-spammed by per-(integrator, collection) uniqueness.
+// The integrator does NOT need to hold the cap or own a token — the gate is
+// the fee + the base license being permissionless.
+//
+// Gate order is intentional: ALL aborts happen before the `event::emit` at the
+// end, so an aborted registration emits nothing (AE3) and the registry stays
+// untouched. The `app_metadata` blob is length-bounded on-chain only; the
+// backend (U7) validates its JSON schema before surfacing it in "Used by".
+public entry fun register_integration(
+    collection: &mut NftCollection,
+    mut payment: Coin<SUI>,
+    app_metadata: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = ctx.sender();
+
+    // 1. Integration gate — the nft creator (cap holder) opens/closes this via
+    //    set_integration_policy (defaults PERMISSIONLESS at launch). A
+    //    collection-level (L2) decision, NOT the base model's L1 license (D-030).
+    assert!(collection.integration_policy == POLICY_PERMISSIONLESS, EIntegrationsClosed);
+    // 2. Fee gate.
+    assert!(coin::value(&payment) >= collection.register_fee, EFeeTooLow);
+    // 3. Anti-spam — one registration per (integrator, collection).
+    assert!(!collection.integrations.contains(sender), EAlreadyRegistered);
+    // 4. Bound the metadata blob (schema validated off-chain by U7).
+    assert!(vector::length(&app_metadata) <= APP_METADATA_MAX, EAppMetadataTooLong);
+
+    // 5. Route the fee to the nft creator; return any overpayment to the
+    //    integrator (mirrors launch_collection's coin handling).
+    let fee = collection.register_fee;
+    if (fee > 0) {
+        let fee_coin = coin::split(&mut payment, fee, ctx);
+        transfer::public_transfer(fee_coin, collection.nft_creator);
+    };
+    if (coin::value(&payment) == 0) {
+        coin::destroy_zero(payment);
+    } else {
+        transfer::public_transfer(payment, sender);
+    };
+
+    // 6. Record (Table is the single source of truth for "Used by").
+    let now = clock.timestamp_ms();
+    collection.integrations.add(sender, IntegrationRecord {
+        app_metadata,
+        registered_at_ms: now,
+    });
+
+    // 7. Emit inside the frame — rolls back atomically on any earlier abort.
+    event::emit(IntegrationRegistered {
+        collection_id: object::id(collection),
+        integrator: sender,
+        registered_at_ms: now,
+    });
+}
+
 // === RoyaltyPaid accessors (test-only — production indexers parse via BCS) ===
 
 #[test_only] public fun royalty_paid_buyer(e: &RoyaltyPaid): address { e.buyer }
@@ -867,6 +974,16 @@ public entry fun mint_nft_token(
 
 #[test_only] public fun nft_token_minted_token_id(e: &NftTokenMinted): ID { e.token_id }
 #[test_only] public fun nft_token_minted_collection_id(e: &NftTokenMinted): ID { e.collection_id }
+#[test_only] public fun nft_token_minted_base_model_id(e: &NftTokenMinted): ID { e.base_model_id }
+#[test_only] public fun nft_token_minted_nft_creator(e: &NftTokenMinted): address { e.nft_creator }
+
+#[test_only] public fun integration_registered_collection_id(e: &IntegrationRegistered): ID { e.collection_id }
+#[test_only] public fun integration_registered_integrator(e: &IntegrationRegistered): address { e.integrator }
+#[test_only] public fun integration_registered_at_ms(e: &IntegrationRegistered): u64 { e.registered_at_ms }
+
+#[test_only] public fun collection_launched_collection_id(e: &CollectionLaunched): ID { e.collection_id }
+#[test_only] public fun collection_launched_base_model_id(e: &CollectionLaunched): ID { e.base_model_id }
+#[test_only] public fun collection_launched_nft_creator(e: &CollectionLaunched): address { e.nft_creator }
 
 // === Test-only helpers ===
 
@@ -906,8 +1023,9 @@ public fun destroy_collection_for_testing(collection: NftCollection) {
         id,
         base_model_id: _,
         base_creator: _,
+        nft_creator: _,
         base_royalty_bps: _,
-        base_policy: _,
+        integration_policy: _,
         register_fee: _,
         integrations,
     } = collection;
@@ -919,5 +1037,12 @@ public fun destroy_collection_for_testing(collection: NftCollection) {
 public fun destroy_collection_cap_for_testing(cap: NftCollectionCreatorCap) {
     let NftCollectionCreatorCap { id, collection_id: _ } = cap;
     object::delete(id);
+}
+
+// Removes + drops one integration record so a populated collection can be torn
+// down via `destroy_collection_for_testing` (which requires an empty Table).
+#[test_only]
+public fun remove_integration_for_testing(c: &mut NftCollection, who: address) {
+    let IntegrationRecord { app_metadata: _, registered_at_ms: _ } = c.integrations.remove(who);
 }
 

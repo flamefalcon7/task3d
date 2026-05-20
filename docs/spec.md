@@ -413,6 +413,8 @@ public fun new(blob: Blob, ctx: &mut TxContext) {
 
 ### 2.8 我們的 Move 設計 — Design B(Content + Access)+ Derivative Layer
 
+> **⚠️ D-029 / D-030 更新(2026-05-20)**:本節描述的 `Access` struct 已在 v3 合約**刪除**。其「soulbound 收據」角色由 `NftCollectionCreatorCap`(key-only)承接;擁有權收據改為 key+store 的 token / `Model3D` 物件本身。整合 gate 改為 collection-level 的 `NftCollection.integration_policy`(nft creator 經 cap 設定),不再是 model-level `license.policy` 的 snapshot。下方 `Access` / `AccessPurchased` 程式碼為歷史設計,實作以 `contracts/model3d/sources/model3d.move` 為準;§2.8 全面改寫排程於 plan-008 Phase 5 文件清理。
+
 > **重要設計轉折**:原始 spec 把 `Model3D` 當 NFT(一人 mint 一個)。**這個版本不是。**
 >
 > `Model3D` = **content**(creator 上傳一次,1000 人可以同時付費存取)
