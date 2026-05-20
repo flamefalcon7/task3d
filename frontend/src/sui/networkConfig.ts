@@ -20,26 +20,28 @@
 // from the @mysten/kiosk SDK's testnet-defaults constants. Frontend MUST
 // use OUR pinned value or `confirm_request` fails the rule membership check.
 
-// v3 (D-032): Model3D is a shared object; the only TransferPolicy is for
-// NftToken. `transferPolicyId`/`transferPolicyCapId` now hold THAT policy
-// (field names kept stable for the obsolete kioskTxBuilders.ts until U6
-// reworks it into collectionTxBuilders.ts).
+// v4 (D-035/D-036): fresh republish of v3. Model3D is still a shared object;
+// the only TransferPolicy is for NftToken, and it now carries ONLY the royalty
+// rule (D-036 removed lock + personal_kiosk). mint_nft_token yields a plain
+// owned token; listing is a separate opt-in Kiosk PTB. `transferPolicyId`/
+// `transferPolicyCapId` hold the NftToken policy (generic field names kept for
+// config stability). Supersedes v3 0x35ba17b3….
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x35ba17b3188b639cb79ac132979c632168889831a9ecbf63e9f3b69e8eed6785',
+    '0x3b6b7258831f43ad926d3f961b6a77edbce7c5845262c5dfb7d783147158eb03',
   publisherId:
-    '0x00808fedbc652b50436f85a1882107ebac2cc283d508bf32efc691ea5286720f',
+    '0x09f80e91d766bfe71a0a6288e9aeab0c4e0929d60dee5c851a8e2b867dccce5e',
   transferPolicyId:
-    '0xf1816cae676afefa0d8d2b3734347fb240d0547b0736dd62e0c9f31500e57272',
+    '0x9607bcf10be57e99269f6dab4e4e3b5e9aa0527066d5ea14a7985d7ddd6f0342',
   transferPolicyCapId:
-    '0xc2b91b69009ad9d331bdffe9c94fec2902ddb9e0a2e69792bfe9a4695c8860f4',
+    '0x85de8533f4279f56c889d72c952864c73eb471719818856e3005331a475d49ff',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
-  // Resolved at U5 by reading the deployed TransferPolicy's rules VecSet
-  // — all three rule TypeNames live under this one published kiosk-apps
-  // package address. This is NOT the @mysten/kiosk SDK's testnet default.
+  // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
+  // royalty rule TypeName lives under this one published kiosk-apps package
+  // address (unchanged from v2/v3). This is NOT the @mysten/kiosk SDK default.
   kioskAppsPackageId:
     '0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d',
 } as const;

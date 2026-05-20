@@ -1,24 +1,26 @@
 {
   "_meta": {
-    "description": "Phase 4 v3 testnet deploy artifacts (plan-008 U5 + D-032). Model3D is now a SHARED object (publish); the L1 Kiosk path is removed, so there is NO TransferPolicy<Model3D>. The only TransferPolicy is for the L2 NftToken (Kiosk-traded ownership) — the generic `transfer_policy_id` / `transfer_policy_cap_id` fields now hold THAT policy. Field names kept generic for frontend-config stability (networkConfig.ts parity); U6 may rename to *_nfttoken_* when collectionTxBuilders.ts lands. Frontend pins the policy_id from here so confirm_request resolves the canonical policy. Per D-009: testnet is the 6/21 submission target; mainnet ceremony deferred to the 8/27 prize window.",
+    "description": "Phase 4 v4 testnet deploy artifacts (plan-008 U16/U17 + D-035/D-036). v4 is a fresh breaking republish of v3: NftCollection gained `quilt_blob_id`, NftToken gained `patch_id`, launch_collection/mint_nft_token signatures changed, and the NftTokenMinted event layout changed (none in-place upgradeable). D-036: mint_nft_token now public_transfers a PLAIN OWNED token (no auto-Kiosk); listing-for-sale is a separate opt-in Kiosk PTB; ensure_collection_policy attaches ONLY the royalty rule (kiosk_lock_rule + personal_kiosk_rule removed) so a bought NftToken is freely usable. The only TransferPolicy is for the L2 NftToken — the generic `transfer_policy_id` / `transfer_policy_cap_id` fields hold THAT policy. Field names kept generic for frontend-config stability (networkConfig.ts parity). Per D-009: testnet is the 6/21 submission target; mainnet ceremony deferred to the 8/27 prize window.",
     "phase": "4",
     "plan": "docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md",
     "deployed_at": "2026-05-20",
-    "package_version": "v3 (Phase 4, D-032 — Model3D shared, Kiosk only on NftToken)",
+    "package_version": "v4 (Phase 4, D-035/D-036 — L2 quilt patch + owned-token mint + royalty-only policy)",
     "transfer_policy_type": "0x2::transfer_policy::TransferPolicy<…::model3d::NftToken>",
+    "transfer_policy_rules": "royalty_rule ONLY (D-036 removed kiosk_lock_rule + personal_kiosk_rule). Verified at bootstrap: the ensure_collection_policy tx created exactly one RuleKey dynamic field (royalty_rule::Rule under 0xe308bb3e…).",
+    "supersedes_v3_package_id": "0x35ba17b3188b639cb79ac132979c632168889831a9ecbf63e9f3b69e8eed6785",
     "supersedes_v2_package_id": "0x563ab54bf9b6e76d6e61a7f0c8be3157e354750e8e435814dfa0b5232f4b0893",
     "supersedes_phase3_package_id": "0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3",
-    "kiosk_apps_package_id_discovery": "Re-confirmed at v3 by reading the deployed TransferPolicy<NftToken> rules VecSet — all three rule TypeNames (royalty_rule, kiosk_lock_rule, personal_kiosk_rule) live under 0xe308bb3e…, unchanged from v2 (deps pinned identically). Frontend MUST use the address pinned here, NOT the @mysten/kiosk SDK defaults — otherwise confirm_request fails the rule membership check."
+    "kiosk_apps_package_id_discovery": "Unchanged from v2/v3 (deps pinned identically — apps@7a07937). The deployed TransferPolicy<NftToken> royalty rule TypeName lives under 0xe308bb3e…. Frontend MUST use the address pinned here, NOT the @mysten/kiosk SDK defaults — otherwise confirm_request fails the rule membership check."
   },
   "network": "testnet",
   "chain_id": "4c78adac",
-  "model3d_package_id": "0x35ba17b3188b639cb79ac132979c632168889831a9ecbf63e9f3b69e8eed6785",
-  "upgrade_cap_id": "0x0a3c1c5f14c91da247cea5e0230b24098d1ea79387dd6fcb226578e24f9d8567",
-  "publisher_id": "0x00808fedbc652b50436f85a1882107ebac2cc283d508bf32efc691ea5286720f",
-  "transfer_policy_id": "0xf1816cae676afefa0d8d2b3734347fb240d0547b0736dd62e0c9f31500e57272",
-  "transfer_policy_cap_id": "0xc2b91b69009ad9d331bdffe9c94fec2902ddb9e0a2e69792bfe9a4695c8860f4",
+  "model3d_package_id": "0x3b6b7258831f43ad926d3f961b6a77edbce7c5845262c5dfb7d783147158eb03",
+  "upgrade_cap_id": "0xe39adcd33c8d2d693da637a338b2733f9dfeba88240108c67b2d256524bee710",
+  "publisher_id": "0x09f80e91d766bfe71a0a6288e9aeab0c4e0929d60dee5c851a8e2b867dccce5e",
+  "transfer_policy_id": "0x9607bcf10be57e99269f6dab4e4e3b5e9aa0527066d5ea14a7985d7ddd6f0342",
+  "transfer_policy_cap_id": "0x85de8533f4279f56c889d72c952864c73eb471719818856e3005331a475d49ff",
   "deployer_address": "0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed",
-  "publish_tx_digest": "AuzWcL4fUbgLL3uvaqPfwpuzYU5p9EGa4Uqr1fVk2yab",
-  "ensure_collection_policy_tx_digest": "CA6oX21RtzFCd3mj8EM9kxcrhmvyFVeV7tJZwdkonSh1",
+  "publish_tx_digest": "8rFxGjtRyt4krVPtN5ujPcBSHcoGfHtHES91NyPVYRGk",
+  "ensure_collection_policy_tx_digest": "25xdsvTFTLoiCxhtc5dQKeHrHn961H4kCfM6djzdt7yW",
   "kiosk_apps_package_id": "0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d"
 }
