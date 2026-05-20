@@ -130,6 +130,8 @@
 
 ### 1.7 戰略總結(Walrus track 新 framing 必須吸收)
 
+> **⚠️ D-029 修訂(2026-05-20):D-013 的「L2 deferred 到 v1.1」已被反轉。** L2 / NFT collection 層(nft creator 從 Model3D launch `NftCollection`,持 `NftCollectionCreatorCap` 含 register_fee + integration registry;gameDev 付費 register_integration)現在是 **v1 真實 product surface**。本節下方所有「L2 deferred」「composable 是 v2 vision」「2-actor 敘事」的描述以 D-029 + `docs/brainstorms/2026-05-19-four-role-product-realignment.md` 為準。D-013 的 Kiosk-promotion 與 narrowed-framing 部分仍有效,只有 L2-deferral 子句被反轉。pay-per-generate 同步 descope 到 v1.1(demo 用 service-funded Tripo)。
+
 **handbook 寫的 Walrus track 主題**:
 > "Build AI agents and agentic workflows powered by Walrus **as a verifiable data and memory layer**"
 

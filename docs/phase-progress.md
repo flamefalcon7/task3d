@@ -1,5 +1,28 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 — **MAJOR PIVOT: D-013 reversed (D-029). plan-007 needs restructure before U6 resumes.**
+
+### What happened this session (2026-05-20)
+
+Started `/ce-work skip to U6`, but surfaced a role-coherence problem → paused U6 → ran `/ce-brainstorm` (four-role realignment) → `/ce-doc-review` (7 personas) → a design discussion that ended in a **foundational scope reversal**:
+
+- **D-029 supersedes D-013.** The L2 / NFT collection layer is un-deferred and is now real v1 product surface. Four real actors: mesh creator (Model3D) → nft creator (`launch_collection` → `NftCollectionCreatorCap` holding `register_fee` + integration registry) → gameDev (pays `register_fee` → `register_integration`) → user. ADR written; D-013 status flipped; spec.md §1.7 banner added; brainstorm doc rewritten at `docs/brainstorms/2026-05-19-four-role-product-realignment.md`.
+- **Recorded ROI dissent:** agent assessed this as low hackathon-ROI (hurts the 70%-weighted Real-World Application + Product/UX axes; reverses D-013 on first-principles; +6.5–11.5 net dev-days against ~23–24 working days → buffer −5 to +4.5). User chose path A with eyes open. **Mandatory descope order is in the brainstorm doc's Scope Boundaries.**
+- **Pay-per-generate descoped to v1.1** (demo uses service-funded Tripo). Procedural generation removed.
+- doc-review walk-through was concluded early (its findings were against the pre-reversal premise). Surviving findings folded into the rewritten brainstorm doc (app_metadata XSS, working-day budget, descope order, demo honesty disclosure, OQ-019 cross-ref, route redirects).
+
+### Next Concrete Step (2026-05-20)
+
+**Run `/ce-plan docs/plans/2026-05-19-007-feat-phase-4-kiosk-race-on-mint-plan.md`** to restructure plan-007 from U6 onward for the collection layer. Two **Resolve-Before-Planning** questions block unit decomposition (in the brainstorm doc's Outstanding Questions):
+1. `NftCollection` ↔ `Model3D` ↔ Kiosk relationship — what is the sellable unit (collection vs minted NFT tokens vs Model3D)? Determines the batch-mint surface + what "buy" returns.
+2. Is `register_integration` coupled to ownership (must the gameDev own the asset)?
+
+Resolve those two first (likely a short focused brainstorm or a plan-mode discussion), then decompose. Carry the mandatory descope order into the plan as explicit drop-priority.
+
+Nothing committed yet — decisions.md, spec.md, brainstorm doc, this file are all modified-uncommitted. Suggest committing the docs pivot before starting ce-plan.
+
+---
+
 ## Last Updated: 2026-05-19 late — **plan-007 U5 landed (commit `20ec24d`). 5/14 units complete; typed PTB builder ships 6-call chain (was claimed 5; framework-docs review caught missing `kiosk_lock_rule::prove` + PersonalKioskCap `borrow_val`/`return_val` wrapping → 8 PTB Move calls total). 298/298 frontend tests + tsc clean + live testnet dry-run green.**
 
 ### Hackathon Tracker

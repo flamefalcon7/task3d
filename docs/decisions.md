@@ -432,7 +432,7 @@ User's correct intuition: 2-service split is the right separation of concerns. W
 
 ## D-013: v1 scope refocus — cut L2 Derivative, promote Kiosk, narrow framing to Sui-native 3D NFT economy
 
-**Status**: Accepted
+**Status**: Superseded by D-029 (2026-05-20 — L2 collection layer un-deferred; nftCreator becomes a real v1 actor). The Kiosk-promotion and narrowed-framing parts of this decision still hold; only the "L2 deferred to v1.1" clause is reversed.
 **Date**: 2026-05-14
 **Phase**: Pre-Phase-1 strategy (refines v1 scope from D-001 + D-002)
 **Relates to**: D-001 (v1 narrows framing; v2 vision unchanged), D-002 (L2 layer deferred to v1.1), D-003 (license policy unchanged at type level; not exposed in v1 UI), D-005 (snapshot immutability still applies when L2 ships in v1.1)
@@ -1466,6 +1466,65 @@ WAL acquisition must complete by 8/19 at latest (8 days before 8/27) to remove "
 
 ---
 
+## D-029: Four-role realignment — reverse D-013, ship NFT collection layer + integration registry in v1
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Supersedes**: D-013 (un-defers L2; nftCreator becomes a real v1 actor)
+**Relates to**: D-001 (v2 composable-economy vision pulled into v1), D-002 (L2 layer revived ahead of v1.1), D-003 (license.policy now exposed in UI), D-014 (pay-per-generate supersedes creator-self-pays-Tripo, but is itself descoped — see below)
+
+### Context
+
+A `/ce-brainstorm` triggered mid-`/ce-work` (plan-007 U6 dispatch) to realign the product around four named roles: **mesh creator** (makes a Model3D), **nft creator** (launches an NFT collection from a specific Model3D), **gameDev** (integrates collections into games), **user** (collects/uses). The brainstorm initially resolved to keep D-013 (L2 deferred) and treat nftCreator/gameDev as pitch-narrative only. A 7-persona `/ce-doc-review` then ran; during the finding walk-through the user clarified that register fees and the integration registry are an **NFT-collection-level** concern, not a base-Model3D concern — which only makes sense if the NFT collection layer is real in v1.
+
+The user was presented an explicit hackathon-ROI assessment arguing **against** building the full L2 collection layer for 6/21 (Real-World Application 50% + Product/UX 20% — the 70% majority — reward concrete traction + polish, which more unvalidated surface does not provide; the layer reverses D-013 on first-principles with no new evidence; +5–10 dev-days against a ~23–24 working-day window). The recommendation was path B (creator-held cap, no second tier, no D-013 reversal) for 6/21 with the full layer as a 7/22–8/27 mainnet-window build. **The user chose path A with eyes open** — full collection layer into 6/21.
+
+### Decision
+
+Ship the NFT collection layer as real v1 product surface for the 6/21 submission:
+
+1. **mesh creator** publishes a `Model3D` (base mesh, unchanged from D-002 / Phase 4 v2 contract).
+2. **nft creator** calls `launch_collection(model_id, ...)` to launch an `NftCollection` based on a specific `Model3D`, receiving an **`NftCollectionCreatorCap`**. The cap holds the collection's **fee setup** (the `register_fee`) and **integration registry**. The collection creator may differ from the mesh creator (second-party fork — the L2 economics D-013 cut).
+3. **gameDev** calls `register_integration(collection, payment, app_metadata, ...)`, paying `register_fee` (routed to the cap holder) to record an integration in the collection's registry. `app_metadata` is length-bounded + schema-constrained (name + url), rendered text-node-only (no innerHTML) — per the security-lens review finding.
+4. **`license.policy`** is exposed in v1 UI (mint radio + Browse filter), gating whether a collection accepts integrations.
+
+Coupled decisions folded into this ADR:
+
+- **Pay-per-generate is descoped to v1.1 / mainnet window.** 6/21 demo uses service-funded Tripo (team absorbs cost, 0 dev-days, demo arc identical). This supersedes D-014's creator-self-pays model but defers the on-chain pay-per-generate backend (replay protection, session binding, refund semantics all move with it). Recovered ~4–5 dev-days are reallocated to the collection layer.
+- **Procedural generation is removed** (TypeScript generators in `backend/src/generators/` + router); Tripo is the only generation path. `/generate` route + `CreatorFlow.tsx` delete.
+
+### Rationale
+
+- User's strategic call: a concrete, demonstrable composable creator economy (vs the aspirational framing D-013 flagged as risk-prone) plus the technical depth of a Model3D → NftCollection → Cap → registry object graph with on-chain fee routing — strong on the Vision (10%) and Technical (20%) judging axes.
+- The cap-based pattern is idiomatic Sui Move (owner-held capability gates privileged ops); fee + registry on the cap (not the base Model3D) cleanly matches "fee is collection-level, set by whoever launched the collection."
+- register_fee is simultaneously anti-spam (paid registration), monetization (creators earn from game integrations), and self-loop mitigation (paid integration is more credible than a free flag).
+
+### Alternatives Considered
+
+- **Path B — creator-held cap, single creator tier, no D-013 reversal.** mesh creator launches their own collection + holds the cap; no second-party fork. ~2–4 dev-days, captures ~80% of the value, keeps D-013. Recommended by the agent for 6/21. Rejected by user in favor of the full two-tier model.
+- **Path C — status quo (register_integration on Model3D, no fee, nftCreator pitch-only).** Cheapest; rejected — does not satisfy the "fee is NFT-collection-level" intent.
+- **Build path A but in the 7/22–8/27 mainnet window** (the timing-arbitrage from the ideation seed S1: 6/21 = pitch artifact, 8/27 = feature ship). Rejected by user, who wants it in the 6/21 submission.
+
+### Consequences
+
+- ✅ Concrete L2 actor makes the "composable creator economy" pitch demonstrable, not hand-wave (directly addresses the framing risk D-013 named)
+- ✅ Idiomatic capability + fee-routing design showcases Sui-native depth
+- ⚠️ +5–10 dev-days against a ~23–24 working-day window; pay-per-generate descope recovers ~4–5 but net scope still grows. **6/21 deadline risk is HIGH.**
+- ⚠️ **Reverses D-013 on first-principles with no new user evidence** — the exact pattern D-013's reasoning warns against. Recorded ROI dissent: the agent assessed this as low hackathon-ROI (hurts the 70% of scoring weighted on Real-World Application + Product/UX); user proceeded knowingly.
+- ⚠️ Demo requires real external mesh creator / nft creator / gameDev actors, or an explicit honesty disclosure that the four archetypes are team-controlled wallets for 6/21 (per adversarial + product-lens review findings).
+- ⚠️ Mandatory contingency: an explicit descope order for worst-case (recommend: collection-layer UI polish → register_fee mechanics → narrative-only, cut in that order if buffer hits zero).
+- 🔮 Re-opens the v1/v1.1 boundary; spec.md §1.7 + plan-007 (U6 onward) require restructuring before implementation resumes.
+
+### Related
+
+- Supersedes: [[D-013]]
+- spec.md section: §1.7 (L2-deferred framing must be rewritten to L2-in-v1)
+- `docs/brainstorms/2026-05-19-four-role-product-realignment.md` (the brainstorm; revised to reflect this decision)
+- Related decisions: [[D-001]], [[D-002]], [[D-003]], [[D-014]], [[D-028]]
+
+---
+
 # Reserved Decision Numbers
 
-D-029 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-030 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
