@@ -68,7 +68,7 @@ D-013 had deferred exactly this layer (L2) to v1.1 on the grounds that 3D has no
 
 **Role framing**
 - R1. The product ships four real actors (mesh creator, nft creator, gameDev, user). nftCreator and gameDev are product surfaces with their own flows — no longer pitch-narrative only (reverses the pre-revision R1/R2; per D-029)
-- R2. The base/derivative split is explicit: `Model3D` is base mesh (mesh creator); `NftCollection` is launched from a Model3D (nft creator). The two creators may be different people
+- R2. The base/derivative split is explicit: `Model3D` is base mesh (mesh creator); `NftCollection` is launched from a Model3D (nft creator). The two creators may be different people. **Two sale paths coexist:** L1 direct purchase of a `Model3D` (existing `purchase_with_kiosk`, unchanged) and L2 purchase of collection NFT tokens (new, additive). nft creator pays-to-derive; mesh creator keeps the base + earns royalty (Fork A)
 
 **mesh creator flow**
 - R3. mesh creator generation goes through Tripo only; procedural generators (`backend/src/generators/` + `agent/router.ts` + ShapePicker) are removed. No Go backend exists (dropped at D-012)
@@ -78,7 +78,7 @@ D-013 had deferred exactly this layer (L2) to v1.1 on the grounds that 3D has no
 
 **nft creator collection layer**
 - R7. A Move entry fn `launch_collection(model_id, terms, ctx)` launches an `NftCollection` tied to a base `Model3D` and transfers an `NftCollectionCreatorCap` to the caller
-- R8. The `NftCollectionCreatorCap` holds the collection's `register_fee` (settable by the cap holder) and is the authority for the collection's integration registry
+- R8. The `NftCollectionCreatorCap` holds the collection's `register_fee` (settable by the cap holder) and is the authority for the collection's integration registry. The cap is **key-only (soulbound)** — re-anchoring the spec.md §1.7 #3 "soulbound by Move ability" selling point now that `Access` is cut
 - R9. The nft creator sets/updates `register_fee` via a cap-gated entry fn (only the cap holder can change it)
 - R10. The collection is listable on Kiosk; secondary-sale royalty continues to route via the existing TransferPolicy
 - R11. The integration registry is owned by / addressable through the collection (or its cap); it is the source of truth for the "Used by" reverse lookup
@@ -100,6 +100,7 @@ D-013 had deferred exactly this layer (L2) to v1.1 on the grounds that 3D has no
 
 **Frontend cleanup**
 - R21. `/generate` route + `creator/CreatorFlow.tsx` + procedural UI delete. The mint flow consolidates to one canonical page (closes OQ-019; the OQ-019 grep gate is the acceptance check). `/generate` and `/forge` issue redirects to the canonical route — per design-lens review
+- R22. Delete the dead `Access` surface: the `Access` struct + its accessors (`access_target_id` / `access_holder` / `access_expires_at_ms`) + `destroy_access_for_testing` in `model3d.move`, plus any frontend `useOwnedVariants` Access-based discovery path. v2 already flagged `Access` as a no-op (no constructor since Phase 2's `mint_model_access` was stripped); this formalizes the deletion the contract scheduled for U10. Ownership of the `key + store` NFT token is the purchase receipt
 
 ---
 
@@ -158,6 +159,13 @@ The realignment makes the 6/21 buffer thin-to-negative (see Dependencies). If bu
 - **Pay-per-generate descoped to v1.1**; 6/21 uses service-funded Tripo (supersedes D-014's creator-self-pays)
 - **`license.policy` exposed in v1 UI** (mint radio + Browse filter); gates collection integration eligibility
 - **register_fee + integration registry live on the `NftCollectionCreatorCap`, not on Model3D** — fee is collection-level, set by the launching nft creator; resolves the "NFT-level not model-level" requirement
+
+**Resolved architecture (2026-05-20, the two prior Resolve-Before-Planning questions):**
+
+- **Fork A — pay-to-derive (not buy-to-own).** nft creator pays a derive fee to `launch_collection`; the mesh creator **retains the base Model3D and earns ongoing royalty** on the collection's sales (base_royalty_bps snapshot at launch, ≤30% cap per D-004). This is the composable-IP economy; buy-to-own was rejected (one-shot sale kills the protocol-level perpetual-royalty story)
+- **Fork B — tradeable NFT tokens; L1 direct + L2 collection coexist.** Users buy `key + store` NFT tokens minted from a collection (resellable on Kiosk, royalty enforced on resale). The existing L1 direct-purchase path (`purchase_with_kiosk` selling Model3D, U4/U5) **stays unchanged**; the L2 collection-token path is **additive**, not a replacement
+- **Fork B' — soulbound `Access` is cut.** v2 already flagged `Access` as a dead no-op surface (no entry fn constructs it; only a test helper references it; scheduled for U10 deletion). We delete it now (struct + accessors + test helper). The "soulbound by Move ability" pitch point (spec.md §1.7 #3) **re-anchors to a key-only `NftCollectionCreatorCap`** — a more natural fit than a soulbound receipt alongside tradeable tokens
+- **Fork C — register_integration is not coupled to ownership.** Gated by `register_fee` payment only (B2B integration license at the collection level); the gameDev does not need to own a token. register_fee + per-pair uniqueness are the anti-spam controls
 - **Budget recomputed in working days** (see Dependencies) with a mandatory descope order (Scope Boundaries) — per scope-guardian review
 - **Move package: adding `launch_collection` / `register_integration` as new entry fns is upgrade-compatible**, but `NftCollection` / `NftCollectionCreatorCap` are new structs (additive, also upgrade-safe). Whether any change touches the existing `Model3D` struct (forcing a v3 republish) is a plan-time question — default to keeping Model3D unchanged
 
@@ -177,8 +185,7 @@ The realignment makes the 6/21 buffer thin-to-negative (see Dependencies). If bu
 
 ### Resolve Before Planning
 
-- [Affects R7-R11][Architecture] `NftCollection` ↔ `Model3D` ↔ Kiosk relationship: is the sellable Kiosk item the `NftCollection`, individual NFT tokens minted from it, or the `Model3D` itself? This determines the batch-mint surface and what "buy" returns. (The pre-revision doc had no NFT tokens; D-029 introduces the collection but the token-vs-collection sale unit is unresolved and blocks unit decomposition.)
-- [Affects R12][Architecture] Does `register_integration` require the gameDev to also own/buy the asset, or can any payer register? Determines whether integration and purchase are coupled.
+- (none — the two architecture questions were resolved 2026-05-20; see Key Decisions "Resolved architecture": sellable unit = L1 Model3D direct + L2 collection NFT tokens, coexisting; register_integration is fee-gated, not ownership-coupled.)
 
 ### Deferred to Planning
 
