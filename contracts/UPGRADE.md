@@ -11,7 +11,7 @@ This file applies to **mainnet** upgrades. Testnet republishes are cheap and aba
 Sui supports `additive` and `dep_only` compatible upgrades. For struct fields the rule is narrower than "append-only":
 
 - **`copy + drop` structs (e.g. events like `RoyaltyPaid`, `ModelPublished`)** — **fields cannot be added or removed.** Compatibility is by exact layout. To extend an event, define `RoyaltyPaidV2` alongside and emit both for one upgrade window, then deprecate the old one after indexers migrate. Never edit the old struct in place.
-- **`key` objects (`Model3D`, `Access`)** — **fields cannot be added or removed** on an existing struct in a compatible upgrade. The struct layout is part of the on-chain object representation; changing it would invalidate all existing instances. Add a sibling `Model3DV2` struct + new entry fn if a layout change is required, and keep the old `Model3D` accessors functional until indexers migrate.
+- **`key` objects (`Model3D`, `NftCollection`)** — **fields cannot be added or removed** on an existing struct in a compatible upgrade. The struct layout is part of the on-chain object representation; changing it would invalidate all existing instances. Add a sibling `Model3DV2` struct + new entry fn if a layout change is required, and keep the old `Model3D` accessors functional until indexers migrate. **Deleting a public struct entirely (e.g. `Access` in v3) is also breaking** — it removes type and accessor symbols from the ABI, so it forces a fresh package publish, never a compatible upgrade.
 - **`store + copy + drop` value types (e.g. `LicenseTerms`)** — same rule. Editing the field list of a struct held by other live objects breaks deserialization of those objects on read. If `LicenseTerms` needs another field, add `LicenseTermsV2` + a `new_license_terms_v2` constructor + accessor overloads.
 
 The "additive" upgrade flavor refers to **adding new public functions, new public structs, and new public constants** — **not** mutating existing struct layouts.
@@ -43,6 +43,8 @@ The "additive" upgrade flavor refers to **adding new public functions, new publi
 A compatible upgrade publishes under a **new `published-at` PackageID** but preserves the **`original-id`** (the first-ever PackageID for this package). Indexers should track `original-id` for cross-upgrade joins. A breaking change publishes a brand new package with a brand new `original-id`; from a client perspective it is a different package.
 
 The Phase 2 → Phase 4 jump on testnet was a breaking change (Model3D ability set changed from `has key` to `has key, store`). We could not upgrade in place; we re-published under a new PackageID and abandoned the Phase 2 testnet objects.
+
+The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a **breaking change, not a compatible upgrade**: v3 *deletes* the public `Access` struct + its accessors (`access_target_id` / `access_holder` / `access_expires_at_ms`) + `destroy_access_for_testing`. Removing public ABI symbols is incompatible, so v3 republishes under a fresh `original-id` (U5). This is low-cost now — the frontend is not yet migrated off the obsolete Phase-2 flow and no demo pre-bake exists, so there is no v2 on-chain state worth preserving. v3 *adds* `NftCollection` / `NftCollectionCreatorCap` / `NftToken` / `launch_collection` / `set_register_fee` / `register_integration` / `mint_nft_token` (all additive on their own — only the `Access` deletion forces the republish).
 
 ---
 

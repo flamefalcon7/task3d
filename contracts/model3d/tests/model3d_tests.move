@@ -28,6 +28,8 @@ use foreign_witness::foreign_witness;
 use model3d::model3d::{
     Self,
     Model3D,
+    NftCollection,
+    NftCollectionCreatorCap,
     new_license_terms,
     policy_permissionless,
     policy_restricted,
@@ -43,7 +45,12 @@ use model3d::model3d::{
     ensure_creator_kiosk,
     mint_and_list,
     purchase_with_kiosk,
+    launch_collection,
+    destroy_collection_for_testing,
+    destroy_collection_cap_for_testing,
 };
+
+const NFT_CREATOR: address = @0xD15C0;
 
 const CREATOR: address = @0xC0FFEE;
 
@@ -1375,6 +1382,160 @@ fun personal_kiosk_rule_blocks_vanilla_kiosk_purchase() {
     sc.return_to_sender(personal_cap);
     ts::return_shared(kiosk);
     ts::return_shared(policy);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// === D-029 U1 — launch_collection (pay-to-derive, Fork A) ===
+
+// Build a base Model3D owned by CREATOR with a caller-chosen license. Returns
+// the model by value (the caller keeps it for the duration of the test).
+#[test_only]
+fun mint_base_model(
+    system: &mut System,
+    clk: &clock::Clock,
+    license: model3d::LicenseTerms,
+    ctx: &mut tx_context::TxContext,
+): Model3D {
+    let b = mint_blob(system, ctx);
+    new_model(
+        b,
+        s(b"car"),
+        s(b"{\"variant\":1}"),
+        s(b"BaseCar"),
+        make_tags(1),
+        s(b"lineageBlobBase"),
+        false,
+        license,
+        clk,
+        ctx,
+    )
+}
+
+// Covers AE1: launch_collection with a 0-fee base → one shared NftCollection
+// tied to base_model_id, one soulbound cap owned by the caller, register_fee == 0,
+// snapshots match the base license. (0-fee path: no derive payment moves.)
+#[test]
+fun launch_collection_creates_collection_and_soulbound_cap() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    // 0 derive fee, permissionless, 500 bps derivative royalty.
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+    let model_id = object::id(&model);
+
+    sc.next_tx(NFT_CREATOR);
+    // Even at fee 0 the entry fn takes a Coin<SUI>; a zero coin is valid.
+    let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
+    launch_collection(&model, payment, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+
+    assert!(model3d::collection_base_model_id(&collection) == model_id, 300);
+    assert!(model3d::collection_base_creator(&collection) == CREATOR, 301);
+    assert!(model3d::collection_base_policy(&collection) == policy_permissionless(), 302);
+    assert!(model3d::collection_base_royalty_bps(&collection) == 500, 303);
+    assert!(model3d::collection_register_fee(&collection) == 0, 304);
+    assert!(model3d::cap_collection_id(&cap) == object::id(&collection), 305);
+    // Soulbound proof is compile-time: `transfer::public_transfer(cap, …)` here
+    // would NOT compile because NftCollectionCreatorCap lacks `store`.
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Pay-to-derive: a non-zero derivative_mint_fee is routed to the base creator;
+// the remainder of the payment returns to the caller.
+#[test]
+fun launch_collection_routes_derive_fee_to_base_creator() {
+    let fee: u64 = 2_000_000;
+    let extra: u64 = 500_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_permissionless(), fee, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(fee + extra, sc.ctx());
+    launch_collection(&model, payment, sc.ctx());
+
+    // Base creator (CREATOR) received exactly the derive fee.
+    sc.next_tx(CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&fee_coin) == fee, 310);
+    coin::burn_for_testing(fee_coin);
+
+    // Caller (NFT_CREATOR) received the remainder.
+    sc.next_tx(NFT_CREATOR);
+    let change = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&change) == extra, 311);
+    coin::burn_for_testing(change);
+
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Covers AE7: a restricted base records base_policy == POLICY_RESTRICTED (0).
+#[test]
+fun launch_collection_snapshots_restricted_policy() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_restricted(), 0, 0, false, false);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
+    launch_collection(&model, payment, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let collection = sc.take_shared<NftCollection>();
+    assert!(model3d::collection_base_policy(&collection) == policy_restricted(), 320);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Underpaying the derive fee aborts with EInsufficientDeriveFee (35).
+#[test]
+#[expected_failure(abort_code = model3d::EInsufficientDeriveFee)]
+fun launch_collection_aborts_when_payment_below_fee() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_permissionless(), 1_000_000, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(999_999, sc.ctx());
+    launch_collection(&model, payment, sc.ctx()); // aborts
+
+    // Unreachable — kept so the borrow checker is satisfied.
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
     system.destroy_for_testing();
     sc.end();
 }
