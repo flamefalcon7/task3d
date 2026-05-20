@@ -750,6 +750,19 @@ public entry fun launch_collection(
     transfer::transfer(cap, ctx.sender());
 }
 
+// Cap holder sets/updates the collection's `register_fee` (the SUI a gameDev
+// pays to `register_integration`). Authority is the matching soulbound cap;
+// `fee == 0` is valid (free integration). Setting the fee does not touch the
+// integration registry — only future `register_integration` calls read it.
+public entry fun set_register_fee(
+    cap: &NftCollectionCreatorCap,
+    collection: &mut NftCollection,
+    fee: u64,
+) {
+    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+    collection.register_fee = fee;
+}
+
 // === RoyaltyPaid accessors (test-only — production indexers parse via BCS) ===
 
 #[test_only] public fun royalty_paid_buyer(e: &RoyaltyPaid): address { e.buyer }

@@ -46,6 +46,7 @@ use model3d::model3d::{
     mint_and_list,
     purchase_with_kiosk,
     launch_collection,
+    set_register_fee,
     destroy_collection_for_testing,
     destroy_collection_cap_for_testing,
 };
@@ -1534,6 +1535,82 @@ fun launch_collection_aborts_when_payment_below_fee() {
     launch_collection(&model, payment, sc.ctx()); // aborts
 
     // Unreachable — kept so the borrow checker is satisfied.
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// === D-029 U2 — set_register_fee (cap-gated) ===
+
+// Matching cap sets the fee; a subsequent read reflects it. Setting to 0 is
+// allowed (free integration is a valid configuration).
+#[test]
+fun set_register_fee_with_matching_cap_updates_fee() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
+    launch_collection(&model, payment, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let mut collection = sc.take_shared<NftCollection>();
+
+    set_register_fee(&cap, &mut collection, 7_000_000);
+    assert!(model3d::collection_register_fee(&collection) == 7_000_000, 330);
+
+    // Fee 0 is explicitly allowed.
+    set_register_fee(&cap, &mut collection, 0);
+    assert!(model3d::collection_register_fee(&collection) == 0, 331);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// A cap from a DIFFERENT collection cannot set this collection's fee.
+#[test]
+#[expected_failure(abort_code = model3d::EWrongCollectionCap)]
+fun set_register_fee_with_mismatched_cap_aborts() {
+    let second_creator: address = @0xBEEF;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    // Collection A — cap to NFT_CREATOR.
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+    // Collection B — cap to second_creator.
+    sc.next_tx(second_creator);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let cap_a = sc.take_from_sender<NftCollectionCreatorCap>();
+    sc.next_tx(second_creator);
+    let cap_b = sc.take_from_sender<NftCollectionCreatorCap>();
+
+    // Borrow collection B by its id (the one cap_b authorizes).
+    let id_b = model3d::cap_collection_id(&cap_b);
+    let mut collection_b = ts::take_shared_by_id<NftCollection>(&sc, id_b);
+
+    // cap_a does NOT authorize collection_b → abort EWrongCollectionCap.
+    set_register_fee(&cap_a, &mut collection_b, 5);
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(cap_a);
+    destroy_collection_cap_for_testing(cap_b);
+    destroy_collection_for_testing(collection_b);
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
