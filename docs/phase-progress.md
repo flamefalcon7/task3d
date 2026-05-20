@@ -1,5 +1,33 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U6 SHIPPED) — **collectionTxBuilders.ts done. Next = U7 backend indexer OR U9/U10 frontend migration.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+**U6 — `frontend/src/sui/collectionTxBuilders.ts` (NEW) + `.test.ts`.** Typed PTB builders for the 4 collection-layer entry fns, mirroring `kioskTxBuilders.ts` (TxResult<T> envelope, struct-arg discipline, RPC-reachability test leg):
+- `buildLaunchCollectionPtb({ modelId, feeMist })` — `tx.object(modelId)` (shared Model3D per D-032) + fee split from gas; CollectionLaunched.
+- `buildSetRegisterFeePtb({ capId, collectionId, feeMist })` — cap-gated, no event.
+- `buildMintNftTokenPtb({ capId, collectionId, kioskId, personalKioskCapId, name, priceMist })` — NftTokenMinted + kiosk::ItemListed<NftToken>.
+- `buildRegisterIntegrationPtb({ collectionId, feeMist, appMetadata })` — fee split from gas, `app_metadata` as `vector<u8>`, clock 0x6; IntegrationRegistered.
+
+Choices: fee paid via `tx.splitCoins(tx.gas, [feeMist])` (Move refunds excess) — callers pass `feeMist`, not a pre-split coin. No `@mysten/kiosk` dep (these 4 builders are pure moveCalls). **10/10 vitest green; `pnpm exec tsc -b` clean** (note: bare `npx tsc` grabs an older TS that errors on tsconfig options — use `pnpm exec`).
+
+### Not done in U6 (deferred, by design)
+- `set_integration_policy` builder — trivial sibling of set_register_fee; add in U12 if the nft-creator page needs it.
+- NftToken **buyer/resale** PTB (the 6-call Kiosk chain) — not in U6's 4-fn scope; a later buyer-flow unit.
+- Obsolete `kioskTxBuilders.ts` (dead Model3D mint/purchase) NOT deleted — still TS-compiles (string targets); U9/U10 remove it + migrate L1 to `publish` + `take_shared<Model3D>`.
+
+### Next Concrete Step
+Pick up **U7** (backend SuiClient + single-topic `IntegrationRegistered` indexer + `app_metadata` schema + Used-by API) **or** jump to **U9/U10** (procedural removal + canonical mint page on `publish`). U7 unblocks U14's "Used by"; U9/U10 unblock the demo's L1 story. Suggest U10 next if prioritizing demo-visible path.
+
+### Blockers / Open Questions
+- Uncommitted: `collectionTxBuilders.ts` + `.test.ts` + this file. Suggest commit.
+
+---
+
 ## Last Updated: 2026-05-20 (U5 SHIPPED) — **v3 republished to testnet (D-032). Next = U6 frontend builders.**
 
 ### Hackathon Tracker
