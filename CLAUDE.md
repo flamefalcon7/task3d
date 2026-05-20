@@ -154,9 +154,9 @@ project-root/
 │   ├── open-questions.md       # Unresolved questions
 │   ├── plans/                  # plan-mode outputs for substantial features
 │   └── solutions/              # documented solutions to past problems (bugs, patterns, decisions), organized by category with YAML frontmatter (module, tags, problem_type) — relevant when implementing or debugging in documented areas
-├── backend/                    # TS Node + Hono (procedural generators + LLM router, D-012)
+├── backend/                    # TS Node + Hono (Tripo dispatch + Sui/Walrus read path, D-012)
 ├── frontend/                   # React + Vite + Babylon (imperative)
-├── shared/                     # types shared by browser + backend (Generator, GenerateParams, LineageRecord)
+├── shared/                     # types shared by browser + backend (Generator, TripoParams, LineageRecord)
 ├── contracts/                  # Sui Move package model3d::model3d
 ├── samples/                    # Sample game scene (Phase 3 deliverable)
 └── pitch/                      # Pitch deck, demo video script, screenshots (Phase 3+)
@@ -170,7 +170,7 @@ Implementation directories (`backend/`, `frontend/`, etc.) will be created in Ph
 
 (Authoritative versions and gotchas in `docs/spec.md` §4. Pin all `@mysten/*` to **2026-05-08 release train**.)
 
-- **Backend** (D-012): Node 22 LTS (or Bun 1.2.x) + Hono + `@gltf-transform/core` + `@anthropic-ai/sdk` + `@mysten/sui` + `zod`
+- **Backend** (D-012): Node 22 LTS (or Bun 1.2.x) + Hono + `@gltf-transform/core` + `@mysten/sui` + `zod` (`@anthropic-ai/sdk` dropped per D-023 — no LLM router)
 - **Frontend**: React + Vite + TypeScript, `@babylonjs/core` (imperative — **NOT `react-babylonjs`**, drop per D-007)
 - **Wallet / Auth**: `@mysten/dapp-kit` + `@mysten/enoki` (zkLogin) + `@mysten/slush-wallet`
 - **Storage**: `@mysten/walrus` + `@mysten/walrus-wasm`, **upload relay required for browser**
@@ -200,10 +200,9 @@ L3  Access        — Soulbound receipt of paid access (`key` only, no `store`)
 
 ## 🎯 Core Constraints
 
-- Input restricted to predefined shape categories (no free-form NL)
-- Procedural generation in Go (zero per-call AI API cost)
-- Low poly, manifold mesh, rigid-body friendly
-- Preview < 2s end-to-end
+- Content sources: Tripo prompt-mode (free-form NL, D-023) + user GLB upload (D-033). Procedural generation removed in U9 (was Go, then TS; D-033 supersedes the original "predefined shape categories" + "procedural generation" constraints)
+- Tripo prompt-mode is SUI-fee-gated (D-034); GLB upload validated for format + size
+- Low poly, manifold mesh, rigid-body friendly (best-effort for uploaded GLBs — D-033)
 - Login required before mint (preview can be open)
 - **1-layer derivation only** (D-002); royalty hard-capped at 30% (D-004)
 - **GLB only for v1** (no FBX/USDZ per D-006)
