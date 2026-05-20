@@ -15,6 +15,8 @@ import {
 import { TripoClient } from './lib/tripo-client.js';
 import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
 import { buildAuthRoute } from './routes/auth.js';
+import { createIntegrationIndexer } from './events/integrationIndexer.js';
+import { getSuiClient } from './sui/client.js';
 
 // D-023: LLM routing dropped. HardcodedRouter handles both slider mode
 // (procedural shapes) and prompt mode (direct dispatch to Tripo). Tripo is
@@ -72,7 +74,15 @@ const port = Number(process.env.PORT ?? 3001);
 // against the dev server.
 const invokedDirectly = import.meta.url === `file://${process.argv[1]}`;
 if (invokedDirectly) {
-  serve({ fetch: buildServerApp().fetch, port }, (info) => {
+  // U7: start the single-topic IntegrationRegistered poller and wire its
+  // "Used by" reads into the app. Only here (not in buildServerApp) so test
+  // imports don't kick off live polling.
+  const indexer = createIntegrationIndexer({ client: getSuiClient() });
+  indexer.start();
+  const jwt = buildJwt();
+  const app = buildApp({ router: buildRouter(), jwt, integrationIndexer: indexer });
+  app.route('/api/auth', buildAuthRoute({ jwt }));
+  serve({ fetch: app.fetch, port }, (info) => {
     // eslint-disable-next-line no-console
     console.log(`backend listening on http://localhost:${info.port}`);
   });

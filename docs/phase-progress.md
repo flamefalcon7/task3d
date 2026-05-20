@@ -1,5 +1,30 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U7 SHIPPED) — **backend on-chain read path done. Next = U8 (browse policy) / U9 / U10.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+**U7 — backend's first on-chain read capability, from zero.** Four new modules + tests, wired into the Hono app:
+- `backend/src/sui/client.ts` — `SuiJsonRpcClient` (D-019); reads `model3d_package_id` from `contracts/networks/testnet.json` via `fs` at load (single source of truth, no second mirror). Env `SUI_RPC_URL` override.
+- `backend/src/lib/appMetadataSchema.ts` — `parseAppMetadata`: exact `{name,url}`, name ≤64 codepoints + NFC + reject control/format/bidi/zero-width/surrogate/private-use, url ≤256 + **https-only**. (Residual: full homoglyph-confusables table out of scope — invisible/bidi class is rejected, visually-confusable printable homoglyphs are not.)
+- `backend/src/events/integrationIndexer.ts` — self-contained single-topic poll (2s) of `IntegrationRegistered`; per event resolves `app_metadata` from the collection's `integrations` Table (getObject→Table UID cached, getDynamicFieldObject→record; vector<u8> accepted as base64 or number[]), validates, drops invalid. In-memory `Map<collectionId, Map<integrator, record>>` + cursor. Client injected → mock-tested (testnet has zero registrations).
+- `backend/src/api/collections.ts` — `GET /api/collections/:id/integrations`; `:id` regex-validated; coarse per-IP fixed-window limiter (60/min); returns `{integrations:[{name,url,integrator,registered_at_ms}]}`.
+- `app.ts` mounts `/api/collections` (empty-indexer fallback); `server.ts` creates + `.start()`s the live indexer only on direct invoke (not in test imports).
+
+**25 new tests; full backend suite 157/157 green; `pnpm exec tsc --noEmit` clean.**
+
+### Next Concrete Step
+**U8** (Browse query carries `license.policy`, client-side) or **U9/U10** (procedural removal + canonical mint page on `publish`). For the demo's L1 path, U9→U10 is the higher-leverage chain. U14 ("Used by" UI) now has its backend (U7) ready.
+
+### Blockers / Open Questions
+- Uncommitted: 6 new backend files + `app.ts`/`server.ts` + this file. Suggest commit.
+- Indexer state is in-memory (restart re-scans from genesis cursor) — acceptable for demo; a real deployment needs a persisted cursor.
+
+---
+
 ## Last Updated: 2026-05-20 (U6 SHIPPED) — **collectionTxBuilders.ts done. Next = U7 backend indexer OR U9/U10 frontend migration.**
 
 ### Hackathon Tracker
