@@ -58,7 +58,7 @@ function moveCalls(tx: { getData: () => { commands: unknown[] } }) {
   return tx
     .getData()
     .commands.filter(
-      (c): c is { $kind: 'MoveCall'; MoveCall?: { module?: string; function?: string; package?: string } } =>
+      (c): c is { $kind: 'MoveCall'; MoveCall?: { module?: string; function?: string; package?: string; arguments?: unknown[] } } =>
         (c as { $kind?: string }).$kind === 'MoveCall',
     );
 }
@@ -73,6 +73,9 @@ describe('buildLaunchCollectionPtb', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.MoveCall?.function).toBe('launch_collection');
     expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // v4 arity: model, payment, quilt_blob_id (3). A dropped quiltBlobId or a
+    // transposed arg would change this count.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(3);
     expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::CollectionLaunched`]);
   });
 
@@ -105,6 +108,9 @@ describe('buildMintNftTokenPtb', () => {
     const calls = moveCalls(tx);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.MoveCall?.function).toBe('mint_nft_token');
+    // v4 arity: cap, collection, name, patch_id (4). name and patch_id are both
+    // pure.string — a transposition or a dropped arg would change this count.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(4);
     expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::NftTokenMinted`]);
     // D-036: mint no longer touches a Kiosk → no ItemListed event.
     expect(
@@ -144,6 +150,7 @@ describe('type discipline', () => {
   it('feeMist must be bigint, not string (compile-time)', () => {
     const bad: LaunchCollectionArgs = {
       modelId: FAKE_MODEL,
+      quiltBlobId: 'q',
       // @ts-expect-error — feeMist must be bigint
       feeMist: '0',
     };

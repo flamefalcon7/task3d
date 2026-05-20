@@ -525,12 +525,18 @@ public entry fun publish(
 // === ensure_creator_kiosk — the nft creator's PersonalKiosk for NftTokens ===
 
 // `ensure_creator_kiosk(ctx)` is the first-time helper for an nft creator who
-// will `mint_nft_token` (the ONLY Kiosk-traded type, D-032). It:
+// wants to LIST an owned `NftToken` for sale. Post-D-036 `mint_nft_token` does
+// NOT place into a Kiosk (it `public_transfer`s a plain owned token); Kiosk
+// placement is a separate opt-in step the creator runs only when selling (a
+// `kiosk::place_and_list<NftToken>` PTB). So this helper is a prerequisite for
+// the listing path, NOT for mint. It:
 //   1. Creates a fresh `Kiosk` + `KioskOwnerCap` via `sui::kiosk::new`,
 //   2. Wraps the `KioskOwnerCap` in a `PersonalKioskCap` via
-//      `kiosk::personal_kiosk::new` (this also sets the OwnerMarker dynamic
-//      field on the Kiosk so `personal_kiosk_rule::prove` passes for any future
-//      NftToken landed in this Kiosk),
+//      `kiosk::personal_kiosk::new` (sets the OwnerMarker dynamic field). NOTE
+//      (D-036): the `TransferPolicy<NftToken>` no longer carries
+//      `personal_kiosk_rule`, so the OwnerMarker is no longer load-bearing for
+//      policy enforcement — a plain Kiosk would also satisfy the royalty-only
+//      confirm chain. Personal kiosk is kept as the mainstream listing form.
 //   3. Shares the Kiosk (so buyers can read listings and `purchase`),
 //   4. Transfers the `PersonalKioskCap` (key-only, soulbound) to ctx.sender().
 //

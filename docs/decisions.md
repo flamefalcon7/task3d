@@ -1468,7 +1468,7 @@ WAL acquisition must complete by 8/19 at latest (8 days before 8/27) to remove "
 
 ## D-029: Four-role realignment — reverse D-013, ship NFT collection layer + integration registry in v1
 
-**Status**: Accepted
+**Status**: Accepted — *`mint_nft_token` place-and-list behavior + the lock/personal_kiosk rules in `ensure_collection_policy` superseded in part by [[D-036]] (2026-05-20)*
 **Date**: 2026-05-20
 **Phase**: 4
 **Supersedes**: D-013 (un-defers L2; nftCreator becomes a real v1 actor)
@@ -1798,7 +1798,8 @@ v3 `mint_nft_token` takes `kiosk_obj` + `personal_cap` and `place_and_list`s the
 
 - ✅ `/track` ownership discovery simplifies to "query owned objects of type `NftToken`" (no Kiosk walk — the earlier U11 wrinkle dissolves).
 - ✅ gameDev apps `getObject` the owned token directly.
-- ✅ Royalty story intact (enforced on secondary Kiosk sales — the classic royalty surface).
+- ✅ Royalty story intact for Kiosk-routed sales (the classic royalty surface).
+- ⚠️ **Royalty enforcement is now OPT-IN for the seller, not protocol-enforced.** Dropping `kiosk_lock_rule` means a bought `NftToken` is a freely-owned `key+store` object: any holder can `public_transfer` it (or sell it off-Kiosk for off-chain payment) and pay **zero** royalty. Royalty fires *only* when the seller chooses to sell through a Kiosk (`purchase` → `confirm_request`). This is the explicit, accepted D-036 tradeoff — you cannot have both a freely-usable owned token (the gameDev value prop) and protocol-enforced perpetual royalty. If forced royalty ever becomes a hard requirement, re-add `kiosk_lock_rule` (and accept the Kiosk-walk complexity). Regression vs v3, which locked tokens in-Kiosk.
 - ⚠️ Primary mint/transfer is NOT royalty-enforced (only Kiosk sales are) — accepted.
 - ⚠️ Removing rules changes the `confirm_request` hot-potato flow — the resale/buy PTB builder must satisfy exactly `royalty_rule` (see `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`).
 - ⚠️ Same v4 republish as [[D-035]]; changes `mint_nft_token` signature + U6 builder + U12.

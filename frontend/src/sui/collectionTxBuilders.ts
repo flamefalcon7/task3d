@@ -5,8 +5,10 @@
 //
 // D-032 context: `Model3D` is a SHARED object (published via `publish`), so
 // `launch_collection(model: &Model3D, …)` takes the model by a plain
-// `tx.object(modelId)` shared-object ref — any wallet can reference it. The
-// only Kiosk-traded type is `NftToken` (minted by `mint_nft_token`).
+// `tx.object(modelId)` shared-object ref — any wallet can reference it.
+// D-036: `mint_nft_token` yields a PLAIN OWNED `NftToken` (no Kiosk at mint);
+// Kiosk placement is a separate opt-in listing step (a future
+// `place_and_list<NftToken>` builder, not yet implemented).
 //
 // Payment discipline: `launch_collection` and `register_integration` each take
 // a `Coin<SUI>` by value, require `value >= fee`, and refund the remainder to
@@ -139,8 +141,9 @@ export function buildSetRegisterFeePtb(
  * `mint_nft_token(cap, collection, name, patch_id, ctx)` — cap-gated. Mints an
  * `NftToken` bound to one quilt patch (D-035) and `public_transfer`s it to the
  * caller as a PLAIN OWNED object (D-036) — NO Kiosk placement. Emits only
- * `NftTokenMinted` (no `ItemListed`). Listing-for-sale is the separate opt-in
- * `buildListNftTokenForSalePtb` path.
+ * `NftTokenMinted` (no `ItemListed`). Listing-for-sale is a separate opt-in
+ * `place_and_list<NftToken>` PTB (a dedicated builder is deferred — see
+ * plan-008 "Deferred to Follow-Up Work").
  */
 export function buildMintNftTokenPtb(
   args: MintNftTokenArgs,

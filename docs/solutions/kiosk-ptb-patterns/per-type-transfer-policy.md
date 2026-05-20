@@ -76,4 +76,4 @@ The existing `phase4_bootstrap` helper already followed this order implicitly (s
 
 ## Note
 
-`NftTokenMinted { token_id, collection_id, base_model_id, nft_creator }` was added (analog of `ModelPublished`) so the frontend/indexer and tests can resolve the minted token's id without parsing the PTB — `mint_nft_token` places the token straight into the Kiosk, so the id is otherwise not externally observable.
+`NftTokenMinted { token_id, collection_id, base_model_id, nft_creator, patch_id }` was added (analog of `ModelPublished`) as an indexer anchor. **v4 (D-036) update:** `mint_nft_token` now `public_transfer`s a plain owned token to the caller (no Kiosk placement), so the new token's object id is directly observable in the PTB effects — the event is convenience, not the only observation point. The `patch_id` field (D-035) lets an indexer resolve the variant GLB straight from the event without a follow-up `getObject`.

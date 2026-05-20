@@ -54,6 +54,11 @@ use model3d::model3d::{
 
 const GAMEDEV: address = @0x6A3E;
 
+// A buyer distinct from the nft creator — used by the resale test so the
+// "buyer takes the token out and freely owns it" invariant is verified across
+// two different addresses (not a self-purchase).
+const BUYER: address = @0xB0B;
+
 const NFT_CREATOR: address = @0xD15C0;
 
 const CREATOR: address = @0xC0FFEE;
@@ -853,6 +858,32 @@ fun launch_collection_quilt_blob_id_too_long_aborts() {
     sc.end();
 }
 
+// D-035 — a quilt_blob_id at exactly MAX_BLOB_ID_LEN (128) is accepted and
+// stored (boundary-accept companion to the 129-reject above).
+#[test]
+fun launch_collection_quilt_blob_id_at_128_accepts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), repeat_byte(ASCII_B, 128), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    assert!(string::length(model3d::collection_quilt_blob_id(&collection)) == 128, 390);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
 // === D-029 U2 — set_register_fee (cap-gated) ===
 
 // Matching cap sets the fee; a subsequent read reflects it. Setting to 0 is
@@ -1017,7 +1048,13 @@ fun mint_nft_token_yields_owned_token_with_patch_no_listing() {
 fun collection_policy_has_only_royalty_rule() {
     let mut sc = ts::begin(CREATOR);
     let (system, clk, model, policy, collection, cap) = nfttoken_bootstrap(&mut sc);
+    // Exactly one rule…
     assert!(sui::vec_set::size(tp::rules<NftToken>(&policy)) == 1, 380);
+    // …and it is specifically the royalty rule: fee_amount aborts if the
+    // royalty Config dynamic field is absent, so a non-royalty single rule
+    // would fail here rather than silently passing the count==1 check.
+    let owed = royalty_rule::fee_amount<NftToken>(&policy, 1_000_000_000);
+    assert!(owed == (1_000_000_000 * (amount_bp_default() as u64)) / 10_000, 382);
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);
@@ -1062,9 +1099,9 @@ fun mint_multiple_tokens_share_one_patch_id() {
 
 // D-036 — resale of an NftToken now runs the ROYALTY-ONLY chain: the creator
 // opt-in places+lists the owned token in their PersonalKiosk (a separate step
-// from mint), the buyer purchases, pays royalty, confirms, and TAKES the token
-// out (no lock rule → no re-lock required). Self-purchase keeps the Kiosk
-// reference unambiguous.
+// from mint), a DISTINCT buyer purchases, pays royalty, confirms, and TAKES the
+// token out (no lock rule → no re-lock required). The buyer-side assertion
+// proves cross-address ownership transfer + free use, not a self-purchase.
 #[test]
 fun nft_token_resale_runs_royalty_only_chain_and_buyer_takes() {
     let price: u64 = 1_000_000_000; // 1 SUI — above the floor crossover
@@ -1084,8 +1121,8 @@ fun nft_token_resale_runs_royalty_only_chain_and_buyer_takes() {
         kiosk::place_and_list<NftToken>(&mut kiosk, owner_cap, token, price);
     };
 
-    // Buyer purchases the listed NftToken with an exact-price payment.
-    sc.next_tx(NFT_CREATOR);
+    // A DISTINCT buyer (not the seller) purchases with an exact-price payment.
+    sc.next_tx(BUYER);
     let payment = coin::mint_for_testing<SUI>(price, sc.ctx());
     let (item, mut request) = kiosk::purchase<NftToken>(&mut kiosk, token_id, payment);
 
@@ -1103,10 +1140,19 @@ fun nft_token_resale_runs_royalty_only_chain_and_buyer_takes() {
     assert!(paid_amount == price, 354);
     assert!(returned_id == token_id, 355);
 
-    // No lock rule → the buyer holds the token directly (took it out of the sale).
-    destroy_nft_token_for_testing(item);
+    // No lock rule → the buyer holds the token by value and freely owns it.
+    // Transfer to BUYER and re-take to prove it is a plain owned object in the
+    // buyer's inbox (would be impossible if a lock rule had re-locked it).
+    transfer::public_transfer(item, BUYER);
+    sc.next_tx(BUYER);
+    let owned = sc.take_from_sender<NftToken>();
+    assert!(object::id(&owned) == token_id, 356);
+    assert!(*string::as_bytes(model3d::nft_token_patch_id(&owned)) == b"patchId01", 357);
+    destroy_nft_token_for_testing(owned);
 
-    sc.return_to_sender(personal_cap);
+    // personal_cap was taken from NFT_CREATOR; return it there (current sender
+    // is now BUYER, so return_to_sender would abort ECantReturnObject).
+    ts::return_to_address(NFT_CREATOR, personal_cap);
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);
@@ -1180,6 +1226,30 @@ fun mint_nft_token_patch_id_too_long_aborts() {
     mint_nft_token(&cap, &collection, s(b"ok"), repeat_byte(ASCII_A, 129), sc.ctx());
 
     // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    ts::return_shared(policy);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// patch_id at exactly MAX_PATCH_ID_LEN (128) is accepted and carried on the
+// minted token (boundary-accept companion to the 129-reject above).
+#[test]
+fun mint_nft_token_patch_id_at_128_accepts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, policy, collection, cap) = nfttoken_bootstrap(&mut sc);
+
+    sc.next_tx(NFT_CREATOR);
+    mint_nft_token(&cap, &collection, s(b"ok"), repeat_byte(ASCII_A, 128), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    let token = sc.take_from_sender<NftToken>();
+    assert!(string::length(model3d::nft_token_patch_id(&token)) == 128, 391);
+    destroy_nft_token_for_testing(token);
+
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);

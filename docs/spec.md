@@ -422,6 +422,8 @@ public fun new(blob: Blob, ctx: &mut TxContext) {
 > **D-031 釐清層級**:**L1 `Model3D` 賣 access(存取權,Seal-gated,v1.1)、L2 `NftToken` 賣 ownership(擁有權,Kiosk + royalty,v1)**。`LicenseTerms.policy` 是 L1 的**存取控制**維度(RESTRICTED = 僅 creator、ALLOW_LIST = creator + 付費存取者、PERMISSIONLESS = 任何人),其**真正執行需要 Seal**(加密 Walrus blob + `seal_approve` 驗 access 收據)→ **排 v1.1**;v1.1 會重新引入一個 access-receipt(即 R22 刪掉的 `Access` 的 analog)。
 >
 > **⚠️ D-032 定案(2026-05-20)**:`Model3D` 改回 **shared object**(`publish`,非 Kiosk)。L1 的 Kiosk 路徑(`mint_and_list` / `purchase_with_kiosk` / `TransferPolicy<Model3D>` / `RoyaltyPaid`)**已從 v3 合約移除**;**Kiosk / TransferPolicy / royalty 只在 L2 `NftToken`**。shared `Model3D` 跨錢包可引用 → 不同 nft creator 能 `launch_collection` fork(解決 AC-003)。L1 v1 變現 = `derivative_mint_fee` + 下游 `NftToken` 的 `base_royalty_bps`。**OQ-020 定為 path (b)**:6/21 demo L1 只發佈,銷售在 L2。下方 `Access` / `AccessPurchased` 為歷史設計;實作以 `contracts/model3d/sources/model3d.move` 為準;§2.8 全面改寫排程於 Phase 5。
+>
+> **⚠️ D-035 / D-036 定案(2026-05-20,v4 republish)**:**L2 `NftToken` 現為 plain owned object**——`mint_nft_token` 直接 `public_transfer` 給 caller(**不再 auto-place 進 Kiosk**);上架販售改為獨立的 opt-in `place_and_list<NftToken>` PTB。`TransferPolicy<NftToken>` **只留 `royalty_rule`**(移除 `kiosk_lock_rule` + `personal_kiosk_rule`),所以買家買到後可自由使用 token——代價是 **royalty 變成賣家 opt-in、非協議強制**(可繞過 Kiosk 直接轉移即 0 royalty,見 [[D-036]] Consequences)。**D-035**:`NftCollection` += `quilt_blob_id`、`NftToken` += `patch_id`(每個 token 綁一個 quilt 變體 patch,經 by-quilt-patch-id aggregator 解析 GLB);`launch_collection` / `mint_nft_token` 簽名隨之改變。v4 package `0x3b6b7258…`(supersedes v3 `0x35ba17b3…`)。
 
 > **重要設計轉折**:原始 spec 把 `Model3D` 當 NFT(一人 mint 一個)。**這個版本不是。**
 >
