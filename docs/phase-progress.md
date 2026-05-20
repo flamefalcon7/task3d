@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U5 SHIPPED) — **v3 republished to testnet (D-032). Next = U6 frontend builders.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+**U5 — v3 republish to testnet, done.** Environment verified first (active-env testnet, 11.46 SUI gas, `SUI_MAINNET_DEPLOY_KEY` not set). `Published.toml`'s v2 `[published.testnet]` entry blocked the republish (CLI address-management); removed it (git-recoverable) → CLI rewrote it with the v3 ID. Bootstrap = **only `ensure_collection_policy`** (D-032 dropped `ensure_transfer_policy`).
+
+v3 testnet IDs (also in `contracts/networks/testnet.json` + `docs/reports/phase-4-v3-republish.md`):
+- package `0x35ba17b3…`, UpgradeCap `0x0a3c1c5f…`, Publisher `0x00808fed…`
+- `TransferPolicy<NftToken>` `0xf1816cae…` (+ cap `0xc2b91b69…`) — verified 3 rules (royalty/lock/personal_kiosk under `0xe308bb3e…`, unchanged from v2)
+- publish digest `AuzWcL4f…` (~0.049 SUI); bootstrap digest `CA6oX21R…`
+- supersedes v2 `0x563ab54b…`
+
+Config updated: `testnet.json` (restructured for D-032 — one NftToken policy, generic `transfer_policy_id` key holds it) + `frontend/src/sui/networkConfig.ts` (values only, field names kept stable for the obsolete `kioskTxBuilders.ts`). **Parity test green.** `UPGRADE.md` v3 note added.
+
+### Next Concrete Step
+**U6 — `frontend/src/sui/collectionTxBuilders.ts`** (typed PTB wrappers for `launch_collection` / `set_register_fee` / `mint_nft_token` / `register_integration`, mirroring `kioskTxBuilders.ts` shape). U6 also reworks/deletes the obsolete `kioskTxBuilders.ts` (Model3D purchase chain is dead post-D-032) and should switch L1 to the new `publish` (shared object) + `take_shared<Model3D>` browse. Note OQ-019 (legacy PTB routes pinned to superseded package) clears here.
+
+### Blockers / Open Questions
+- Uncommitted (this U5 batch): `Published.toml`, `contracts/networks/testnet.json`, `frontend/src/sui/networkConfig.ts`, `contracts/UPGRADE.md`, `docs/reports/phase-4-v3-republish.md`, this file. Suggest a commit.
+- Frontend still on pre-D-032 flow (publishPtb/buildCollectionPtb call non-existent Move fns; kioskTxBuilders targets the removed Model3D purchase path). U6/U9/U10 own the migration. Build/typecheck not re-verified beyond the parity test — frontend was already known-obsolete.
+
+---
+
 ## Last Updated: 2026-05-20 (latest) — **D-032: `Model3D` → shared object, L1 Kiosk path removed. Move layer green. Next = U5 republish.**
 
 ### Hackathon Tracker

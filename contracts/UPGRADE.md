@@ -46,6 +46,10 @@ The Phase 2 → Phase 4 jump on testnet was a breaking change (Model3D ability s
 
 The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a **breaking change, not a compatible upgrade**: v3 *deletes* the public `Access` struct + its accessors (`access_target_id` / `access_holder` / `access_expires_at_ms`) + `destroy_access_for_testing`. Removing public ABI symbols is incompatible, so v3 republishes under a fresh `original-id` (U5). This is low-cost now — the frontend is not yet migrated off the obsolete Phase-2 flow and no demo pre-bake exists, so there is no v2 on-chain state worth preserving. v3 *adds* `NftCollection` / `NftCollectionCreatorCap` / `NftToken` / `launch_collection` / `set_register_fee` / `register_integration` / `mint_nft_token` (all additive on their own — only the `Access` deletion forces the republish).
 
+**D-032 (also in v3):** `Model3D` is now published as a SHARED object via `publish`; the L1 Kiosk path (`mint_and_list`, `purchase_with_kiosk`, `ensure_transfer_policy`, the `RoyaltyPaid` event) is **removed**. Removing public functions/structs is breaking — it rides the same v3 republish. The only `TransferPolicy` in v3 is for `NftToken`; the U5 bootstrap therefore runs only `ensure_collection_policy`.
+
+**v3 shipped 2026-05-20 (testnet):** `package_id 0x35ba17b3…`, `upgrade_cap 0x0a3c1c5f…`, `publisher 0x00808fed…`, `TransferPolicy<NftToken> 0xf1816cae…` (+ cap `0xc2b91b69…`). Superseded v2 `0x563ab54b…`. See `docs/reports/phase-4-v3-republish.md` + `contracts/networks/testnet.json`.
+
 ---
 
 ## Before any upgrade — checklist
@@ -57,7 +61,7 @@ The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a
 5. [ ] `Published.toml` and any frontend `.env*` files updated with the new `published-at` PackageID
 6. [ ] `original-id` preserved (compatible upgrade) OR explicitly bumped (new package)
 7. [ ] UpgradeCap custody verified — testnet uses the dev's interactive Sui CLI keychain; mainnet uses a hardware wallet or multisig (R2)
-8. [ ] **Publisher custody verified** — `init` transfers Publisher to deployer (`ctx.sender()`); for mainnet, transfer Publisher to a hardware wallet or multisig **immediately after publish** so a compromised deploy key can't claim TransferPolicy rules ahead of legitimate U3 work. Loss of Publisher = cannot create or rotate TransferPolicy<Model3D>; recovery requires republish under a new `original-id`.
+8. [ ] **Publisher custody verified** — `init` transfers Publisher to deployer (`ctx.sender()`); for mainnet, transfer Publisher to a hardware wallet or multisig **immediately after publish** so a compromised deploy key can't claim TransferPolicy rules ahead of legitimate U3 work. Loss of Publisher = cannot create or rotate TransferPolicy<NftToken> (the only policy type since D-032); recovery requires republish under a new `original-id`.
 8. [ ] Indexers + replay fixtures updated for any new event types (R12 capture if non-obvious)
 9. [ ] CHANGELOG entry (Phase 5) cites the upgrade ID, what changed, and what clients must update
 10. [ ] If a struct grew a V2 sibling: indexer subscribes to both old + new event types for the migration window
