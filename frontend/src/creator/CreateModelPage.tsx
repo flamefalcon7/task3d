@@ -121,7 +121,7 @@ export function CreateModelPage() {
       const payResult = await signAndExecute({ transaction: tx });
       setGenStatus('generating');
       const result = await generate(
-        { prompt } as never,
+        { shape: 'tripo', prompt },
         session.jwt,
         payResult.digest,
       );

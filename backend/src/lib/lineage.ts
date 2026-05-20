@@ -1,14 +1,13 @@
 import type {
-  GenerateParams,
   GeneratorSource,
   LineageRecord,
-  ShapeId,
+  TripoParams,
 } from '@overflow2026/shared';
 
 export interface BuildLineageInput {
   id: string;
-  shape: ShapeId | 'tripo';
-  params: GenerateParams;
+  shape: 'tripo';
+  params: TripoParams;
   generatorSource: GeneratorSource;
   createdAt: string;
   prompt?: string;

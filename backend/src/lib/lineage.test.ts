@@ -6,16 +6,16 @@ describe('buildLineageStub', () => {
   it('returns a stub matching the input fields', () => {
     const stub = buildLineageStub({
       id: 'abc-123',
-      shape: 'box',
-      params: { shape: 'box', width: 1, height: 1, depth: 1 },
-      generatorSource: 'procedural',
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a cube' },
+      generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
     });
     expect(stub).toEqual({
       id: 'abc-123',
-      shape: 'box',
-      params: { shape: 'box', width: 1, height: 1, depth: 1 },
-      generatorSource: 'procedural',
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a cube' },
+      generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
     });
   });
@@ -23,9 +23,9 @@ describe('buildLineageStub', () => {
   it('omits undefined optional fields', () => {
     const stub = buildLineageStub({
       id: 'abc',
-      shape: 'sphere',
-      params: { shape: 'sphere', radius: 1, latSegments: 8, lonSegments: 12 },
-      generatorSource: 'procedural',
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a sphere' },
+      generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
     });
     expect('prompt' in stub).toBe(false);
@@ -35,15 +35,15 @@ describe('buildLineageStub', () => {
   it('includes prompt + llmDecision when provided', () => {
     const stub = buildLineageStub({
       id: 'abc',
-      shape: 'box',
-      params: { shape: 'box', width: 1, height: 1, depth: 1 },
-      generatorSource: 'procedural',
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a cube' },
+      generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
       prompt: 'a cube',
-      llmDecision: { model: 'claude' },
+      llmDecision: { tags: ['cube'] },
     });
     expect(stub.prompt).toBe('a cube');
-    expect(stub.llmDecision).toEqual({ model: 'claude' });
+    expect(stub.llmDecision).toEqual({ tags: ['cube'] });
   });
 });
 
@@ -51,24 +51,24 @@ describe('buildLineageJson', () => {
   it('returns valid JSON that parses to a LineageRecord', () => {
     const json = buildLineageJson({
       id: 'abc-123',
-      shape: 'box',
-      params: { shape: 'box', width: 1, height: 1, depth: 1 },
-      generatorSource: 'procedural',
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a cube' },
+      generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
     });
     const parsed = JSON.parse(json) as LineageRecord;
     expect(parsed.id).toBe('abc-123');
-    expect(parsed.shape).toBe('box');
-    expect(parsed.generatorSource).toBe('procedural');
+    expect(parsed.shape).toBe('tripo');
+    expect(parsed.generatorSource).toBe('tripo');
     expect(parsed.createdAt).toBe('2026-05-14T00:00:00.000Z');
-    expect(parsed.params).toEqual({ shape: 'box', width: 1, height: 1, depth: 1 });
+    expect(parsed.params).toEqual({ shape: 'tripo', prompt: 'a cube' });
   });
 
   it('roundtrips prompt + llmDecision through JSON', () => {
     const json = buildLineageJson({
       id: 'abc',
-      shape: 'chest',
-      params: { shape: 'chest', width: 1, height: 1, depth: 1, lidOpenRadians: 0.5 },
+      shape: 'tripo',
+      params: { shape: 'tripo', prompt: 'a treasure chest' },
       generatorSource: 'tripo',
       createdAt: '2026-05-14T00:00:00.000Z',
       prompt: 'a treasure chest',

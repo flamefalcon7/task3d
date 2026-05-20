@@ -4,7 +4,6 @@ import type { Router } from '@overflow2026/shared';
 import { HardcodedRouter } from './agent/router.js';
 import { buildCollectionRoute } from './routes/collection.js';
 import { buildGenerateRoute } from './routes/generate.js';
-import { shapesRoute } from './routes/shapes.js';
 import { buildCollectionsRoute } from './api/collections.js';
 import type { IntegrationIndexer } from './events/integrationIndexer.js';
 import type { PaymentVerifier } from './sui/paymentVerifier.js';
@@ -27,7 +26,6 @@ export function buildApp(deps: BuildAppDeps = {}) {
   app.get('/', (c) => c.text('overflow2026 backend ok'));
 
   const router = deps.router ?? new HardcodedRouter();
-  app.route('/api/shapes', shapesRoute);
   app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt, paymentVerifier: deps.paymentVerifier }));
   app.route('/api/collection', buildCollectionRoute({ jwt: deps.jwt }));
   app.route(

@@ -1,5 +1,27 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U9 DONE) — **procedural generation removed. Next = U11/U12 (or U8).**
+
+### U9 — procedural teardown (done, green)
+Implements D-033: `Model3D` content now comes only from Tripo prompt-mode (D-023) or user GLB upload (U10). Procedural generation gone.
+- **Deleted (backend):** `generators/{box,chest,cylinder,sphere,sword,hammer,platform}.ts` (+ tests, 14 files), `routes/shapes.ts`, `lib/catalog.ts`. `generators/tripo.ts` (+test) **kept** — it's the surviving Tripo dispatch.
+- **Deleted (frontend):** `creator/CreatorFlow.tsx` (+test), `components/ShapePicker.tsx` (+test). `components/` dir now empty/removed. `creator/PromptInput` + `NameInput` **kept** (ForgePage still imports them).
+- **Rewritten:** `generators/index.ts` (TripoGenerator only); `agent/router.ts` (`HardcodedRouter(tripo?)` — single injected Tripo generator, prompt-only `route`, slider branch gone, `TripoDisabledError` kept); `routes/generate.ts` (prompt-only — drops `generateParamsSchema`/slider branch, keeps auth + D-034 pay-gate); `lib/schema.ts` (drops `generateParamsSchema`); `lib/lineage.ts` (`shape:'tripo'`, `TripoParams`); `app.ts` (unmount `/api/shapes`); `server.ts` (`buildRouter` injects only Tripo); `frontend/lib/api.ts` (drops `fetchShapes`/`ShapeCatalog`, `generate(params: TripoParams)`); `CreateModelPage.tsx` (`generate({shape:'tripo',prompt})`, dropped `as never`).
+- **`shared/src/types.ts`:** removed `ShapeId`/`GeneratorId`/`PlatformStyle`/`paramRanges`/all `*Params` except `TripoParams`/`GenerateParams` union/all procedural zod schemas/`proceduralParamsSchemas`/`GenerateParamsSchema`/`ParamFieldSpec`/`ShapeSpec`/`ShapeCatalog`. `GeneratorSource = 'tripo'`. Kept `TripoParams`/`tripoParamsSchema`/`GenerateResult`/`Generator`/`Router`/`LineageRecord`/`GenerateResponse` + all Phase-3 Collection types.
+- Tests rewritten: `routes.test.ts`, `agent/router.test.ts`, `lib/lineage.test.ts`.
+- **Gates:** grep for deleted symbols → only comments. shared/backend/frontend `pnpm exec tsc` clean. **Backend 110/110** (−56, all deleted-generator tests), **frontend 293/293** (−9, CreatorFlow+ShapePicker tests).
+
+### ⚠️ Doc follow-up (not done in U9)
+`CLAUDE.md` §Core Constraints still says "Input restricted to predefined shape categories" + "Procedural generation in Go" — **contradicted by D-033**. D-033 records the supersession; left CLAUDE.md edit for the user to approve (it's the project instruction file). Flag for Phase 5 doc cleanup or a quick edit.
+
+### Next Concrete Step
+Pick **U11** (/track discovery off `?model=` getObject), **U12** (nft-creator launch-collection + set_register_fee UI), or **U8** (browse carries `license.policy`). U12 unblocks the four-actor demo arc (modelCreator→nftCreator fork).
+
+### Blockers / Open Questions
+- Uncommitted (U9): see `git status`. Suggest commit.
+
+---
+
 ## Last Updated: 2026-05-20 (U10 DONE) — **/create mint wizard shipped. Next = U9 (procedural teardown) then U11/U12.**
 
 ### U10 chunk 2 — the `/create` wizard (done, green)

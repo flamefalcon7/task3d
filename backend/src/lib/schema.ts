@@ -1,20 +1,7 @@
 import { z } from 'zod';
-import { proceduralParamsSchemas } from '@overflow2026/shared';
 
-// /api/generate slider path validates against the 7 procedural shape schemas
-// only — the tripo variant in shared GenerateParamsSchema is never a direct
-// request input (DL-010). Tripo gets exercised via promptRequestSchema +
-// HardcodedRouter.route({ prompt }) (D-023). Composing the 7-shape subset
-// here keeps the slider request gate strict.
-export const generateParamsSchema = z.discriminatedUnion('shape', [
-  ...proceduralParamsSchemas,
-]);
-
-export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;
-
-// /api/generate accepts either { prompt } (D-023: dispatched directly to
-// Tripo by HardcodedRouter) or the flat params shape (slider mode → matching
-// procedural generator). The route handler branches on which variant validated.
+// D-033: procedural slider mode removed. /api/generate accepts only { prompt }
+// (D-023: dispatched directly to Tripo by HardcodedRouter).
 export const promptRequestSchema = z.object({
   prompt: z.string().min(1).max(1000),
   // D-034: SUI service-fee payment proof. Optional in the schema so legacy

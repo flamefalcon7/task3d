@@ -1,17 +1,8 @@
 import { serve } from '@hono/node-server';
-import type { Generator, GeneratorId, Router } from '@overflow2026/shared';
+import type { Router } from '@overflow2026/shared';
 import { buildApp } from './app.js';
 import { HardcodedRouter } from './agent/router.js';
-import {
-  BoxGenerator,
-  ChestGenerator,
-  CylinderGenerator,
-  HammerGenerator,
-  PlatformGenerator,
-  SphereGenerator,
-  SwordGenerator,
-  TripoGenerator,
-} from './generators/index.js';
+import { TripoGenerator } from './generators/index.js';
 import { TripoClient } from './lib/tripo-client.js';
 import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
 import { buildAuthRoute } from './routes/auth.js';
@@ -19,37 +10,21 @@ import { createIntegrationIndexer } from './events/integrationIndexer.js';
 import { createPaymentVerifier } from './sui/paymentVerifier.js';
 import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST } from './sui/client.js';
 
-// D-023: LLM routing dropped. HardcodedRouter handles both slider mode
-// (procedural shapes) and prompt mode (direct dispatch to Tripo). Tripo is
-// wired in only when TRIPO_ENABLED=true; prompt mode throws TripoDisabledError
-// otherwise, surfaced as 400 tripo_disabled by /api/generate.
+// D-023/D-033: the only content the backend generates is Tripo prompt-mode.
+// Tripo is wired in only when TRIPO_ENABLED=true; otherwise prompt requests
+// throw TripoDisabledError, surfaced as 400 tripo_disabled by /api/generate.
 export function buildRouter(env: NodeJS.ProcessEnv = process.env): Router {
   const tripoEnabled = env.TRIPO_ENABLED === 'true';
   const tripoApiKey = env.TRIPO_API_KEY?.trim();
 
-  const generators = new Map<GeneratorId, Generator>([
-    ['box', new BoxGenerator()],
-    ['chest', new ChestGenerator()],
-    ['cylinder', new CylinderGenerator()],
-    ['sphere', new SphereGenerator()],
-    ['sword', new SwordGenerator()],
-    ['hammer', new HammerGenerator()],
-    ['platform', new PlatformGenerator()],
-  ]);
+  if (!tripoEnabled) return new HardcodedRouter();
 
-  // Register Tripo only when both env vars are set. tripoEnabled-without-key
-  // is a misconfiguration we surface loudly at startup rather than at call
-  // time — the dev should not see TripoDisabledError fire for a missing key.
-  if (tripoEnabled) {
-    if (!tripoApiKey) {
-      throw new Error(
-        'TRIPO_ENABLED=true but TRIPO_API_KEY missing — set the key in your env',
-      );
-    }
-    generators.set('tripo', new TripoGenerator(new TripoClient(tripoApiKey)));
+  // tripoEnabled-without-key is a misconfiguration we surface loudly at startup
+  // rather than at call time.
+  if (!tripoApiKey) {
+    throw new Error('TRIPO_ENABLED=true but TRIPO_API_KEY missing — set the key in your env');
   }
-
-  return new HardcodedRouter(generators);
+  return new HardcodedRouter(new TripoGenerator(new TripoClient(tripoApiKey)));
 }
 
 // Startup hard-fail: a weak or absent JWT secret silently degrades sign-in

@@ -1,8 +1,7 @@
 import type {
-  GenerateParams,
   GenerateResponse,
   LineageRecord,
-  ShapeCatalog,
+  TripoParams,
 } from '@overflow2026/shared';
 
 export interface GenerateResult {
@@ -11,17 +10,11 @@ export interface GenerateResult {
   lineageStub: Partial<LineageRecord>;
 }
 
-export async function fetchShapes(): Promise<ShapeCatalog> {
-  const res = await fetch('/api/shapes');
-  if (!res.ok) throw new Error(`fetchShapes: HTTP ${res.status}`);
-  return (await res.json()) as ShapeCatalog;
-}
-
 export async function generate(
-  params: GenerateParams,
-  // Backend prompt mode (shape='tripo' with a prompt body) is JWT-gated;
-  // slider mode (procedural shapes) is anonymous. Caller is responsible
-  // for passing the session.jwt when invoking prompt mode.
+  // D-033: Tripo prompt-mode is the only generation path. The backend reads
+  // `prompt` off the body; we send the full TripoParams for forward-compat.
+  params: TripoParams,
+  // Prompt mode is JWT-gated — caller passes session.jwt.
   authToken?: string,
   // D-034: prompt-mode SUI service-fee proof (tx digest). Merged into the body
   // so the backend pay-gate can verify it before calling Tripo.
