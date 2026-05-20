@@ -131,6 +131,10 @@
 ### 1.7 戰略總結(Walrus track 新 framing 必須吸收)
 
 > **⚠️ D-029 修訂(2026-05-20):D-013 的「L2 deferred 到 v1.1」已被反轉。** L2 / NFT collection 層(nft creator 從 Model3D launch `NftCollection`,持 `NftCollectionCreatorCap` 含 register_fee + integration registry;gameDev 付費 register_integration)現在是 **v1 真實 product surface**。本節下方所有「L2 deferred」「composable 是 v2 vision」「2-actor 敘事」的描述以 D-029 + `docs/brainstorms/2026-05-19-four-role-product-realignment.md` 為準。D-013 的 Kiosk-promotion 與 narrowed-framing 部分仍有效,只有 L2-deferral 子句被反轉。pay-per-generate 同步 descope 到 v1.1(demo 用 service-funded Tripo)。
+>
+> **⚠️ D-031 補充(2026-05-20)**:層級語意釐清——**L1 `Model3D` 賣 access(Seal-gated,v1.1)、L2 `NftToken` 賣 ownership(Kiosk,v1)**。下方表格 row 3「Access soulbound」描述的是 L1 access-receipt 機制,屬 **v1.1**(Seal)。
+>
+> **⚠️ D-032 定案(2026-05-20)**:`Model3D` 改回 **shared object**(`publish` entry fn,非 Kiosk)。**所有 Kiosk / `TransferPolicy` / royalty 機制只存在於 L2 `NftToken`**;L1 的 `mint_and_list` / `purchase_with_kiosk` / `TransferPolicy<Model3D>` 已移除。shared `Model3D` 可被跨錢包引用,讓不同錢包的 nft creator 能 `launch_collection` fork(解決 AC-003)。L1 v1 變現 = `derivative_mint_fee` + 下游 `NftToken` 銷售的 `base_royalty_bps`;Seal 直接 access-sale 仍是 v1.1。**OQ-020 定為 path (b)**:6/21 demo L1 只發佈,銷售故事在 L2。
 
 **handbook 寫的 Walrus track 主題**:
 > "Build AI agents and agentic workflows powered by Walrus **as a verifiable data and memory layer**"
@@ -413,7 +417,11 @@ public fun new(blob: Blob, ctx: &mut TxContext) {
 
 ### 2.8 我們的 Move 設計 — Design B(Content + Access)+ Derivative Layer
 
-> **⚠️ D-029 / D-030 更新(2026-05-20)**:本節描述的 `Access` struct 已在 v3 合約**刪除**。其「soulbound 收據」角色由 `NftCollectionCreatorCap`(key-only)承接;擁有權收據改為 key+store 的 token / `Model3D` 物件本身。整合 gate 改為 collection-level 的 `NftCollection.integration_policy`(nft creator 經 cap 設定),不再是 model-level `license.policy` 的 snapshot。下方 `Access` / `AccessPurchased` 程式碼為歷史設計,實作以 `contracts/model3d/sources/model3d.move` 為準;§2.8 全面改寫排程於 plan-008 Phase 5 文件清理。
+> **⚠️ D-029 / D-030 / D-031 更新(2026-05-20)**:本節描述的 `Access` struct 已在 v3 合約**刪除**;整合 gate 改為 collection-level 的 `NftCollection.integration_policy`(nft creator 經 cap 設定),不再是 model-level `license.policy` 的 snapshot。
+>
+> **D-031 釐清層級**:**L1 `Model3D` 賣 access(存取權,Seal-gated,v1.1)、L2 `NftToken` 賣 ownership(擁有權,Kiosk + royalty,v1)**。`LicenseTerms.policy` 是 L1 的**存取控制**維度(RESTRICTED = 僅 creator、ALLOW_LIST = creator + 付費存取者、PERMISSIONLESS = 任何人),其**真正執行需要 Seal**(加密 Walrus blob + `seal_approve` 驗 access 收據)→ **排 v1.1**;v1.1 會重新引入一個 access-receipt(即 R22 刪掉的 `Access` 的 analog)。
+>
+> **⚠️ D-032 定案(2026-05-20)**:`Model3D` 改回 **shared object**(`publish`,非 Kiosk)。L1 的 Kiosk 路徑(`mint_and_list` / `purchase_with_kiosk` / `TransferPolicy<Model3D>` / `RoyaltyPaid`)**已從 v3 合約移除**;**Kiosk / TransferPolicy / royalty 只在 L2 `NftToken`**。shared `Model3D` 跨錢包可引用 → 不同 nft creator 能 `launch_collection` fork(解決 AC-003)。L1 v1 變現 = `derivative_mint_fee` + 下游 `NftToken` 的 `base_royalty_bps`。**OQ-020 定為 path (b)**:6/21 demo L1 只發佈,銷售在 L2。下方 `Access` / `AccessPurchased` 為歷史設計;實作以 `contracts/model3d/sources/model3d.move` 為準;§2.8 全面改寫排程於 Phase 5。
 
 > **重要設計轉折**:原始 spec 把 `Model3D` 當 NFT(一人 mint 一個)。**這個版本不是。**
 >

@@ -691,7 +691,7 @@ public fun publish(
 
 ## D-016: `publish_and_share` entry pattern + `purchase_model_access` naming + `duration_ms` retention + Phase 4 Kiosk-coexistence caveat
 
-**Status**: Accepted
+**Status**: Superseded by D-032 (2026-05-20) — Phase 4 had already replaced `publish_and_share`/`purchase_model_access` with the Kiosk-on-`Model3D` path; D-032 in turn removes that path, returning `Model3D` to a shared object (`publish`) with Kiosk/ownership-sale living only on L2 `NftToken`.
 **Date**: 2026-05-14
 **Phase**: Phase 2 (Sui Integration) — U2 precursor
 
@@ -1573,6 +1573,92 @@ The integration gate lives on the collection and is owned by the nft creator:
 
 ---
 
+## D-031: L1 `Model3D` sells **access** (Seal-gated, v1.1); L2 `NftToken` sells **ownership** (Kiosk, v1)
+
+**Status**: Accepted (vision/layering). Superseded in part by **D-032** — §3 (interim Kiosk-on-`Model3D` kept) and the open OQ-020 are resolved there: `Model3D` became a shared object and the L1 Kiosk path was removed; OQ-020 resolved as path (b).
+**Date**: 2026-05-20
+**Phase**: 4
+**Refines**: D-002 (re-asserts the §2.8 Content+Access intent), D-013/D-016 (reframes the Kiosk-on-Model3D work as interim), D-029 (the L2 layer it added is the ownership tier)
+
+### Context
+
+Surfaced while resolving the U1–U4 review: the team re-confirmed the **two economic models are different layers**:
+- **L1 `Model3D` = content; you sell ACCESS to it** (one creator, N buyers pay to access). Access control is `LicenseTerms.policy`: `RESTRICTED` = creator-only, `ALLOW_LIST` = creator + paid-access holders, `PERMISSIONLESS` = anyone. **Real enforcement requires Seal** (encrypt the Walrus blob; `seal_approve` checks a soulbound access receipt before decryption). Without Seal the blob is public and "access" is unenforceable.
+- **L2 `NftToken` = you sell OWNERSHIP** (a tradeable token, Kiosk + `TransferPolicy` royalty on resale).
+
+This is exactly the original spec **§2.8 "Design B (Content + Access)" + §1.7**. Phase 4 **drifted** from it: D-013/D-016/plan-007 made `Model3D` itself a Kiosk-traded, single-owner object (`purchase_with_kiosk` = ownership transfer, `TransferPolicy<Model3D>`), and D-029/R22 then **deleted the `Access` struct**. Net: today **both L1 and L2 sell ownership via Kiosk** — the L1 access model is not implemented and its receipt type was removed.
+
+### Decision
+
+1. **Canonical target layering:** L1 `Model3D` sells **access** (Seal-gated); L2 `NftToken` sells **ownership** (Kiosk). `LicenseTerms.policy` is the L1 **access-control** dimension (not an ownership or integration gate — integration is L2 `integration_policy` per D-030).
+2. **L1 access-enforcement is v1.1.** Seal encryption + a soulbound **access-receipt** object + `seal_approve` move to the mainnet window (consistent with D-009's "Seal optional v1.1"). v1.1 will **re-introduce an access-receipt analog** of the `Access` struct deleted in D-029/R22 — that deletion is acknowledged here as premature for the long-term model, but is **not reversed now** (no v1 consumer; v1.1 re-adds cleanly under the v3+ package).
+3. **The Phase-4 Kiosk-on-`Model3D` machinery (`mint_and_list` / `purchase_with_kiosk` / `TransferPolicy<Model3D>`) is reframed as INTERIM**, not the target. It is not removed in v1 (it works and is shipped); whether the 6/21 demo *uses* it for an L1 "buy the model" beat, or L1 stays publish-only with the sale story on L2, is **left open (OQ-020)**.
+4. **The L2 ownership tier (`NftToken` + its own Kiosk/`TransferPolicy<NftToken>`, plan-008 U3) is correct as built** and stays.
+
+### Alternatives Considered
+
+- **Re-architect L1 for 6/21** (restore the access receipt, drop Kiosk-on-Model3D, wire Seal) — rejected: Seal is a large v1.1 effort, access is unenforceable without it, and it would blow the 6/21 buffer for no demo-visible gain.
+- **Re-sync docs to the ownership-Model3D reality** (declare L1 = ownership permanently) — rejected: abandons the "content accessed by many" core that distinguishes the product from a 1-of-1 NFT marketplace.
+
+### Consequences
+
+- ✅ Clean conceptual split: access (L1, Seal, v1.1) vs ownership (L2, Kiosk, v1). Resolves the docs-vs-code drift the review surfaced.
+- ✅ Protects the shipped L2 work; no code churn now.
+- ⚠️ v1.1 must re-add an access-receipt object + Seal + `seal_approve` (re-introducing what R22 deleted).
+- ⚠️ The 6/21 demo's L1 story is unresolved (OQ-020); the interim Kiosk-on-Model3D may or may not be shown.
+- 🔮 spec §1.7/§2.8 need a full rewrite in Phase 5 to state access-vs-ownership cleanly; banners added now.
+
+### Related
+
+- Refines: [[D-002]], [[D-013]], [[D-016]], [[D-029]], [[D-030]]; gates [[D-009]] (Seal v1.1)
+- spec.md: §1.7, §2.8 (banners added; full rewrite = Phase 5)
+- Open question: OQ-020 (6/21 L1 demo story)
+
+---
+
+## D-032: `Model3D` is a shared object (`publish`); Kiosk/ownership-sale lives only on L2 `NftToken`
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Supersedes**: D-016 (the Kiosk-on-`Model3D` `publish_and_share`→`mint_and_list`/`purchase_with_kiosk` path)
+**Refines**: D-031 (implements its target layering for v1); resolves OQ-020 (path b)
+
+### Context
+
+D-031 fixed the target layering (L1 sells access, L2 sells ownership) but left the interim Kiosk-on-`Model3D` machinery in place and left the 6/21 L1 demo story open (OQ-020). Reading the shipped contract surfaced a hard blocker: the only mint path was `mint_and_list`, which `place_and_list`s the `Model3D` into the creator's Kiosk. A Kiosk-locked object can only be borrowed by its `KioskOwnerCap` holder, but `launch_collection(model: &Model3D, …)` needs a `&Model3D` reference. **A different-wallet nft creator therefore cannot fork a published model** — which breaks the four-actor demo arc (modelCreator publishes → a *different* nftCreator forks). This was tracked as AC-003.
+
+The user confirmed the framing: "model 不該被放到 Kiosk 因為他是賣 Access；只有 nft 會被放到 Kiosk." Kiosk is a protocol-level NFT trading + royalty-enforcement primitive — it belongs to the ownership tier (`NftToken`), not the access tier (`Model3D`).
+
+### Decision
+
+1. **`Model3D` is published as a SHARED object.** New `publish` entry fn = `new_model(...)` + `transfer::share_object(model)` (one wallet popup). A shared `Model3D` is referenceable cross-wallet, so `launch_collection` works for any nft creator — **AC-003 dissolves**.
+2. **Remove the entire L1 Kiosk path:** `mint_and_list`, `purchase_with_kiosk`, `ensure_transfer_policy` (`TransferPolicy<Model3D>`), the `RoyaltyPaid` event + `emit_royalty_paid`, and abort code `EWrongRoyaltyRate` (21, retired, not reused). The U5 bootstrap now needs only `ensure_collection_policy<NftToken>`.
+3. **All Kiosk + `TransferPolicy` + royalty machinery lives only on L2 `NftToken`** (`ensure_collection_policy`, `mint_nft_token`). `ensure_creator_kiosk` is retained — it is the nft creator's PersonalKiosk for minting `NftToken`s.
+4. **L1 monetization (v1)** = the pay-to-derive `derivative_mint_fee` (`launch_collection`) + perpetual `base_royalty_bps` on downstream `NftToken` sales. Seal-gated direct access-sale on L1 stays the v1.1 flagship (D-031 §2). This resolves **OQ-020 as path (b)**: L1 is publish-only in the demo; the sale story lives on L2 ownership.
+
+### Alternatives Considered
+
+- **Keep `mint_and_list` on L1, demo "buy the model" as interim** (OQ-020 path a) — rejected: contradicts D-031 AND structurally breaks cross-wallet `launch_collection` (AC-003).
+- **Leave the L1 Kiosk fns as dead/interim code** — rejected: two mint paths confuse the indexer and the pitch; one shared-object `publish` is simpler. Removed cleanly since there is no v1 consumer.
+
+### Consequences
+
+- ✅ AC-003 resolved; four-actor demo is buildable; matches D-031's access-vs-ownership split.
+- ✅ Simpler surface: one L1 mint path (`publish`), one `TransferPolicy` (`NftToken`), one bootstrap call.
+- ✅ Move package + 43 tests green after the change (L1 Kiosk tests removed, `publish` test added).
+- ⚠️ Must land **before** the U5 republish (it changes the public Move surface) — done in the same unit.
+- ⚠️ Frontend (U6/U10) must build on `publish` + `take_shared<Model3D>`, not `mint_and_list`/`purchase_with_kiosk`. Browse reads shared `Model3D` objects.
+- 🔮 v1.1 Seal access-receipt re-introduction (D-031 §2) layers onto the shared `Model3D` cleanly.
+
+### Related
+
+- Supersedes: [[D-016]]; refines [[D-031]]; implements [[D-002]] §2.8 layering
+- Resolves: OQ-020 (path b), AC-003 (api-contract review finding)
+- spec.md: §1.7, §2.8 (banners updated)
+
+---
+
 # Reserved Decision Numbers
 
-D-031 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-033 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

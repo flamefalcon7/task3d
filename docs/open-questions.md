@@ -294,3 +294,21 @@ This is actually a **stronger** guarantee than runtime would be: the rejection h
 **Acceptance**: U6 cannot ship until `grep -rn "publishPtb\|purchaseAccessPtb" frontend/src/` returns zero hits and the 4 files are deleted.
 
 **Blocker level**: 🟡 Held — U6 must clear before that unit ships.
+
+---
+
+## OQ-020: 6/21 demo's L1 (`Model3D`) story — access-sale vs ownership-interim vs publish-only
+
+**Status**: ✅ RESOLVED 2026-05-20 — **path (b)** via **D-032**. `Model3D` is a shared object (`publish`); the L1 Kiosk ownership-sale path was removed. 6/21 demo shows L1 as publish-only (creator earns the derive fee + downstream `NftToken` royalty); the ownership-sale story lives entirely on L2 `NftToken`. Seal-gated L1 access-sale is v1.1. Note the original "not blocking U5" premise was **wrong** — the resolution changed the Move surface and had to land *before* the U5 republish.
+**Surfaced**: 2026-05-20 (D-031 vision clarification)
+**Resolved by**: D-032 (also resolved the entangled AC-003 cross-wallet `launch_collection` blocker)
+
+D-031 settled the target layering — **L1 `Model3D` sells access (Seal-gated, v1.1); L2 `NftToken` sells ownership (Kiosk, v1)** — but left open what the **6/21 demo** actually shows for L1, since real access-enforcement (Seal) is v1.1 and unencrypted Walrus blobs can't be access-gated.
+
+Options:
+- **(a) Interim ownership-sale on L1.** Keep the shipped Kiosk-on-`Model3D` path (`mint_and_list` / `purchase_with_kiosk`) and demo "buy the model" as ownership, framed honestly as interim; Seal-gated access is the v1.1 roadmap. Lowest code churn (uses what's built).
+- **(b) L1 publish-only + free permissionless access; sale story lives entirely on L2 `NftToken` ownership.** Cleanest conceptually (no "buy a model object" beat that contradicts "L1 = access"); Seal-access is the v1.1 flagship. May leave the shipped L1 Kiosk machinery unused in the demo.
+
+Agent lean: **(b)** — keeps the demo coherent with D-031 and avoids touching Seal. Decision affects U10's mint-page framing and U15's four-actor demo arc.
+
+**Blocker level**: 🟢 Open — resolve before demo wiring (U10/U15), not before U5.

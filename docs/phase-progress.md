@@ -1,6 +1,63 @@
 # Phase Progress
 
-## Last Updated: 2026-05-20 (later) — **plan-008 written + doc-reviewed. plan-007 superseded for U6+.**
+## Last Updated: 2026-05-20 (latest) — **D-032: `Model3D` → shared object, L1 Kiosk path removed. Move layer green. Next = U5 republish.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+Working OQ-020 + AC-003 surfaced a wrong premise in the shipped contract: `Model3D` was Kiosk-locked by `mint_and_list`, so a different-wallet nft creator could not get the `&Model3D` reference `launch_collection` needs → four-actor demo structurally broken (AC-003). User confirmed the fix ("model 不該被放到 Kiosk 因為他是賣 Access;只有 nft 會被放到 Kiosk").
+
+**D-032 (new ADR, supersedes D-016, resolves OQ-020 path (b) + AC-003):**
+- `Model3D` now published as a **shared object** via new `publish` entry fn (`new_model` + `share_object`).
+- **Removed the entire L1 Kiosk path:** `mint_and_list`, `purchase_with_kiosk`, `ensure_transfer_policy` (`TransferPolicy<Model3D>`), `RoyaltyPaid` + `emit_royalty_paid`, abort code `EWrongRoyaltyRate` (21, retired).
+- All Kiosk / `TransferPolicy` / royalty machinery now lives only on L2 `NftToken`. `ensure_creator_kiosk` retained (nft creator's PersonalKiosk for `NftToken`).
+- L1 v1 monetization = `derivative_mint_fee` (launch_collection) + downstream `NftToken` `base_royalty_bps`. Seal access-sale = v1.1.
+- Tests: removed L1-Kiosk tests, added `publish_shares_model_and_emits_model_published`. **43/43 Move tests pass, 0 warnings.**
+
+Docs updated: D-032 ADR + D-016 marked superseded + D-031 status note; spec §1.7/§2.8 D-032 banners; OQ-020 resolved (path b).
+
+### Next Concrete Step
+**U5 — v3 republish to testnet (USER-IN-LOOP).** `sui client publish` (fresh PackageID) + bootstrap **only `ensure_collection_policy`** (D-032 dropped `ensure_transfer_policy`) + update `contracts/networks/testnet.json` + `frontend/src/sui/networkConfig.ts` (parity test) + capture UpgradeCap. Walk the checklist with the user before running — needs their keychain + testnet SUI; abort guard if `SUI_MAINNET_DEPLOY_KEY` in env. RR-001: after republish, all event subscribers use the new package ID.
+
+### Blockers / Open Questions
+- U5 is a hard stop requiring the user (external, irreversible-ish).
+- Uncommitted: `model3d.move` + tests (D-032), `decisions.md` (D-032/D-016/D-031), `spec.md`, `open-questions.md` (OQ-020), this file — **plus** the prior-session D-031 docs. All want one commit before U5.
+- Frontend units (U6/U10) must build on `publish` + `take_shared<Model3D>`, not the removed `mint_and_list`/`purchase_with_kiosk`. plan-008 unit bodies still say `mint_and_list` — adjust at implementation time (plan is a decision artifact, not edited mid-execution).
+
+---
+
+## Last Updated: 2026-05-20 (later) — **plan-008 U1–U4 (whole Move layer) SHIPPED + reviewed + D-030. Next = U5 republish.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+Executed `/ce-work` plan-008 U1–U4 (the entire local Move collection layer), inline-serial, `sui move build`+`test` gated, committed per unit:
+- **U1** `c2f9a03` — delete `Access`; add `NftCollection` (shared) + soulbound key-only `NftCollectionCreatorCap` + `launch_collection` (pay-to-derive Fork A).
+- **U2** `1079dd9` — `set_register_fee` (cap-gated).
+- **U3** `8048114` — `NftToken` (key+store) + `ensure_collection_policy` (own `TransferPolicy<NftToken>`) + `mint_nft_token` + `NftTokenMinted`.
+- **U4 + D-030** `5cfc943` — `register_integration` (fee/license/uniqueness/length-gated, fee→nft_creator, emit-in-frame) **plus** the D-030 amendment.
+
+Ran `/ce-code-review` (9 agents) on U1–U4 → no P0; surfaced 2 architecture questions. User ruled:
+- **D-030 (new ADR):** integration gate is **collection-level**, not a model-license snapshot. `NftCollection.base_policy` removed → `integration_policy` (cap-set via `set_integration_policy`, default PERMISSIONLESS); `register_integration` gates on it; `ELicenseRestricted`→`EIntegrationsClosed`.
+- **Decision A = path ii:** base `license.policy` is display-only; derivation is fee-gated. A RESTRICTED base **can** still be forked (accepted for v1).
+- Folded review quick-wins (event-field assertions, coin-branch/name-too-long/foreign-publisher/cap-mismatch tests). Focused correctness+security re-review of the D-030 delta: **clean**. **58/58 Move tests, 0 warnings.**
+
+Accepted-as-v1 (not fixed): NftToken resale royalty → policy balance not base_creator (v1.1 split-rule); sybil/no-deregister registry; base_royalty_bps dead state (v1.1 pre-lay); D-004 dead assert.
+
+### Next Concrete Step
+**U5 — v3 republish to testnet (USER-IN-LOOP).** `sui client publish` (fresh PackageID) + bootstrap `ensure_transfer_policy` + `ensure_collection_policy` + update `contracts/networks/testnet.json` + `frontend/src/sui/networkConfig.ts` (parity test) + capture UpgradeCap. Walk the checklist with the user before running — needs their keychain + testnet SUI; abort guard if `SUI_MAINNET_DEPLOY_KEY` in env. RR-001 (api-contract review): after republish, all event subscribers must use the new package ID.
+
+### Blockers / Open Questions
+- U5 is a hard stop requiring the user (external, irreversible-ish).
+- U6 (`collectionTxBuilders.ts`) + api-contract finding AC-003 to revisit: `launch_collection(&Model3D)` can't be called by a different-wallet nft creator when the model is Kiosk-locked — the four-role pay-to-derive flow needs a resolution (buy-first / wrapper / collapse roles for demo). Flagged for U6/U12; not yet decided.
+
+---
+
+## Last Updated: 2026-05-20 (earlier) — **plan-008 written + doc-reviewed. plan-007 superseded for U6+.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): **32 of 38**
