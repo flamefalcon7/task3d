@@ -1732,6 +1732,83 @@ The modelCreator flow (user-confirmed 2026-05-20): prompt → **pay SUI** → Tr
 
 ---
 
+## D-035: L2 `NftToken` reconnects to Phase-3 quilt variants — each token binds an on-chain patch
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Refines**: D-029 (L2 token layer); reuses plan-003 quilt + material-swap infra
+
+### Context
+
+D-029 redesigned L2 from "Forge colored variants" into "lean ownership tokens", leaving `NftToken { id, collection_id, base_model_id, name }` with **no per-token appearance** — all tokens of a collection share the base `Model3D`'s single GLB. Phase-3's quilt + material-swap pipeline (1 blob / N colored patches, `Model3DSummary.patchId`, `by-quilt-patch-id` aggregator, `VariantEditor`) was orphaned. Separately, reading the v3 contract surfaced a resolution gap: neither `Model3D` nor `NftToken` stores a resolvable GLB blob id (the GLB `Blob` is a separate creator-owned object; `Model3D` keeps only `lineage_blob_id`). The user chose **real on-chain variants** (over a cosmetic client-side tint) so the "fleet of colored cars" is verifiable provenance.
+
+Correction to the original mental model: real variants are **NOT** 100 separate blobs — the efficient design is **1 Walrus quilt blob with N patches** (100 separate blobs = 100 storage registrations). Phase-3 already packs quilts this way.
+
+### Decision
+
+1. **`NftCollection` gains `quilt_blob_id: String`** — the collection's variants are packed into one Walrus quilt; the blob id is supplied by the nft creator at `launch_collection`.
+2. **`NftToken` gains `patch_id: String`** — points at this token's patch (one colored car) within the quilt. Multiple tokens MAY share a patch (e.g. a "red edition ×10").
+3. **`launch_collection` signature gains `quilt_blob_id`**; **`mint_nft_token` signature gains `patch_id`** (length-bounded by `MAX_BLOB_ID_LEN`).
+4. **Resolution chain:** token → `getObject` → `patch_id` → aggregator `by-quilt-patch-id` → real variant GLB. This **closes the L2 GLB-resolution gap**. (L1 `Model3D` GLB resolution still uses the `?blob=` URL hatch for the demo; on-chain pointer deferred to v1.1.)
+5. **Requires a v4 republish** — adding fields to existing Move structs is not an in-place upgrade; this is a fresh republish following the U5 process.
+
+### Alternatives Considered
+
+- **Cosmetic client-side tint** (color = f(tokenId), shared base mesh, zero contract change) — rejected by the user: the variant should be real on-chain provenance, not a render-time effect.
+- **100 separate blobs** — rejected: 100× storage registrations; quilt (1 blob / N patches) is the correct shape and already built in Phase-3.
+
+### Consequences
+
+- ✅ Reuses Phase-3 `/api/collection/build` (material-swap) + quilt upload + `by-quilt-patch-id` aggregator + `VariantEditor`/`patchId`.
+- ✅ Colored fleet is verifiable on-chain; L2 token→GLB resolution is clean.
+- ⚠️ Another republish (v4): rerun the U5 flow (new package id, `testnet.json`, `networkConfig.ts`, `Published.toml`, bootstrap policy).
+- ⚠️ Touches U6 builders, U12 mint page, U11 /track — **plan-008 must be revised** (and resequenced; U11 can no longer ship as a standalone frontend unit — it now needs v4 + a real minted token).
+- ⚠️ Partial tension with D-034 ("no contract churn for the demo") — D-034 was scoped to the Tripo pay-gate (stays off-chain); this is a deeper product feature that justifies the republish.
+- 🔮 Per-patch metadata (material name / rarity) is a future extension.
+
+### Related
+
+- Refines [[D-029]]; reuses plan-003 quilt; bundled with [[D-036]] into v4; affects U6/U11/U12
+
+---
+
+## D-036: `mint_nft_token` mints a plain owned token (no auto-Kiosk); `TransferPolicy<NftToken>` keeps royalty only
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Supersedes**: the v3 `mint_nft_token` place-and-list behavior + the lock/personal-kiosk rules added in `ensure_collection_policy` (D-029/U3)
+
+### Context
+
+v3 `mint_nft_token` takes `kiosk_obj` + `personal_cap` and `place_and_list`s the freshly minted `NftToken` into the nft creator's Kiosk; `TransferPolicy<NftToken>` carries three rules (royalty + lock + personal_kiosk). A Kiosk-locked token can only be read via Kiosk borrow / dynamic-field walking, which is hostile to the two consumers that matter for the demo: `/track` (drive the token) and gameDev integrations (load the token in an app). The user directed: **mint must not auto-place into Kiosk**, and (confirmed) the **`kiosk_lock_rule` should be removed** so a token bought through a Kiosk can be taken out and used freely.
+
+### Decision
+
+1. **`mint_nft_token` drops `kiosk_obj`/`personal_cap` + `place_and_list`** — it mints the `NftToken` and `transfer::public_transfer`s it to the caller (a plain owned object).
+2. **Listing for sale is a separate opt-in PTB** (standard Kiosk `place_and_list`); royalty is enforced by `TransferPolicy<NftToken>` when sold through a Kiosk.
+3. **`ensure_collection_policy` keeps only `royalty_rule`** — `kiosk_lock_rule` and `personal_kiosk_rule` are removed, so a token sold through a Kiosk can be taken out afterward and used as a plain owned object.
+
+### Alternatives Considered
+
+- **Keep auto-Kiosk + lock rule, make consumers Kiosk-aware** — rejected: pushes Kiosk borrow complexity into `/track` and every gameDev app; contradicts the "any app can use a bought NFT" value prop.
+
+### Consequences
+
+- ✅ `/track` ownership discovery simplifies to "query owned objects of type `NftToken`" (no Kiosk walk — the earlier U11 wrinkle dissolves).
+- ✅ gameDev apps `getObject` the owned token directly.
+- ✅ Royalty story intact (enforced on secondary Kiosk sales — the classic royalty surface).
+- ⚠️ Primary mint/transfer is NOT royalty-enforced (only Kiosk sales are) — accepted.
+- ⚠️ Removing rules changes the `confirm_request` hot-potato flow — the resale/buy PTB builder must satisfy exactly `royalty_rule` (see `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`).
+- ⚠️ Same v4 republish as [[D-035]]; changes `mint_nft_token` signature + U6 builder + U12.
+
+### Related
+
+- Supersedes part of [[D-029]]; bundled with [[D-035]] into v4; affects U6/U11/U12
+
+---
+
 # Reserved Decision Numbers
 
-D-035 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-037 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

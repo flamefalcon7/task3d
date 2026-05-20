@@ -1,5 +1,30 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (D-035/D-036 accepted; plan-008 revised) — **Next = U16 (Move v4 source delta).**
+
+### What happened (design pivot, no code yet)
+While scoping U11 (/track discovery), reading the v3 contract surfaced two things the user decided to fix as real on-chain features → **two new ADRs + a v4 republish**:
+- **D-035** — L2 `NftToken` reconnects to Phase-3 quilt variants: `NftCollection += quilt_blob_id`, `NftToken += patch_id`; `launch_collection`/`mint_nft_token` gain those params. Each token binds one colored quilt patch (reuses Phase-3 `/api/collection/build` + `by-quilt-patch-id` + `forge/VariantEditor`). Closes the L2 GLB-blob-id resolution gap (v3 `Model3D`/`NftToken` store no GLB blob id; L1 still uses the `?blob=` hatch).
+- **D-036** — `mint_nft_token` mints a **plain owned token** (no auto-Kiosk place_and_list; drops kiosk args); listing-for-sale is a separate opt-in. `ensure_collection_policy` keeps **only `royalty_rule`** (drops lock + personal_kiosk rules) so bought tokens are freely usable — gameDev/`/track`-friendly.
+- Both ship in **one v4 fresh republish** (Move struct field adds aren't in-place upgradeable).
+
+### Plan + ADRs revised (uncommitted)
+- `docs/decisions.md` — added D-035, D-036 (Accepted).
+- `docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md` — added amendment banners (D-032/D-035/D-036), **new U16 (Move v4 source) + U17 (v4 republish)**, rewrote **U11** (/track = owned `NftToken` → `patch_id` quilt resolution; track-scoped Access grep) + **U12** (variant authoring + quilt + mint-per-patch), U6 v4-revision note, and a "Deferred to Follow-Up" item for the frontend `Access` dead-code purge (~12 files, NOT folded into U11).
+- Tasks: #45 U16, #46 U17 created; #35 U11 + #36 U12 rewritten; dep chain U16→U17→U12→U11.
+
+### New dependency chain (U11 is now BLOCKED)
+**U16 (Move v4 source, test-first) → U17 (v4 republish, user-in-loop like U5) → U12 (nft creator quilt/mint UI) → U11 (/track).**
+
+### Next Concrete Step
+**Start U16** — Move v4 source delta in `contracts/model3d/sources/model3d.move`: add `NftCollection.quilt_blob_id` + `NftToken.patch_id` (+ accessors), `launch_collection` += `quilt_blob_id`, `mint_nft_token` drop kiosk args + add `patch_id` + `public_transfer` to caller, `ensure_collection_policy` royalty-only. Update Move tests (test-first: owned-mint/no-ItemListed/patch_id/single-rule policy). `sui move build` + `test` green. Then U17 republish (needs user-in-loop CLI publish).
+
+### Blockers / Open Questions
+- Uncommitted: `docs/decisions.md`, `docs/plans/2026-05-20-008-…-plan.md`, this file. Suggest commit before compaction.
+- U17 republish needs the user to run `sui client publish` (interactive keychain), same as U5.
+
+---
+
 ## Last Updated: 2026-05-20 (U9 DONE) — **procedural generation removed. Next = U11/U12 (or U8).**
 
 ### U9 — procedural teardown (done, green)

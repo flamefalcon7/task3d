@@ -19,6 +19,13 @@ Reverse D-013 and ship the NFT collection layer as real v1 surface (per **D-029*
 
 > **⚠️ D-030 amendment (2026-05-20, post U1–U4 code review).** The integration gate is **collection-level, not a model-license snapshot.** `NftCollection` carries `integration_policy: u8` (set by the nft creator via cap-gated `set_integration_policy`, default `POLICY_PERMISSIONLESS`); the old `base_policy` snapshot field is **removed**. `register_integration` gates on `collection.integration_policy`; abort `ELicenseRestricted` → **`EIntegrationsClosed`**. The base model's `license.policy` is **display/Browse metadata only** — derivation (`launch_collection`) is gated purely by the pay-to-derive fee (a `RESTRICTED` base can still be forked, by design). Wherever this plan says "integration gate = `base_policy`/`license.policy`," read `collection.integration_policy`. The Browse integration filter (U8/U14) reads the **collection's** `integration_policy`, not the model's. See D-030.
 
+> **⚠️ D-032 amendment (2026-05-20, U5 shipped).** Model3D is now a **shared object** sold via `publish` (sells *access*, not ownership); the L1 Kiosk path (`mint_and_list` / `purchase_with_kiosk` / `TransferPolicy<Model3D>` / `RoyaltyPaid`) was **removed**. The package shipped as **v3** (PackageID `0x35ba17b3…`), not "v2". Wherever this plan's body says `mint_and_list`/`purchase_with_kiosk` for L1, read `publish` + `take_shared<Model3D>`. U10 shipped as the `/create` wizard on `publish` (Tripo pay-gate + GLB upload), not a `mint_and_list` rebuild. See D-032.
+
+> **⚠️ D-035 + D-036 amendment (2026-05-20) — triggers a v4 republish; resequences U6/U11/U12; adds U16+U17.** Two accepted ADRs change the L2 surface:
+> - **D-035** — `NftCollection` gains `quilt_blob_id: String`; `NftToken` gains `patch_id: String`; `launch_collection` gains a `quilt_blob_id` param; `mint_nft_token` gains a `patch_id` param. Each token binds one on-chain **quilt patch** (a colored variant), reconnecting the Phase-3 quilt + material-swap pipeline (backend `/api/collection/build`, `by-quilt-patch-id` aggregator, `frontend/src/forge/VariantEditor`, `Model3DSummary.patchId`). Resolution: token `getObject` → `patch_id` → aggregator → variant GLB (closes the L2 GLB-blob-id gap; L1 `Model3D` GLB still uses the `?blob=` hatch for the demo).
+> - **D-036** — `mint_nft_token` no longer auto-places into Kiosk: it mints a **plain owned `NftToken`** and `public_transfer`s it to the caller (drops `kiosk_obj`/`personal_cap` + `place_and_list`). Listing-for-sale is a separate opt-in Kiosk `place_and_list` PTB. `ensure_collection_policy` keeps **only `royalty_rule`** (removes `kiosk_lock_rule` + `personal_kiosk_rule`) so a Kiosk-bought token can be taken out and used freely — gameDev/`/track`-friendly.
+> - **Sequencing:** these Move-struct field additions are not in-place upgradeable → a **v4 fresh republish** (new `U16` Move source delta + `U17` republish, mirroring the U1–U4/U5 shape). **U6** shipped against v3 and needs a delta pass (see its v4-revision note). **U11** and **U12** (both not yet started) are rewritten below against v4. The `confirm_request` hot-potato for any resale/buy PTB now satisfies **only** `royalty_rule`. See D-035, D-036.
+
 ---
 
 ## Problem Frame
@@ -93,7 +100,7 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 | R-ID (origin) | Plan coverage |
 |---|---|
 | R1 four real actors | U10/U12/U13/U14 (surfaces) + U15 (pitch/demo) |
-| R2 base/derivative split; L1+L2 coexist | U1 (`launch_collection`, pay-to-derive) + U3 (L2 token) + L1 unchanged (plan-007) |
+| R2 base/derivative split; L1+L2 coexist | U1 (`launch_collection`, pay-to-derive) + U3 (L2 token) + U16 (v4: patch variants + owned-token mint) + L1 `publish` (D-032, shipped) |
 | R3 Tripo-only; procedural removed | U9 |
 | R4 Tripo service-funded; pay-per-generate → v1.1 | U10 (no SUI charge at generate) + Scope Boundaries |
 | R5 `license.policy` radio at publish | U10 |
@@ -101,7 +108,7 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 | R7 `launch_collection` entry fn | U1 |
 | R8 key-only `NftCollectionCreatorCap` holds fee + registry | U1 |
 | R9 cap-gated `set_register_fee` | U2 |
-| R10 collection listable; resale royalty via TransferPolicy | U3 |
+| R10 collection listable; resale royalty via TransferPolicy | U3 + U16 (v4: royalty-only policy, owned-token mint, opt-in list-for-sale) |
 | R11 registry addressable through collection | U1 (Table on collection) |
 | R12 `register_integration` fee-gated, routes to cap holder | U4 |
 | R13 abort `ELicenseRestricted` on restricted base; UI message + filter link | U4 (Move) + U13 (UI) |
@@ -282,6 +289,8 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 **Verification:** Vitest green; dry-run smokes green against v3 package.
 
+> **v4-revision note (D-035/D-036, post-U16/U17).** U6 shipped against v3 and needs a delta pass once v4 lands: `buildLaunchCollectionPtb` gains a `quiltBlobId` arg; `buildMintNftTokenPtb` **drops** the Kiosk args (`kioskId`/`personalKioskCapId`) + the `kiosk::ItemListed` expectation and **gains** a `patchId` arg (now a pure mint→`public_transfer`); add a **separate** `buildListNftTokenForSalePtb` (standard Kiosk `place_and_list`) for the opt-in sale path, whose `confirm_request`/buy chain satisfies **only** `royalty_rule` (lock + personal_kiosk rules removed per D-036). Re-point all builder dry-run smokes at the v4 PackageID.
+
 ---
 
 ### U7. Backend `SuiClient` + `IntegrationRegistered` indexer + "Used by" API + `app_metadata` schema validation
@@ -378,45 +387,61 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 ---
 
-### U11. `/track` discovery off `Access` → `?model=` Kiosk-protocol lookup (R22 frontend)
+### U11. `/track` discovery = owned `NftToken` → `patch_id` quilt resolution (R22 frontend; rewritten for D-035/D-036)
 
-**Goal:** Delete the `Access`-based discovery path in `useOwnedVariants`; `TrackPage` resolves the asset via `?model=<id>` by **fetching the `Model3D` object directly via the frontend Sui client** (`getObject` → `lineage_blob_id`/blob) → Walrus blob. No backend listings API exists, so do not depend on one.
+**Goal (rewritten):** `/track` reflects **NFT ownership**, not the dead `Access` path. The user owns `NftToken` objects (per D-036 they are **plain owned objects** — no Kiosk walk needed). The carousel lists the connected wallet's owned `NftToken`s; each token's drivable GLB resolves through its on-chain `patch_id` (D-035). `?model=<tokenId>` drives a specific token directly; the `?blob=<blobId>` dev escape hatch is retained.
 
-**Requirements:** R22 (frontend half)
+**Why this changed:** the original "`getObject(Model3D) → blob`" approach was based on the stale Phase-2/3 Model3D shape — the v3/v4 `Model3D` has **no GLB blob field** (only `lineage_blob_id`; the GLB `Blob` is a separate creator-owned object). D-035 puts a resolvable `patch_id` on the `NftToken` instead, so L2 driving resolves cleanly via the collection quilt. D-036 makes owned tokens plain objects, so discovery is a simple owned-objects query (the earlier Kiosk-walk wrinkle is gone).
 
-**Dependencies:** U10 (v3 package + canonical mint)
+**Requirements:** R22 (frontend half); consumes D-035 (patch_id resolution) + D-036 (owned-object discovery)
 
-**Files:** `frontend/src/track/useOwnedVariants.ts` (delete Access query; rewrite to a direct `?model=` object fetch OR delete entirely if `?model=` covers all paths); `frontend/src/track/TrackPage.tsx` (read `?model=`, `getObject(modelId)` for the Walrus blob, mount scene; `racetrackScene.ts` untouched — still takes pre-fetched `carGlbBytes`).
+**Dependencies:** U16 + U17 (v4 package: `NftToken.patch_id`, `NftCollection.quilt_blob_id`, owned-not-Kiosk mint), U12 (a real minted token to discover). **No longer a standalone frontend unit** — needs v4 + a minted token on testnet.
+
+**Files:**
+- `frontend/src/track/useOwnedVariants.ts` → **rename to `usePublishedModels`→ actually `useOwnedTokens.ts`**: delete the two-pass `Access` GraphQL discovery; replace with "query owned objects of type `${pkg}::model3d::NftToken` for the connected wallet" → map each to `{ tokenId, patchId, collectionId, baseModelId, name }`. (Resolve final filename during impl; the export must reflect "owned NftTokens", not "owned variants".)
+- `frontend/src/track/TrackPage.tsx`: `?model=<tokenId>` → `useSuiClient().getObject(tokenId, { showContent })` → read `patch_id` → build the aggregator `by-quilt-patch-id` URL → mount scene. Carousel (no `?model=`) consumes `useOwnedTokens`. Keep `?blob=` hatch. `racetrackScene.ts` untouched (still takes pre-fetched `carGlbBytes`).
+- **Delete** `frontend/src/track/stubListingLookup.ts` (+ replace its `aggregatorUrlForVariant` patch-id branch usage — already supports `by-quilt-patch-id`).
+- Tests: `frontend/src/track/useOwnedTokens.test.ts` (rewrite from `useOwnedVariants.test.ts`), `frontend/src/track/TrackPage.test.tsx` (update).
+
+**Approach:** owned-objects query via the frontend `SuiJsonRpcClient` (`getOwnedObjects` filtered by `StructType`), NOT GraphQL Access discovery. `getObject(tokenId)` for the `?model=` single-drive path. GLB bytes come from the aggregator `by-quilt-patch-id/{patch_id}` URL (the existing `aggregatorUrlForVariant` patch branch).
 
 **Test scenarios:**
-- `?model=<id>` present → `getObject(modelId)` mock returns the model's `lineage_blob_id` → scene mounts with that model's GLB.
-- `?model=` absent → falls back to existing carousel default (Phase-3 backward compat).
-- No `Access`/`buy_access` references remain in frontend (grep).
+- `?model=<tokenId>` present → `getObject` mock returns a token with `patch_id` → scene mounts with the `by-quilt-patch-id` GLB for that patch.
+- `?model=` absent + wallet connected → `getOwnedObjects(NftToken)` mock populates the carousel; selecting a token drives its patch.
+- `?blob=<id>` present → drives that blob directly (dev hatch), bypassing on-chain lookup.
+- No `Access`/`buy_access` references remain **in `frontend/src/track/`** (track-scoped grep; the frontend-wide purge is a separate follow-up — see Scope Boundaries).
 
-**Verification:** tests green; manual smoke — purchased model drives via `?model=`.
+**Verification:** tests green; manual smoke — a wallet that owns a minted `NftToken` sees it in the carousel and drives its colored variant; `?model=<tokenId>` drives that token.
 
 ---
 
-### U12. nft creator launch-collection page + `set_register_fee` UI (F2)
+### U12. nft creator launch-collection page — variant authoring (quilt) + mint-per-patch + `set_register_fee` UI (F2; expanded for D-035)
 
-**Goal:** The nft-creator surface: pick a base Model3D → `launch_collection` (pay derive fee) → receive cap → set `register_fee` → list.
+**Goal (expanded):** The nft-creator surface, now carrying the D-035 variant flow: pick a base Model3D → author **N colored variants** (reuse the Phase-3 `VariantEditor`) → build + upload the **quilt** → `launch_collection(base, quilt_blob_id, …)` (pay derive fee) → receive soulbound cap → set `register_fee` → **mint one `NftToken` per patch** (plain owned token per D-036). Tokens are NOT auto-listed; "list for sale" is a separate opt-in (deferred / U6 builder).
 
-**Requirements:** R7, R8, R9, R10
+**Requirements:** R7, R8, R9, R10; consumes D-035 (quilt variants) + D-036 (owned-token mint)
 
-**Dependencies:** U6, U8
+**Dependencies:** U16 + U17 (v4 package), U6 (v4-revised builders: `buildLaunchCollectionPtb` +`quiltBlobId`, `buildMintNftTokenPtb` +`patchId`), U8
 
-**Files:** `frontend/src/collection/LaunchCollectionPage.tsx` (NEW) + test; `frontend/src/collection/SetRegisterFee.tsx` (NEW) + test; `frontend/src/App.tsx` (route).
+**Files:**
+- `frontend/src/collection/LaunchCollectionPage.tsx` (NEW) + test — base picker + variant authoring + launch + cap + fee + mint.
+- Reuse `frontend/src/forge/VariantEditor.tsx` + `VariantPreview.tsx` (Phase-3 color/material authoring — already built).
+- Reuse backend `POST /api/collection/build` (material-swap → N GLBs; already built) + the Phase-3 quilt-upload path (`frontend/src/forge/buildCollectionPtb.ts` holds the quilt-upload shape — extract/reuse, do not call the dead `publish_collection`).
+- `frontend/src/collection/SetRegisterFee.tsx` (NEW) + test.
+- `frontend/src/App.tsx` (route).
 
-**Approach:** model picker (from `/api/listings`) → `buildLaunchCollectionPtb` → on success surface the cap + a `register_fee` input → `buildSetRegisterFeePtb`. Cap is soulbound — copy explains it cannot be transferred.
+**Approach:** base Model3D picker (client-side GraphQL, like Browse) → `VariantEditor` to define N variants (baseColorRgb + optional textureId) → `POST /api/collection/build` returns N GLBs → pack + upload as ONE Walrus quilt (Phase-3 `writeFilesFlow`/quilt path) → capture `quilt_blob_id` + per-variant `patch_id`s → `buildLaunchCollectionPtb({ modelId, feeMist, quiltBlobId })` → on success surface the soulbound cap + a `register_fee` input (`buildSetRegisterFeePtb`) → loop `buildMintNftTokenPtb({ capId, collectionId, name, patchId })` per variant (each a plain owned token, D-036). Cap is soulbound — copy explains it cannot be transferred.
 
 **Test scenarios:**
-- Launch happy path → `CollectionLaunched`; cap shown; fee form enabled.
+- Author 3 variants → `/api/collection/build` called with 3 specs → quilt upload yields 1 blob_id + 3 patch_ids (mock Walrus).
+- Launch happy path → `buildLaunchCollectionPtb` carries `quiltBlobId`; `CollectionLaunched`; cap shown; fee form enabled.
+- Mint-per-patch → `buildMintNftTokenPtb` called once per patch with the right `patchId`; no Kiosk args passed (D-036); no `ItemListed` expected.
 - Set fee → `set_register_fee` signed; UI reflects new fee.
 - Wallet rejection on launch → toast + Retry.
 
-**Verification:** tests green; manual smoke — launch a collection from a published model, set a fee, see it on the collection detail page.
+**Verification:** tests green; manual smoke — author a 3-color collection from a published model, launch (quilt uploaded), set a fee, mint 3 owned tokens; each drives its own color on `/track`.
 
-> **Descope hook:** Scope Boundaries #3 — if buffer collapses, drop this separate surface; mesh creator launches their own collection (path B) reusing the same builders.
+> **Descope hook (revised):** if buffer collapses, drop the multi-variant authoring and mint a **single** token off the base model's own GLB (1 patch / no material-swap), keeping the launch + cap + fee + registry economy intact. The colored fleet is the polish cut, not the economy.
 
 ---
 
@@ -480,6 +505,58 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 ---
 
+### U16. Move v4 — L2 variant patch + owned-token mint (D-035 + D-036 source delta)
+
+**Goal:** Add the on-chain variant + owned-token surface in the Move source: `NftCollection.quilt_blob_id`, `NftToken.patch_id`, the `launch_collection`/`mint_nft_token` signature changes, and the royalty-only `TransferPolicy<NftToken>`. Move tests cover the new fields + the no-Kiosk mint.
+
+**Requirements:** consumes D-035 + D-036; advances R10 (royalty-on-resale) + R2 (L2 leg)
+
+**Dependencies:** U1–U4 (the v3 collection layer this modifies). **Lands in the same source as a fresh v4 republish (U17).**
+
+**Files:**
+- `contracts/model3d/sources/model3d.move`:
+  - `NftCollection` += `quilt_blob_id: String` (length-bounded by `MAX_BLOB_ID_LEN`); add public accessor `collection_quilt_blob_id`.
+  - `NftToken` += `patch_id: String`; add public accessor `nft_token_patch_id`.
+  - `launch_collection` += `quilt_blob_id: String` param (validate length; store on collection).
+  - `mint_nft_token`: **drop** `kiosk_obj`/`personal_cap` + `place_and_list`; **add** `patch_id: String` param; mint + `transfer::public_transfer(token, ctx.sender())`. `NftTokenMinted` event may carry `patch_id` (optional, for the indexer).
+  - `ensure_collection_policy`: keep **only** `royalty_rule::add` — remove `kiosk_lock_rule::add` + `personal_kiosk_rule::add`.
+  - New abort code if needed: `EPatchIdMalformed` (next free in the 30s block).
+- `contracts/model3d/tests/model3d_tests.move`: update `launch_collection`/`mint_nft_token` callsites; add the new-field + owned-mint + royalty-only assertions.
+- `contracts/UPGRADE.md` (note: v4 is another fresh republish — struct field additions are not in-place upgradeable).
+- `docs/solutions/kiosk-ptb-patterns/per-type-transfer-policy.md` (UPDATE — royalty-only rule set + the confirm_request consequence; supersedes the three-rule note from U3).
+
+**Execution note:** Test-first — write the "mint yields a plain owned token (no Kiosk, no ItemListed)" + "token carries the supplied patch_id" tests before changing the entry fn.
+
+**Test scenarios:**
+- `launch_collection(base, payment, quilt_blob_id)` → collection stores `quilt_blob_id`; accessor returns it; over-`MAX_BLOB_ID_LEN` aborts.
+- `mint_nft_token(cap, collection, name, price?, patch_id)` → a **plain owned** `NftToken` transferred to caller; `nft_token_patch_id` returns the supplied patch; **no Kiosk placement, no `ItemListed` event**.
+- Multiple tokens may share one `patch_id` (a "red edition").
+- `ensure_collection_policy` → `TransferPolicy<NftToken>` has **exactly** `royalty_rule` (assert lock + personal_kiosk rules absent).
+- A standard Kiosk `place_and_list` + `purchase` + `confirm_request` chain on an `NftToken` satisfies royalty-only and lets the buyer **take** the token out (no lock).
+- Non-cap-holder cannot `mint_nft_token`.
+
+**Verification:** `sui move build` clean; `sui move test` green; per-type-policy doc updated.
+
+---
+
+### U17. Move v4 republish to testnet + bootstrap + config (mirrors U5)
+
+**Goal:** Fresh v4 publish (new PackageID), rerun the bootstrap (`ensure_collection_policy`, now royalty-only), and update both config mirrors. Same process + safety guards as U5.
+
+**Requirements:** foundation for the v4-dependent frontend units (U6 delta, U11, U12); R22 already satisfied in v3.
+
+**Dependencies:** U16
+
+**Files:** `contracts/networks/testnet.json` (UPDATE — new v4 PackageID + Publisher + `TransferPolicy<NftToken>` id/cap + `kiosk_apps_package_id` + `supersedes_v3_package_id`); `frontend/src/sui/networkConfig.ts` (UPDATE the typed mirror; keep `networkConfig.test.ts` parity green); `contracts/UPGRADE.md`; `docs/reports/phase-4-v4-republish.md` (NEW — gas, IDs, bootstrap receipts).
+
+**Approach:** `sui client publish`; record IDs into both config files (parity test guards drift); run `ensure_collection_policy` bootstrap. Same env guard as U5: refuse publish if `SUI_MAINNET_DEPLOY_KEY` is set. Verify the new `TransferPolicy<NftToken>` shows **one** rule (royalty only).
+
+**Test scenarios:** Test expectation: none — deploy artifact. Verification = config populated + bootstrap receipt + single-rule policy.
+
+**Verification:** new v4 package on Sui Explorer; `testnet.json` + `networkConfig.ts` updated (parity green, no nulls); `TransferPolicy<NftToken>` shows exactly the royalty rule; republish notes committed.
+
+---
+
 ## Pending from plan-007 (build per plan-007 spec — NONE are shipped)
 
 These plan-007 units were **never built** (only U1–U5 shipped). They remain in-scope Phase-4 deliverables; execute them per their plan-007 spec, **adjusted for the no-backend-indexer reality** (plan-007 assumed a backend `eventPollerBase`/indexer that does not exist — wherever those units called for backend polling, use client-side polling instead). Each carries a first-class v3 acceptance criterion below. Listed here so plan-008 is the complete index of remaining Phase-4 work.
@@ -537,6 +614,9 @@ These plan-007 units were **never built** (only U1–U5 shipped). They remain in
 - nft creator dashboard beyond the per-collection detail page
 - gameDev full discovery directory beyond the Browse filter + detail reverse lookup
 - Multi-layer derivation (D-002 still caps at 1 layer)
+
+### Deferred to Follow-Up Work
+- **Frontend `Access`/`buy_access` dead-code purge.** The v3 republish (U1) deleted the `Access` Move struct, but the L1 buy-access UI still references it across ~12 frontend files: `buy/` (`ModelDetailPage`, `BuyAccessButton`, `hooks`), `browse/` (`useModelIndex`, `ModelCard`, `CollectionCard`), `collection/` (`useCollectionBySlug`, `CollectionDetailPage`), and `sui/purchaseAccessPtb.ts`. All of it is dead against v3/v4. U11's grep gate is therefore **track-scoped** (clean within `frontend/src/track/`), not frontend-wide. The full purge is its own unit — naturally bundled with the U8/U14 Browse rework, since L1 access-sale is a v1.1 Seal-gated concern (D-031) that may be reworked rather than just deleted. **Do not fold it into U11.**
 
 ### Mandatory contingency — worst-case descope order (first to cut first)
 The realignment makes the 6/21 buffer **−5 to +4.5 working days**. If buffer hits zero, cut in this order (cumulative — each step fires only if still over budget after the prior). Each step names the **unit-IDs voided/modified** so the cut is mechanical, not narrative:
