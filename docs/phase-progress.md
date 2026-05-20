@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (later) — **plan-008 written + doc-reviewed. plan-007 superseded for U6+.**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+- Days to shortlist (7/8): **49 of 55**
+- Days to Demo Day (7/20–21): **61 of 67**
+- Days to winners (8/27): **99 of 105**
+
+### What happened
+Ran `/ce-plan` on plan-007 → decided (with user) to write a **new plan-008** rather than amend plan-007. `docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md` (status active) is the go-forward Phase-4 plan; plan-007 flipped to `status: superseded-for-U6+`.
+
+Key decisions made during planning:
+- **v3 republish (locked):** physically deleting the public `Access` struct (R22) breaks compatible-upgrade rules → fresh PackageID. User chose clean republish over keep-dead-code. Low cost now (frontend unmigrated, no pre-bake yet).
+- **No backend listing indexer:** plan-007 U6–U14 were **never built** (only U1–U5 shipped: v2 Move contract + `kioskTxBuilders.ts` + `contracts/networks/testnet.json`/`networkConfig.ts`). Browse stays **client-side GraphQL** (`useModelIndex`); only a single-topic `IntegrationRegistered` backend indexer is new. This was a correction caught by the feasibility reviewer and cut scope in the right direction (negative buffer).
+
+plan-008 = 15 units (U1–U15) + 6 pending plan-007 units carried by reference. Move collection layer (launch_collection / set_register_fee / NftToken / register_integration) → v3 republish → frontend builders → backend integration indexer → mint consolidation + procedural removal → collection/integration UI → four-actor demo. 4-persona doc-review applied: foundation correction, security commitments (https-only + name/url caps + homoglyph + fee TOCTOU), descope reorder flag.
+
+### Next Concrete Step
+**Open `/ce-work docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md`** starting at **U1** (Move v3: delete Access + launch_collection + key-only cap). U1→U4 are Move (test-locally), U5 is the single v3 republish, then frontend/backend. Descope order (Scope Boundaries) is final: 0) drop L2 NftToken, 1) UI polish, 2) nft-creator-separate-flow (→ path B), 3) register_fee mechanics, 4) narrative-only. (#2↔#3 swapped from D-029 origin order, user-confirmed 2026-05-20 — keep the Explorer-visible fee story alive longer than a UI page.)
+
+### Blockers / Open Questions
+- (Resolved) Descope #2↔#3 swap — confirmed, applied to plan.
+- Nothing committed yet this session: plan-008 (new), plan-007 (status flip), this file are modified-uncommitted. The earlier pivot (D-029/decisions.md/spec.md/brainstorm) was committed (`899fc92`, `2127354`).
+
+---
+
 ## Last Updated: 2026-05-20 — **MAJOR PIVOT: D-013 reversed (D-029). plan-007 needs restructure before U6 resumes.**
 
 ### What happened this session (2026-05-20)

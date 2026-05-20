@@ -3,10 +3,13 @@ date: 2026-05-19
 type: feat
 title: "Phase 4 — Kiosk integration + race-on-mint demo centerpiece"
 origin: docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md
-status: active
+status: superseded-for-U6+
+superseded_by: docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md
 ---
 
 # Phase 4 — Kiosk integration + race-on-mint demo centerpiece
+
+> **Superseded (2026-05-20, D-029).** U1–U5 (Move v2 contract + TransferPolicy + `mint_and_list`/`purchase_with_kiosk` + `kioskTxBuilders.ts`) **shipped** and remain the cited foundation. U6–U14 were **never built**; they are superseded by `docs/plans/2026-05-20-008-feat-four-role-collection-layer-plan.md`, which reworks the mint/track units, drops the backend listing-indexer architecture (Browse stays client-side GraphQL), and carries the still-needed pending units (U8 overlay, U9 errors, U10 nav, U11 pre-bake, U13 mainnet, U14 build config) forward per their spec here. Read plan-008 for go-forward Phase-4 work.
 
 ## Summary
 
