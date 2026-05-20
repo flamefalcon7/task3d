@@ -1,5 +1,29 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (v4 shipped + reviewed; D-037 accepted) — **Next = U18 (Move v5: Model3D += glb_blob_id), then U19 republish, then U12.**
+
+### Since last entry
+- **v4 code review** (multi-agent, `base:76603f5`) → no P0/P1 code defects. Applied the cheap cluster (commit `2f5fe57`): doc/comment rot, D-029 status (Decision Reversal step 2), spec §2.8 callout, D-036 royalty-opt-in tradeoff made explicit, Move + TS test hardening. Move 49/49, TS 11/11, all clean. By-design items accepted (royalty opt-in, patch_id length-only, etc.).
+- **U12 scoping → surfaced a real blocker (D-037).** To fork a base Model3D, U12 needs the base GLB bytes, but v4 `Model3D` has **no on-chain GLB pointer** (Browse can't even preview L1 models today — `useModelIndex` reads a non-existent `blob_id`). User rejected the `?blob=` paste hatch and the params_json side-channel as not-legit. **Decision (D-037): add a typed `glb_blob_id: String` to `Model3D`, v5 republish.** Sub-decision (i): GLB uploaded as its own standalone blob, resolved via aggregator `/v1/blobs/<glb_blob_id>`.
+
+### New dependency chain
+**U18 (Move v5 source: `glb_blob_id`, test-first, solo) → U19 (v5 republish, user-in-loop CLI publish like U17; + U10 follow-up: `/create` uploads GLB standalone + passes `glbBlobId`, `useModelIndex` reads it) → U12 (nft-creator launch page).**
+
+### U12 decisions already locked (for when we get there)
+- **D1 = (b)+(i)**: real `glb_blob_id` field (D-037), standalone blob resolution. (NOT the paste hatch, NOT params_json.)
+- **D2**: build new `collection/LaunchCollectionPage.tsx`; **delete the dead Phase-3 forge path** (`forge/buildCollectionPtb.ts` + `ForgePage` target the removed `publish_collection`).
+- **D3**: batch the per-patch mints into **one PTB / one wallet popup** (new batched builder), not N popups.
+- Reuse as-is: `forge/VariantEditor` + `VariantPreview`, `walrus/useWalrusUpload` (returns blobIds+patchIds), backend `POST /api/collection/build`, the dapp-kit→Walrus signer bridge.
+
+### Next Concrete Step
+**Start U18** — `contracts/model3d/sources/model3d.move`: add `Model3D.glb_blob_id: String` (+ accessor) mirroring `lineage_blob_id`; `new_model`/`publish` take a `glb_blob_id` param (bound `MAX_BLOB_ID_LEN`/`EBlobIdMalformed`); thread through all Move test callsites + add stored/accessor/128-accept/129-reject tests (test-first). `sui move build` + `test` green. Then U19 republish (needs user to run `sui client publish`).
+
+### Blockers / Open Questions
+- Context ~50% at this checkpoint — consider `/compact` before U18 (the U18→U19→U12 road is long).
+- D-037 ADR text written — confirm with user before implementing U18.
+
+---
+
 ## Last Updated: 2026-05-20 (U16 + U17 + U6-v4 DONE) — **v4 live on testnet. Next = U12 (nft-creator quilt/mint UI), then U11 (/track).**
 
 ### Shipped this session (3 units, all committed)

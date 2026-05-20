@@ -557,6 +557,45 @@ Backend validates the **full** `app_metadata` schema (UTF-8 JSON, `name` + `url`
 
 ---
 
+### U18. Move v5 — `Model3D += glb_blob_id` (D-037 source delta)
+
+**Goal:** Make a published L1 `Model3D`'s GLB on-chain-resolvable. Add a typed `glb_blob_id: String` field, mirroring `lineage_blob_id` exactly. Closes the L1 GLB-resolution gap (Browse can't preview L1; U12 can't fork a base).
+
+**Requirements:** consumes D-037; unblocks U12; fixes L1 Browse preview.
+
+**Dependencies:** v4 source (U16). **Lands as a fresh v5 republish (U19).**
+
+**Files:**
+- `contracts/model3d/sources/model3d.move`: `Model3D += glb_blob_id: String` (+ accessor `glb_blob_id`); `new_model`/`publish` take a `glb_blob_id: String` param; `validate_publish_inputs` (or inline) length-bounds it via `MAX_BLOB_ID_LEN`/`EBlobIdMalformed`; update `ModelPublished` event? **No** — keep event layout unless needed (event is `copy+drop`; adding a field is breaking but we're already republishing — decide at impl whether the indexer needs it; default: leave event, resolve via object field).
+- `contracts/model3d/tests/model3d_tests.move`: thread `glb_blob_id` through all `new_model`/`publish`/`mint_base_model` callsites; add stored+accessor + 128-accept/129-reject tests.
+- `contracts/UPGRADE.md` (v5 note); `docs/spec.md` §2.8 (glb_blob_id callout).
+
+**Execution note:** Test-first for the new field's stored+accessor+bound assertions.
+
+**Test scenarios:** `publish(..., glb_blob_id)` → object carries it; accessor returns it; 128 accepts, 129 aborts `EBlobIdMalformed`. Existing publish/new_model tests pass with the new param threaded.
+
+**Verification:** `sui move build` clean; `sui move test` green.
+
+---
+
+### U19. Move v5 republish to testnet + config (mirrors U17)
+
+**Goal:** Fresh v5 publish (new PackageID), rerun the `ensure_collection_policy` bootstrap (still royalty-only), update both config mirrors. Same process + env guard as U5/U17.
+
+**Requirements:** foundation for U10's `glb_blob_id` wiring + U12 base fork.
+
+**Dependencies:** U18
+
+**Files:** `contracts/networks/testnet.json` (UPDATE — v5 PackageID + Publisher + `TransferPolicy<NftToken>` id/cap + `supersedes_v4_package_id`); `frontend/src/sui/networkConfig.ts` (UPDATE; parity test green); `contracts/UPGRADE.md`; `docs/reports/phase-4-v5-republish.md` (NEW).
+
+**Approach:** `sui client publish`; record IDs into both config files; run `ensure_collection_policy`; verify single royalty rule. Same `SUI_MAINNET_DEPLOY_KEY` guard as U17.
+
+**Verification:** v5 package on Sui Explorer; both configs updated (parity green); `TransferPolicy<NftToken>` = 1 rule; republish notes committed.
+
+> **U10 follow-up (folds into U12 prep or its own small unit):** `/create` now uploads the GLB as a **standalone** Walrus blob (not quilted with lineage) and passes its blob-id string to `buildPublishPtb({ …, glbBlobId })`; `buildPublishPtb` + `useModelIndex` (read `json.glb_blob_id`) + the base-GLB resolver gain the field. Resolution sub-decision **(i)**: `/v1/blobs/<glb_blob_id>`.
+
+---
+
 ## Pending from plan-007 (build per plan-007 spec — NONE are shipped)
 
 These plan-007 units were **never built** (only U1–U5 shipped). They remain in-scope Phase-4 deliverables; execute them per their plan-007 spec, **adjusted for the no-backend-indexer reality** (plan-007 assumed a backend `eventPollerBase`/indexer that does not exist — wherever those units called for backend polling, use client-side polling instead). Each carries a first-class v3 acceptance criterion below. Listed here so plan-008 is the complete index of remaining Phase-4 work.

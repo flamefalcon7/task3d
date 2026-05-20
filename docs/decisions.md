@@ -1810,6 +1810,47 @@ v3 `mint_nft_token` takes `kiosk_obj` + `personal_cap` and `place_and_list`s the
 
 ---
 
+## D-037: `Model3D` gains a first-class `glb_blob_id` — L1 GLB becomes on-chain-resolvable (v5 republish)
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+
+### Context
+
+v4 `Model3D` stores only `lineage_blob_id` (the lineage JSON) — there is **no on-chain pointer to the model's GLB bytes**. Consequence: nothing can resolve a published L1 model's 3D file from the object alone. This breaks two flows: (1) Browse/detail can't preview L1 models (`useModelIndex` reads a non-existent `blob_id` → `''`), and (2) the nft-creator launch flow (U12) can't fork a base model — it needs the base GLB bytes to material-swap variants. The interim `?blob=` URL hatch (paste a blob id) is unacceptable UX. Smuggling the id into the free-form `params_json` string works but is a stringly-typed side-channel, not a legit content-addressing model. Testnet republish is cheap (v4 just shipped), so doing it correctly now — before U11/U12/demo build on top — is the right call.
+
+### Decision
+
+`Model3D` gains a typed `glb_blob_id: String` field — a first-class on-chain pointer to the model's GLB, mirroring the existing `lineage_blob_id` exactly (same `MAX_BLOB_ID_LEN` bound + `EBlobIdMalformed` code). `new_model`/`publish` take a `glb_blob_id` param; the frontend passes the GLB's Walrus blob-id string (computed off-chain by the Walrus SDK, same as `lineage_blob_id`). The GLB is uploaded as its **own standalone blob** (resolution sub-decision **(i)**), resolved via the standard aggregator `/v1/blobs/<glb_blob_id>` — no quilt/patch indirection for a single L1 GLB. Ships as a fresh **v5 republish** (struct field add is not in-place upgradeable).
+
+### Rationale
+
+- Content addressing belongs in a typed field on the content object, not in a metadata string.
+- Symmetric with the L2 design (NftToken resolves its GLB via `patch_id`); L1 now resolves via `glb_blob_id`.
+- Fixes the existing "Browse can't preview L1 models" bug as a side effect.
+- Unblocks U12's base-model fork with zero-friction UX (click a model → auto-resolve its GLB).
+
+### Alternatives Considered
+
+- **(a) `?blob=` paste hatch** — rejected: terrible UX.
+- **(d) Embed GLB id in `params_json`** — rejected: stringly-typed side-channel; works but not a legit data model.
+- **(ii) Keep GLB quilted with lineage, store `glb_patch_id`** — viable + symmetric with L2, but adds quilt/patch indirection for a single-file L1 GLB; (i) standalone blob is simpler.
+
+### Consequences
+
+- ✅ L1 GLB resolvable from the object alone; Browse L1 preview works; U12 fork is friction-free.
+- ⚠️ Fresh **v5 republish** (new PackageID; supersedes v4 `0x3b6b7258…`). Same process as U17.
+- ⚠️ Touches the already-shipped U10 `/create`: GLB now uploaded standalone (not quilted with lineage) + `buildPublishPtb` passes `glb_blob_id`.
+- ⚠️ Only models minted under v5 carry `glb_blob_id` — irrelevant on testnet (we mint all demo data).
+- 🔮 At mainnet, `glb_blob_id` is part of the canonical `Model3D` ABI from the start.
+
+### Related
+
+- Unblocks U12 (base-model fork); fixes the L1 GLB-resolution gap noted in [[D-035]]/[[D-036]] work. New units U18 (Move v5 source) + U19 (v5 republish). Touches U10.
+
+---
+
 # Reserved Decision Numbers
 
-D-037 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-038 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
