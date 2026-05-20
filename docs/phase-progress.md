@@ -1,5 +1,24 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U16 + U17 + U6-v4 DONE) — **v4 live on testnet. Next = U12 (nft-creator quilt/mint UI), then U11 (/track).**
+
+### Shipped this session (3 units, all committed)
+- **U16 (commit `2bb5ba3`)** — Move v4 source delta. `NftCollection += quilt_blob_id`, `NftToken += patch_id` (+ accessors); `launch_collection` += `quilt_blob_id` (bounded by `MAX_BLOB_ID_LEN`/`EBlobIdMalformed`); `mint_nft_token` drops kiosk args + `price` + `place_and_list`, adds `patch_id` (`MAX_PATCH_ID_LEN`/`EPatchIdMalformed=36`), `public_transfer`s a plain owned token; `NftTokenMinted` carries `patch_id`; `ensure_collection_policy` royalty-only. `sui move test` 47/47, build clean. UPGRADE.md + per-type-transfer-policy.md updated.
+- **U17 (commit `a7f76ff`)** — v4 fresh republish to testnet. **package `0x3b6b7258…`**, UpgradeCap `0xe39adcd3…`, Publisher `0x09f80e91…`, `TransferPolicy<NftToken> 0x9607bcf1…` (+ cap `0x85de8533…`). Bootstrap ran royalty-only `ensure_collection_policy`; on-chain read confirms rules VecSet = exactly `royalty_rule` (1 rule). Both config mirrors updated (testnet.json + networkConfig.ts, parity green); `docs/reports/phase-4-v4-republish.md` written. Supersedes v3 `0x35ba17b3…`. publish ~0.0496 SUI.
+- **U6 v4 delta (commit `0643e86`)** — `buildLaunchCollectionPtb += quiltBlobId`; `buildMintNftTokenPtb` drops kiosk args + price + ItemListed, adds `patchId` (plain mint→transfer). vitest 11/11, tsc clean; dry-run smokes hit the v4 package.
+
+### Decisions taken this session
+- **Listing builder = option C (deferred).** `buildListNftTokenForSalePtb` not built — nothing before the demo needs L2 listing (U11 shows owned tokens, U12 mints owned tokens). Tracked as task #48. When built it uses **option A** = personal-kiosk `borrow_val`→`place_and_list`→`return_val` (personal kiosk is mainstream + matches `ensure_creator_kiosk`).
+- **U11 `/track` discovery = option (a):** official `suiClient.getOwnedObjects({ filter: { StructType: <pkg>::model3d::NftToken } })` — owned, *unlisted* tokens only. NO third-party API (Kiosk SDK / Blockberry / TradePort only needed if we ever show kiosk-listed tokens; that's out of scope for 6/21). Then `getObject(token) → patch_id → by-quilt-patch-id aggregator → variant GLB`.
+
+### Next Concrete Step
+**U12 — nft-creator launch page.** VariantEditor (Phase-3 `forge/`) for color/patch authoring → `/api/collection/build` (material-swap quilt) → Walrus quilt upload → `buildLaunchCollectionPtb({ modelId, feeMist, quiltBlobId })` → cap → `buildSetRegisterFeePtb` → `buildMintNftTokenPtb({ capId, collectionId, name, patchId })` per patch. Produces the real minted tokens U11 then discovers. **Large UI unit — discuss scope/file plan before coding (multi-file); cannot browser-test here, flag it.**
+
+### Blockers / Open Questions
+- U12 is substantial UI work spanning several files — align on scope first.
+
+---
+
 ## Last Updated: 2026-05-20 (D-035/D-036 accepted; plan-008 revised) — **Next = U16 (Move v4 source delta).**
 
 ### What happened (design pivot, no code yet)
