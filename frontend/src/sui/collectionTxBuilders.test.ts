@@ -17,7 +17,6 @@ import {
   buildSetRegisterFeePtb,
   buildMintNftTokenPtb,
   buildRegisterIntegrationPtb,
-  KIOSK_FRAMEWORK_PACKAGE,
   type LaunchCollectionArgs,
   type SetRegisterFeeArgs,
   type MintNftTokenArgs,
@@ -29,11 +28,13 @@ const PKG = TESTNET.model3dPackageId;
 const FAKE_MODEL = '0x' + '1'.repeat(64);
 const FAKE_CAP = '0x' + '2'.repeat(64);
 const FAKE_COLLECTION = '0x' + '3'.repeat(64);
-const FAKE_KIOSK = '0x' + '4'.repeat(64);
-const FAKE_PERSONAL_CAP = '0x' + '5'.repeat(64);
 const DRY_RUN_SENDER = TESTNET.deployerAddress;
 
-const LAUNCH_ARGS: LaunchCollectionArgs = { modelId: FAKE_MODEL, feeMist: 0n };
+const LAUNCH_ARGS: LaunchCollectionArgs = {
+  modelId: FAKE_MODEL,
+  feeMist: 0n,
+  quiltBlobId: 'quiltBlobIdABC',
+};
 const SET_FEE_ARGS: SetRegisterFeeArgs = {
   capId: FAKE_CAP,
   collectionId: FAKE_COLLECTION,
@@ -42,10 +43,8 @@ const SET_FEE_ARGS: SetRegisterFeeArgs = {
 const MINT_ARGS: MintNftTokenArgs = {
   capId: FAKE_CAP,
   collectionId: FAKE_COLLECTION,
-  kioskId: FAKE_KIOSK,
-  personalKioskCapId: FAKE_PERSONAL_CAP,
   name: 'Racer #1',
-  priceMist: 1_000_000_000n,
+  patchId: 'patchId01',
 };
 const REGISTER_ARGS: RegisterIntegrationArgs = {
   collectionId: FAKE_COLLECTION,
@@ -78,7 +77,9 @@ describe('buildLaunchCollectionPtb', () => {
   });
 
   it('builds with a non-zero derive fee', () => {
-    expect(() => buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 5_000_000n })).not.toThrow();
+    expect(() =>
+      buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 5_000_000n, quiltBlobId: 'q' }),
+    ).not.toThrow();
   });
 });
 
@@ -97,19 +98,25 @@ describe('buildSetRegisterFeePtb', () => {
   });
 });
 
-// === mint_nft_token ===
+// === mint_nft_token (v4, D-036: plain owned mint, no Kiosk) ===
 describe('buildMintNftTokenPtb', () => {
-  it('emits one mint_nft_token call and declares NftTokenMinted + ItemListed<NftToken>', () => {
+  it('emits one mint_nft_token call declaring only NftTokenMinted (no ItemListed)', () => {
     const { tx, metadata } = buildMintNftTokenPtb(MINT_ARGS);
     const calls = moveCalls(tx);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.MoveCall?.function).toBe('mint_nft_token');
-    expect(metadata.expectedEvents).toContain(`${PKG}::model3d::NftTokenMinted`);
+    expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::NftTokenMinted`]);
+    // D-036: mint no longer touches a Kiosk → no ItemListed event.
     expect(
-      metadata.expectedEvents.some(
-        (e) => e === `${KIOSK_FRAMEWORK_PACKAGE}::kiosk::ItemListed<${PKG}::model3d::NftToken>`,
-      ),
-    ).toBe(true);
+      metadata.expectedEvents.some((e) => e.includes('kiosk::ItemListed')),
+    ).toBe(false);
+  });
+
+  it('takes no splitCoins (no price/payment at mint)', () => {
+    const { tx } = buildMintNftTokenPtb(MINT_ARGS);
+    expect(
+      tx.getData().commands.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins'),
+    ).toBe(false);
   });
 });
 
@@ -143,14 +150,12 @@ describe('type discipline', () => {
     expect(bad).toBeDefined();
   });
 
-  it('mint requires the kiosk + cap fields (compile-time)', () => {
-    // @ts-expect-error — kioskId is required
+  it('mint requires patchId (compile-time)', () => {
+    // @ts-expect-error — patchId is required
     const bad: MintNftTokenArgs = {
       capId: FAKE_CAP,
       collectionId: FAKE_COLLECTION,
-      personalKioskCapId: FAKE_PERSONAL_CAP,
       name: 'x',
-      priceMist: 1n,
     };
     expect(bad).toBeDefined();
   });
@@ -185,7 +190,7 @@ describe('PTB encoding reaches live RPC (fake IDs → object-resolution error)',
       ctx.skip();
       return;
     }
-    const { tx } = buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 0n });
+    const { tx } = buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 0n, quiltBlobId: 'q' });
     tx.setSender(DRY_RUN_SENDER);
     let err: Error | null = null;
     try {

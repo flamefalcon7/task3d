@@ -21,9 +21,6 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { TESTNET } from './networkConfig';
 
-// The Sui framework package (0x2) — where `kiosk::ItemListed` is emitted from.
-export const KIOSK_FRAMEWORK_PACKAGE = '0x2';
-
 // On-chain Clock singleton (shared object at 0x6).
 const CLOCK_OBJECT_ID = '0x6';
 
@@ -39,7 +36,6 @@ export type TxResult<T> = {
 };
 
 const PKG = TESTNET.model3dPackageId;
-const NFT_TOKEN_TYPE = `${PKG}::model3d::NftToken`;
 
 export interface LaunchCollectionArgs {
   /** Shared `Model3D` object ID to fork. Referenceable by any wallet (D-032). */
@@ -47,6 +43,10 @@ export interface LaunchCollectionArgs {
   /** Derive fee in MIST (the base model's `license.derivative_mint_fee`).
    *  Split from gas; the Move side refunds any excess to the sender. */
   feeMist: bigint;
+  /** D-035 — the Walrus quilt blob id holding this collection's variant
+   *  patches. Stored on the collection; each minted token binds one patch by
+   *  id. Length-bounded by MAX_BLOB_ID_LEN on chain. */
+  quiltBlobId: string;
 }
 
 export interface SetRegisterFeeArgs {
@@ -63,14 +63,11 @@ export interface MintNftTokenArgs {
   capId: string;
   /** Shared `NftCollection` ID the token is minted from. */
   collectionId: string;
-  /** nft creator's PersonalKiosk-wrapped Kiosk ID (mutable on chain). */
-  kioskId: string;
-  /** nft creator's `PersonalKioskCap` ID (read-only borrow at call). */
-  personalKioskCapId: string;
   /** Token display name (≤ 128 bytes, enforced on chain). */
   name: string;
-  /** Listing price in MIST. */
-  priceMist: bigint;
+  /** D-035 — quilt-patch id this token binds (the colored variant). Length-
+   *  bounded by MAX_PATCH_ID_LEN on chain. */
+  patchId: string;
 }
 
 export interface RegisterIntegrationArgs {
@@ -87,8 +84,9 @@ export interface RegisterIntegrationArgs {
 // === Builders ===
 
 /**
- * `launch_collection(model: &Model3D, payment: Coin<SUI>, ctx)` — an nft
- * creator forks a shared Model3D into an `NftCollection` (pay-to-derive). The
+ * `launch_collection(model: &Model3D, payment: Coin<SUI>, quilt_blob_id, ctx)`
+ * — an nft creator forks a shared Model3D into an `NftCollection`
+ * (pay-to-derive), pinning the collection's variant quilt blob (D-035). The
  * derive fee is split from gas; excess refunds to the caller. Emits
  * `CollectionLaunched`; transfers a soulbound cap + shares the collection.
  */
@@ -99,7 +97,7 @@ export function buildLaunchCollectionPtb(
   const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.feeMist)]);
   tx.moveCall({
     target: `${PKG}::model3d::launch_collection`,
-    arguments: [tx.object(args.modelId), payment!],
+    arguments: [tx.object(args.modelId), payment!, tx.pure.string(args.quiltBlobId)],
   });
   return {
     tx,
@@ -138,10 +136,11 @@ export function buildSetRegisterFeePtb(
 }
 
 /**
- * `mint_nft_token(cap, collection, kiosk: &mut, personal_cap, name, price, ctx)`
- * — cap-gated. Mints an `NftToken` and atomically place+lists it in the nft
- * creator's PersonalKiosk (one wallet popup). Emits `NftTokenMinted` + one
- * `kiosk::ItemListed<NftToken>`.
+ * `mint_nft_token(cap, collection, name, patch_id, ctx)` — cap-gated. Mints an
+ * `NftToken` bound to one quilt patch (D-035) and `public_transfer`s it to the
+ * caller as a PLAIN OWNED object (D-036) — NO Kiosk placement. Emits only
+ * `NftTokenMinted` (no `ItemListed`). Listing-for-sale is the separate opt-in
+ * `buildListNftTokenForSalePtb` path.
  */
 export function buildMintNftTokenPtb(
   args: MintNftTokenArgs,
@@ -152,10 +151,8 @@ export function buildMintNftTokenPtb(
     arguments: [
       tx.object(args.capId),
       tx.object(args.collectionId),
-      tx.object(args.kioskId),
-      tx.object(args.personalKioskCapId),
       tx.pure.string(args.name),
-      tx.pure.u64(args.priceMist),
+      tx.pure.string(args.patchId),
     ],
   });
   return {
@@ -163,10 +160,7 @@ export function buildMintNftTokenPtb(
     handles: {},
     metadata: {
       target: `${PKG}::model3d::mint_nft_token`,
-      expectedEvents: [
-        `${PKG}::model3d::NftTokenMinted`,
-        `${KIOSK_FRAMEWORK_PACKAGE}::kiosk::ItemListed<${NFT_TOKEN_TYPE}>`,
-      ],
+      expectedEvents: [`${PKG}::model3d::NftTokenMinted`],
     },
   };
 }
