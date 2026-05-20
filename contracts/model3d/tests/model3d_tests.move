@@ -30,6 +30,7 @@ use model3d::model3d::{
     Model3D,
     NftCollection,
     NftCollectionCreatorCap,
+    NftToken,
     new_license_terms,
     policy_permissionless,
     policy_restricted,
@@ -47,6 +48,8 @@ use model3d::model3d::{
     purchase_with_kiosk,
     launch_collection,
     set_register_fee,
+    ensure_collection_policy,
+    mint_nft_token,
     destroy_collection_for_testing,
     destroy_collection_cap_for_testing,
 };
@@ -1612,6 +1615,175 @@ fun set_register_fee_with_mismatched_cap_aborts() {
     destroy_collection_cap_for_testing(cap_b);
     destroy_collection_for_testing(collection_b);
     destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// === D-029 U3 — NftToken: mint + per-type TransferPolicy + resale royalty ===
+
+// Stand up: Publisher → TransferPolicy<NftToken> → base Model3D → launched
+// NftCollection (+cap) → NFT_CREATOR PersonalKiosk. Returns everything the
+// caller must tear down. `model`/`system`/`clk` are kept alive for teardown.
+#[test_only]
+fun nfttoken_bootstrap(sc: &mut ts::Scenario): (
+    system::System,
+    clock::Clock,
+    Model3D,
+    TransferPolicy<NftToken>,
+    NftCollection,
+    NftCollectionCreatorCap,
+    Kiosk,
+    PersonalKioskCap,
+) {
+    init_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let publisher = sc.take_from_sender<Publisher>();
+    ensure_collection_policy(&publisher, sc.ctx());
+    sc.return_to_sender(publisher);
+
+    sc.next_tx(CREATOR);
+    let policy = ts::take_shared<TransferPolicy<NftToken>>(sc);
+    let mut system = system::new_for_testing(sc.ctx());
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = ts::take_shared<NftCollection>(sc);
+    let (kiosk, personal_cap) = new_creator_kiosk(sc, NFT_CREATOR);
+
+    (system, clk, model, policy, collection, cap, kiosk, personal_cap)
+}
+
+// mint_nft_token places + lists the token in the creator Kiosk, emits
+// NftTokenMinted, and the per-type policy carries the three rules.
+#[test]
+fun mint_nft_token_places_lists_with_three_rule_policy() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, policy, collection, cap, mut kiosk, personal_cap) =
+        nfttoken_bootstrap(&mut sc);
+
+    sc.next_tx(NFT_CREATOR);
+    mint_nft_token(&cap, &collection, &mut kiosk, &personal_cap, s(b"Racer #1"), 1_000_000_000, sc.ctx());
+
+    // Exactly one NftTokenMinted, linked to this collection.
+    let minted = event::events_by_type<model3d::NftTokenMinted>();
+    assert!(vector::length(&minted) == 1, 340);
+    let me = vector::borrow(&minted, 0);
+    let token_id = model3d::nft_token_minted_token_id(me);
+    assert!(model3d::nft_token_minted_collection_id(me) == object::id(&collection), 341);
+
+    // Token is placed + listed in the creator Kiosk.
+    assert!(kiosk::has_item(&kiosk, token_id), 342);
+    assert!(kiosk::is_listed(&kiosk, token_id), 343);
+
+    // Exactly one kiosk::ItemListed<NftToken>.
+    let listed = event::events_by_type<sui::kiosk::ItemListed<NftToken>>();
+    assert!(vector::length(&listed) == 1, 344);
+
+    // Per-type policy has all three rules (royalty + lock + personal_kiosk).
+    assert!(sui::vec_set::size(tp::rules<NftToken>(&policy)) == 3, 345);
+
+    sc.return_to_sender(personal_cap);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    ts::return_shared(kiosk);
+    ts::return_shared(policy);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Test-first centerpiece: an NftToken resale runs the full hot-potato chain
+// (purchase → lock → royalty pay → personal prove → confirm_request); the
+// royalty is collected into the policy and ownership transfers (token locked).
+// Buyer reuses the creator's PersonalKiosk to avoid take_shared<Kiosk>
+// ambiguity (same convention as purchase_with_kiosk_returns_request_and_item).
+#[test]
+fun nft_token_resale_runs_confirm_chain_and_collects_royalty() {
+    let price: u64 = 1_000_000_000; // 1 SUI — above the floor crossover
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut policy, collection, cap, mut kiosk, personal_cap) =
+        nfttoken_bootstrap(&mut sc);
+
+    sc.next_tx(NFT_CREATOR);
+    mint_nft_token(&cap, &collection, &mut kiosk, &personal_cap, s(b"Racer #1"), price, sc.ctx());
+    let minted = event::events_by_type<model3d::NftTokenMinted>();
+    let token_id = model3d::nft_token_minted_token_id(vector::borrow(&minted, 0));
+
+    // Buyer purchases the listed NftToken with an exact-price payment.
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(price, sc.ctx());
+    let (item, mut request) = kiosk::purchase<NftToken>(&mut kiosk, token_id, payment);
+
+    // Inspect the token's provenance linkage before locking it away.
+    assert!(model3d::nft_token_collection_id(&item) == object::id(&collection), 350);
+    assert!(model3d::nft_token_base_model_id(&item) == object::id(&model), 351);
+    assert!(*string::as_bytes(model3d::nft_token_name(&item)) == b"Racer #1", 352);
+
+    // Satisfy all three rules, then consume the hot potato.
+    {
+        let owner_cap = personal_kiosk::borrow(&personal_cap);
+        kiosk::lock<NftToken>(&mut kiosk, owner_cap, &policy, item);
+    };
+    kiosk_lock_rule::prove<NftToken>(&mut request, &kiosk);
+    personal_kiosk_rule::prove<NftToken>(&kiosk, &mut request);
+    let owed = royalty_rule::fee_amount<NftToken>(&policy, price);
+    assert!(owed == (price * (amount_bp_default() as u64)) / 10_000, 353);
+    let royalty_coin = coin::mint_for_testing<SUI>(owed, sc.ctx());
+    royalty_rule::pay<NftToken>(&mut policy, &mut request, royalty_coin);
+
+    let (returned_id, paid_amount, _from) = tp::confirm_request<NftToken>(&policy, request);
+    assert!(paid_amount == price, 354);
+    assert!(returned_id == token_id, 355);
+    // Ownership transferred + locked in the buyer (here: same) Kiosk.
+    assert!(kiosk::has_item(&kiosk, token_id), 356);
+    assert!(kiosk::is_locked(&kiosk, token_id), 357);
+
+    sc.return_to_sender(personal_cap);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    ts::return_shared(kiosk);
+    ts::return_shared(policy);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// A cap from a different collection cannot mint into this collection.
+#[test]
+#[expected_failure(abort_code = model3d::EWrongCollectionCap)]
+fun mint_nft_token_with_mismatched_cap_aborts() {
+    let second_creator: address = @0xBEEF;
+
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, policy, collection, cap, mut kiosk, personal_cap) =
+        nfttoken_bootstrap(&mut sc);
+
+    // Launch a SECOND collection from the same base; its cap goes to second_creator.
+    sc.next_tx(second_creator);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), sc.ctx());
+    sc.next_tx(second_creator);
+    let foreign_cap = sc.take_from_sender<NftCollectionCreatorCap>();
+
+    sc.next_tx(NFT_CREATOR);
+    // foreign_cap authorizes the second collection, NOT `collection` → abort.
+    mint_nft_token(&foreign_cap, &collection, &mut kiosk, &personal_cap, s(b"X"), 1, sc.ctx());
+
+    // Unreachable.
+    destroy_collection_cap_for_testing(foreign_cap);
+    sc.return_to_sender(personal_cap);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    ts::return_shared(kiosk);
+    ts::return_shared(policy);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
     sc.end();

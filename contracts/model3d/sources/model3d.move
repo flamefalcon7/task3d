@@ -193,6 +193,17 @@ public struct NftCollectionCreatorCap has key {
     collection_id: ID,
 }
 
+// Fork B — a tradeable token minted from an `NftCollection` by its cap holder.
+// `key + store` so it can be Kiosk-`place`'d (like `Model3D`) and resold under
+// its OWN per-type `TransferPolicy<NftToken>` (created once by
+// `ensure_collection_policy`). Coexists with the unchanged L1 `Model3D` sale.
+public struct NftToken has key, store {
+    id: UID,
+    collection_id: ID,
+    base_model_id: ID,
+    name: String,
+}
+
 // === Events ===
 
 public struct ModelPublished has copy, drop {
@@ -205,6 +216,16 @@ public struct ModelPublished has copy, drop {
 // D-029 — emitted by `launch_collection` when an nft creator derives a
 // collection from a base Model3D.
 public struct CollectionLaunched has copy, drop {
+    collection_id: ID,
+    base_model_id: ID,
+    nft_creator: address,
+}
+
+// D-029 — emitted by `mint_nft_token`. The L2 analog of `ModelPublished`:
+// surfaces the new token's id for the frontend/indexer (resolving the listing
+// without parsing the PTB) and links it to its collection + base model.
+public struct NftTokenMinted has copy, drop {
+    token_id: ID,
     collection_id: ID,
     base_model_id: ID,
     nft_creator: address,
@@ -329,6 +350,31 @@ public entry fun ensure_transfer_policy(publisher: &Publisher, ctx: &mut TxConte
     transfer::public_transfer(cap, ctx.sender());
 }
 
+// === D-029 U3 — TransferPolicy<NftToken> bootstrap ===
+//
+// The L2 analog of `ensure_transfer_policy`. Creates the per-type
+// `TransferPolicy<NftToken>`, attaches the SAME three built-in rules
+// (royalty + lock + personal_kiosk), shares the policy, and hands the
+// `TransferPolicyCap<NftToken>` to the caller. One-time per package (run at
+// the U5 bootstrap alongside `ensure_transfer_policy`).
+//
+// Per-type policy (learnings #4): `TransferPolicy<T>` is generic over the
+// item type, so `NftToken` resales need their own policy ID distinct from
+// `Model3D`'s. Same ordering invariant as the Model3D bootstrap — rules are
+// attached before the policy is shared, fail-safe by construction. The same
+// idempotency caveat applies (not guarded; U5 pins the policy ID).
+public entry fun ensure_collection_policy(publisher: &Publisher, ctx: &mut TxContext) {
+    assert!(package::from_package<NftToken>(publisher), EWrongPublisher);
+
+    let (mut policy, cap) = tp::new<NftToken>(publisher, ctx);
+    royalty_rule::add<NftToken>(&mut policy, &cap, AMOUNT_BP_DEFAULT, MIN_ROYALTY_AMOUNT_MIST);
+    kiosk_lock_rule::add<NftToken>(&mut policy, &cap);
+    personal_kiosk_rule::add<NftToken>(&mut policy, &cap);
+
+    transfer::public_share_object(policy);
+    transfer::public_transfer(cap, ctx.sender());
+}
+
 // === LicenseTerms constructor ===
 
 public fun new_license_terms(
@@ -381,6 +427,10 @@ public fun collection_has_integration(c: &NftCollection, who: address): bool {
     c.integrations.contains(who)
 }
 public fun cap_collection_id(cap: &NftCollectionCreatorCap): ID { cap.collection_id }
+
+public fun nft_token_collection_id(t: &NftToken): ID { t.collection_id }
+public fun nft_token_base_model_id(t: &NftToken): ID { t.base_model_id }
+public fun nft_token_name(t: &NftToken): &String { &t.name }
 
 // === Input validation (D-018) ===
 
@@ -763,6 +813,42 @@ public entry fun set_register_fee(
     collection.register_fee = fee;
 }
 
+// Cap holder mints an `NftToken` from their collection and atomically
+// place+lists it into their PersonalKiosk — the L2 analog of `mint_and_list`,
+// one wallet popup. The token carries the collection + base-model linkage so
+// the frontend can resolve provenance. Authority is the matching soulbound cap.
+//
+// Resale is NOT wrapped in Move: buyers compose `kiosk::purchase<NftToken>` +
+// the lock/royalty/personal-prove/confirm_request chain in a PTB (U6 builder),
+// identical in shape to the Model3D buyer flow.
+public entry fun mint_nft_token(
+    cap: &NftCollectionCreatorCap,
+    collection: &NftCollection,
+    kiosk_obj: &mut Kiosk,
+    personal_cap: &PersonalKioskCap,
+    name: String,
+    price: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+    assert!(string::length(&name) <= MAX_NAME_LEN, ENameTooLong);
+
+    let token = NftToken {
+        id: object::new(ctx),
+        collection_id: object::id(collection),
+        base_model_id: collection.base_model_id,
+        name,
+    };
+    event::emit(NftTokenMinted {
+        token_id: object::id(&token),
+        collection_id: object::id(collection),
+        base_model_id: collection.base_model_id,
+        nft_creator: ctx.sender(),
+    });
+    let owner_cap = personal_kiosk::borrow(personal_cap);
+    kiosk::place_and_list<NftToken>(kiosk_obj, owner_cap, token, price);
+}
+
 // === RoyaltyPaid accessors (test-only — production indexers parse via BCS) ===
 
 #[test_only] public fun royalty_paid_buyer(e: &RoyaltyPaid): address { e.buyer }
@@ -778,6 +864,9 @@ public entry fun set_register_fee(
 #[test_only] public fun model_published_model_id(e: &ModelPublished): ID { e.model_id }
 #[test_only] public fun model_published_creator(e: &ModelPublished): address { e.creator }
 #[test_only] public fun model_published_policy(e: &ModelPublished): u8 { e.policy }
+
+#[test_only] public fun nft_token_minted_token_id(e: &NftTokenMinted): ID { e.token_id }
+#[test_only] public fun nft_token_minted_collection_id(e: &NftTokenMinted): ID { e.collection_id }
 
 // === Test-only helpers ===
 
@@ -831,3 +920,4 @@ public fun destroy_collection_cap_for_testing(cap: NftCollectionCreatorCap) {
     let NftCollectionCreatorCap { id, collection_id: _ } = cap;
     object::delete(id);
 }
+
