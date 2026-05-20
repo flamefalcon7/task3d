@@ -12,6 +12,8 @@ tags:
   - transfer-policy
   - generics
   - d-029
+  - d-035
+  - d-036
 ---
 
 # Per-type TransferPolicy (D-029 / plan-008 U3)
@@ -22,23 +24,36 @@ L2 tradeable `NftToken` resales must enforce royalty on the Kiosk. `TransferPoli
 
 ## Pattern
 
-Bootstrap a second policy with the **same three built-in rules**, via an L2 analog of `ensure_transfer_policy`:
+Bootstrap a per-`NftToken` policy via an L2 analog of `ensure_transfer_policy`.
+
+> **D-036 update (v4, 2026-05-20):** the policy now carries **only the royalty rule**. The original v3 version (below) attached three rules (royalty + `kiosk_lock_rule` + `personal_kiosk_rule`); D-036 dropped the latter two so a bought `NftToken` is freely usable (gameDev-friendly) and is *taken out* of the sale rather than re-locked into a Kiosk.
 
 ```move
+// v4 (D-036) — royalty-only
 public entry fun ensure_collection_policy(publisher: &Publisher, ctx: &mut TxContext) {
     assert!(package::from_package<NftToken>(publisher), EWrongPublisher);
     let (mut policy, cap) = tp::new<NftToken>(publisher, ctx);
     royalty_rule::add<NftToken>(&mut policy, &cap, AMOUNT_BP_DEFAULT, MIN_ROYALTY_AMOUNT_MIST);
-    kiosk_lock_rule::add<NftToken>(&mut policy, &cap);
-    personal_kiosk_rule::add<NftToken>(&mut policy, &cap);
     transfer::public_share_object(policy);
     transfer::public_transfer(cap, ctx.sender());
 }
 ```
 
-- Same ordering invariant as the `Model3D` bootstrap: attach all rules *before* sharing (fail-safe by construction; see `transfer-policy-before-place.md`).
-- Run **both** `ensure_transfer_policy` (Model3D) and `ensure_collection_policy` (NftToken) at the one-time U5 deploy bootstrap. The network config pins **two** policy IDs; the frontend selects by item type.
-- `mint_nft_token` is the L2 analog of `mint_and_list` — cap-gated, atomic place+list into the creator's PersonalKiosk, one wallet popup. Resale is **not** wrapped in Move: buyers compose `kiosk::purchase<NftToken>` + lock/royalty/personal-prove/`confirm_request` in a PTB, identical in shape to the `Model3D` buyer flow.
+- Same ordering invariant as before: attach the rule *before* sharing (fail-safe by construction; see `transfer-policy-before-place.md`).
+- Since D-032 the package creates **only** `TransferPolicy<NftToken>` (Model3D is shared, not Kiosk-traded), so the bootstrap runs only `ensure_collection_policy`.
+
+### confirm_request consequence (royalty-only)
+
+With a single royalty rule, the resale hot-potato chain is just **pay royalty → `confirm_request`** — no `kiosk_lock_rule::prove`, no `personal_kiosk_rule::prove`. The buyer receives the `NftToken` by value from `kiosk::purchase` and keeps it (no re-lock):
+
+```move
+let (item, mut request) = kiosk::purchase<NftToken>(&mut kiosk, token_id, payment);
+royalty_rule::pay<NftToken>(&mut policy, &mut request, royalty_coin);
+let (_id, _paid, _from) = tp::confirm_request<NftToken>(&policy, request);
+// `item` is now freely owned — no kiosk::lock required.
+```
+
+- **Minting no longer touches a Kiosk (D-036).** `mint_nft_token` `public_transfer`s a plain owned token to the caller. Listing-for-sale is a *separate opt-in* PTB the owner composes (`kiosk::place_and_list<NftToken>`), so the v3 "atomic place+list at mint" shape is gone.
 
 ## Gotcha — test setup ordering (cost us a red run)
 

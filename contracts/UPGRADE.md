@@ -50,6 +50,8 @@ The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a
 
 **v3 shipped 2026-05-20 (testnet):** `package_id 0x35ba17b3…`, `upgrade_cap 0x0a3c1c5f…`, `publisher 0x00808fed…`, `TransferPolicy<NftToken> 0xf1816cae…` (+ cap `0xc2b91b69…`). Superseded v2 `0x563ab54b…`. See `docs/reports/phase-4-v3-republish.md` + `contracts/networks/testnet.json`.
 
+**v4 (D-035 + D-036) — another breaking change, fresh republish (U16/U17):** v4 *adds fields* to two existing `key` structs — `NftCollection.quilt_blob_id` and `NftToken.patch_id` — which is **not** a compatible upgrade (struct layout is part of the on-chain object representation; see the rule above). It also changes the signatures of two existing public entry fns (`launch_collection` += `quilt_blob_id`, `mint_nft_token` drops `kiosk_obj`/`personal_cap`/`price` and adds `patch_id`) and edits the `NftTokenMinted` event layout (`copy+drop` events cannot change in place) — each independently breaking. So v4 republishes under a fresh `original-id`, abandoning v3 testnet state. Still low-cost: no v3 demo pre-bake or migrated frontend depends on the abandoned objects. The v4 `ensure_collection_policy` attaches **only** the royalty rule (D-036 dropped `kiosk_lock_rule` + `personal_kiosk_rule`), so a bought `NftToken` is freely usable; `mint_nft_token` now `public_transfer`s a plain owned token and listing-for-sale is a separate opt-in Kiosk PTB. U17 records the v4 ids.
+
 ---
 
 ## Before any upgrade — checklist

@@ -9,32 +9,34 @@
 //     all removed). L1 monetization = the pay-to-derive fee (launch_collection)
 //     + perpetual `base_royalty_bps` on downstream NftToken sales. Seal-gated
 //     direct access-sale on L1 is the v1.1 flagship.
-//   - L2 `NftCollection` + `NftToken` sell OWNERSHIP via Kiosk (D-029). All
-//     Kiosk + `TransferPolicy` + royalty machinery lives here, on `NftToken`
-//     only (`ensure_collection_policy`, `mint_nft_token`).
+//   - L2 `NftCollection` + `NftToken` sell OWNERSHIP (D-029). `mint_nft_token`
+//     yields a PLAIN OWNED token (D-036) — no auto-Kiosk; the creator opt-in
+//     lists it for sale in a separate Kiosk PTB. The per-type
+//     `TransferPolicy<NftToken>` carries ONLY the royalty rule (D-036 dropped
+//     lock + personal_kiosk so bought tokens are freely usable). Each token
+//     binds one quilt-patch variant (D-035: `NftCollection.quilt_blob_id` +
+//     `NftToken.patch_id`).
 //   - Phase 2 entries `publish_and_share` / `purchase_model_access` and Phase 3
 //     `Collection` / `VariantSpec` plumbing were already REMOVED. The old L3
 //     `Access` soulbound receipt is DELETED; its "soulbound by Move ability"
 //     role re-anchors to `NftCollectionCreatorCap`.
 //   - MODEL3D one-time-witness + `init` claims `Publisher`, consumed by
-//     `ensure_collection_policy` to attach RoyaltyRule + LockRule +
-//     PersonalKioskRule to `TransferPolicy<NftToken>`.
+//     `ensure_collection_policy` to attach the RoyaltyRule (only) to
+//     `TransferPolicy<NftToken>` (D-036).
 module model3d::model3d;
 
 use std::string::{Self, String};
 use sui::clock::Clock;
 use sui::coin::{Self, Coin};
 use sui::event;
-use sui::kiosk::{Self, Kiosk};
+use sui::kiosk;
 use sui::table::{Self, Table};
 use sui::package::{Self, Publisher};
 use sui::sui::SUI;
 use sui::transfer_policy::{Self as tp};
 use walrus::blob::Blob;
 use kiosk::royalty_rule;
-use kiosk::kiosk_lock_rule;
-use kiosk::personal_kiosk::{Self, PersonalKioskCap};
-use kiosk::personal_kiosk_rule;
+use kiosk::personal_kiosk;
 
 // === Constants ===
 
@@ -103,12 +105,17 @@ const EAlreadyRegistered:    u64 = 32; // per-(integrator,collection) uniqueness
 const EAppMetadataTooLong:   u64 = 33; // app_metadata exceeds APP_METADATA_MAX
 const EWrongCollectionCap:   u64 = 34; // cap does not authorize this collection
 const EInsufficientDeriveFee: u64 = 35; // launch_collection payment < derivative_mint_fee
+// D-035 — mint_nft_token's patch_id exceeds MAX_PATCH_ID_LEN.
+const EPatchIdMalformed:     u64 = 36;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
 const MAX_PARAMS_JSON_LEN:  u64 = 4096;
 const MAX_NAME_LEN:         u64 = 128;
 const MAX_BLOB_ID_LEN:      u64 = 128;
+// D-035 — bound on an NftToken's quilt-patch id (URL-safe base64 quilt patch
+// identifier). Same generous 128-byte ceiling as a Walrus blob id.
+const MAX_PATCH_ID_LEN:     u64 = 128;
 // D-029 — on-chain length cap on register_integration's app_metadata blob.
 // Length-only guard; the backend (U7) validates the full UTF-8 JSON schema
 // (name+url). 512 bytes comfortably holds {name<=64, url<=256} + JSON syntax.
@@ -179,6 +186,12 @@ public struct NftCollection has key {
     // who is paid the derive fee + secondary royalty).
     nft_creator: address,
     base_royalty_bps: u16,
+    // D-035 — the Walrus quilt blob holding this collection's colored variant
+    // patches (one quilt, N patches). Each minted NftToken binds one patch by
+    // id; the frontend resolves token.patch_id → this quilt → the variant GLB
+    // via the by-quilt-patch-id aggregator. Snapshot at launch, length-bounded
+    // by MAX_BLOB_ID_LEN.
+    quilt_blob_id: String,
     // L2 integration gate, set by the nft creator (cap holder) via
     // `set_integration_policy`; defaults to POLICY_PERMISSIONLESS at launch.
     // Whether gameDevs may `register_integration` against THIS collection is a
@@ -207,6 +220,11 @@ public struct NftToken has key, store {
     collection_id: ID,
     base_model_id: ID,
     name: String,
+    // D-035 — the quilt-patch id this token binds (one colored variant inside
+    // the collection's quilt). Resolves to a variant GLB via the parent
+    // collection's `quilt_blob_id` + the by-quilt-patch-id aggregator. Multiple
+    // tokens may share one patch_id (a "red edition").
+    patch_id: String,
 }
 
 // === Events ===
@@ -234,6 +252,9 @@ public struct NftTokenMinted has copy, drop {
     collection_id: ID,
     base_model_id: ID,
     nft_creator: address,
+    // D-035 — carried so the indexer can resolve the variant GLB straight from
+    // the event (no follow-up getObject on the now-owned token).
+    patch_id: String,
 }
 
 // D-029 — emitted by `register_integration` (inside the call frame, so an
@@ -267,10 +288,16 @@ fun init(otw: MODEL3D, ctx: &mut TxContext) {
 //
 // The ONLY TransferPolicy this package creates (D-032 removed the
 // `TransferPolicy<Model3D>` bootstrap — Model3D is shared, not Kiosk-traded).
-// Creates the per-type `TransferPolicy<NftToken>`, attaches three built-in
-// rules (royalty + lock + personal_kiosk), shares the policy, and hands the
+// Creates the per-type `TransferPolicy<NftToken>`, attaches ONLY the built-in
+// royalty rule (D-036 dropped the lock + personal_kiosk rules so a bought token
+// is freely usable — gameDev-friendly), shares the policy, and hands the
 // `TransferPolicyCap<NftToken>` to the caller. One-time per package (run at the
-// U5 bootstrap).
+// v4 bootstrap, U17).
+//
+// D-036 consequence on the resale hot-potato: with only the royalty rule, a
+// buyer's `confirm_request<NftToken>` needs just the royalty receipt — no
+// `kiosk_lock_rule::prove` / `personal_kiosk_rule::prove` — and the purchased
+// token is taken out of the sale rather than re-locked into a Kiosk.
 //
 // Ordering invariant (R12 —
 // `docs/solutions/kiosk-ptb-patterns/transfer-policy-before-place.md`): rules
@@ -300,8 +327,6 @@ public entry fun ensure_collection_policy(publisher: &Publisher, ctx: &mut TxCon
 
     let (mut policy, cap) = tp::new<NftToken>(publisher, ctx);
     royalty_rule::add<NftToken>(&mut policy, &cap, AMOUNT_BP_DEFAULT, MIN_ROYALTY_AMOUNT_MIST);
-    kiosk_lock_rule::add<NftToken>(&mut policy, &cap);
-    personal_kiosk_rule::add<NftToken>(&mut policy, &cap);
 
     transfer::public_share_object(policy);
     transfer::public_transfer(cap, ctx.sender());
@@ -357,6 +382,7 @@ public fun collection_integration_app_metadata(c: &NftCollection, who: address):
     &c.integrations.borrow(who).app_metadata
 }
 public fun collection_base_royalty_bps(c: &NftCollection): u16 { c.base_royalty_bps }
+public fun collection_quilt_blob_id(c: &NftCollection): &String { &c.quilt_blob_id }
 public fun collection_integration_policy(c: &NftCollection): u8 { c.integration_policy }
 public fun collection_register_fee(c: &NftCollection): u64 { c.register_fee }
 public fun collection_has_integration(c: &NftCollection, who: address): bool {
@@ -367,6 +393,7 @@ public fun cap_collection_id(cap: &NftCollectionCreatorCap): ID { cap.collection
 public fun nft_token_collection_id(t: &NftToken): ID { t.collection_id }
 public fun nft_token_base_model_id(t: &NftToken): ID { t.base_model_id }
 public fun nft_token_name(t: &NftToken): &String { &t.name }
+public fun nft_token_patch_id(t: &NftToken): &String { &t.patch_id }
 
 // === Input validation (D-018) ===
 
@@ -544,8 +571,13 @@ public entry fun ensure_creator_kiosk(ctx: &mut TxContext) {
 public entry fun launch_collection(
     model: &Model3D,
     mut payment: Coin<SUI>,
+    quilt_blob_id: String,
     ctx: &mut TxContext,
 ) {
+    // D-035 — the collection's variant quilt blob (length-bounded, same ceiling
+    // + abort code as the model's lineage_blob_id).
+    assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+
     let base_royalty_bps = model.license.derivative_royalty_bps;
     // D-004 belt-and-suspenders: the base model already passed this bound at
     // mint (validate_publish_inputs), but snapshot defensively in case a future
@@ -572,6 +604,7 @@ public entry fun launch_collection(
         base_creator: model.creator,
         nft_creator: ctx.sender(),
         base_royalty_bps,
+        quilt_blob_id,
         integration_policy: POLICY_PERMISSIONLESS,
         register_fee: 0,
         integrations: table::new(ctx),
@@ -621,40 +654,41 @@ public entry fun set_integration_policy(
     collection.integration_policy = policy;
 }
 
-// Cap holder mints an `NftToken` from their collection and atomically
-// place+lists it into their PersonalKiosk in one wallet popup. The token
-// carries the collection + base-model linkage so the frontend can resolve
-// provenance. Authority is the matching soulbound cap. This is the ONLY
-// Kiosk-traded type (D-032).
+// Cap holder mints an `NftToken` from their collection and `public_transfer`s
+// it to the caller as a PLAIN OWNED object (D-036) — NO auto-Kiosk placement.
+// The token binds one quilt-patch variant (D-035 `patch_id`) and carries the
+// collection + base-model linkage so the frontend can resolve provenance.
+// Authority is the matching soulbound cap.
 //
-// Resale is NOT wrapped in Move: buyers compose `kiosk::purchase<NftToken>` +
-// the lock/royalty/personal-prove/confirm_request chain in a PTB (U6 builder).
+// Listing-for-sale is a SEPARATE opt-in step (D-036): the owner composes a
+// Kiosk `place_and_list<NftToken>` PTB when they choose to sell. Resale then
+// runs the royalty-only confirm chain (see `ensure_collection_policy`).
 public entry fun mint_nft_token(
     cap: &NftCollectionCreatorCap,
     collection: &NftCollection,
-    kiosk_obj: &mut Kiosk,
-    personal_cap: &PersonalKioskCap,
     name: String,
-    price: u64,
+    patch_id: String,
     ctx: &mut TxContext,
 ) {
     assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
     assert!(string::length(&name) <= MAX_NAME_LEN, ENameTooLong);
+    assert!(string::length(&patch_id) <= MAX_PATCH_ID_LEN, EPatchIdMalformed);
 
     let token = NftToken {
         id: object::new(ctx),
         collection_id: object::id(collection),
         base_model_id: collection.base_model_id,
         name,
+        patch_id,
     };
     event::emit(NftTokenMinted {
         token_id: object::id(&token),
         collection_id: object::id(collection),
         base_model_id: collection.base_model_id,
         nft_creator: ctx.sender(),
+        patch_id: token.patch_id,
     });
-    let owner_cap = personal_kiosk::borrow(personal_cap);
-    kiosk::place_and_list<NftToken>(kiosk_obj, owner_cap, token, price);
+    transfer::public_transfer(token, ctx.sender());
 }
 
 // === D-029 U4 — register_integration (B2B integration registry) ===
@@ -726,6 +760,7 @@ public entry fun register_integration(
 #[test_only] public fun nft_token_minted_collection_id(e: &NftTokenMinted): ID { e.collection_id }
 #[test_only] public fun nft_token_minted_base_model_id(e: &NftTokenMinted): ID { e.base_model_id }
 #[test_only] public fun nft_token_minted_nft_creator(e: &NftTokenMinted): address { e.nft_creator }
+#[test_only] public fun nft_token_minted_patch_id(e: &NftTokenMinted): &String { &e.patch_id }
 
 #[test_only] public fun integration_registered_collection_id(e: &IntegrationRegistered): ID { e.collection_id }
 #[test_only] public fun integration_registered_integrator(e: &IntegrationRegistered): address { e.integrator }
@@ -764,6 +799,14 @@ public fun destroy_model_for_testing(model: Model3D) {
     object::delete(id);
 }
 
+// D-036 — NftToken is now a plain owned object (mint no longer Kiosk-locks it),
+// so tests that take it from an inbox need a destructor (NftToken has no `drop`).
+#[test_only]
+public fun destroy_nft_token_for_testing(token: NftToken) {
+    let NftToken { id, collection_id: _, base_model_id: _, name: _, patch_id: _ } = token;
+    object::delete(id);
+}
+
 // D-029 test helpers — tear down a launched collection + its soulbound cap.
 // Requires an empty `integrations` Table (IntegrationRecord has no `drop`, so a
 // populated table cannot be bulk-dropped — U4 tests must `remove` records first).
@@ -775,6 +818,7 @@ public fun destroy_collection_for_testing(collection: NftCollection) {
         base_creator: _,
         nft_creator: _,
         base_royalty_bps: _,
+        quilt_blob_id: _,
         integration_policy: _,
         register_fee: _,
         integrations,
