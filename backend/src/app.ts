@@ -7,6 +7,7 @@ import { buildGenerateRoute } from './routes/generate.js';
 import { shapesRoute } from './routes/shapes.js';
 import { buildCollectionsRoute } from './api/collections.js';
 import type { IntegrationIndexer } from './events/integrationIndexer.js';
+import type { PaymentVerifier } from './sui/paymentVerifier.js';
 import type { JwtSigner } from './lib/jwt.js';
 
 export interface BuildAppDeps {
@@ -15,6 +16,9 @@ export interface BuildAppDeps {
   // U7: provides the "Used by" read API. When omitted, the route is still
   // mounted but returns empty lists (server.ts injects the live indexer).
   integrationIndexer?: Pick<IntegrationIndexer, 'getIntegrations'>;
+  // U10/D-034: when present, prompt-mode generate requires a verified SUI
+  // service-fee payment. server.ts injects the live verifier.
+  paymentVerifier?: PaymentVerifier;
 }
 
 export function buildApp(deps: BuildAppDeps = {}) {
@@ -24,7 +28,7 @@ export function buildApp(deps: BuildAppDeps = {}) {
 
   const router = deps.router ?? new HardcodedRouter();
   app.route('/api/shapes', shapesRoute);
-  app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt }));
+  app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt, paymentVerifier: deps.paymentVerifier }));
   app.route('/api/collection', buildCollectionRoute({ jwt: deps.jwt }));
   app.route(
     '/api/collections',

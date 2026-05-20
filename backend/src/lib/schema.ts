@@ -17,6 +17,13 @@ export type ValidatedGenerateParams = z.infer<typeof generateParamsSchema>;
 // procedural generator). The route handler branches on which variant validated.
 export const promptRequestSchema = z.object({
   prompt: z.string().min(1).max(1000),
+  // D-034: SUI service-fee payment proof. Optional in the schema so legacy
+  // callers/tests still validate; the route ENFORCES it (402) when a
+  // paymentVerifier is wired (server.ts). base58 tx digest.
+  paymentDigest: z
+    .string()
+    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,50}$/, 'paymentDigest must be a base58 tx digest')
+    .optional(),
 });
 
 export type ValidatedPromptRequest = z.infer<typeof promptRequestSchema>;

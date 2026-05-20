@@ -22,19 +22,30 @@ const TESTNET_JSON_PATH = resolve(HERE, '../../../contracts/networks/testnet.jso
 export interface NetworkConfig {
   network: 'testnet';
   packageId: string;
+  /** Deployer address — also the Tripo service-fee treasury (D-034). */
+  deployerAddress: string;
 }
 
 function loadNetworkConfig(): NetworkConfig {
   const raw = readFileSync(TESTNET_JSON_PATH, 'utf-8');
-  const json = JSON.parse(raw) as { model3d_package_id?: string };
+  const json = JSON.parse(raw) as { model3d_package_id?: string; deployer_address?: string };
   const packageId = json.model3d_package_id;
   if (!packageId || !/^0x[0-9a-fA-F]{64}$/.test(packageId)) {
     throw new Error(`Invalid model3d_package_id in ${TESTNET_JSON_PATH}`);
   }
-  return { network: 'testnet', packageId };
+  const deployerAddress = json.deployer_address;
+  if (!deployerAddress || !/^0x[0-9a-fA-F]{64}$/.test(deployerAddress)) {
+    throw new Error(`Invalid deployer_address in ${TESTNET_JSON_PATH}`);
+  }
+  return { network: 'testnet', packageId, deployerAddress };
 }
 
 export const NETWORK = loadNetworkConfig();
+
+// D-034 Tripo service-fee config (env-overridable). Treasury defaults to the
+// deployer; fee defaults to 0.1 SUI.
+export const TRIPO_FEE_TREASURY = process.env.TRIPO_FEE_TREASURY ?? NETWORK.deployerAddress;
+export const TRIPO_FEE_MIST = BigInt(process.env.TRIPO_FEE_MIST ?? '100000000');
 
 // Override with SUI_RPC_URL (comma-separated) in env; otherwise public testnet
 // fullnode + one fallback (mirrors frontend TESTNET_RPC_ENDPOINTS).

@@ -16,7 +16,8 @@ import { TripoClient } from './lib/tripo-client.js';
 import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
 import { buildAuthRoute } from './routes/auth.js';
 import { createIntegrationIndexer } from './events/integrationIndexer.js';
-import { getSuiClient } from './sui/client.js';
+import { createPaymentVerifier } from './sui/paymentVerifier.js';
+import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST } from './sui/client.js';
 
 // D-023: LLM routing dropped. HardcodedRouter handles both slider mode
 // (procedural shapes) and prompt mode (direct dispatch to Tripo). Tripo is
@@ -79,8 +80,13 @@ if (invokedDirectly) {
   // imports don't kick off live polling.
   const indexer = createIntegrationIndexer({ client: getSuiClient() });
   indexer.start();
+  const paymentVerifier = createPaymentVerifier({
+    client: getSuiClient(),
+    treasury: TRIPO_FEE_TREASURY,
+    feeMist: TRIPO_FEE_MIST,
+  });
   const jwt = buildJwt();
-  const app = buildApp({ router: buildRouter(), jwt, integrationIndexer: indexer });
+  const app = buildApp({ router: buildRouter(), jwt, integrationIndexer: indexer, paymentVerifier });
   app.route('/api/auth', buildAuthRoute({ jwt }));
   serve({ fetch: app.fetch, port }, (info) => {
     // eslint-disable-next-line no-console

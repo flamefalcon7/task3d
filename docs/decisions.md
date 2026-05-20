@@ -1659,6 +1659,79 @@ The user confirmed the framing: "model 不該被放到 Kiosk 因為他是賣 Acc
 
 ---
 
+## D-033: `Model3D` creation = Tripo prompt-mode + user GLB upload; procedural generation removed
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Supersedes**: D-011's procedural half (the hybrid procedural+LLM generator architecture) and the original "input restricted to predefined shape categories" core constraint (CLAUDE.md §Core Constraints)
+**Refines**: D-023 (Tripo prompt-mode dispatch stays); implements R3 / R21 / OQ-019
+
+### Context
+
+The four-role realignment (D-029) dropped procedural generation. Resolving the U9/U10 ordering, the user confirmed the go-forward `Model3D` content sources and a new requirement: in addition to Tripo prompt generation, **users may upload their own GLB** directly. The original constraint that content come only from predefined procedural shapes is fully retired (already eroded by D-023's free-form Tripo prompt).
+
+### Decision
+
+1. A `Model3D`'s GLB originates from exactly two paths, both converging on Walrus upload → `publish` (D-032 shared object):
+   - **(a) Tripo prompt-mode** — `creatorPrompt → Tripo → GLB` (the surviving `/api/generate` prompt path; D-023).
+   - **(b) User GLB upload** — the creator supplies their own `.glb` file.
+2. **Procedural generation is removed** (U9): the `backend/src/generators/` package, `ShapePicker`, `CreatorFlow`, slider/params mode, `/api/shapes`, `ShapeId`/`GenerateParams`/`paramRanges`/`proceduralParamsSchemas`. `backend/src/routes/generate.ts` is **rewritten to prompt-only** (not deleted — Tripo path survives).
+3. **Build order flipped:** U10 (canonical `publish` mint page carrying both sources + `license.policy` radio) ships **before** U9 (procedural teardown), so a working mint path always exists.
+
+### Consequences
+
+- ✅ Two clear creation sources; demo modelCreator flow (prompt) + power-user GLB upload both supported.
+- ✅ U9 becomes a clean teardown once U10's replacement exists.
+- ⚠️ Uploaded GLBs bypass the procedural "low-poly / manifold / rigid-body-friendly" guarantees — the mint path must enforce **format (.glb only, D-006) + size caps** and treat uploaded content as untrusted. GLB structural validation is best-effort (gltf-transform parse) for v1.
+- ⚠️ `generate.ts` rewrite must preserve the Tripo auth gate (paid API) while dropping slider mode.
+- 🔮 Watermark / provenance for uploaded (non-generated) content is a v1.1 concern.
+
+### Related
+
+- Supersedes part of [[D-011]]; refines [[D-023]]; implements R3/R21/OQ-019
+- Sequencing: U10 before U9 (this plan's order flipped, user-confirmed 2026-05-20)
+
+---
+
+## D-034: Tripo generation is SUI-fee-gated (pay-per-call, off-chain verified); publish is user-funded
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Phase**: 4
+**Refines**: D-033 (creation sources), D-023 (Tripo dispatch)
+
+### Context
+
+The modelCreator flow (user-confirmed 2026-05-20): prompt → **pay SUI** → Tripo → preview → (pay again to regenerate | confirm) → set `license` policies → **publish to Walrus** (user pays SUI gas + WAL). The user-upload-GLB path skips the Tripo steps and their fee. We need a way to (a) charge SUI per Tripo call without the user fat-fingering amount/destination, and (b) let the backend attribute "which payment funded which API call".
+
+### Decision
+
+1. **Tripo prompt-mode is gated by a fixed SUI service-fee** (demo: **0.1 SUI** to the **deployer address** `0x3116…` as treasury; both env-overridable). The operator's Tripo key funds the API itself ("service-funded"); the user pays the SUI fee.
+2. **Approach A — off-chain verification, no new Move function.** The frontend builds the exact transfer PTB (`splitCoins(gas,[fee])` → `transfer(treasury)`; amount + destination hardcoded, so the user only signs — no fat-finger surface). The wallet returns the **transaction digest** (= tx hash). The frontend sends `{ prompt, paymentDigest }` to `POST /api/generate`; the backend verifies via RPC that the tx's payer == the JWT session address, transferred ≥ fee to the treasury, and the digest is **unused** (in-memory replay set; persist for prod), then calls Tripo.
+3. **Each regeneration is a fresh paid call** (a new payment + digest).
+4. **Publish is user-funded** for BOTH paths: the user's wallet pays SUI gas + WAL storage (no sponsored tx for v1).
+
+### Alternatives Considered
+
+- **B — Move `pay_for_api_call` entry fn emitting `ApiCallPaid`** (typed event, on-chain amount enforcement, clean indexer attribution consistent with the rest of the event-driven design). Rejected for the 6/21 demo: it forces a contract upgrade right after the v3 republish, and Approach A already eliminates the user-error surface (frontend-built PTB) and solves attribution (frontend passes the exact digest). **Revisit in v1.1** for clean on-chain payment attribution + an Explorer-visible payment event.
+- Sponsored (gasless) publish via Enoki — deferred; user-funded is simpler and the creator paying is acceptable.
+
+### Consequences
+
+- ✅ No contract churn post-v3; ships fast; user can't mis-send the fee.
+- ✅ `paymentDigest` gives unambiguous payment↔generation attribution + replay protection.
+- ⚠️ Backend must parse the payment tx's balance changes to verify amount/destination (fiddlier than a typed event would be; acceptable for demo).
+- ⚠️ Replay guard is in-memory — a backend restart forgets spent digests (re-use window). Persist for production.
+- ⚠️ `backend/src/routes/generate.ts` gains the payment gate AND is rewritten prompt-only (overlaps U9's procedural teardown).
+- 🔮 v1.1: Approach B (`pay_for_api_call` + `ApiCallPaid`) for on-chain attribution; persisted replay store; possibly sponsored publish.
+
+### Related
+
+- Refines [[D-033]], [[D-023]]; sequenced in U10 (before U9 per D-033)
+
+---
+
 # Reserved Decision Numbers
 
-D-033 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-035 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

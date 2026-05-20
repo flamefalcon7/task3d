@@ -5,6 +5,7 @@ import { generateParamsSchema, promptRequestSchema } from '../lib/schema.js';
 import { buildLineageJson, buildLineageStub } from '../lib/lineage.js';
 import { TripoDisabledError } from '../agent/router.js';
 import type { JwtSigner } from '../lib/jwt.js';
+import type { PaymentVerifier } from '../sui/paymentVerifier.js';
 
 export interface GenerateRouteDeps {
   router: Router;
@@ -13,6 +14,10 @@ export interface GenerateRouteDeps {
   // Tripo API from anonymous callers (review #2 P0; carries forward from the
   // pre-D-023 Anthropic-protection rationale).
   jwt?: JwtSigner;
+  // D-034: when wired, prompt-mode additionally requires a verified SUI
+  // service-fee payment (paymentDigest) before Tripo runs. Optional so legacy
+  // tests/slider mode are unaffected.
+  paymentVerifier?: PaymentVerifier;
 }
 
 export function buildGenerateRoute(deps: GenerateRouteDeps) {
@@ -44,10 +49,27 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
       if (!token) {
         return c.json({ error: 'auth_required', message: 'Prompt-mode requires Authorization: Bearer <jwt>' }, 401);
       }
+      let claims;
       try {
-        await deps.jwt.verifySession(token);
+        claims = await deps.jwt.verifySession(token);
       } catch {
         return c.json({ error: 'auth_invalid', message: 'Invalid or expired session token' }, 401);
+      }
+
+      // D-034 pay-gate: when a verifier is wired, prompt-mode requires a
+      // verified SUI service-fee payment before the paid Tripo call.
+      if (deps.paymentVerifier) {
+        const paymentDigest = promptParsed.data.paymentDigest;
+        if (!paymentDigest) {
+          return c.json(
+            { error: 'payment_required', message: 'Prompt-mode requires a paymentDigest (SUI service fee)' },
+            402,
+          );
+        }
+        const result = await deps.paymentVerifier.verify(paymentDigest, claims.sub);
+        if (!result.ok) {
+          return c.json({ error: 'payment_invalid', reason: result.reason }, 402);
+        }
       }
     }
 

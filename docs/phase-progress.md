@@ -1,5 +1,26 @@
 # Phase Progress
 
+## Last Updated: 2026-05-20 (U10 in progress — chunk 1 done) — **L1 builders + Tripo pay-gate done. Next = U10 chunk 2 (the /create wizard UI).**
+
+### Hackathon Tracker
+- Days to submission (6/21): **32 of 38**
+
+### Decisions this session (new)
+- **D-033** — `Model3D` creation = Tripo prompt-mode **+ user GLB upload**; procedural generation removed. Retires the "predefined shapes only" constraint + D-011's procedural half. **Order flipped: U10 before U9.**
+- **D-034** — Tripo generation is SUI-fee-gated (0.1 SUI → deployer treasury), verified **off-chain (Approach A)**: frontend builds exact transfer PTB (no fat-finger), backend verifies `paymentDigest` (= tx hash) before Tripo. Publish is user-funded (SUI gas + WAL). Rejected Approach B (`pay_for_api_call` Move fn) for demo to avoid contract churn — revisit v1.1.
+
+### U10 chunk 1 (done, green)
+- **`frontend/src/sui/modelTxBuilders.ts`** (+test, 7 green) — `buildPayForApiCallPtb` (split 0.1 SUI from gas → treasury) + `buildPublishPtb` (`model3d::publish` shared object). `TRIPO_FEE_MIST`/`TRIPO_FEE_TREASURY`.
+- **Backend pay-gate** — `sui/paymentVerifier.ts` (+test, 9 green): verify digest via `getTransactionBlock` (success + sender==payer + ≥fee to treasury + in-memory replay guard). Wired into `generate.ts` prompt-mode (402 when verifier present + payment missing/invalid), conditional on injected verifier so legacy tests stay green. `client.ts` exports treasury/fee (from testnet.json deployer + env override). `server.ts` injects live verifier. `schema.ts` prompt schema gains optional `paymentDigest`. **Backend 166/166, tsc clean.** Slider mode left intact (U9 removes it).
+
+### Next Concrete Step — U10 chunk 2 (the big UI)
+`/create` wizard (replaces `/generate`): source tab [Tripo prompt | upload .glb] → Tripo path (pay→generate→preview→regen/confirm) → name/tags/`license.policy` radio + fees → Walrus upload (`useWalrusUpload`) → `buildPublishPtb`. Rework `MintButton`; add route in `App.tsx`; `lib/api.ts` generate call sends `paymentDigest`. **Caveat: cannot browser-test here** — will cover with component tests + typecheck and flag for live click-through before demo.
+
+### Blockers / Open Questions
+- Uncommitted (U10 chunk 1 + D-033/D-034): `decisions.md`, `modelTxBuilders.ts`(+test), `paymentVerifier.ts`(+test), `client.ts`, `schema.ts`, `generate.ts`, `app.ts`, `server.ts`, this file. Suggest commit before the UI.
+
+---
+
 ## Last Updated: 2026-05-20 (U7 SHIPPED) — **backend on-chain read path done. Next = U8 (browse policy) / U9 / U10.**
 
 ### Hackathon Tracker
