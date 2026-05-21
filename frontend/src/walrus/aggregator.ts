@@ -18,3 +18,12 @@ export function glbUrlForSummary(
   if (m.glbBlobId) return `${WALRUS_AGGREGATOR}/v1/blobs/${m.glbBlobId}`;
   return `${WALRUS_AGGREGATOR}/v1/blobs/${m.blobId}`;
 }
+
+// L2 NftToken GLB resolution (U11, D-035): a token binds a quilt patch, so its
+// drivable variant is the by-quilt-patch-id slice. `blobId` is the /track
+// ?blob= dev hatch only — a raw standalone blob to drive before any real token
+// exists. patch_id wins when both are present (mirrors glbUrlForSummary).
+export function glbUrlForToken(t: { patchId: string; blobId: string }): string {
+  if (t.patchId) return `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${t.patchId}`;
+  return `${WALRUS_AGGREGATOR}/v1/blobs/${t.blobId}`;
+}

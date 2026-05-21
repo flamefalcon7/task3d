@@ -3,9 +3,9 @@ import { act } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-// Phase 3 U6 + Plan-004 U4 — TrackPage shell tests. Mock everything
-// Babylon-shaped so the tests stay in jsdom: useOwnedVariants returns plain
-// JS arrays; createRacetrackScene is a vi.fn returning fake handles.
+// Phase 3 U6 + Plan-004 U4 + U11 — TrackPage shell tests. Mock everything
+// Babylon-shaped so the tests stay in jsdom: useOwnedTokens/useTokenById return
+// plain JS; createRacetrackScene is a vi.fn returning fake handles.
 // Real-engine behaviour is exercised in racetrackScene.test.ts via
 // module-boundary Babylon mocks.
 //
@@ -13,15 +13,18 @@ import { MemoryRouter } from 'react-router-dom';
 // onLapStateChange callback and drive lap-state transitions manually.
 
 import type { LapState } from './lapState';
+import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 
 const useCurrentAccountMock = vi.fn();
 vi.mock('@mysten/dapp-kit', () => ({
   useCurrentAccount: () => useCurrentAccountMock(),
 }));
 
-const useOwnedVariantsMock = vi.fn();
-vi.mock('./useOwnedVariants', () => ({
-  useOwnedVariants: (addr: string | undefined) => useOwnedVariantsMock(addr),
+const useOwnedTokensMock = vi.fn();
+const useTokenByIdMock = vi.fn();
+vi.mock('./useOwnedTokens', () => ({
+  useOwnedTokens: (addr: string | undefined) => useOwnedTokensMock(addr),
+  useTokenById: (id: string | undefined) => useTokenByIdMock(id),
 }));
 
 const createSceneMock = vi.fn();
@@ -31,26 +34,28 @@ vi.mock('./racetrackScene', () => ({
 
 import { TrackPage } from './TrackPage';
 
-function variant(overrides: Partial<{ objectId: string; patchId: string; blobId: string; name: string; shapeType: string }> = {}) {
+function token(
+  overrides: Partial<{
+    objectId: string;
+    tokenId: string;
+    patchId: string;
+    blobId: string;
+    name: string;
+  }> = {},
+) {
   return {
-    objectId: overrides.objectId ?? '0xv1',
-    blobId: overrides.blobId ?? 'blob-1',
-    collectionId: '0xcoll',
-    patchId: overrides.patchId ?? 'patch-1',
-    creator: '0xcreator',
-    shapeType: overrides.shapeType ?? 'car',
-    paramsJson: '{}',
+    tokenId: overrides.tokenId ?? overrides.objectId ?? '0xv1',
     name: overrides.name ?? 'My Car',
-    directAccessPrice: '100000000',
-    tags: [],
-    createdAtMs: '0',
-    lineageBlobId: '',
+    patchId: overrides.patchId ?? 'patch-1',
+    collectionId: '0xcoll',
+    baseModelId: '0xbase',
+    blobId: overrides.blobId ?? '',
   };
 }
 
-function renderPage() {
+function renderPage(path = '/track') {
   return render(
-    <MemoryRouter initialEntries={['/track']}>
+    <MemoryRouter initialEntries={[path]}>
       <TrackPage />
     </MemoryRouter>,
   );
@@ -58,11 +63,14 @@ function renderPage() {
 
 beforeEach(() => {
   useCurrentAccountMock.mockReset();
-  useOwnedVariantsMock.mockReset();
+  useOwnedTokensMock.mockReset();
+  useTokenByIdMock.mockReset();
   createSceneMock.mockReset();
   localStorage.clear();
-  // Default: a connected wallet so the variants branches are reachable.
+  // Default: a connected wallet so the carousel branches are reachable.
   useCurrentAccountMock.mockReturnValue({ address: '0xWALLET' });
+  // Default override hook: no ?model= token resolved (carousel mode).
+  useTokenByIdMock.mockReturnValue({ token: null, loading: false, error: null });
   // Default scene mock — never resolves so the loading overlay sticks. Each
   // test that cares about the post-load state overrides this.
   createSceneMock.mockReturnValue(new Promise(() => undefined));
@@ -131,8 +139,8 @@ function installLiveScene() {
 describe('TrackPage', () => {
   it('shows sign-in prompt when no wallet is connected', () => {
     useCurrentAccountMock.mockReturnValue(null);
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
       loading: false,
       error: null,
     });
@@ -141,8 +149,8 @@ describe('TrackPage', () => {
   });
 
   it('shows the "buy first" empty state with zero owned variants', () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
       loading: false,
       error: null,
     });
@@ -153,8 +161,8 @@ describe('TrackPage', () => {
   });
 
   it('renders the carousel + canvas when variants exist', () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa', name: 'Red Car' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa', name: 'Red Car' })],
       loading: false,
       error: null,
     });
@@ -168,8 +176,8 @@ describe('TrackPage', () => {
   });
 
   it('shows the "Loading variant…" overlay during the Walrus fetch (D-004)', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant()],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token()],
       loading: false,
       error: null,
     });
@@ -180,8 +188,8 @@ describe('TrackPage', () => {
   });
 
   it('shows the variants-loading state', () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
       loading: true,
       error: null,
     });
@@ -190,8 +198,8 @@ describe('TrackPage', () => {
   });
 
   it('shows the variants-error state', () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
       loading: false,
       error: new Error('boom'),
     });
@@ -202,10 +210,10 @@ describe('TrackPage', () => {
   });
 
   it('clicking a carousel tile updates the selected index', () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [
-        variant({ objectId: '0xa', name: 'Red' }),
-        variant({ objectId: '0xb', name: 'Blue' }),
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [
+        token({ objectId: '0xa', name: 'Red' }),
+        token({ objectId: '0xb', name: 'Blue' }),
       ],
       loading: false,
       error: null,
@@ -225,8 +233,8 @@ describe('TrackPage', () => {
   // ─── U4: HUD overlay + PB persistence + result modal + retry ───
 
   it('U4 — HUD shows lap timer and best PB (— when no PB stored)', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -239,8 +247,8 @@ describe('TrackPage', () => {
   });
 
   it('U4 — HUD pulls existing PB from localStorage on car-load', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -253,8 +261,8 @@ describe('TrackPage', () => {
   });
 
   it('U4 — finishing a lap renders the ResultOverlay with the lap time', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -282,8 +290,8 @@ describe('TrackPage', () => {
   });
 
   it('U4/AE5 — Retry button calls scene.reset() and clears the overlay', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -325,8 +333,8 @@ describe('TrackPage', () => {
     // Only the finished-state path was previously asserted; this covers the
     // running-state branch so a regression that flipped the guard to
     // `!== 'finished'` (incorrect) would be caught.
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -352,8 +360,8 @@ describe('TrackPage', () => {
     // Code-review #9 — R-key listener at window level must skip when focus
     // is in a text input (future-proofing against on-page search/comment
     // fields) and when Cmd/Ctrl is held (Cmd-R hard-reload).
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -384,8 +392,8 @@ describe('TrackPage', () => {
   });
 
   it('U4/R13 — pressing R while finished triggers retry equivalently', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -408,8 +416,8 @@ describe('TrackPage', () => {
   });
 
   it('U4 — improving on a stored PB writes the new value to localStorage', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -436,10 +444,10 @@ describe('TrackPage', () => {
   // ─── U5: carousel switching teardown (per-car PB isolation, R14/AE6) ───
 
   it('U5/AE6 — switching to another car clears the overlay and reloads its PB', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [
-        variant({ objectId: '0xA', name: 'Red' }),
-        variant({ objectId: '0xB', name: 'Blue' }),
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [
+        token({ objectId: '0xA', name: 'Red' }),
+        token({ objectId: '0xB', name: 'Blue' }),
       ],
       loading: false,
       error: null,
@@ -476,10 +484,10 @@ describe('TrackPage', () => {
   });
 
   it('U5/AE6 — after switching cars, the next lap-finish writes under the new car\'s storage key', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [
-        variant({ objectId: '0xA' }),
-        variant({ objectId: '0xB' }),
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [
+        token({ objectId: '0xA' }),
+        token({ objectId: '0xB' }),
       ],
       loading: false,
       error: null,
@@ -512,8 +520,8 @@ describe('TrackPage', () => {
   });
 
   it('U4 — slower than stored PB shows positive delta and keeps the old PB in storage', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -540,8 +548,8 @@ describe('TrackPage', () => {
   // ─── Plan-006 U8: intro orbit + countdown flow ───
 
   it('U8 — countdown overlay does NOT mount before the camera orbit completes', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -554,8 +562,8 @@ describe('TrackPage', () => {
   });
 
   it('U8 — scene firing onOrbitComplete mounts the countdown overlay', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -569,8 +577,8 @@ describe('TrackPage', () => {
   });
 
   it('U8 — onIntroSkipRequested routes through scene.dispatchIntroSkip', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -584,8 +592,8 @@ describe('TrackPage', () => {
   });
 
   it('U8 — countdown overlay unmounts once lapState transitions to waiting', async () => {
-    useOwnedVariantsMock.mockReturnValue({
-      variants: [variant({ objectId: '0xa' })],
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa' })],
       loading: false,
       error: null,
     });
@@ -608,5 +616,61 @@ describe('TrackPage', () => {
       });
     });
     expect(screen.queryByTestId('countdown-overlay')).toBeNull();
+  });
+
+  // ─── U11: override modes (?model= single-drive, ?blob= dev hatch) ───
+
+  it('U11 — ?model=<tokenId> drives that token via the by-quilt-patch-id GLB', async () => {
+    // The single-drive path resolves through useTokenById, NOT the owned-tokens
+    // carousel query — so a connected wallet is irrelevant here.
+    useTokenByIdMock.mockReturnValue({
+      token: token({ tokenId: '0xtok', patchId: 'patch-red' }),
+      loading: false,
+      error: null,
+    });
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    const { captured } = installLiveScene();
+    renderPage('/track?model=0xtok');
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    // useTokenById was asked for the token id; owned-tokens query was skipped.
+    expect(useTokenByIdMock).toHaveBeenCalledWith('0xtok');
+    expect(useOwnedTokensMock).toHaveBeenCalledWith(undefined);
+    // The scene fetched the variant GLB at the by-quilt-patch-id URL.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/patch-red`,
+      expect.anything(),
+    );
+  });
+
+  it('U11 — ?blob=<id> drives that blob directly (dev hatch), no chain lookup', async () => {
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    const { captured } = installLiveScene();
+    renderPage('/track?blob=raw-blob-99');
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    // ?blob= bypasses both the token-by-id and owned-tokens queries.
+    expect(useTokenByIdMock).toHaveBeenCalledWith(undefined);
+    expect(useOwnedTokensMock).toHaveBeenCalledWith(undefined);
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${WALRUS_AGGREGATOR}/v1/blobs/raw-blob-99`,
+      expect.anything(),
+    );
+  });
+
+  it('U11 — ?model= mode shows loading then error without needing a wallet', async () => {
+    useCurrentAccountMock.mockReturnValue(null);
+    useTokenByIdMock.mockReturnValue({
+      token: null,
+      loading: false,
+      error: new Error('Token 0xmissing not found'),
+    });
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    renderPage('/track?model=0xmissing');
+    // No sign-in gate in override mode; the token-resolution error surfaces.
+    expect(screen.queryByTestId('track-needs-signin')).toBeNull();
+    expect(screen.getByTestId('track-variants-error').textContent).toMatch(
+      /not found/,
+    );
   });
 });

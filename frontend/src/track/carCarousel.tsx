@@ -1,10 +1,10 @@
-import type { Model3DSummary } from '@overflow2026/shared';
+import type { OwnedToken } from './useOwnedTokens';
 
-// Phase 3 U6 — horizontal strip of owned-variant thumbnails. Click a tile
+// Phase 3 U6 / U11 — horizontal strip of owned-NFT thumbnails. Click a tile
 // to swap the loaded car. v1 has no GLB thumbnails (would need a second
-// Babylon render-to-texture pass per variant), so each tile shows the
-// variant name + a colored swatch derived from its objectId. Phase 5 polish
-// can add real screenshots.
+// Babylon render-to-texture pass per token), so each tile shows the token
+// name + a colored swatch derived from its tokenId. Phase 5 polish can add
+// real screenshots.
 
 function truncate(addr: string, head = 4, tail = 4): string {
   if (!addr || addr.length <= head + tail + 1) return addr;
@@ -24,13 +24,13 @@ function swatch(objectId: string): string {
 }
 
 export interface CarCarouselProps {
-  variants: Model3DSummary[];
+  tokens: OwnedToken[];
   selectedIdx: number;
   onSelect: (idx: number) => void;
 }
 
 export function CarCarousel({
-  variants,
+  tokens,
   selectedIdx,
   onSelect,
 }: CarCarouselProps) {
@@ -44,11 +44,11 @@ export function CarCarousel({
         padding: '12px 0',
       }}
     >
-      {variants.map((v, idx) => {
+      {tokens.map((t, idx) => {
         const selected = idx === selectedIdx;
         return (
           <button
-            key={v.objectId}
+            key={t.tokenId}
             data-testid={`carousel-tile-${idx}`}
             data-selected={selected ? 'true' : 'false'}
             onClick={() => onSelect(idx)}
@@ -69,15 +69,15 @@ export function CarCarousel({
                 width: '100%',
                 height: 64,
                 borderRadius: 6,
-                background: swatch(v.objectId),
+                background: swatch(t.tokenId),
                 marginBottom: 8,
               }}
             />
             <div style={{ fontWeight: 600, fontSize: 13 }}>
-              {v.name || `Variant ${truncate(v.objectId)}`}
+              {t.name || `NFT ${truncate(t.tokenId)}`}
             </div>
             <div style={{ fontSize: 11, color: '#666' }}>
-              {v.shapeType || 'unknown'}
+              {truncate(t.tokenId)}
             </div>
           </button>
         );

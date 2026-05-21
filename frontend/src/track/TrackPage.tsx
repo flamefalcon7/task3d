@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
-import type { Model3DSummary } from '@overflow2026/shared';
-import { useOwnedVariants } from './useOwnedVariants';
-import { stubListingLookup } from './stubListingLookup';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import { useOwnedTokens, useTokenById, type OwnedToken } from './useOwnedTokens';
+import { glbUrlForToken } from '../walrus/aggregator';
 import { CarCarousel } from './carCarousel';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
@@ -14,11 +12,11 @@ import { ResultOverlay } from './ResultOverlay';
 import { formatHudTime } from './formatLapTime';
 import { Countdown } from './Countdown';
 
-// Phase 3 U6 — /track page. Wraps the Babylon scene in a React shell:
-// query owned variants → render carousel + canvas → rebuild scene each time
-// the selected variant changes. D-004: show a loading overlay while the
-// Walrus fetch + scene-build is in flight (critical for the demo recording
-// so the canvas doesn't go blank during the swap).
+// Phase 3 U6 / U11 — /track page. Wraps the Babylon scene in a React shell:
+// query owned NftTokens → render carousel + canvas → rebuild scene each time
+// the selected token changes. D-004: show a loading overlay while the Walrus
+// fetch + scene-build is in flight (critical for the demo recording so the
+// canvas doesn't go blank during the swap).
 
 interface LastResult {
   lapMs: number;
@@ -28,27 +26,57 @@ interface LastResult {
 
 export function TrackPage() {
   const account = useCurrentAccount();
-  // Phase 4 U1-prelim — `?model=<id>` bypass: when present, resolve the model
-  // through a stub (U10 will swap for `GET /api/listings/:id`) and skip the
-  // Phase-3 useOwnedVariants/Access-based discovery path entirely. The race-
-  // on-mint demo arc auto-navigates here with `?model=` set, and the buyer
-  // does NOT also hold an Access object (Kiosk-protocol KTD).
+  // U11 override modes (both skip the owned-tokens wallet query):
+  //   ?blob=<id>  — dev hatch: drive a raw standalone Walrus blob with no chain
+  //                 lookup (exercise the scene before any real token exists).
+  //   ?model=<id> — single-drive: resolve ONE NftToken's patch_id on chain.
+  //                 The race-on-mint demo arc auto-navigates here; the driver
+  //                 may not be the connected wallet, so we read the token by id
+  //                 rather than relying on owned-objects discovery.
+  // ?blob= wins when both are present.
   const [searchParams] = useSearchParams();
   const modelParam = searchParams.get('model');
   const blobOverride = searchParams.get('blob');
-  const overrideVariant = useMemo(
-    () => (modelParam ? stubListingLookup(modelParam, blobOverride) : null),
-    [modelParam, blobOverride],
+  const blobToken = useMemo<OwnedToken | null>(
+    () =>
+      blobOverride
+        ? {
+            tokenId: modelParam ?? 'dev-blob',
+            name: 'prototype',
+            patchId: '',
+            collectionId: '',
+            baseModelId: '',
+            blobId: blobOverride,
+          }
+        : null,
+    [blobOverride, modelParam],
   );
-  const isOverrideMode = overrideVariant !== null;
+  const isOverrideMode = blobOverride !== null || modelParam !== null;
   const {
-    variants: queriedVariants,
-    loading: variantsLoading,
-    error: variantsError,
-  } = useOwnedVariants(isOverrideMode ? undefined : account?.address);
-  const variants: Model3DSummary[] = overrideVariant
-    ? [overrideVariant]
-    : queriedVariants;
+    token: modelToken,
+    loading: modelLoading,
+    error: modelError,
+  } = useTokenById(blobOverride ? undefined : modelParam ?? undefined);
+  const {
+    tokens: ownedTokens,
+    loading: ownedLoading,
+    error: ownedError,
+  } = useOwnedTokens(isOverrideMode ? undefined : account?.address);
+  const tokens: OwnedToken[] = blobToken
+    ? [blobToken]
+    : modelToken
+      ? [modelToken]
+      : isOverrideMode
+        ? []
+        : ownedTokens;
+  // Unified loading/error across the three discovery paths. The ?blob= hatch is
+  // synchronous (no fetch), so it never reports loading/error.
+  const tokensLoading = blobToken
+    ? false
+    : isOverrideMode
+      ? modelLoading
+      : ownedLoading;
+  const tokensError = blobToken ? null : isOverrideMode ? modelError : ownedError;
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
@@ -68,13 +96,13 @@ export function TrackPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<RacetrackSceneHandles | null>(null);
 
-  // Keep selectedIdx in range when the variants list changes (initial fetch
-  // or post-purchase refresh).
+  // Keep selectedIdx in range when the token list changes (initial fetch
+  // or post-mint refresh).
   useEffect(() => {
-    if (selectedIdx >= variants.length) setSelectedIdx(0);
-  }, [variants.length, selectedIdx]);
+    if (selectedIdx >= tokens.length) setSelectedIdx(0);
+  }, [tokens.length, selectedIdx]);
 
-  const selected = variants[selectedIdx];
+  const selected = tokens[selectedIdx];
 
   // U4/U5 — when the selected variant changes (carousel switch), reset
   // React-side game state and re-read the PB for the new car.
@@ -84,7 +112,7 @@ export function TrackPage() {
     setLapState(initialLapState());
     setLastResult(null);
     setOrbitDone(false);
-    setPbState(selected ? getPb(selected.objectId) : null);
+    setPbState(selected ? getPb(selected.tokenId) : null);
   }, [selected]);
 
   // Build (and rebuild) the scene whenever the selected variant changes.
@@ -103,7 +131,7 @@ export function TrackPage() {
     setSceneError(null);
     (async () => {
       try {
-        const url = glbUrlForSummary(selected);
+        const url = glbUrlForToken(selected);
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
         const carGlbBytes = new Uint8Array(await res.arrayBuffer());
@@ -180,7 +208,7 @@ export function TrackPage() {
     const previousPbMs = pb;
     const isNewPb = previousPbMs === null || lapMs < previousPbMs;
     if (isNewPb) {
-      setPb(selected.objectId, lapMs);
+      setPb(selected.tokenId, lapMs);
       setPbState(lapMs);
     }
     setLastResult({ lapMs, previousPbMs, isNewPb });
@@ -245,36 +273,36 @@ export function TrackPage() {
     };
   }, []);
 
-  // U1-prelim — in override mode, skip wallet/owned-variants gating. Render
-  // straight through with the stubbed variant as the only carousel entry.
+  // U11 — only the carousel (owned-tokens) path needs a connected wallet. Both
+  // override modes (?model= / ?blob=) resolve a token without one.
   if (!isOverrideMode && !account) {
     return (
       <div style={{ padding: 32 }} data-testid="track-needs-signin">
         <h2>Tiny Racetrack</h2>
-        <p>Connect a wallet to drive variants you own.</p>
+        <p>Connect a wallet to drive the NFTs you own.</p>
       </div>
     );
   }
-  if (!isOverrideMode && variantsLoading) {
+  if (tokensLoading) {
     return (
       <div style={{ padding: 32 }} data-testid="track-loading-variants">
-        Loading your variants…
+        Loading your NFTs…
       </div>
     );
   }
-  if (!isOverrideMode && variantsError) {
+  if (tokensError) {
     return (
       <div style={{ padding: 32, color: 'crimson' }} data-testid="track-variants-error">
-        Couldn't load your variants: {variantsError.message}
+        Couldn't load your NFTs: {tokensError.message}
       </div>
     );
   }
-  if (variants.length === 0) {
+  if (tokens.length === 0) {
     return (
       <div style={{ padding: 32 }} data-testid="track-empty">
-        <h2>No variants yet</h2>
+        <h2>No drivable NFTs yet</h2>
         <p>
-          Buy a variant first to drive it.{' '}
+          Mint or collect an NFT first to drive it.{' '}
           <Link to="/" data-testid="track-empty-browse">
             Browse the marketplace
           </Link>
@@ -288,7 +316,7 @@ export function TrackPage() {
     <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto' }} data-testid="track-page">
       <h2 style={{ marginTop: 0 }}>Tiny Racetrack</h2>
       <CarCarousel
-        variants={variants}
+        tokens={tokens}
         selectedIdx={selectedIdx}
         onSelect={setSelectedIdx}
       />
