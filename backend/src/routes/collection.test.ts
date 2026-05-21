@@ -155,11 +155,11 @@ describe('POST /api/collection/build — input validation', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects oversized baseGlbBase64 (>11MB string — SEC-001)', async () => {
-    // 11_000_001-char string — just past zod's max. Use repeat to avoid
-    // allocating 11MB of distinct characters; the parser only cares about
-    // length.
-    const oversized = 'A'.repeat(11_000_001);
+  it('rejects oversized baseGlbBase64 (past the 12 MiB-binary cap — SEC-001)', async () => {
+    // 19 MiB string — past both the 18 MiB bodyLimit and zod's 16.8M field cap
+    // (sized to a 12 MiB GLB binary). Use repeat to avoid allocating distinct
+    // characters; the guards only care about length.
+    const oversized = 'A'.repeat(19 * 1024 * 1024);
     const res = await app.request('/api/collection/build', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },

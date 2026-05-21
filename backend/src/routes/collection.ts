@@ -13,11 +13,13 @@ export interface CollectionRouteDeps {
   jwt?: JwtSigner;
 }
 
-// SEC-001: ~8MB GLB binary => ~10.7MB base64 + envelope; 12MB cap leaves
-// headroom and rejects oversized requests BEFORE @gltf-transform/core
-// allocates anything. Zod's max(11_000_000) on baseGlbBase64 is the
-// second line of defense at field-level.
-const MAX_BODY_BYTES = 12 * 1024 * 1024;
+// SEC-001: reject oversized requests BEFORE @gltf-transform/core allocates
+// anything. Sized to the SAME 12 MiB GLB-binary ceiling /create enforces on
+// upload (CreateModelPage MAX_GLB_BYTES) so any publishable model can also be
+// forked: 12 MiB binary base64-encodes to ~16.78 MB, plus the JSON envelope
+// (variants + paramsJson), so the body cap is 18 MiB. Zod's
+// max(16_800_000) on baseGlbBase64 is the second line of defense at field-level.
+const MAX_BODY_BYTES = 18 * 1024 * 1024;
 
 export function buildCollectionRoute(deps: CollectionRouteDeps) {
   const route = new Hono();

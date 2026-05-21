@@ -123,10 +123,13 @@ export interface VariantMaterialSpec {
 }
 
 // Zod schema for the backend /api/collection/build request body. Hard caps
-// per plan-003 KTD-6 + SEC-001/SEC-004: ~8MB GLB binary => ~10.7MB base64,
-// 1-16 variants, per-variant paramsJson <= 1024 bytes valid JSON.
+// per plan-003 KTD-6 + SEC-001/SEC-004: 1-16 variants, per-variant paramsJson
+// <= 1024 bytes valid JSON. The base64 cap is sized to the SAME 12 MB binary
+// ceiling the /create GLB upload enforces (CreateModelPage MAX_GLB_BYTES) so any
+// model that can be published can also be forked — 12 MiB → ceil(n/3)*4 ≈
+// 16,777,216 chars; rounded up to 16,800,000 for padding margin.
 export const collectionBuildRequestSchema = z.object({
-  baseGlbBase64: z.string().min(1).max(11_000_000),
+  baseGlbBase64: z.string().min(1).max(16_800_000),
   variants: z
     .array(
       z.object({
