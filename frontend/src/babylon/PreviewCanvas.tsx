@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import {
+  type AbstractMesh,
   ArcRotateCamera,
   AssetContainer,
   Engine,
@@ -9,6 +10,37 @@ import {
   Vector3,
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
+
+// Frame the ArcRotateCamera so the loaded mesh fills the box regardless of its
+// authored scale — Tripo/uploaded GLBs range from sub-unit to tens of units, so
+// a fixed radius makes some render as a speck and clips others. We size the
+// orbit radius to the bounding sphere + the vertical FOV (+ padding), recenter
+// the target, and widen the near/far planes so neither tiny nor huge meshes clip.
+function frameCameraToMeshes(camera: ArcRotateCamera, meshes: AbstractMesh[]): void {
+  let min: Vector3 | null = null;
+  let max: Vector3 | null = null;
+  for (const mesh of meshes) {
+    if (mesh.getTotalVertices() === 0) continue; // skip glTF __root__ / empty nodes
+    mesh.computeWorldMatrix(true);
+    const bb = mesh.getBoundingInfo().boundingBox;
+    min = min ? Vector3.Minimize(min, bb.minimumWorld) : bb.minimumWorld.clone();
+    max = max ? Vector3.Maximize(max, bb.maximumWorld) : bb.maximumWorld.clone();
+  }
+  if (!min || !max) return; // nothing with geometry — keep defaults
+
+  const center = min.add(max).scale(0.5);
+  const radius = max.subtract(min).length() / 2; // bounding-sphere radius
+  if (radius <= 0) return;
+
+  const fitRadius = (radius / Math.sin(camera.fov / 2)) * 1.3; // 30% padding
+  camera.setTarget(center);
+  camera.radius = fitRadius;
+  camera.lowerRadiusLimit = fitRadius * 0.15;
+  camera.upperRadiusLimit = fitRadius * 6;
+  camera.minZ = Math.max(0.001, fitRadius * 0.005);
+  camera.maxZ = fitRadius * 100;
+  camera.wheelDeltaPercentage = 0.01;
+}
 
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). useEffect builds
 // Engine/Scene/Camera/Light once; a second effect swaps assets when glbUrl
@@ -67,6 +99,11 @@ export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
         containerRef.current?.dispose();
         container.addAllToScene();
         containerRef.current = container;
+
+        const camera = scene.activeCamera;
+        if (camera instanceof ArcRotateCamera) {
+          frameCameraToMeshes(camera, container.meshes);
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('PreviewCanvas: load failed', err);
