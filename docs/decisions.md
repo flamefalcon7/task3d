@@ -1986,6 +1986,40 @@ The fresh republish also keeps a **single package id** (no published-at/original
 
 ---
 
+## D-041: Simple marketplace via Sui Kiosk — primary list + purchase of NftTokens
+
+**Status**: Accepted
+**Date**: 2026-05-21
+**Phase**: 4
+
+### Context
+`mint_nft_token` `public_transfer`s the freshly minted token to the caller (the nft creator), so after a launch the creator holds every token and there is **no in-app way for a separate user to acquire one**. The /track demo only works today because nftCreator == user (same wallet). This is the last broken leg of the four-actor journey (modelCreator → nftCreator → gameDev → **user buys** → drives).
+
+### Decision
+Build a *simple* marketplace on **Sui Kiosk** (the standard primitive) — not a hand-rolled Move store (user explicitly rejected reinventing it). Pure frontend: a list-for-sale PTB and a purchase PTB, plus minimal discovery + UI. **0 Move changes** — the royalty-only `TransferPolicy<NftToken>` (D-036) and `@mysten/kiosk@1.2.6` are already in place; Plan 009's v7 republish already re-bootstrapped a fresh policy (`transferPolicyId 0x3ffa22b3…`, `transferPolicyCapId 0x76cc6960…`, royalty-only verified).
+
+- **List**: owner places + lists an owned `NftToken` in their Kiosk at a price (create the Kiosk in the same PTB if absent).
+- **Purchase**: standard hot-potato chain — `kiosk::purchase` → `royalty_rule::pay` → `transfer_policy::confirm_request`. Because the policy carries **only** the royalty rule (no `kiosk_lock_rule`, per D-036), `confirm_request` succeeds without locking, the item is returned by value, and we `public_transfer` it to the buyer as a plain owned object. The buyer therefore needs no Kiosk, and the token is immediately discoverable by /track's owned-token query (U11).
+- **Discovery**: approach (a) — track the seller Kiosk id (returned by the list PTB) and query that Kiosk's listings. Demo-grade; we control the seller wallet for the demo.
+
+### Alternatives Considered
+- **Hand-rolled `Store` / `buy_token` Move entry** — rejected by user; reinvents Kiosk and adds Move surface + a republish.
+- **Discovery via `kiosk::ItemListed` event indexer** (mirrors U7) — deferred post-submission; correct scalable path but more work than the demo needs.
+- **Query all Kiosks holding the NftToken type** — broadest, most work; rejected for v1.
+
+### Consequences
+- ✅ Completes the four-actor flow: a second wallet can buy a listed token and drive it on /track.
+- ✅ Royalty is enforced on every Kiosk-routed sale via `confirm_request` (consistent with D-036; not protocol-enforced for off-Kiosk transfers — the accepted D-036 tradeoff).
+- ⚠️ Listing discovery is single-seller-scoped for the demo (approach (a)); no global marketplace search.
+- ⚠️ Resale UX is just the same purchase path; no auctions/offers/bulk management.
+- 🔮 (b) `ItemListed` event indexer is the post-submission scale path for multi-seller discovery.
+
+### Related
+- Implemented per `docs/plans/2026-05-21-010-feat-kiosk-simple-marketplace-plan.md`.
+- Builds on the v7 ids from [[D-040]]; royalty-only policy from [[D-036]]; owned-token discovery from U11; `confirm_request` choreography in `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`.
+
+---
+
 # Reserved Decision Numbers
 
-D-041 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-042 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
