@@ -1908,6 +1908,40 @@ It launches the collection (routes the derive fee exactly like `launch_collectio
 
 ---
 
+## D-039: Material-swap stays backend for v1; move to client-side gltf-transform post-submission
+
+**Status**: Accepted
+**Date**: 2026-05-21
+**Phase**: 4 (revisit Phase 5 / post-submission)
+
+### Context
+The L2 fork flow's variant generation (swap `baseColorFactor` + optional texture into N GLBs) runs server-side at `/api/collection/build` via `@gltf-transform`. The base GLB round-trips through the backend as base64 JSON and the N variants return in one response — in-memory, N-multiplied. This forces the size caps (zod 16.8M chars + 18 MiB bodyLimit, aligned to the 12 MiB `/create` upload ceiling in commit `45a32dc`) and wastes bandwidth: bytes go browser→backend→browser *before* heading to Walrus, their actual destination. The 12 MiB cap is an app-level guard, **not** a Walrus limit (Walrus single-blob ceiling is ~GB).
+
+### Decision
+Keep the backend material-swap for the 6/21 submission. Post-submission, move the swap into the browser using **`@gltf-transform` in-browser** (NOT Babylon GLB export) and retire `/api/collection/build` + its auth/size guards.
+
+### Rationale
+- The data is already client-side and Walrus-bound; the backend hop is pure overhead and the source of the cap pain.
+- gltf-transform in-browser preserves the surgical/deterministic edit the backend does today (Babylon export serializes the whole scene — lossy/non-surgical).
+- Client compute scales free (no server CPU/OOM), drops a hard backend dependency from a core creator flow (backend's real job is Tripo dispatch + Sui/Walrus read path, D-012), and removes the cap (Walrus ~GB becomes the only ceiling).
+- Deferred because the backend path works today, 12 MiB is plenty for low-poly content (D-006), and a rebuild carries demo risk mid-sprint.
+
+### Alternatives Considered
+- **Move now (pre-6/21)** — rejected: real work + demo risk for no demo-visible benefit at low-poly sizes.
+- **Babylon GLB export client-side** — rejected: re-encodes the whole scene; risks byte/size/extension drift on the canonical on-chain artifact.
+- **Raise backend caps further** — rejected: the in-memory N× multiplication is the real constraint; bigger numbers only move the OOM threshold.
+
+### Consequences
+- ✅ v1 ships on the working backend path; no churn during the sprint.
+- ⚠️ The 12 MiB fork ceiling persists until the move (fine for low-poly; only matters for large assets).
+- ⚠️ Post-move loses the server-side validation/whitelist/agent-API entry point for forking (not used today).
+- 🔮 Post-move: `/api/collection/build` + its bodyLimit/zod caps retire; frontend bundle gains gltf-transform (+ possible codec WASM); base GLB never leaves the browser except to Walrus.
+
+### Related
+- Builds on the size-cap alignment fix (commit `45a32dc`). Extends the "base GLB round-trip stays client-side" choice (phase-progress) from *fetching* the GLB to *swapping* it. Tracked as a post-submission unit.
+
+---
+
 # Reserved Decision Numbers
 
-D-039 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-040 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
