@@ -1,6 +1,37 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (U12a + D-038 builder + U12b + seed DONE — nft-creator launch flow live on v6) — **Next = browser e2e of /launch (interactive wallet), then U11 (/track) or U13 (gameDev).**
+## Last Updated: 2026-05-21 (nft-creator `/launch` VERIFIED end-to-end on v6 + a string of read-path fixes) — **Next = U11 (`/track` owned-NftToken discovery) so the user can drive a forked token.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### Live e2e verification — `/launch` works (real wallet, in browser)
+The user ran the full nft-creator flow in-browser. Confirmed on chain (tx `DYCbVcVt…` = `launch_collection_with_tokens`, ONE signature):
+- **`NftCollection 0xab907e2ad49fdcc1680868d7313b0fdee87f792b764e467f2bba4d6b792db689`** — base_model_id `0x3220615b…` (the user's own L1 model), quilt_blob_id `BHZ3BtQ1…`, register_fee 0, base_royalty_bps 500 (snapshot), nft_creator = user wallet `0xc731848b…`.
+- **2 owned `NftToken`** ("Avocado variants #1/#2"), distinct patch_ids; patch resolves via `by-quilt-patch-id` → HTTP 200 / 8.3 MB / `glTF`. So D-038 batch fn + the whole L1→L2 fork is real.
+- Four-role status: ✅ modelCreator (/create) · ✅ **nftCreator (/launch)** · ⛔ user (/track is broken — see U11) · ⬜ gameDev (U13).
+
+### Read-path / preview fixes shipped this session (all committed, tsc clean, 292 fe + 110 be green)
+- **`e886dff`** — all index/detail hooks read `TESTNET.model3dPackageId`, NOT the stale `VITE_MODEL3D_PACKAGE_ID` env (was pinned to Phase-3 `0x18a480b3…` → Browse queried wrong package, showed nothing). Single source of truth; republish only bumps `networkConfig.ts`.
+- **`4e53ac4`** — v6 L1 Model3D is standalone content (no `collection_id`/`patch_id`/`blob`). New `walrus/aggregator.glbUrlForSummary` (patchId → glbBlobId → legacy blobId) used at all 4 resolvers; `CollectionCard` routes `_orphan:` (standalone) models to `/model/:objectId` not the dead collection slug. Fixed empty-preview + "Collection not found".
+- **`ae3e708`** — `PreviewCanvas` auto-frames the ArcRotateCamera to mesh bounding box (fixed-radius made small meshes a speck / clipped big ones).
+- **`45a32dc`** — `/api/collection/build` size caps aligned to the 12 MiB `/create` upload ceiling (zod 16.8M chars + bodyLimit 18 MiB); an 8.3 MB model that published couldn't be forked (400 too_big).
+- **`b344b33`** — **D-039** ADR: material-swap stays backend for v1; move to client-side gltf-transform post-submission (task #53). The 12 MiB cap is an app guard, NOT a Walrus limit (~GB).
+
+### Seed data on v6 (for pickers/demo)
+- Seed L1 Model3D **`0x38d3bdbb…`** ("Seed Roadster", glb `yCv__…`, fork fee 0.1 SUI, royalty 5%). User's own L1 `0x3220615b…` (8.3 MB avocado — high-poly, not low-poly; fine functionally, small cars are better game content). User wallet topped up with 0.5 WAL (from deployer, digest `6PipeAzG…`).
+
+### Next Concrete Step — U11 (`/track` owned-NftToken discovery)
+`frontend/src/track/useOwnedVariants.ts` still queries the **deleted `Access` type** → always empty (only `?blob=` dev hatch works). Rewrite: query owned objects of type `<v6pkg>::model3d::NftToken` → read `patch_id` → resolve GLB via `glbUrlForSummary` (already handles patchId). Delete the Access-based discovery + `stubListingLookup`. Keep the `?blob=` escape hatch. The user has 2 real owned tokens (`0xb852e23…`, `0xc3a93a87…`) to test against immediately. Pure frontend, scope clear.
+
+### Notes for next session
+- **RTK gotcha**: the curl hook summarizes `curl` stdout (breaks JSON parsing). Use `python3 -c "...urllib..."` for chain/GraphQL queries. Aggregator 403s urllib's default UA → send `User-Agent: Mozilla/5.0`.
+- `publishPtb.ts` + `purchaseAccessPtb.ts` still orphaned dead Phase-2 code (separate purge). `forge/` now holds only `VariantEditor`/`VariantPreview` (reused by `/launch`).
+- After U11: U13 (gameDev register-integration page), U14 (Browse shows L2 NftCollections — currently Browse only queries L1 Model3D), U15 (demo/pitch).
+
+---
+
+## (earlier 2026-05-21) U12a + D-038 builder + U12b + seed DONE — nft-creator launch flow live on v6
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38
