@@ -3,8 +3,9 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 
 // Walrus client + WalrusFile are mocked at the @mysten/walrus boundary so the
 // hook never touches real WASM, real signers, or real network IO.
-const { writeFilesFlowFactory, walrusFileFromMock } = vi.hoisted(() => ({
+const { writeFilesFlowFactory, writeBlobFlowFactory, walrusFileFromMock } = vi.hoisted(() => ({
   writeFilesFlowFactory: vi.fn(),
+  writeBlobFlowFactory: vi.fn(),
   walrusFileFromMock: vi.fn((opts: { contents: Uint8Array; identifier?: string }) => ({
     __identifier: opts.identifier ?? null,
     __bytes: opts.contents,
@@ -24,6 +25,7 @@ vi.mock('@mysten/sui/jsonRpc', () => {
       return {
         walrus: {
           writeFilesFlow: (...args: unknown[]) => writeFilesFlowFactory(...args),
+          writeBlobFlow: (...args: unknown[]) => writeBlobFlowFactory(...args),
         },
       };
     }
@@ -78,8 +80,25 @@ function makeHappyFlow() {
   };
 }
 
+// writeBlobFlow happy path (D-037 standalone GLB upload). executeCertify
+// resolves the WriteBlobStepCertified carrying blobId + blobObjectId directly.
+function makeHappyBlobFlow() {
+  const BLOB_ID = 'raw-blob-xyz';
+  const BLOB_OBJECT_ID = '0x' + 'b'.repeat(64);
+  const encode = vi.fn().mockResolvedValue({ step: 'encoded' });
+  const executeRegister = vi
+    .fn()
+    .mockResolvedValue({ step: 'registered', txDigest: '0xdigest', blobObjectId: BLOB_OBJECT_ID });
+  const upload = vi.fn().mockResolvedValue({ step: 'uploaded' });
+  const executeCertify = vi
+    .fn()
+    .mockResolvedValue({ step: 'certified', blobId: BLOB_ID, blobObjectId: BLOB_OBJECT_ID });
+  return { encode, executeRegister, upload, executeCertify, BLOB_ID, BLOB_OBJECT_ID };
+}
+
 beforeEach(() => {
   writeFilesFlowFactory.mockReset();
+  writeBlobFlowFactory.mockReset();
   walrusFileFromMock.mockClear();
 });
 
@@ -269,5 +288,69 @@ describe('useWalrusUpload', () => {
     act(() => result.current.reset());
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
+  });
+
+  describe('uploadBlob (D-037 standalone blob)', () => {
+    it('drives writeBlobFlow and returns the raw blobId + Sui Blob object id', async () => {
+      const flow = makeHappyBlobFlow();
+      writeBlobFlowFactory.mockReturnValue(flow);
+
+      const { result } = renderHook(() => useWalrusUpload());
+      const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+
+      let res: Awaited<ReturnType<typeof result.current.uploadBlob>> | undefined;
+      await act(async () => {
+        res = await result.current.uploadBlob(glb, makeSigner());
+      });
+
+      // Routed through writeBlobFlow (NOT quilted via writeFilesFlow).
+      expect(writeBlobFlowFactory).toHaveBeenCalledOnce();
+      expect(writeFilesFlowFactory).not.toHaveBeenCalled();
+      expect(flow.encode).toHaveBeenCalledOnce();
+      expect(flow.executeRegister.mock.calls[0]?.[0]).toMatchObject({
+        epochs: 10,
+        deletable: false,
+        owner: '0xCAFE',
+      });
+      expect(flow.upload).toHaveBeenCalledOnce();
+      expect(flow.executeCertify).toHaveBeenCalledOnce();
+
+      expect(res).toEqual({ blobId: flow.BLOB_ID, blobObjectId: flow.BLOB_OBJECT_ID });
+      expect(res?.blobObjectId).toMatch(/^0x[0-9a-f]{64}$/);
+      await waitFor(() => expect(result.current.status).toBe('done'));
+    });
+
+    it('throws synchronously on empty bytes and does not touch the SDK', async () => {
+      writeBlobFlowFactory.mockReturnValue(makeHappyBlobFlow());
+      const { result } = renderHook(() => useWalrusUpload());
+
+      let captured: unknown;
+      await act(async () => {
+        await result.current.uploadBlob(new Uint8Array([]), makeSigner()).catch((e) => {
+          captured = e;
+        });
+      });
+      expect((captured as Error).message).toMatch(/non-empty/);
+      expect(writeBlobFlowFactory).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('idle');
+    });
+
+    it('transitions to error when certify fails', async () => {
+      const flow = makeHappyBlobFlow();
+      flow.executeCertify.mockRejectedValueOnce(new Error('certify boom'));
+      writeBlobFlowFactory.mockReturnValue(flow);
+
+      const { result } = renderHook(() => useWalrusUpload());
+      let captured: unknown;
+      await act(async () => {
+        await result.current.uploadBlob(new Uint8Array([1]), makeSigner()).catch((e) => {
+          captured = e;
+        });
+      });
+
+      expect((captured as Error).message).toMatch(/certify boom/);
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(result.current.error?.stage).toBe('awaiting-certify');
+    });
   });
 });

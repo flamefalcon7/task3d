@@ -53,6 +53,8 @@ export interface PublishArgs {
   name: string;
   tags: string[];
   lineageBlobId: string;
+  /** Standalone Walrus blob id of the GLB (D-037) — resolved via /v1/blobs/<id>. */
+  glbBlobId: string;
   isEncrypted: boolean;
   license: LicenseTermsInput;
 }
@@ -108,6 +110,7 @@ export function buildPublishPtb(args: PublishArgs): TxResult<{ licenseHandle: Tr
       tx.pure.string(args.name),
       tx.pure.vector('string', args.tags),
       tx.pure.string(args.lineageBlobId),
+      tx.pure.string(args.glbBlobId),
       tx.pure.bool(args.isEncrypted),
       licenseHandle,
       tx.object(CLOCK_OBJECT_ID),

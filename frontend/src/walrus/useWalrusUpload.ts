@@ -64,6 +64,61 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
     return clientRef.current;
   }, []);
 
+  // Upload ONE file as a STANDALONE (non-quilted) Walrus blob via writeBlobFlow.
+  // Unlike uploadFiles (which always quilts, even for N=1), the returned blobId
+  // resolves directly at the aggregator's `/v1/blobs/<blobId>` path to the raw
+  // bytes — required by D-037 so a published Model3D's glb_blob_id previews the
+  // base mesh and an nft creator can fork it. Same 2-popup cost as uploadFiles
+  // (1 register + 1 certify); writeFilesFlow delegates to this same flow.
+  const uploadBlob = useCallback(
+    async (bytes: Uint8Array, signer: Signer): Promise<BlobUploadResult> => {
+      if (!bytes || bytes.length === 0) {
+        throw new Error('useWalrusUpload: uploadBlob requires a non-empty Uint8Array');
+      }
+
+      setError(null);
+      setStatus('uploading');
+      setStage('encoding');
+
+      const client = options.client ?? getClient();
+      const owner = signer.toSuiAddress();
+      const flow = client.walrus.writeBlobFlow({ blob: bytes });
+
+      let lastStage: UploadStage = 'encoding';
+      try {
+        await flow.encode();
+
+        lastStage = 'awaiting-register';
+        setStage(lastStage);
+        const registerResult = await flow.executeRegister({
+          signer,
+          epochs: options.epochs ?? 10,
+          deletable: false,
+          owner,
+        });
+
+        lastStage = 'relay-upload';
+        setStage(lastStage);
+        await flow.upload({ digest: registerResult.txDigest });
+
+        lastStage = 'awaiting-certify';
+        setStage(lastStage);
+        const certified = await flow.executeCertify({ signer });
+
+        setStage('done');
+        setStatus('done');
+        return { blobId: certified.blobId, blobObjectId: certified.blobObjectId };
+      } catch (cause) {
+        const failedStage = lastStage as UploadError['stage'];
+        setError({ stage: failedStage, cause });
+        setStage('error');
+        setStatus('error');
+        throw cause;
+      }
+    },
+    [getClient, options.client, options.epochs],
+  );
+
   const uploadFiles = useCallback(
     async (files: Uint8Array[], signer: Signer): Promise<UploadResult> => {
       if (!files || files.length === 0) {
@@ -157,6 +212,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
   return {
     uploadFiles,
+    uploadBlob,
     status,
     stage,
     error,

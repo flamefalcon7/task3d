@@ -41,5 +41,6 @@ export function stubListingLookup(
     tags: [],
     createdAtMs: '0',
     lineageBlobId: '',
+    glbBlobId: '',
   };
 }

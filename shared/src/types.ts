@@ -87,6 +87,7 @@ export interface Model3DSummary {
   tags: string[];
   createdAtMs: string;         // u64 timestamp as string
   lineageBlobId: string;       // D-015
+  glbBlobId: string;           // D-037 — standalone Walrus blob id of the GLB mesh ('' if absent)
 }
 
 // --- Phase 3 Collection Forge types (plan-003 KTD-5, U3, U5) --------------

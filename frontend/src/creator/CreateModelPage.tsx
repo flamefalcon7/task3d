@@ -79,7 +79,6 @@ export function CreateModelPage() {
 
   const [glb, setGlb] = useState<Uint8Array | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
-  const [lineageJson, setLineageJson] = useState<Uint8Array | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
   const [name, setName] = useState('');
@@ -94,7 +93,7 @@ export function CreateModelPage() {
 
   const { session } = useSession();
   const account = useCurrentAccount();
-  const { uploadFiles, stage: uploadStage } = useWalrusUpload();
+  const { uploadBlob, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const signer = useDappKitSigner(account?.address ?? null);
 
@@ -103,9 +102,8 @@ export function CreateModelPage() {
     return () => URL.revokeObjectURL(glbUrl);
   }, [glbUrl]);
 
-  const setGlbBytes = useCallback((bytes: Uint8Array, lineage: Uint8Array | null) => {
+  const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
-    setLineageJson(lineage);
     setConfirmed(false);
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }));
     setGlbUrl(url);
@@ -125,7 +123,7 @@ export function CreateModelPage() {
         session.jwt,
         payResult.digest,
       );
-      setGlbBytes(result.glbBytes, result.lineageJson);
+      setGlbBytes(result.glbBytes);
       setGenStatus('idle');
     } catch (e) {
       setGenError(e instanceof Error ? e.message : String(e));
@@ -141,7 +139,7 @@ export function CreateModelPage() {
         setGenError('Not a valid .glb file (max 12MB, must start with the glTF magic).');
         return;
       }
-      setGlbBytes(bytes, null);
+      setGlbBytes(bytes);
       if (!name) setName(file.name.replace(/\.glb$/i, ''));
     },
     [setGlbBytes, name],
@@ -152,22 +150,22 @@ export function CreateModelPage() {
     setMintError(null);
     setMintStatus('uploading');
     try {
-      const files = lineageJson ? [glb, lineageJson] : [glb];
-      const upload = await uploadFiles(files, signer);
+      // D-037 (option A): the GLB is uploaded as a STANDALONE blob (not quilted)
+      // so its blob id resolves directly at /v1/blobs/<id> — both the on-chain
+      // Blob object and glb_blob_id come from this one upload. lineage.json is
+      // no longer separately persisted (it was never resolved anywhere); the
+      // lineage pointer collapses onto the GLB's own blob id.
+      const glbBlob = await uploadBlob(glb, signer);
       setMintStatus('signing');
-      const firstBlob = upload.blobObjects[0];
-      if (!firstBlob) throw new Error('Walrus upload returned no blob');
-      // Tripo path uploads [glb, lineage] → lineage is the 2nd blob; upload
-      // path has only the glb, so the lineage pointer is the glb's own blob id.
-      const lineageBlobId = upload.blobIds[1] ?? upload.blobIds[0]!;
       const tags = tagsStr.split(',').map((t) => t.trim()).filter(Boolean);
       const { tx } = buildPublishPtb({
-        blobObjectId: firstBlob.blobObjectId,
+        blobObjectId: glbBlob.blobObjectId,
         shapeType: sourceMode,
         paramsJson: JSON.stringify(sourceMode === 'tripo' ? { prompt } : { source: 'upload' }),
         name: name.trim(),
         tags,
-        lineageBlobId,
+        lineageBlobId: glbBlob.blobId,
+        glbBlobId: glbBlob.blobId,
         isEncrypted: false,
         license: {
           policy,
@@ -184,7 +182,7 @@ export function CreateModelPage() {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, lineageJson, uploadFiles, tagsStr, sourceMode, prompt, policy, feeSui, royaltyBps, signAndExecute]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, royaltyBps, signAndExecute]);
 
   if (!session) {
     return (

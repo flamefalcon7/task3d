@@ -53,6 +53,7 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const blob = (json.blob ?? {}) as Record<string, unknown>;
   const blobId = String(blob.blob_id ?? json.blob_id ?? '');
   const lineageBlobId = String(json.lineage_blob_id ?? '');
+  const glbBlobId = String(json.glb_blob_id ?? '');
   const creator = String(json.creator ?? '');
   const shapeType = String(json.shape_type ?? '');
   const paramsJson = String(json.params_json ?? '');
@@ -81,6 +82,7 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     tags,
     createdAtMs,
     lineageBlobId,
+    glbBlobId,
   };
 }
 

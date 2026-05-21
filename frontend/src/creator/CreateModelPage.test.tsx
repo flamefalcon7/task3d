@@ -13,9 +13,9 @@ vi.mock('@mysten/dapp-kit', () => ({
 const useSessionMock = vi.fn();
 vi.mock('../auth/useSession', () => ({ useSession: () => useSessionMock() }));
 
-const uploadFilesMock = vi.fn();
+const uploadBlobMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
-  useWalrusUpload: () => ({ uploadFiles: uploadFilesMock, stage: 'idle', status: 'idle', error: null }),
+  useWalrusUpload: () => ({ uploadBlob: uploadBlobMock, stage: 'idle', status: 'idle', error: null }),
 }));
 
 vi.mock('../babylon/PreviewCanvas', () => ({

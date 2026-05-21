@@ -44,6 +44,7 @@ describe('buildPublishPtb', () => {
     name: 'Excalibur',
     tags: ['weapon'],
     lineageBlobId: 'walrus_lineage_id',
+    glbBlobId: 'walrus_glb_id',
     isEncrypted: false,
     license: {
       policy: 2,
@@ -78,6 +79,7 @@ describe('type discipline', () => {
       name: 'X',
       tags: [],
       lineageBlobId: 'l',
+      glbBlobId: 'g',
       isEncrypted: false,
       license: {
         policy: 0,
@@ -123,6 +125,7 @@ describe('publish PTB reaches live RPC (fake blob → object-resolution error)',
       name: 'X',
       tags: [],
       lineageBlobId: 'l',
+      glbBlobId: 'g',
       isEncrypted: false,
       license: { policy: 2, derivativeMintFee: 0n, derivativeRoyaltyBps: 0, commercialUse: false, requireAttribution: false },
     });

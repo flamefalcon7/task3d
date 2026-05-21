@@ -103,6 +103,7 @@ function nodeToSummary(node: GraphQLObjectNode): Model3DSummary | null {
     tags: rawTags.map((t) => String(t)),
     createdAtMs: String(json.created_at_ms ?? '0'),
     lineageBlobId: String(json.lineage_blob_id ?? ''),
+    glbBlobId: String(json.glb_blob_id ?? ''),
   };
 }
 
