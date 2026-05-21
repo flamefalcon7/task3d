@@ -1,9 +1,20 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (U11 + U13 DONE, both browser-smoke-passed — all 4 actors functional) — **Next = U14 (Browse integration filter + Used-by section) so registered integrations are visible in-app.**
+## Last Updated: 2026-05-21 (U11 + U13 + U14 DONE — full four-role loop visible in-app; only U15 demo/docs left) — **Next = U15 (four-actor demo recording + pitch slide + README + honest disclosure).**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### U14 DONE — Browse integration filter + XSS-safe Used-by (commit `b4ecb5c`, data path verified live)
+- **`collection/UsedBySection.tsx`** (NEW): `GET /api/collections/:id/integrations`. AE4 defense-in-depth: `name` as React text node (markup → inert text), `url` as `<a>` ONLY after a fresh https allowlist check (else plain text); never `dangerouslySetInnerHTML`. States loading / list / empty / restricted.
+- **`collection/CollectionDetailPage.tsx`** (rewritten): v6 `Model3D` has no `collection_id`, so the old `useCollectionBySlug` path was dead. Now resolves the L2 `NftCollection` via `useCollectionById` (name joined from base model), shows fee + royalty + UsedBySection. No 3D variant grid (driving is on /track).
+- **`integration/useCollections.ts`**: `enabled` flag (skip fetch off the integration view) + `useCollectionById` hook.
+- **`browse/BrowsePage.tsx`**: `?filter=integration` toggle → permissionless-only L2 collection grid, cards link to `/collection/:id`. Deleted dead `useCollectionBySlug.{ts,test}`; fixed dead `/generate`→`/create` empty-state link.
+- Verified end-to-end on live testnet + running backend: `IntegrationRegistered` event (collection `0xcbea3c1c…`, integrator = user wallet) → indexer → `/api/collections/:id/integrations` returns `{name:"race1", url:"https://localhost:5173/track"}`; collection GraphQL `integration_policy=2` (PERMISSIONLESS) → appears in the filter. tsc clean, prod build OK, **325 fe tests green**.
+- **Known demo-content note**: the registered url `https://localhost:5173/track` won't resolve (local dev is http, no https server). https-only validation is correct (public clickable href = XSS surface) and stays. For the demo, deploy the dapp to an https host (Walrus Sites preferred — on-track) and register a real URL; the localhost record is already on chain (immutable) but harmless.
+
+### Next Concrete Step — U15 (four-actor demo + pitch + README + honest disclosure)
+All four actors now work in-app on v6: ✅ modelCreator (/create) · ✅ nftCreator (/launch) · ✅ user (/track) · ✅ gameDev (/integrate) + Used-by reverse lookup (/collection/:id, Browse `?filter=integration`). Remaining: (1) deploy frontend to an https host — **Walrus Sites** is the on-theme choice (Walrus track) — so the Used-by link + demo are publicly reachable; (2) record the four-actor arc (mesh publish → nft launch+fee → gameDev pay+register → user buy+drive → Used-by resolves on screen); (3) four-archetype pitch slide + README hero + honest disclosure (the four wallets are team-controlled for 6/21 unless a real external integrator is recruited). See plan U15 + carried plan-007 demo units.
 
 ### U13 DONE — gameDev `/integrate` page (commit `a4f3826`, integrate tx succeeded on chain)
 gameDev registers an on-chain integration against a permissionless L2 collection: pick collection → {name,url} → pay register_fee → `register_integration` (fee routes to nft creator).
