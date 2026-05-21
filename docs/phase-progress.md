@@ -16,7 +16,17 @@
 ### Cleanup since U14 (commit `4f81076`) — Access/buy dead-code purge + /model rework
 The Phase-2 buy-access flow targeted `purchase_model_access` (removed in v6), so `/model/:id` — the landing page for **every Browse card** — had a broken "Buy access" button. Reworked `ModelDetailPage` into an L1 content detail page (preview + fork terms + "Fork → /launch" CTA; not-forkable note when no `glb_blob_id`). Removed `useOwnsAccess` (queried the deleted `Access` type) and deleted `BuyAccessButton`, `sui/purchaseAccessPtb`, `sui/publishPtb` (+ tests). Net −588 lines; 307 fe tests green. **Residual (intentionally left)**: `Model3DSummary.directAccessPrice` still in the type (always '0' in v6); `ModelCard`/`CollectionCard` still show a price → render "Free". Removing it is a separate type-wide pass.
 
-### Next Concrete Step — U15 (four-actor demo + pitch + README + honest disclosure)
+### NEW plans written (2026-05-21) — two functional gaps found post-U14
+Reviewed "what's not implemented" and found two real gaps (verified against Move source). Plans written, **not yet started**:
+- **Plan 009** (`docs/plans/2026-05-21-009-feat-l1-license-policy-enforcement-plan.md`, ADR D-040 pending): `Model3D.license.policy` is **stored but never enforced** (model3d.move:588 — fork gated only by fee). Fix: enforce RESTRICTED (creator-only) vs PERMISSIONLESS in `launch_collection_internal` (1 additive assert → **compatible upgrade possible, no fresh republish**), drop ALLOW_LIST from `/create` UI (no allow-list field in LicenseTerms). Small, standalone — **do first**.
+- **Plan 010** (`docs/plans/2026-05-21-010-feat-kiosk-simple-marketplace-plan.md`, ADR D-041 pending): **no in-app way for a user to acquire a token** (mint goes to creator; /track demo only works because nftCreator==user). Fix: simple **Kiosk** marketplace (user rejected hand-rolled store). **0 Move changes expected** — `TransferPolicy<NftToken>`+royalty already deployed (U17), `@mysten/kiosk@1.2.6` installed. Units: list PTB (#48) + purchase PTB (hot-potato+royalty) + discovery (main unknown) + /market UI. Frontend-heavy; **do after 009**.
+- User decision pending: confirm sequencing (009 then 010) + whether 009 ships as compatible upgrade vs fresh v7 republish. Write D-040/D-041 at impl start (confirm text with user per CLAUDE.md).
+- U15 demo is **deferred** by user.
+
+### Next Concrete Step — Plan 009 then Plan 010 (then U15 demo)
+Start Plan 009 U1 (Move policy assert). See the two new plan docs above for full unit breakdown. U15 (four-actor demo + pitch + README + honest disclosure) remains deferred.
+
+### (deferred) U15 (four-actor demo + pitch + README + honest disclosure)
 All four actors now work in-app on v6: ✅ modelCreator (/create) · ✅ nftCreator (/launch) · ✅ user (/track) · ✅ gameDev (/integrate) + Used-by reverse lookup (/collection/:id, Browse `?filter=integration`). Remaining: (1) deploy frontend to an https host — **Walrus Sites** is the on-theme choice (Walrus track) — so the Used-by link + demo are publicly reachable; (2) record the four-actor arc (mesh publish → nft launch+fee → gameDev pay+register → user buy+drive → Used-by resolves on screen); (3) four-archetype pitch slide + README hero + honest disclosure (the four wallets are team-controlled for 6/21 unless a real external integrator is recruited). See plan U15 + carried plan-007 demo units.
 
 ### U13 DONE — gameDev `/integrate` page (commit `a4f3826`, integrate tx succeeded on chain)
