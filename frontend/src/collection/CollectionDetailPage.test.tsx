@@ -1,43 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { Model3DSummary } from '@overflow2026/shared';
+import type { NftCollectionSummary } from '../integration/useCollections';
 
-const useCollectionBySlugMock = vi.fn();
-vi.mock('./useCollectionBySlug', () => ({
-  useCollectionBySlug: (slug: string) => useCollectionBySlugMock(slug),
-}));
+const useCollectionByIdMock = vi.fn();
+vi.mock('../integration/useCollections', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../integration/useCollections')>();
+  return {
+    ...actual, // keep POLICY_PERMISSIONLESS for UsedBySection
+    useCollectionById: (id: string | undefined) => useCollectionByIdMock(id),
+  };
+});
 
-// Stub Babylon-backed preview so jsdom doesn't try to run WebGL.
-vi.mock('../babylon/PreviewCanvas', () => ({
-  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
-    <div data-testid="preview-canvas-stub" data-glb-url={glbUrl ?? ''} />
-  ),
-}));
+const useModelIndexMock = vi.fn();
+vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMock() }));
 
-vi.mock('../auth/SignInButton', () => ({
-  SignInButton: () => null,
-}));
+vi.mock('../auth/SignInButton', () => ({ SignInButton: () => null }));
 
 import { CollectionDetailPage } from './CollectionDetailPage';
 
-function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
+function makeCollection(overrides: Partial<NftCollectionSummary> = {}): NftCollectionSummary {
   return {
-    objectId: '0xv0',
-    blobId: 'blob-quilt',
     collectionId: '0xcoll',
-    patchId: 'patch-0',
-    creator: '0x1234567890abcdef',
-    shapeType: 'box',
-    paramsJson: '{"shape":"box"}',
-    name: 'Variant 0',
-    directAccessPrice: '100000000',
-    tags: [],
-    createdAtMs: '1700000000000',
-    lineageBlobId: 'lin-1',
-    glbBlobId: 'glb-1',
-    derivativeMintFee: '0',
-    derivativeRoyaltyBps: 0,
+    baseModelId: '0xbase',
+    baseCreator: '0xbasecreator',
+    nftCreator: '0xnftcreator',
+    baseRoyaltyBps: 500,
+    integrationPolicy: 2,
+    registerFee: '100000000',
     ...overrides,
   };
 }
@@ -53,77 +43,43 @@ function renderAt(slug: string) {
 }
 
 beforeEach(() => {
-  useCollectionBySlugMock.mockReset();
+  useCollectionByIdMock.mockReset();
+  useModelIndexMock.mockReset();
+  useModelIndexMock.mockReturnValue({ models: [{ objectId: '0xbase', name: 'Roadster' }], loading: false });
+  // Default: UsedBySection's fetch resolves to no integrations.
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ integrations: [] }),
+  } as unknown as Response));
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('CollectionDetailPage', () => {
-  it('renders N variant tiles when the collection loads', () => {
-    const variants = Array.from({ length: 16 }, (_, i) =>
-      makeModel({
-        objectId: `0xv${i}`,
-        patchId: `patch-${i}`,
-        name: `Demo Car #${i + 1}`,
-      }),
-    );
-    useCollectionBySlugMock.mockReturnValue({ variants, loading: false, error: null });
-
+  it('renders the collection name (joined from base model) + economics', () => {
+    useCollectionByIdMock.mockReturnValue({ collection: makeCollection(), loading: false, error: null });
     renderAt('0xcoll');
-    expect(screen.getByTestId('variant-grid')).toBeTruthy();
-    for (let i = 0; i < 16; i++) {
-      expect(screen.getByTestId(`variant-tile-0xv${i}`)).toBeTruthy();
-    }
-    expect(screen.getByTestId('collection-variant-count').textContent).toContain('16 variants');
-  });
-
-  it('each tile preview uses its variant-specific patchId aggregator URL', () => {
-    const variants = [
-      makeModel({ objectId: '0xv0', patchId: 'patch-aaa' }),
-      makeModel({ objectId: '0xv1', patchId: 'patch-bbb' }),
-    ];
-    useCollectionBySlugMock.mockReturnValue({ variants, loading: false, error: null });
-
-    renderAt('0xcoll');
-    const url0 =
-      screen.getByTestId('variant-preview-0xv0').querySelector('[data-glb-url]')?.getAttribute('data-glb-url') ?? '';
-    const url1 =
-      screen.getByTestId('variant-preview-0xv1').querySelector('[data-glb-url]')?.getAttribute('data-glb-url') ?? '';
-    expect(url0).toContain('/v1/blobs/by-quilt-patch-id/patch-aaa');
-    expect(url1).toContain('/v1/blobs/by-quilt-patch-id/patch-bbb');
-    expect(url0).not.toBe(url1);
-  });
-
-  it('clicking a variant tile links to /model/<objectId>', () => {
-    const variants = [makeModel({ objectId: '0xMODELv7' })];
-    useCollectionBySlugMock.mockReturnValue({ variants, loading: false, error: null });
-
-    renderAt('0xcoll');
-    const tile = screen.getByTestId('variant-tile-0xMODELv7') as HTMLAnchorElement;
-    expect(tile.getAttribute('href')).toBe('/model/0xMODELv7');
+    expect(screen.getByTestId('collection-name').textContent).toMatch(/Roadster collection/);
+    expect(screen.getByTestId('collection-register-fee').textContent).toMatch(/0\.10 SUI/);
+    expect(screen.getByTestId('usedby-section')).toBeTruthy();
   });
 
   it('renders loading state', () => {
-    useCollectionBySlugMock.mockReturnValue({ variants: [], loading: true, error: null });
+    useCollectionByIdMock.mockReturnValue({ collection: null, loading: true, error: null });
     renderAt('0xcoll');
     expect(screen.getByTestId('collection-loading')).toBeTruthy();
   });
 
-  it('renders empty state when no variants match', () => {
-    useCollectionBySlugMock.mockReturnValue({ variants: [], loading: false, error: null });
-    renderAt('0xnotfound');
-    expect(screen.getByTestId('collection-empty')).toBeTruthy();
-  });
-
-  it('renders error state when load fails', () => {
-    useCollectionBySlugMock.mockReturnValue({
-      variants: [],
+  it('renders not-found state on error', () => {
+    useCollectionByIdMock.mockReturnValue({
+      collection: null,
       loading: false,
-      error: new Error('GraphQL 502'),
+      error: new Error('Collection 0xnope not found'),
     });
-    renderAt('0xcoll');
-    expect(screen.getByTestId('collection-error').textContent).toContain('502');
+    renderAt('0xnope');
+    expect(screen.getByTestId('collection-empty')).toBeTruthy();
   });
 });

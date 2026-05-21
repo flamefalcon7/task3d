@@ -95,12 +95,20 @@ export interface UseCollectionsResult {
   error: Error | null;
 }
 
-export function useCollections(): UseCollectionsResult {
+// `enabled` lets a caller (e.g. Browse, which only needs collections under the
+// ?filter=integration view) skip the network round-trip until it's actually
+// shown — without violating the rules-of-hooks unconditional-call requirement.
+export function useCollections(enabled = true): UseCollectionsResult {
   const [collections, setCollections] = useState<NftCollectionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setCollections([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -133,9 +141,52 @@ export function useCollections(): UseCollectionsResult {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   return { collections, loading, error };
+}
+
+export interface UseCollectionByIdResult {
+  collection: NftCollectionSummary | null;
+  loading: boolean;
+  error: Error | null;
+}
+
+// Single-collection hook for CollectionDetailPage (`/collection/:id`). Wraps
+// fetchCollectionById with loading/error/cancellation. `not found` surfaces as
+// an error so the page can show its empty state.
+export function useCollectionById(
+  collectionId: string | undefined,
+): UseCollectionByIdResult {
+  const [collection, setCollection] = useState<NftCollectionSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!collectionId) {
+      setCollection(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const c = await fetchCollectionById(collectionId);
+        if (!cancelled) setCollection(c);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionId]);
+
+  return { collection, loading, error };
 }
 
 // TOCTOU guard for RegisterIntegrationPage: the cap holder may have raised the

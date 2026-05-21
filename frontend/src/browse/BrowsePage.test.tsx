@@ -10,6 +10,12 @@ vi.mock('../babylon/PreviewCanvas', () => ({
   ),
 }));
 
+const useCollectionsMock = vi.fn();
+vi.mock('../integration/useCollections', () => ({
+  useCollections: (...a: unknown[]) => useCollectionsMock(...a),
+  POLICY_PERMISSIONLESS: 2,
+}));
+
 import { BrowsePage } from './BrowsePage';
 import * as hookMod from './useModelIndex';
 
@@ -47,9 +53,9 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
   };
 }
 
-function renderPage() {
+function renderPage(path = '/') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <BrowsePage />
     </MemoryRouter>,
   );
@@ -57,6 +63,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
 });
 
 afterEach(() => {
@@ -165,5 +172,61 @@ describe('BrowsePage', () => {
     renderPage();
     fireEvent.click(screen.getByTestId('refresh-button'));
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── U14: ?filter=integration view (R17) ───
+
+  it('does not fetch collections in the default (non-integration) view', () => {
+    mockHook({ models: [makeModel()] });
+    renderPage();
+    // useCollections is called with enabled=false so it skips the network.
+    expect(useCollectionsMock).toHaveBeenCalledWith(false);
+    expect(screen.queryByTestId('integration-view')).toBeNull();
+  });
+
+  it('?filter=integration lists only permissionless collections (R17)', () => {
+    mockHook({ models: [{ ...makeModel({ objectId: '0xbase', name: 'Roadster' }) }] });
+    useCollectionsMock.mockReturnValue({
+      collections: [
+        {
+          collectionId: '0xopen',
+          baseModelId: '0xbase',
+          baseCreator: '0xb',
+          nftCreator: '0xn',
+          baseRoyaltyBps: 500,
+          integrationPolicy: 2, // permissionless
+          registerFee: '100000000',
+        },
+        {
+          collectionId: '0xclosed',
+          baseModelId: '0xbase',
+          baseCreator: '0xb',
+          nftCreator: '0xn',
+          baseRoyaltyBps: 500,
+          integrationPolicy: 0, // restricted
+          registerFee: '0',
+        },
+      ],
+      loading: false,
+      error: null,
+    });
+    renderPage('/?filter=integration');
+    expect(useCollectionsMock).toHaveBeenCalledWith(true);
+    expect(screen.getByTestId('integration-grid')).toBeTruthy();
+    expect(screen.getByTestId('integration-card-0xopen')).toBeTruthy();
+    expect(screen.queryByTestId('integration-card-0xclosed')).toBeNull();
+    // card links to the collection detail page
+    expect(
+      (screen.getByTestId('integration-card-0xopen') as HTMLAnchorElement).getAttribute('href'),
+    ).toBe('/collection/0xopen');
+    // model grid is hidden in this view
+    expect(screen.queryByTestId('model-grid')).toBeNull();
+  });
+
+  it('?filter=integration shows the empty state when no collection is open', () => {
+    mockHook({ models: [] });
+    useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
+    renderPage('/?filter=integration');
+    expect(screen.getByTestId('integration-empty')).toBeTruthy();
   });
 });

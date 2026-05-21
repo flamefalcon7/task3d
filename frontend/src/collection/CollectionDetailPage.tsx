@@ -1,18 +1,16 @@
 import { Link, useParams } from 'react-router-dom';
-import type { Model3DSummary } from '@overflow2026/shared';
-import { useCollectionBySlug } from './useCollectionBySlug';
 import { SignInButton } from '../auth/SignInButton';
-import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import { useCollectionById } from '../integration/useCollections';
+import { useModelIndex } from '../browse/useModelIndex';
+import { UsedBySection } from './UsedBySection';
 
-// Phase 3 (U5): Browse → collection card → here. Renders all N variants of
-// a collection as a grid of tiles, each fetched directly from the Walrus
-// testnet aggregator via its quilt-patch URL (R9 confirmed pattern). Click
-// a tile → existing /model/:objectId detail page (which owns the buy flow).
-//
-// Slug strategy is the collectionId verbatim (see CollectionCard header). A
-// Phase 4 indexer can switch this to human slugs without changing the route
-// signature.
+// plan-008 U14 — L2 collection detail (`/collection/:slug`, slug = NftCollection
+// object id). Reworked off the dead Phase-3 `useCollectionBySlug` path: v6
+// `Model3D` no longer carries `collection_id`, so the collection relation lives
+// on the L2 `NftCollection` itself. This page resolves that object, shows its
+// economics, and renders the public "Used by" integration list. The colored
+// variant tokens are driven on /track (owned-NftToken discovery, U11), so this
+// page intentionally does not re-render a 3D variant grid.
 
 function truncate(addr: string, head = 6, tail = 4): string {
   if (!addr || addr.length <= head + tail + 1) return addr;
@@ -26,22 +24,15 @@ function formatSui(mist: string): string {
   return `${sui.toFixed(sui < 0.01 ? 4 : 2)} SUI`;
 }
 
-function deriveCollectionName(variants: Model3DSummary[]): string {
-  const first = variants[0];
-  if (!first) return 'Collection';
-  if (variants.length === 1) return first.name || `Model ${truncate(first.objectId)}`;
-  const stripped = first.name.replace(/\s*#\d+\s*$/, '').trim();
-  return stripped || first.name || 'Collection';
-}
-
 export function CollectionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
-  const { variants, loading, error } = useCollectionBySlug(slug ?? '');
+  const { collection, loading, error } = useCollectionById(slug);
+  const { models } = useModelIndex();
 
   if (!slug) {
     return (
       <div style={{ padding: 16 }} data-testid="collection-invalid">
-        Invalid collection slug.
+        Invalid collection id.
       </div>
     );
   }
@@ -52,14 +43,7 @@ export function CollectionDetailPage() {
       </div>
     );
   }
-  if (error) {
-    return (
-      <div role="alert" style={{ padding: 20, color: 'salmon' }} data-testid="collection-error">
-        Couldn't load this collection: {error.message}
-      </div>
-    );
-  }
-  if (variants.length === 0) {
+  if (error || !collection) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#888' }} data-testid="collection-empty">
         Collection not found.{' '}
@@ -68,8 +52,8 @@ export function CollectionDetailPage() {
     );
   }
 
-  const name = deriveCollectionName(variants);
-  const creator = variants[0]!.creator;
+  const baseModel = models.find((m) => m.objectId === collection.baseModelId);
+  const name = baseModel?.name ? `${baseModel.name} collection` : `Collection ${truncate(collection.collectionId)}`;
 
   return (
     <div
@@ -93,81 +77,38 @@ export function CollectionDetailPage() {
         </div>
       </header>
 
-      <section style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+      <section style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
         <h1 style={{ fontSize: 24, margin: '0 0 8px 0' }} data-testid="collection-name">
           {name}
         </h1>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 24 }}>
-          by <code data-testid="collection-creator">{truncate(creator)}</code> ·{' '}
-          <span data-testid="collection-variant-count">{variants.length} variant{variants.length === 1 ? '' : 's'}</span>
+          launched by <code data-testid="collection-creator">{truncate(collection.nftCreator)}</code>
         </div>
 
-        <div
-          data-testid="variant-grid"
+        <dl
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-            gap: 16,
+            gridTemplateColumns: 'max-content 1fr',
+            gap: '6px 16px',
+            fontSize: 14,
           }}
         >
-          {variants.map((v) => (
-            <Link
-              key={v.objectId}
-              to={`/model/${v.objectId}`}
-              data-testid={`variant-tile-${v.objectId}`}
-              style={{
-                display: 'block',
-                textDecoration: 'none',
-                color: 'inherit',
-                border: '1px solid #2a2d33',
-                borderRadius: 8,
-                background: '#1a1c20',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  aspectRatio: '1 / 1',
-                  background: '#15171b',
-                  overflow: 'hidden',
-                }}
-                data-testid={`variant-preview-${v.objectId}`}
-              >
-                {/* One Babylon canvas per tile. Browsers cap WebGL contexts
-                    at ~8-16 per page; collections above that count will see
-                    later tiles render as black. Acceptable for v1 since the
-                    cap is 16 variants per Move contract. */}
-                <PreviewCanvas glbUrl={glbUrlForSummary(v)} />
-              </div>
-              <div style={{ padding: 10 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    marginBottom: 4,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {v.name || `Variant ${truncate(v.objectId)}`}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: '#aaa' }}>{v.shapeType}</span>
-                  <span data-testid={`variant-price-${v.objectId}`} style={{ fontSize: 12, fontWeight: 600 }}>
-                    {formatSui(v.directAccessPrice)}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+          <dt style={{ color: '#888' }}>Register fee</dt>
+          <dd data-testid="collection-register-fee" style={{ margin: 0 }}>
+            {formatSui(collection.registerFee)}
+          </dd>
+          <dt style={{ color: '#888' }}>Resale royalty</dt>
+          <dd style={{ margin: 0 }}>{(collection.baseRoyaltyBps / 100).toFixed(2)}%</dd>
+        </dl>
+
+        <UsedBySection
+          collectionId={collection.collectionId}
+          integrationPolicy={collection.integrationPolicy}
+        />
+
+        <p style={{ marginTop: 24, fontSize: 13 }}>
+          <Link to="/integrate" style={{ color: '#7aa2ff' }}>Register your game →</Link>
+        </p>
       </section>
     </div>
   );

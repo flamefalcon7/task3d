@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useModelIndex } from './useModelIndex';
 import { CollectionCard } from './CollectionCard';
 import { SignInButton } from '../auth/SignInButton';
+import { useCollections, POLICY_PERMISSIONLESS } from '../integration/useCollections';
 
 // Phase 3 (U5): Browse renders one card per Collection rather than per
 // Model3D variant. Phase 2 "degenerate-of-1" mints whose collectionId points
@@ -31,10 +32,22 @@ export function groupByCollection(
 }
 
 export function BrowsePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const integrationFilter = searchParams.get('filter') === 'integration';
   const [tagFilter, setTagFilter] = useState<string>('');
   const { models, loading, error, refetch } = useModelIndex({
     tagFilter: tagFilter || undefined,
   });
+  // Only fetch L2 collections when the integration view is active (R17).
+  const {
+    collections,
+    loading: collectionsLoading,
+    error: collectionsError,
+  } = useCollections(integrationFilter);
+  const openCollections = useMemo(
+    () => collections.filter((c) => c.integrationPolicy === POLICY_PERMISSIONLESS),
+    [collections],
+  );
 
   // Distinct tags across the loaded set — Phase 2 catalog is small enough
   // that client-side derivation is fine (plan §U8 "Tag filter").
@@ -90,6 +103,7 @@ export function BrowsePage() {
               data-testid="tag-filter"
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
+              disabled={integrationFilter}
               style={{ marginLeft: 4 }}
             >
               <option value="">All</option>
@@ -105,29 +119,104 @@ export function BrowsePage() {
           >
             Refresh
           </button>
+          {integrationFilter ? (
+            <button
+              data-testid="clear-integration-filter"
+              onClick={() => setSearchParams({})}
+              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+            >
+              ← Show all models
+            </button>
+          ) : (
+            <button
+              data-testid="integration-filter"
+              onClick={() => setSearchParams({ filter: 'integration' })}
+              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+            >
+              Open for game integration
+            </button>
+          )}
         </div>
 
-        {loading && (
+        {/* R17 — collections accepting game integrations (permissionless). */}
+        {integrationFilter && (
+          <div data-testid="integration-view">
+            {collectionsLoading && (
+              <div data-testid="integration-loading" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
+                Loading collections…
+              </div>
+            )}
+            {collectionsError && !collectionsLoading && (
+              <div role="alert" data-testid="integration-error" style={{ color: 'salmon', padding: 20 }}>
+                Couldn't load collections: {collectionsError.message}
+              </div>
+            )}
+            {!collectionsLoading && !collectionsError && openCollections.length === 0 && (
+              <div data-testid="integration-empty" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
+                No collections are open for integration yet.
+              </div>
+            )}
+            {!collectionsLoading && !collectionsError && openCollections.length > 0 && (
+              <div
+                data-testid="integration-grid"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                  gap: 16,
+                }}
+              >
+                {openCollections.map((c) => {
+                  const baseModel = models.find((m) => m.objectId === c.baseModelId);
+                  const label = baseModel?.name ? `${baseModel.name} collection` : 'Collection';
+                  const feeSui = Number(c.registerFee) / 1e9;
+                  return (
+                    <Link
+                      key={c.collectionId}
+                      to={`/collection/${c.collectionId}`}
+                      data-testid={`integration-card-${c.collectionId}`}
+                      style={{
+                        display: 'block',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        border: '1px solid #2a2d33',
+                        borderRadius: 8,
+                        background: '#1a1c20',
+                        padding: 14,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
+                      <div style={{ fontSize: 12, color: '#9aa' }}>
+                        register fee: {feeSui > 0 ? `${feeSui} SUI` : 'Free'}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!integrationFilter && loading && (
           <div data-testid="loading-state" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
             Loading…
           </div>
         )}
 
-        {error && !loading && (
+        {!integrationFilter && error && !loading && (
           <div role="alert" data-testid="error-state" style={{ color: 'salmon', padding: 20 }}>
             Couldn't load index: {error.message}{' '}
             <button onClick={refetch} style={{ marginLeft: 8 }}>Retry</button>
           </div>
         )}
 
-        {!loading && !error && models.length === 0 && (
+        {!integrationFilter && !loading && !error && models.length === 0 && (
           <div data-testid="empty-state" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
             No models published yet — be the first to{' '}
-            <Link to="/generate" style={{ color: '#7aa2ff' }}>mint one</Link>.
+            <Link to="/create" style={{ color: '#7aa2ff' }}>mint one</Link>.
           </div>
         )}
 
-        {!loading && !error && models.length > 0 && (
+        {!integrationFilter && !loading && !error && models.length > 0 && (
           <div
             data-testid="model-grid"
             style={{
