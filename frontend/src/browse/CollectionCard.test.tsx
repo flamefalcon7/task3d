@@ -28,6 +28,7 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     tags: ['weapon'],
     createdAtMs: '1700000000000',
     lineageBlobId: 'lin-1',
+    glbBlobId: 'glb-1',
     ...overrides,
   };
 }

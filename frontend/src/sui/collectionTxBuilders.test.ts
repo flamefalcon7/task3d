@@ -14,10 +14,12 @@ import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { TESTNET, TESTNET_RPC_ENDPOINTS } from './networkConfig';
 import {
   buildLaunchCollectionPtb,
+  buildLaunchCollectionWithTokensPtb,
   buildSetRegisterFeePtb,
   buildMintNftTokenPtb,
   buildRegisterIntegrationPtb,
   type LaunchCollectionArgs,
+  type LaunchCollectionWithTokensArgs,
   type SetRegisterFeeArgs,
   type MintNftTokenArgs,
   type RegisterIntegrationArgs,
@@ -45,6 +47,14 @@ const MINT_ARGS: MintNftTokenArgs = {
   collectionId: FAKE_COLLECTION,
   name: 'Racer #1',
   patchId: 'patchId01',
+};
+const BATCH_ARGS: LaunchCollectionWithTokensArgs = {
+  modelId: FAKE_MODEL,
+  feeMist: 0n,
+  quiltBlobId: 'quiltBlobIdABC',
+  registerFeeMist: 2_000_000n,
+  tokenNames: ['Racer #1', 'Racer #2'],
+  tokenPatchIds: ['patch01', 'patch02'],
 };
 const REGISTER_ARGS: RegisterIntegrationArgs = {
   collectionId: FAKE_COLLECTION,
@@ -83,6 +93,47 @@ describe('buildLaunchCollectionPtb', () => {
     expect(() =>
       buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 5_000_000n, quiltBlobId: 'q' }),
     ).not.toThrow();
+  });
+});
+
+// === launch_collection_with_tokens (D-038, one-signature batch) ===
+describe('buildLaunchCollectionWithTokensPtb', () => {
+  it('emits one batch call after a splitCoins, declaring CollectionLaunched + NftTokenMinted', () => {
+    const { tx, metadata } = buildLaunchCollectionWithTokensPtb(BATCH_ARGS);
+    const cmds = tx.getData().commands;
+    expect(cmds.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins')).toBe(true);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('launch_collection_with_tokens');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Arity: model, payment, quilt_blob_id, register_fee, token_names,
+    // token_patch_ids (6). The two vectors are one arg each regardless of N.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(6);
+    expect(metadata.expectedEvents).toEqual([
+      `${PKG}::model3d::CollectionLaunched`,
+      `${PKG}::model3d::NftTokenMinted`,
+    ]);
+  });
+
+  it('builds with a single token and a zero derive fee', () => {
+    expect(() =>
+      buildLaunchCollectionWithTokensPtb({
+        ...BATCH_ARGS,
+        feeMist: 0n,
+        tokenNames: ['Solo'],
+        tokenPatchIds: ['patchSolo'],
+      }),
+    ).not.toThrow();
+  });
+
+  it('throws before signing when names and patch ids differ in length (mirrors EBatchLenMismatch)', () => {
+    expect(() =>
+      buildLaunchCollectionWithTokensPtb({
+        ...BATCH_ARGS,
+        tokenNames: ['a', 'b'],
+        tokenPatchIds: ['only-one'],
+      }),
+    ).toThrow(/same length/);
   });
 });
 
@@ -198,6 +249,25 @@ describe('PTB encoding reaches live RPC (fake IDs → object-resolution error)',
       return;
     }
     const { tx } = buildLaunchCollectionPtb({ modelId: FAKE_MODEL, feeMist: 0n, quiltBlobId: 'q' });
+    tx.setSender(DRY_RUN_SENDER);
+    let err: Error | null = null;
+    try {
+      await tx.build({ client: liveClient });
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).not.toBeNull();
+    expect(err?.message ?? '').toMatch(/does not exist/);
+  });
+
+  it('launch_collection_with_tokens PTB is well-formed and reaches RPC build resolution', async (ctx) => {
+    if (!liveClient) {
+      ctx.skip();
+      return;
+    }
+    // Resolves the v6 batch fn signature against the real package; a wrong arg
+    // count or type would fail at build resolution rather than object lookup.
+    const { tx } = buildLaunchCollectionWithTokensPtb(BATCH_ARGS);
     tx.setSender(DRY_RUN_SENDER);
     let err: Error | null = null;
     try {

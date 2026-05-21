@@ -72,6 +72,23 @@ export interface MintNftTokenArgs {
   patchId: string;
 }
 
+export interface LaunchCollectionWithTokensArgs {
+  /** Shared `Model3D` object ID to fork (D-032). */
+  modelId: string;
+  /** Derive fee in MIST (base model's `license.derivative_mint_fee`). Split
+   *  from gas; the Move side refunds excess to the sender. */
+  feeMist: bigint;
+  /** D-035 — Walrus quilt blob id holding the collection's variant patches. */
+  quiltBlobId: string;
+  /** Register fee in MIST set on the new collection (what a gameDev later pays
+   *  to `register_integration`). Folded in so launch + set-fee is one signature. */
+  registerFeeMist: bigint;
+  /** Token display names; index-aligned with `tokenPatchIds`. ≤16, each ≤128 B. */
+  tokenNames: string[];
+  /** Quilt-patch ids each minted token binds; index-aligned with `tokenNames`. */
+  tokenPatchIds: string[];
+}
+
 export interface RegisterIntegrationArgs {
   /** Shared `NftCollection` ID being integrated against. */
   collectionId: string;
@@ -107,6 +124,53 @@ export function buildLaunchCollectionPtb(
     metadata: {
       target: `${PKG}::model3d::launch_collection`,
       expectedEvents: [`${PKG}::model3d::CollectionLaunched`],
+    },
+  };
+}
+
+/**
+ * `launch_collection_with_tokens(model, payment, quilt_blob_id, register_fee,
+ * token_names, token_patch_ids, ctx)` (D-038) — the one-signature nft-creator
+ * path: forks the shared Model3D, sets the register fee, mints N owned
+ * NftTokens (one per index-aligned name/patch pair), then shares the collection
+ * + transfers the soulbound cap. Collapses launch + set_register_fee + N mints
+ * into a single wallet popup. The derive fee is split from gas (excess
+ * refunded). Emits `CollectionLaunched` + one `NftTokenMinted` per token.
+ *
+ * Names and patch ids MUST be the same length (the Move side aborts
+ * `EBatchLenMismatch`); the builder guards it client-side to fail before signing.
+ */
+export function buildLaunchCollectionWithTokensPtb(
+  args: LaunchCollectionWithTokensArgs,
+): TxResult<Record<string, never>> {
+  if (args.tokenNames.length !== args.tokenPatchIds.length) {
+    throw new Error(
+      `buildLaunchCollectionWithTokensPtb: tokenNames (${args.tokenNames.length}) and ` +
+        `tokenPatchIds (${args.tokenPatchIds.length}) must be the same length`,
+    );
+  }
+  const tx = new Transaction();
+  const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.feeMist)]);
+  tx.moveCall({
+    target: `${PKG}::model3d::launch_collection_with_tokens`,
+    arguments: [
+      tx.object(args.modelId),
+      payment!,
+      tx.pure.string(args.quiltBlobId),
+      tx.pure.u64(args.registerFeeMist),
+      tx.pure.vector('string', args.tokenNames),
+      tx.pure.vector('string', args.tokenPatchIds),
+    ],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      target: `${PKG}::model3d::launch_collection_with_tokens`,
+      expectedEvents: [
+        `${PKG}::model3d::CollectionLaunched`,
+        `${PKG}::model3d::NftTokenMinted`,
+      ],
     },
   };
 }
