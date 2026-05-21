@@ -98,16 +98,6 @@ describe('useCollectionBySlug', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns empty (no fetch) when package id is "0x0"', async () => {
-    stubEnv('0x0');
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { result } = renderHook(() => useCollectionBySlug('0xany'));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.variants).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it('surfaces fetch errors via error state', async () => {
     vi.stubGlobal(

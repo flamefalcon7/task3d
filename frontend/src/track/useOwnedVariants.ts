@@ -4,6 +4,7 @@ import {
   SUI_GRAPHQL_ENDPOINT,
   buildModel3DTypeTag,
 } from '../browse/graphqlQueries';
+import { TESTNET } from '../sui/networkConfig';
 
 // Phase 3 U6 — list a connected wallet's drivable variants.
 //
@@ -76,8 +77,7 @@ interface GraphQLResponse {
 }
 
 function getPackageId(): string {
-  const id = import.meta.env.VITE_MODEL3D_PACKAGE_ID as string | undefined;
-  return id ?? '0x0';
+  return TESTNET.model3dPackageId;
 }
 
 function nodeToSummary(node: GraphQLObjectNode): Model3DSummary | null {

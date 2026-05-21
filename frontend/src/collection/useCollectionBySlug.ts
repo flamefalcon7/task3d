@@ -4,6 +4,7 @@ import {
   SUI_GRAPHQL_ENDPOINT,
   buildModel3DTypeTag,
 } from '../browse/graphqlQueries';
+import { TESTNET } from '../sui/networkConfig';
 
 // Phase 3 (U5): fetch every Model3D variant whose `collection_id` matches a
 // given slug. v1 slug strategy is collectionId itself (see CollectionCard
@@ -35,8 +36,7 @@ interface GraphQLResponse {
 }
 
 function getPackageId(): string {
-  const id = import.meta.env.VITE_MODEL3D_PACKAGE_ID as string | undefined;
-  return id ?? '0x0';
+  return TESTNET.model3dPackageId;
 }
 
 function nodeToSummary(node: GraphQLNode): Model3DSummary | null {

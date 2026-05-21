@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
+import { TESTNET } from '../sui/networkConfig';
 
 // Single-object Model3D query — sibling of useModelIndex (U8) but scoped to
 // one object id. Defensive about partial decodes, same as useModelIndex.
@@ -133,9 +134,7 @@ export function useOwnsAccess(
     let cancelled = false;
     (async () => {
       try {
-        const pkg =
-          (import.meta.env.VITE_MODEL3D_PACKAGE_ID as string) || '0x0';
-        if (pkg === '0x0') return;
+        const pkg = TESTNET.model3dPackageId;
         const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

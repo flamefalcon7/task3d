@@ -72,15 +72,6 @@ describe('useOwnedVariants', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns empty (no fetch) when package id is 0x0', async () => {
-    stubEnv('0x0');
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const { result } = renderHook(() => useOwnedVariants('0xWALLET'));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.variants).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it('starts in loading=true when a fetch is in flight', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));

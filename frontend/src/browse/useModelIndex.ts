@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { SUI_GRAPHQL_ENDPOINT, buildModel3DIndexRequest } from './graphqlQueries';
+import { TESTNET } from '../sui/networkConfig';
 
 export interface UseModelIndexOptions {
   tagFilter?: string;
@@ -15,13 +16,14 @@ export interface UseModelIndexResult {
 
 const CACHE_KEY = 'overflow2026:model-index:v1';
 
-// MODEL3D_PACKAGE_ID is read at hook-call time (not module-load) so tests can
-// stub `import.meta.env` before each render. Falls back to '0x0' when the
-// contract hasn't been deployed yet — the hook then gracefully returns an
-// empty list with no error so the Browse UI is still iterable pre-deploy.
+// Single source of truth for the deployed package: the pinned TESTNET config
+// (mirrored from contracts/networks/testnet.json, guarded by networkConfig.test).
+// This MUST match the write path (modelTxBuilders / collectionTxBuilders also
+// read TESTNET.model3dPackageId) — reading from a separate VITE_MODEL3D_PACKAGE_ID
+// env var silently drifted across the v3→v6 republishes and made Browse query a
+// stale package. Bump networkConfig.ts on republish and read/write stay in sync.
 function getPackageId(): string {
-  const id = import.meta.env.VITE_MODEL3D_PACKAGE_ID as string | undefined;
-  return id ?? '0x0';
+  return TESTNET.model3dPackageId;
 }
 
 interface GraphQLNode {

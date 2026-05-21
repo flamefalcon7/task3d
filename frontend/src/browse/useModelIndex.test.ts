@@ -79,17 +79,6 @@ describe('useModelIndex', () => {
     });
   });
 
-  it('returns empty array (no error) when MODEL3D_PACKAGE_ID is "0x0"', async () => {
-    stubEnv('0x0');
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { result } = renderHook(() => useModelIndex());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.models).toEqual([]);
-    expect(result.current.error).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it('returns empty array when GraphQL returns zero nodes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(graphqlResponse([])));

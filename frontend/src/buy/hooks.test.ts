@@ -84,18 +84,6 @@ describe('useModelById', () => {
 });
 
 describe('useOwnsAccess', () => {
-  it('returns false when package is 0x0 (not deployed)', async () => {
-    vi.unstubAllEnvs();
-    vi.stubEnv('VITE_MODEL3D_PACKAGE_ID', '0x0');
-    const fetchSpy = vi.fn();
-    mockFetch(fetchSpy);
-    const { result } = renderHook(() =>
-      useOwnsAccess('0xBUYER', '0xMODEL'),
-    );
-    await act(async () => {});
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(result.current).toBe(false);
-  });
 
   it('returns false when no walletAddress', async () => {
     const fetchSpy = vi.fn();
