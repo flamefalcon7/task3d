@@ -109,6 +109,8 @@ const EInsufficientDeriveFee: u64 = 35; // launch_collection payment < derivativ
 const EPatchIdMalformed:     u64 = 36;
 // D-038 — launch_collection_with_tokens: token_names / token_patch_ids lengths differ.
 const EBatchLenMismatch:     u64 = 37;
+// D-040 — base model's license.policy is non-permissionless and caller is not the creator.
+const EPolicyRestricted:     u64 = 38;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -584,9 +586,11 @@ public entry fun ensure_creator_kiosk(ctx: &mut TxContext) {
 // `license`; later edits to the base license do not propagate. The collection's
 // own `integration_policy` defaults to POLICY_PERMISSIONLESS (open) and
 // `register_fee` to 0 — both are the nft creator's to set afterward via
-// `set_integration_policy` / `set_register_fee` (D-030). The base model's
-// `license.policy` is NOT consulted here: derivation is gated by the
-// pay-to-derive fee, integration by the collection-level policy.
+// `set_integration_policy` / `set_register_fee` (D-030). D-040 — the base
+// model's `license.policy` IS now consulted: PERMISSIONLESS allows any payer to
+// derive; anything else is creator-only (see the assert in
+// `launch_collection_internal`). Integration is still gated separately by the
+// collection-level policy.
 //
 // No `clock` param: the collection carries no timestamp and `CollectionLaunched`
 // has no `ts` field. Per-integration timestamps are set in `register_integration`.
@@ -603,6 +607,16 @@ fun launch_collection_internal(
     quilt_blob_id: String,
     ctx: &mut TxContext,
 ): (NftCollection, NftCollectionCreatorCap) {
+    // D-040 — enforce the base model's L1 license policy. PERMISSIONLESS (2) lets
+    // anyone who pays the fee derive; any other value (RESTRICTED, and ALLOW_LIST
+    // which has no on-chain address list in v1) collapses to creator-only, so it
+    // fails safe. This is the ONLY gate that consults license.policy; integration
+    // is gated separately at the collection level (D-030).
+    assert!(
+        model.license.policy == POLICY_PERMISSIONLESS || ctx.sender() == model.creator,
+        EPolicyRestricted,
+    );
+
     // D-035 — the collection's variant quilt blob (length-bounded, same ceiling
     // + abort code as the model's lineage_blob_id).
     assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);

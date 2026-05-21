@@ -20,27 +20,34 @@
 // from the @mysten/kiosk SDK's testnet-defaults constants. Frontend MUST
 // use OUR pinned value or `confirm_request` fails the rule membership check.
 
-// v6 (D-038): fresh republish of v5. Adds the batch entry fn
-// `launch_collection_with_tokens` (one-signature launch + set_register_fee +
-// mint-N + share + transfer cap); existing public signatures + struct layouts
-// are unchanged (purely additive — would qualify for a compatible upgrade, but
-// shipped fresh for consistency per D-038). Everything else carries over from
-// v5: Model3D is a shared object carrying glb_blob_id (D-037); the only
-// TransferPolicy is for NftToken and carries ONLY the royalty rule (D-036);
-// mint yields a plain owned token; listing is a separate opt-in Kiosk PTB.
-// `transferPolicyId`/`transferPolicyCapId` hold the NftToken policy (generic
-// field names kept for config stability). Supersedes v5 0xe0d65c4a….
+// v7 (D-040): fresh republish of v6. Adds L1 license-policy ENFORCEMENT — a new
+// `EPolicyRestricted = 38` abort + an assert in `launch_collection_internal` so
+// a RESTRICTED (or ALLOW_LIST, which collapses to creator-only in v1) base model
+// can only be forked by its creator; PERMISSIONLESS stays open to any payer.
+//
+// Shipped as a FRESH republish (not a compatible `sui client upgrade`): a
+// compatible upgrade leaves the prior, UNENFORCED package version permanently
+// callable (a hand-crafted PTB targeting the old id bypasses the gate). A fresh
+// republish has no prior version of itself, so enforcement holds for ALL content
+// under this package id — and it keeps a single package id (no published-at /
+// original-id split). Consistent with the v3–v6 republish precedent (D-038).
+// Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only, D-036).
+//
+// Everything else carries over from v6: Model3D is a shared object carrying
+// glb_blob_id (D-037); mint yields a plain owned token; listing is a separate
+// opt-in Kiosk PTB. `transferPolicyId`/`transferPolicyCapId` hold the NftToken
+// policy. Supersedes v6 0x57e20a13… (abandoned on testnet).
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x57e20a134282476a8b338e85258790ab93f8c9b194bed6fa6120561787af4094',
+    '0x3f53506b076bb9e43fbf8fc1333375530aeb97ad54e2ad81fdd36a9d595d0861',
   publisherId:
-    '0x73ccb3d9619df33e365362b66020ca2608c94949d07735212c7e53935930e549',
+    '0xee62b4643aaa22db193d8044748df0a05a70b6769c13f2ec509ae0c71457ad03',
   transferPolicyId:
-    '0x0e3981e915fd3413b3a62ff6055bf80d67fc8c3e6b80fd437aade5463ffa2386',
+    '0x3ffa22b3472adcc89c7b9d11749d8b17ae0ced2dddfda38e191dc846d2bb2146',
   transferPolicyCapId:
-    '0x8f049a6ec488bc39df1c1920376b766ba8b13db3cc64a41f4fcf7930f801aabc',
+    '0x76cc696054ce4475989a750c12b1775796e5872137df27f003900382201cf48b',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the

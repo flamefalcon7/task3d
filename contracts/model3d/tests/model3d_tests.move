@@ -673,6 +673,110 @@ fun launch_collection_creates_collection_and_soulbound_cap() {
     sc.end();
 }
 
+// === D-040 — L1 license policy enforcement in launch_collection ===
+//
+// PERMISSIONLESS lets any payer fork (covered by the cross-wallet test above,
+// where CREATOR mints and NFT_CREATOR launches). The cases below pin the
+// RESTRICTED / fail-safe behavior the assert introduces.
+
+// RESTRICTED base + non-creator caller → aborts EPolicyRestricted, even with a
+// valid (here zero-fee) payment. The policy gate fires before the fee check.
+#[test, expected_failure(abort_code = model3d::EPolicyRestricted)]
+fun launch_collection_restricted_non_creator_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_restricted(), 0, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), quilt(), sc.ctx());
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// RESTRICTED base + the base creator forks their own model → allowed.
+#[test]
+fun launch_collection_restricted_creator_ok() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_restricted(), 0, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+    let model_id = object::id(&model);
+
+    // Same wallet (CREATOR) that owns the model launches the collection.
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), quilt(), sc.ctx());
+
+    sc.next_tx(CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    assert!(model3d::collection_base_model_id(&collection) == model_id, 380);
+    assert!(model3d::collection_nft_creator(&collection) == CREATOR, 381);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// ALLOW_LIST(1) has no on-chain address list in v1 → fails safe as creator-only;
+// a non-creator caller aborts EPolicyRestricted (same as RESTRICTED).
+#[test, expected_failure(abort_code = model3d::EPolicyRestricted)]
+fun launch_collection_allow_list_non_creator_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_allow_list(), 0, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), quilt(), sc.ctx());
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-040 batch path: launch_collection_with_tokens routes through the same
+// launch_collection_internal, so the policy gate covers it too. A non-creator
+// forking a RESTRICTED base via the one-signature batch fn must abort
+// EPolicyRestricted (guards against the gate being lost on the batch path).
+#[test, expected_failure(abort_code = model3d::EPolicyRestricted)]
+fun launch_collection_with_tokens_restricted_non_creator_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_restricted(), 0, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection_with_tokens(
+        &model,
+        coin::mint_for_testing<SUI>(0, sc.ctx()),
+        quilt(),
+        0,
+        str_vec(b"N", 1),
+        str_vec(b"p", 1),
+        sc.ctx(),
+    );
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
 // Pay-to-derive: a non-zero derivative_mint_fee is routed to the base creator;
 // the remainder of the payment returns to the caller.
 #[test]
@@ -722,9 +826,11 @@ fun set_integration_policy_opens_and_closes_collection() {
     let mut system = system::new_for_testing(sc.ctx());
     sc.next_tx(CREATOR);
     let clk = clock::create_for_testing(sc.ctx());
-    // Base model is RESTRICTED at the L1 license — proving the collection's
-    // integration_policy does NOT inherit it (defaults open regardless).
-    let license = new_license_terms(policy_restricted(), 0, 0, false, false);
+    // Base model is PERMISSIONLESS at the L1 license (so a cross-wallet fork is
+    // allowed post-D-040). The collection's integration_policy is set
+    // independently by the cap holder and does NOT derive from the base L1
+    // policy — proven below by toggling it open→closed→open via the cap (D-030).
+    let license = new_license_terms(policy_permissionless(), 0, 0, false, false);
     let model = mint_base_model(&mut system, &clk, license, sc.ctx());
 
     sc.next_tx(NFT_CREATOR);
@@ -733,7 +839,7 @@ fun set_integration_policy_opens_and_closes_collection() {
     sc.next_tx(NFT_CREATOR);
     let cap = sc.take_from_sender<NftCollectionCreatorCap>();
     let mut collection = sc.take_shared<NftCollection>();
-    // Default open, even though the base model is restricted.
+    // Default open at launch (D-030).
     assert!(model3d::collection_integration_policy(&collection) == policy_permissionless(), 320);
 
     // Close it.

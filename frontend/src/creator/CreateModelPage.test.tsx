@@ -88,4 +88,39 @@ describe('CreateModelPage', () => {
     expect(body).toMatchObject({ prompt: 'a sword', paymentDigest: 'PAYDIGEST123' });
     expect(screen.getByTestId('confirm-model')).toBeTruthy();
   });
+
+  it('offers only Open/Restricted policy options (no allow-list), defaulting to Open (D-040)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    render(<CreateModelPage />);
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('confirm-model'));
+
+    // Open (2) and Restricted (0) are offered; allow-list (1) is gone.
+    const open = screen.getByTestId('policy-2') as HTMLInputElement;
+    const restricted = screen.getByTestId('policy-0') as HTMLInputElement;
+    expect(screen.queryByTestId('policy-1')).toBeNull();
+
+    // Default is Open (permissionless).
+    expect(open.checked).toBe(true);
+    expect(restricted.checked).toBe(false);
+
+    // Selecting Restricted updates the choice.
+    fireEvent.click(restricted);
+    expect(restricted.checked).toBe(true);
+    expect(open.checked).toBe(false);
+  });
 });

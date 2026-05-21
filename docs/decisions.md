@@ -1942,6 +1942,50 @@ Keep the backend material-swap for the 6/21 submission. Post-submission, move th
 
 ---
 
+## D-040: Enforce L1 license policy — RESTRICTED vs PERMISSIONLESS (fresh v7 republish)
+
+**Status**: Accepted
+**Date**: 2026-05-21
+**Phase**: 4
+
+### Context
+`Model3D.license.policy` (RESTRICTED=0 / ALLOW_LIST=1 / PERMISSIONLESS=2) has been stored but never enforced. `launch_collection_internal` (`contracts/model3d/sources/model3d.move:600`) explicitly comments (lines 587–589) that `license.policy` is NOT consulted — derivation is gated only by the pay-to-derive fee. A creator who picks "restricted" in `/create` gets no protection: anyone who pays the fork fee can still fork. This contradicts the core pitch ("creators set license terms for composable IP") and is an honesty gap a judge will catch. `LicenseTerms` carries no allow-list field, so ALLOW_LIST cannot be enforced without an on-chain address list + UI (out of scope for v1).
+
+### Decision
+Collapse L1 policy to two enforced meanings for v1:
+- **PERMISSIONLESS (2)** — anyone who pays the fork fee may derive (current behavior).
+- **RESTRICTED (0)** — only the base model's creator may derive.
+- **ALLOW_LIST (1)** — dropped from the `/create` UI. On-chain it is treated as non-permissionless → creator-only (same as RESTRICTED), so any legacy/odd value fails safe. The Move constant stays (no struct change) to avoid churn.
+
+Enforcement is a single additive assert at the top of `launch_collection_internal`:
+`assert!(policy == POLICY_PERMISSIONLESS || ctx.sender() == model.creator, EPolicyRestricted)` with a new abort const `EPolicyRestricted = 38` (next free after 30–37). This covers both `launch_collection` and `launch_collection_with_tokens`, since both route through the internal.
+
+### Deployment
+Ship as a **fresh v7 republish** (`sui client publish` + re-bootstrap `ensure_collection_policy`), following the v3–v6 republish precedent (D-038) — NOT a compatible `sui client upgrade`.
+
+A compatible upgrade was attempted first and reverted. The reason a fresh republish is **required, not merely conventional**, for an *enforcement* change: a Sui compatible upgrade does not retire the prior package version. The pre-enforcement bytecode at the old package id stays permanently callable, so a hand-crafted PTB targeting it bypasses the new assert entirely — the gate would be honor-system only. A fresh republish has no prior version of *itself*, so the policy is genuinely enforced for all content published under the new package id. (Surfaced by the Plan 009 code review: security + adversarial + api-contract all independently flagged the stale-package bypass.)
+
+The fresh republish also keeps a **single package id** (no published-at/original-id split — Move call targets and type/event identity are the same id again), which removes a class of subtle wiring errors. Cost — re-bootstrapping `TransferPolicy<NftToken>` + royalty rule and updating the config files — is low (the project has done it four times; UPGRADE.md notes re-bootstrap is "~free"). Plan 010 has not started, so the new `transferPolicyId`/`transferPolicyCapId` carry no migration cost; Plan 010 simply targets the v7 ids.
+
+### Alternatives Considered
+- **Compatible `sui client upgrade`** — attempted, then rejected: it leaves the prior unenforced version callable (bypass) and forces a permanent published-at/original-id split in the frontend. The only thing it bought (stable TransferPolicy ids for Plan 010) has no value before Plan 010 starts.
+- **Add an on-chain allow-list for ALLOW_LIST** — rejected for v1: needs a per-model address set + UI; ALLOW_LIST collapses to creator-only instead (fail-safe).
+- **Leave policy unenforced** — rejected: honesty gap against the core pitch.
+
+### Consequences
+- ✅ L1 policy is genuinely enforced for all v7 content; a RESTRICTED model can only be forked by its creator, with no stale-version bypass.
+- ✅ Single package id — no published-at/original-id split; frontend builders use one `model3dPackageId` for both call targets and type/event identity.
+- ⚠️ Fresh TransferPolicy/Publisher/UpgradeCap ids; v6 (`0x57e20a13…`) + its abandoned upgrade published-at (`0x134807cd…`) are abandoned on testnet.
+- ⚠️ ALLOW_LIST has no address-list semantics in v1 (treated as creator-only).
+- 🔮 Plan 010 (Kiosk marketplace) targets the v7 package + its fresh TransferPolicy ids.
+
+### Related
+- Implemented per `docs/plans/2026-05-21-009-feat-l1-license-policy-enforcement-plan.md`.
+- Sequenced before D-041 / Plan 010 (Kiosk marketplace) so the package id is final first.
+- Related decisions: D-030 (integration gate is collection-level, separate from L1 policy), D-038 (republish precedent this **follows**).
+
+---
+
 # Reserved Decision Numbers
 
-D-040 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-041 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

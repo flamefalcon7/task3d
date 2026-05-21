@@ -1,9 +1,19 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (U11 + U13 + U14 DONE — full four-role loop visible in-app; only U15 demo/docs left) — **Next = U15 (four-actor demo recording + pitch slide + README + honest disclosure).**
+## Last Updated: 2026-05-21 (Plan 009 DONE + code-reviewed — L1 license policy ENFORCED via fresh v7 republish) — **Next = commit, then Plan 010 (Kiosk simple marketplace), then U15 demo.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### Plan 009 DONE + code review applied — L1 license policy enforcement (D-040; v7 republish; uncommitted)
+`Model3D.license.policy` was stored but never enforced; now RESTRICTED/ALLOW_LIST base models are creator-only to fork, PERMISSIONLESS open to any payer.
+- **U1 (Move):** `EPolicyRestricted = 38` + `assert!(policy == POLICY_PERMISSIONLESS || ctx.sender() == model.creator)` at top of `launch_collection_internal` (covers both `launch_collection` + `launch_collection_with_tokens`). 4 new Move tests (restricted non-creator / restricted creator-ok / allow-list non-creator / **batch-path** restricted non-creator). Fixed pre-existing `set_integration_policy_opens_and_closes_collection` (RESTRICTED→PERMISSIONLESS base). **58/58 Move green.**
+- **U2 (deploy) — FRESH v7 republish, NOT a compatible upgrade.** A compatible upgrade was done first, then **reverted** after the code review: a compatible upgrade leaves the prior *unenforced* package version permanently callable → a raw PTB to the old id bypasses the gate. A fresh republish has no prior version of itself, so enforcement is real for all v7 content — and it keeps a **single package id** (no published-at/original-id split). Follows the D-038 republish precedent.
+  - **v7 ids** (single `model3dPackageId`): pkg `0x3f53506b076bb9e43fbf8fc1333375530aeb97ad54e2ad81fdd36a9d595d0861` · UpgradeCap `0xcd587052…` · Publisher `0xee62b464…` · TransferPolicy\<NftToken\> `0x3ffa22b3…` (+cap `0x76cc6960…`, royalty-only verified). publish `Cdubzmx8…`, bootstrap `B8MXhFp1…`. Superseded v6 `0x57e20a13…` + its abandoned upgrade `0x134807cd…`. Report: `docs/reports/phase-4-v7-republish.md`.
+- **U3 (/create UI):** Open(2)/Restricted(0) only (dropped ALLOW_LIST); default Open. policy state now typed to the `{0,2}` union (review fix #4).
+- **Code review (10 reviewers) applied:** #1 batch-path Move test added; #2 resolved structurally — fresh republish means D-040 *follows* (not reverses) D-038, so no Decision-Reversal violation; spec.md + UPGRADE.md + D-040 updated for v7; #3 split-test-hardening **mooted** (split deleted); #4 policy type narrowed. Headline P1 (stale-package bypass) is **eliminated** by choosing fresh republish.
+- **Verified:** 58/58 Move · 308/308 frontend · 110/110 backend · prod build clean · v7 package + TransferPolicy live on chain (royalty-only). Live cross-wallet abort deferred into U15.
+- **Next:** suggest a commit, then start Plan 010 (targets the v7 ids above).
 
 ### U14 DONE — Browse integration filter + XSS-safe Used-by (commit `b4ecb5c`, data path verified live)
 - **`collection/UsedBySection.tsx`** (NEW): `GET /api/collections/:id/integrations`. AE4 defense-in-depth: `name` as React text node (markup → inert text), `url` as `<a>` ONLY after a fresh https allowlist check (else plain text); never `dangerouslySetInnerHTML`. States loading / list / empty / restricted.
@@ -20,11 +30,11 @@ The Phase-2 buy-access flow targeted `purchase_model_access` (removed in v6), so
 Reviewed "what's not implemented" and found two real gaps (verified against Move source). Plans written, **not yet started**:
 - **Plan 009** (`docs/plans/2026-05-21-009-feat-l1-license-policy-enforcement-plan.md`, ADR D-040 pending): `Model3D.license.policy` is **stored but never enforced** (model3d.move:588 — fork gated only by fee). Fix: enforce RESTRICTED (creator-only) vs PERMISSIONLESS in `launch_collection_internal` (1 additive assert → **compatible upgrade possible, no fresh republish**), drop ALLOW_LIST from `/create` UI (no allow-list field in LicenseTerms). Small, standalone — **do first**.
 - **Plan 010** (`docs/plans/2026-05-21-010-feat-kiosk-simple-marketplace-plan.md`, ADR D-041 pending): **no in-app way for a user to acquire a token** (mint goes to creator; /track demo only works because nftCreator==user). Fix: simple **Kiosk** marketplace (user rejected hand-rolled store). **0 Move changes expected** — `TransferPolicy<NftToken>`+royalty already deployed (U17), `@mysten/kiosk@1.2.6` installed. Units: list PTB (#48) + purchase PTB (hot-potato+royalty) + discovery (main unknown) + /market UI. Frontend-heavy; **do after 009**.
-- User decision pending: confirm sequencing (009 then 010) + whether 009 ships as compatible upgrade vs fresh v7 republish. Write D-040/D-041 at impl start (confirm text with user per CLAUDE.md).
-- U15 demo is **deferred** by user.
+- ✅ Plan 009 SHIPPED 2026-05-21 as a **fresh v7 republish** (D-040 Accepted; compatible upgrade was tried then reverted after code review — see top section). U15 demo remains **deferred** by user (folds in the live policy-abort confirmation).
+- Plan 010 (D-041 pending) is next.
 
-### Next Concrete Step — Plan 009 then Plan 010 (then U15 demo)
-Start Plan 009 U1 (Move policy assert). See the two new plan docs above for full unit breakdown. U15 (four-actor demo + pitch + README + honest disclosure) remains deferred.
+### Next Concrete Step — commit Plan 009, then Plan 010 (Kiosk simple marketplace)
+Plan 009 done (uncommitted — suggest a commit first). Start Plan 010 U1 (`buildListNftTokenForSalePtb`, the deferred #48) per `docs/plans/2026-05-21-010-feat-kiosk-simple-marketplace-plan.md`. Write D-041 at impl start (confirm text per CLAUDE.md). NOTE for Plan 010: it builds on the **v7** `transferPolicyId` `0x3ffa22b3…` / `transferPolicyCapId` `0x76cc6960…` (fresh from the v7 bootstrap, royalty-only). Single package id again — no PKG/CALL split; builders use `TESTNET.model3dPackageId` for everything.
 
 ### (deferred) U15 (four-actor demo + pitch + README + honest disclosure)
 All four actors now work in-app on v6: ✅ modelCreator (/create) · ✅ nftCreator (/launch) · ✅ user (/track) · ✅ gameDev (/integrate) + Used-by reverse lookup (/collection/:id, Browse `?filter=integration`). Remaining: (1) deploy frontend to an https host — **Walrus Sites** is the on-theme choice (Walrus track) — so the Used-by link + demo are publicly reachable; (2) record the four-actor arc (mesh publish → nft launch+fee → gameDev pay+register → user buy+drive → Used-by resolves on screen); (3) four-archetype pitch slide + README hero + honest disclosure (the four wallets are team-controlled for 6/21 unless a real external integrator is recruited). See plan U15 + carried plan-007 demo units.

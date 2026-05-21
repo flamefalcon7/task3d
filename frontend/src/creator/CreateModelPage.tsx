@@ -27,11 +27,16 @@ type GenStatus = 'idle' | 'paying' | 'generating' | 'error';
 const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46]; // 'glTF'
 const MAX_GLB_BYTES = 12 * 1024 * 1024;
 
+// D-040 — L1 license policy collapses to two enforced meanings: Open
+// (permissionless, 2) lets anyone who pays the fork fee derive; Restricted (0)
+// is creator-only. ALLOW_LIST (1) is dropped — it has no on-chain address list
+// in v1 and the contract treats any non-permissionless value as creator-only.
 const POLICIES = [
-  { value: 2, label: 'Anyone (permissionless)' },
-  { value: 1, label: 'Me + paid-access holders (allow-list)' },
-  { value: 0, label: 'Only me (restricted)' },
+  { value: 2, label: 'Open — anyone can fork (permissionless)' },
+  { value: 0, label: 'Restricted — only I can fork' },
 ] as const;
+
+type PolicyValue = (typeof POLICIES)[number]['value'];
 
 function isValidGlb(bytes: Uint8Array): boolean {
   if (bytes.length < 12 || bytes.length > MAX_GLB_BYTES) return false;
@@ -83,7 +88,7 @@ export function CreateModelPage() {
 
   const [name, setName] = useState('');
   const [tagsStr, setTagsStr] = useState('');
-  const [policy, setPolicy] = useState<number>(2);
+  const [policy, setPolicy] = useState<PolicyValue>(2);
   const [feeSui, setFeeSui] = useState('0');
   const [royaltyBps, setRoyaltyBps] = useState(500);
 
@@ -291,6 +296,7 @@ export function CreateModelPage() {
                     <input
                       type="radio"
                       name="policy"
+                      data-testid={`policy-${p.value}`}
                       checked={policy === p.value}
                       onChange={() => setPolicy(p.value)}
                     />

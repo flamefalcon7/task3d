@@ -429,6 +429,8 @@ public fun new(blob: Blob, ctx: &mut TxContext) {
 >
 > **⚠️ D-038 定案(2026-05-21,v6 republish)**:新增 batch entry fn `launch_collection_with_tokens(model, payment, quilt_blob_id, register_fee, token_names, token_patch_ids, ctx)` —— 模組內一次做完 launch → set fee → mint N 個 owned token → share collection → transfer cap+tokens,讓 nft-creator **一個簽名發行整個變體系列**(把 launch + mint 兩個 tx 併成一個)。純 additive:抽出 package-private cores(`launch_collection_internal` / `mint_nft_token_internal`),既有 `launch_collection` / `set_register_fee` / `mint_nft_token` 簽名不變、仍可單獨使用。新 abort code `EBatchLenMismatch = 37`。雖屬 additive(可 compatible upgrade),為與 v3–v5 一致仍走 fresh republish。package id 見 [[D-038]] / `docs/reports/phase-4-v6-republish.md`(U21)。
 
+> **⚠️ D-040 定案(2026-05-21,v7 republish)**:**L1 license policy 現在會被強制執行**。新增 `EPolicyRestricted = 38` + `launch_collection_internal` 頂部一個 assert:`policy == PERMISSIONLESS || ctx.sender() == model.creator`(同時罩住 `launch_collection` 與 `launch_collection_with_tokens`)。語意收斂為兩種:**PERMISSIONLESS** = 任何付 fork fee 者可衍生;**RESTRICTED** = 僅 base creator 可衍生。**ALLOW_LIST(1)在 v1 退化為 creator-only**(fail-safe)—— 本節下方描述的 `DerivativeApproval` capability-token 流程(§約 514 / 652 / 688–703)**尚未在合約實作**,`/create` 也已移除 allow-list 選項。走 **fresh republish 而非 compatible upgrade**:強制執行類變更若用 compatible upgrade,舊的「未強制」版本仍可被呼叫繞過(見 [[D-040]] / `contracts/UPGRADE.md`)。本節 §2.8 完整重寫排入 Phase 5;此處先標註避免失真。v7 package id 見 [[D-040]] / `contracts/networks/testnet.json`。
+
 > **重要設計轉折**:原始 spec 把 `Model3D` 當 NFT(一人 mint 一個)。**這個版本不是。**
 >
 > `Model3D` = **content**(creator 上傳一次,1000 人可以同時付費存取)
