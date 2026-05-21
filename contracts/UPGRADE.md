@@ -54,6 +54,8 @@ The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a
 
 **v4 shipped 2026-05-20 (testnet):** `package_id 0x3b6b7258…`, `upgrade_cap 0xe39adcd3…`, `publisher 0x09f80e91…`, `TransferPolicy<NftToken> 0x9607bcf1…` (+ cap `0x85de8533…`). Rules VecSet verified = **royalty only** (1 rule). Superseded v3 `0x35ba17b3…`. See `docs/reports/phase-4-v4-republish.md` + `contracts/networks/testnet.json`.
 
+**v5 (D-037) — another breaking change, fresh republish (U18/U19):** v5 *adds a field* to the `Model3D` `key` struct — `glb_blob_id: String` (mirrors `lineage_blob_id`: same `MAX_BLOB_ID_LEN` bound + `EBlobIdMalformed` code) — which is **not** a compatible upgrade (struct layout is on-chain object representation). It also changes the signatures of two existing public fns (`new_model` and the `publish` entry fn both gain a `glb_blob_id: String` param, threaded into `validate_publish_inputs`), each independently breaking. The `ModelPublished` event layout is **unchanged** — the GLB resolves from the object field, so the indexer needs no new event field. So v5 republishes under a fresh `original-id`, abandoning v4 testnet state. Still low-cost: no v4 demo pre-bake or migrated frontend depends on the abandoned objects. Motivation: close the L1 GLB-resolution gap — a published `Model3D` carries a standalone Walrus blob (resolved via `/v1/blobs/<glb_blob_id>`) so Browse previews the base mesh and an nft creator can fork it.
+
 ---
 
 ## Before any upgrade — checklist

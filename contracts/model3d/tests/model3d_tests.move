@@ -175,6 +175,7 @@ fun model3d_has_key_and_store_abilities() {
         s(b"Excalibur"),
         make_tags(2),
         s(b"lineageBlobIdABC"),
+        s(b"glbBlobIdABC"),
         false,
         default_license(),
         &clk,
@@ -218,6 +219,7 @@ fun new_model_emits_model_published_and_transfers_blob() {
         s(b"Aero"),
         make_tags(1),
         s(b"lineageBlobZ"),
+        s(b"glbBlobZ"),
         false,
         default_license(),
         &clk,
@@ -245,6 +247,8 @@ fun new_model_emits_model_published_and_transfers_blob() {
     assert!(*string::as_bytes(model3d::name(&model)) == b"Aero", 308);
     assert!(model3d::is_encrypted(&model) == false, 309);
     assert!(*string::as_bytes(model3d::lineage_blob_id(&model)) == b"lineageBlobZ", 310);
+    // D-037 — glb_blob_id stored + accessor returns it.
+    assert!(*string::as_bytes(model3d::glb_blob_id(&model)) == b"glbBlobZ", 311);
 
     transfer::public_transfer(model, CREATOR);
     sc.next_tx(CREATOR);
@@ -277,7 +281,7 @@ fun new_model_emits_model_published_and_transfers_blob() {
 
 #[test]
 fun validate_inputs_happy_minimum() {
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &default_license());
 }
 
 #[test]
@@ -287,6 +291,7 @@ fun validate_inputs_happy_ten_tags() {
         &s(b"sword"),
         &make_tags(10),
         &s(b"abc123"),
+        &s(b""),
         &default_license(),
     );
 }
@@ -294,37 +299,37 @@ fun validate_inputs_happy_ten_tags() {
 #[test, expected_failure(abort_code = model3d::ERoyaltyTooHigh)]
 fun validate_inputs_rejects_royalty_over_cap() {
     let bad = new_license_terms(policy_permissionless(), 0, max_derivative_royalty_bps() + 1, true, true);
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &bad);
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &bad);
 }
 
 #[test]
 fun validate_inputs_accepts_royalty_at_cap() {
     let edge = new_license_terms(policy_permissionless(), 0, max_derivative_royalty_bps(), true, true);
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &edge);
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &edge);
 }
 
 #[test, expected_failure(abort_code = model3d::ETooManyTags)]
 fun validate_inputs_rejects_17_tags() {
-    validate_publish_inputs(&s(b""), &s(b""), &make_tags(17), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &make_tags(17), &s(b""), &s(b""), &default_license());
 }
 
 #[test]
 fun validate_inputs_accepts_16_tags() {
-    validate_publish_inputs(&s(b""), &s(b""), &make_tags(16), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &make_tags(16), &s(b""), &s(b""), &default_license());
 }
 
 #[test, expected_failure(abort_code = model3d::ETagTooLong)]
 fun validate_inputs_rejects_tag_33_chars() {
     let mut tags = empty_tags();
     vector::push_back(&mut tags, repeat_byte(ASCII_A, 33));
-    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &default_license());
 }
 
 #[test]
 fun validate_inputs_accepts_tag_32_chars() {
     let mut tags = empty_tags();
     vector::push_back(&mut tags, repeat_byte(ASCII_A, 32));
-    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &default_license());
 }
 
 #[test, expected_failure(abort_code = model3d::EParamsJsonTooLong)]
@@ -333,6 +338,7 @@ fun validate_inputs_rejects_params_json_4097() {
         &repeat_byte(ASCII_X, 4097),
         &s(b""),
         &empty_tags(),
+        &s(b""),
         &s(b""),
         &default_license(),
     );
@@ -345,6 +351,7 @@ fun validate_inputs_accepts_params_json_4096() {
         &s(b""),
         &empty_tags(),
         &s(b""),
+        &s(b""),
         &default_license(),
     );
 }
@@ -355,6 +362,7 @@ fun validate_inputs_rejects_name_129() {
         &s(b""),
         &repeat_byte(ASCII_N, 129),
         &empty_tags(),
+        &s(b""),
         &s(b""),
         &default_license(),
     );
@@ -367,6 +375,7 @@ fun validate_inputs_accepts_name_128() {
         &repeat_byte(ASCII_N, 128),
         &empty_tags(),
         &s(b""),
+        &s(b""),
         &default_license(),
     );
 }
@@ -378,6 +387,7 @@ fun validate_inputs_rejects_lineage_blob_id_129() {
         &s(b""),
         &empty_tags(),
         &repeat_byte(ASCII_B, 129),
+        &s(b""),
         &default_license(),
     );
 }
@@ -388,6 +398,34 @@ fun validate_inputs_accepts_lineage_blob_id_128() {
         &s(b""),
         &s(b""),
         &empty_tags(),
+        &repeat_byte(ASCII_B, 128),
+        &s(b""),
+        &default_license(),
+    );
+}
+
+// D-037 — glb_blob_id shares lineage_blob_id's MAX_BLOB_ID_LEN bound +
+// EBlobIdMalformed code. Lineage stays valid (empty) so the abort is
+// attributable to glb_blob_id, not lineage.
+#[test, expected_failure(abort_code = model3d::EBlobIdMalformed)]
+fun validate_inputs_rejects_glb_blob_id_129() {
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &repeat_byte(ASCII_B, 129),
+        &default_license(),
+    );
+}
+
+#[test]
+fun validate_inputs_accepts_glb_blob_id_128() {
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
         &repeat_byte(ASCII_B, 128),
         &default_license(),
     );
@@ -429,6 +467,7 @@ fun publish_shares_model_and_emits_model_published() {
         s(b"Aero"),
         make_tags(1),
         s(b"lineageBlobPub"),
+        s(b"glbBlobPub"),
         false,
         default_license(),
         &clk,
@@ -573,6 +612,7 @@ fun mint_base_model(
         s(b"BaseCar"),
         make_tags(1),
         s(b"lineageBlobBase"),
+        s(b"glbBlobBase"),
         false,
         license,
         clk,

@@ -149,6 +149,12 @@ public struct Model3D has key, store {
     name: String,
     tags: vector<String>,
     lineage_blob_id: String,
+    // D-037 — the Walrus blob holding this L1 model's GLB mesh, uploaded as a
+    // STANDALONE blob (not quilted) and resolved via `/v1/blobs/<glb_blob_id>`.
+    // Closes the L1 GLB-resolution gap: Browse previews the base mesh and an
+    // nft creator forks it. Mirrors lineage_blob_id exactly (same
+    // MAX_BLOB_ID_LEN bound + EBlobIdMalformed code).
+    glb_blob_id: String,
     is_encrypted: bool,
     license: LicenseTerms,
     created_at_ms: u64,
@@ -365,6 +371,7 @@ public fun params_json(model: &Model3D): &String { &model.params_json }
 public fun name(model: &Model3D): &String { &model.name }
 public fun tags(model: &Model3D): &vector<String> { &model.tags }
 public fun lineage_blob_id(model: &Model3D): &String { &model.lineage_blob_id }
+public fun glb_blob_id(model: &Model3D): &String { &model.glb_blob_id }
 public fun is_encrypted(model: &Model3D): bool { model.is_encrypted }
 public fun license(model: &Model3D): &LicenseTerms { &model.license }
 public fun created_at_ms(model: &Model3D): u64 { model.created_at_ms }
@@ -407,6 +414,7 @@ public(package) fun validate_publish_inputs(
     name: &String,
     tags: &vector<String>,
     lineage_blob_id: &String,
+    glb_blob_id: &String,
     license: &LicenseTerms,
 ) {
     assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
@@ -420,6 +428,8 @@ public(package) fun validate_publish_inputs(
     assert!(string::length(params_json) <= MAX_PARAMS_JSON_LEN, EParamsJsonTooLong);
     assert!(string::length(name) <= MAX_NAME_LEN, ENameTooLong);
     assert!(string::length(lineage_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    // D-037 — same bound + abort code as lineage_blob_id.
+    assert!(string::length(glb_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
 }
 
 // === Model3D constructor (foundation; `publish` shares it — D-032) ===
@@ -449,12 +459,13 @@ public(package) fun new_model(
     name: String,
     tags: vector<String>,
     lineage_blob_id: String,
+    glb_blob_id: String,
     is_encrypted: bool,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
 ): Model3D {
-    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &license);
+    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &glb_blob_id, &license);
 
     // Fixed Blob lifecycle (see fn-header note): transferred to creator BEFORE
     // model construction. Walrus storage stays paid for the registered epoch
@@ -473,6 +484,7 @@ public(package) fun new_model(
         name,
         tags,
         lineage_blob_id,
+        glb_blob_id,
         is_encrypted,
         license,
         created_at_ms: clock.timestamp_ms(),
@@ -502,6 +514,7 @@ public entry fun publish(
     name: String,
     tags: vector<String>,
     lineage_blob_id: String,
+    glb_blob_id: String,
     is_encrypted: bool,
     license: LicenseTerms,
     clock: &Clock,
@@ -514,6 +527,7 @@ public entry fun publish(
         name,
         tags,
         lineage_blob_id,
+        glb_blob_id,
         is_encrypted,
         license,
         clock,
@@ -798,6 +812,7 @@ public fun destroy_model_for_testing(model: Model3D) {
         name: _,
         tags: _,
         lineage_blob_id: _,
+        glb_blob_id: _,
         is_encrypted: _,
         license: _,
         created_at_ms: _,
