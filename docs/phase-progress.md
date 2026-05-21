@@ -1,5 +1,25 @@
 # Phase Progress
 
+## Last Updated: 2026-05-21 (U18 + U19 DONE — v5 live on testnet) — **Next = U12 (nft-creator launch page), with the U10 follow-up GLB-wiring folded into its prep.**
+
+### Shipped this session (2 units, committed)
+- **U18 (commit `7137a8e`)** — Move v5 source delta (D-037). `Model3D += glb_blob_id: String` (+ accessor `glb_blob_id()`) mirroring `lineage_blob_id` (same `MAX_BLOB_ID_LEN` + `EBlobIdMalformed`); `new_model`/`publish` gain a `glb_blob_id` param threaded into `validate_publish_inputs`; `ModelPublished` event layout unchanged (resolve via object field). Test-first: glb stored/accessor + 128-accept/129-reject; threaded all 4 constructor + 14 validate callsites. `sui move test` 51/51, build clean. UPGRADE.md v5 rationale + spec §2.8 D-037 callout.
+- **U19 (commit `4acc145`)** — v5 fresh republish to testnet (ran via local keystore, deployer `0x3116881c…`, ~0.05 SUI). **package `0xe0d65c4a…05309b`**, UpgradeCap `0x9642c230…`, Publisher `0xcd1943f4…`, **`TransferPolicy<NftToken> 0xd7677bb0…4774e8`** (+ cap `0xb09e9a2e…`). Bootstrap `ensure_collection_policy`; on-chain read confirms rules VecSet = exactly `royalty_rule` (1 rule). publish digest `FMfF83md…`, bootstrap `Fxq1XDj6…`. Both config mirrors updated (parity green); `docs/reports/phase-4-v5-republish.md` + UPGRADE.md v5-shipped line. Supersedes v4 `0x3b6b7258…`.
+
+### Next Concrete Step
+**U12 — nft-creator launch page** (the U10 GLB-wiring follow-up folds into its prep, since both touch the L1 publish + Browse-resolve path). Decisions already locked below (D1/D2/D3). The **U10 follow-up** to do alongside: `/create` uploads the GLB as a **standalone** Walrus blob (not quilted) → `buildPublishPtb({ …, glbBlobId })` (publish now takes `glbBlobId` positionally after `lineageBlobId`); `useModelIndex` reads `json.glb_blob_id`; resolve via `/v1/blobs/<glb_blob_id>` (sub-decision (i)). **Large multi-file UI unit — align on scope/file plan before coding; cannot browser-test here, flag it.**
+
+### U12 decisions already locked
+- **D1 = (b)+(i)**: real `glb_blob_id` field (D-037, now live on v5), standalone-blob resolution.
+- **D2**: build new `collection/LaunchCollectionPage.tsx`; **delete the dead Phase-3 forge path** (`forge/buildCollectionPtb.ts` + `ForgePage` target the removed `publish_collection`).
+- **D3**: batch the per-patch mints into **one PTB / one wallet popup**.
+- Reuse as-is: `forge/VariantEditor` + `VariantPreview`, `walrus/useWalrusUpload`, backend `POST /api/collection/build`, the dapp-kit→Walrus signer bridge.
+
+### Blockers / Open Questions
+- None blocking. v5 is the active package everywhere (testnet.json + networkConfig.ts). Any indexer/Browse filter must target v5 `0xe0d65c4a…`.
+
+---
+
 ## Last Updated: 2026-05-20 (v4 shipped + reviewed; D-037 accepted) — **Next = U18 (Move v5: Model3D += glb_blob_id), then U19 republish, then U12.**
 
 ### Since last entry
