@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
-import { TESTNET } from '../sui/networkConfig';
 
 // Single-object Model3D query — sibling of useModelIndex (U8) but scoped to
 // one object id. Defensive about partial decodes, same as useModelIndex.
@@ -120,62 +119,4 @@ export function useModelById(objectId: string): {
   }, [objectId]);
 
   return { model, loading, error };
-}
-
-// Repeat-purchase guard (DL-009). Pessimistic default = false; backend Move
-// doesn't enforce uniqueness so worst case the user double-mints an Access.
-export function useOwnsAccess(
-  walletAddress: string | undefined,
-  modelObjectId: string,
-): boolean {
-  const [owns, setOwns] = useState(false);
-  useEffect(() => {
-    if (!walletAddress || !modelObjectId || modelObjectId === '0x0') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const pkg = TESTNET.model3dPackageId;
-        const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            query: /* GraphQL */ `
-              query OwnedAccess($owner: SuiAddress!, $type: String!) {
-                objects(filter: { owner: $owner, type: $type }) {
-                  nodes {
-                    asMoveObject {
-                      contents {
-                        json
-                      }
-                    }
-                  }
-                }
-              }
-            `,
-            variables: {
-              owner: walletAddress,
-              type: `${pkg}::model3d::Access`,
-            },
-          }),
-        });
-        if (!resp.ok || cancelled) return;
-        const data = await resp.json();
-        const nodes =
-          (data?.data?.objects?.nodes ?? []) as Array<{
-            asMoveObject?: { contents?: { json?: Record<string, unknown> } };
-          }>;
-        const hit = nodes.some(
-          (n) =>
-            n?.asMoveObject?.contents?.json?.target_id === modelObjectId,
-        );
-        if (!cancelled) setOwns(hit);
-      } catch {
-        // Silently ignore — pessimistic default false.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [walletAddress, modelObjectId]);
-  return owns;
 }

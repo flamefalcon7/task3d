@@ -1,16 +1,28 @@
-import { useParams } from 'react-router-dom';
-import { useCurrentAccount } from '@mysten/dapp-kit';
-import { useModelById, useOwnsAccess } from './hooks';
-import { BuyAccessButton } from './BuyAccessButton';
-import { SignInButton } from '../auth/SignInButton';
+import { Link, useParams } from 'react-router-dom';
+import { useModelById } from './hooks';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
+
+// L1 published-content detail page (`/model/:objectId`). v6 `Model3D` is shared
+// content a creator publishes with license terms — it is NOT sold per-access
+// (the Phase-2 `purchase_model_access` / `Access` receipt was removed). So this
+// page presents the content + its fork terms and routes to /launch, where an
+// nft creator forks it into a collection (pay-to-derive). User-facing token
+// purchase is the separate L2 Kiosk flow (deferred).
+
+function truncateAddr(a: string): string {
+  return a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a;
+}
+
+function mistToSui(mist: string): string {
+  const n = Number(mist);
+  if (!Number.isFinite(n) || n <= 0) return 'Free';
+  return `${(n / 1e9).toString()} SUI`;
+}
 
 export function ModelDetailPage() {
   const { objectId } = useParams<{ objectId: string }>();
   const { model, loading, error } = useModelById(objectId ?? '');
-  const account = useCurrentAccount();
-  const ownsAccess = useOwnsAccess(account?.address, objectId ?? '');
 
   if (!objectId) {
     return (
@@ -28,10 +40,7 @@ export function ModelDetailPage() {
   }
   if (error || !model) {
     return (
-      <div
-        style={{ padding: 16, color: 'crimson' }}
-        data-testid="detail-error"
-      >
+      <div style={{ padding: 16, color: 'crimson' }} data-testid="detail-error">
         Couldn't load this model.
       </div>
     );
@@ -53,12 +62,7 @@ export function ModelDetailPage() {
     >
       <div>
         <div
-          style={{
-            aspectRatio: '1',
-            background: '#15171b',
-            borderRadius: 8,
-            overflow: 'hidden',
-          }}
+          style={{ aspectRatio: '1', background: '#15171b', borderRadius: 8, overflow: 'hidden' }}
           data-testid="preview-canvas-wrap"
         >
           <PreviewCanvas glbUrl={aggregatorUrl} />
@@ -70,7 +74,7 @@ export function ModelDetailPage() {
           style={{ fontSize: 12, marginTop: 8, display: 'block' }}
           data-testid="walrus-link"
         >
-          Walrus blob: {model.blobId}
+          Walrus blob: {model.glbBlobId || model.blobId}
         </a>
       </div>
       <div>
@@ -102,38 +106,47 @@ export function ModelDetailPage() {
             </span>
           ))}
         </div>
+
+        {/* L1 license / fork terms (D-002 pay-to-derive). This is what an nft
+            creator pays to fork the content on /launch — not an access price. */}
+        <div data-testid="fork-terms" style={{ fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
+          <div>
+            <strong>Fork fee:</strong> {mistToSui(model.derivativeMintFee)}
+          </div>
+          <div>
+            <strong>Resale royalty:</strong> {(model.derivativeRoyaltyBps / 100).toFixed(2)}%
+          </div>
+        </div>
+
         <details style={{ fontSize: 12, marginBottom: 12 }}>
           <summary>Params (json)</summary>
-          <pre
-            style={{
-              background: '#f5f5f5',
-              padding: 8,
-              borderRadius: 4,
-              overflow: 'auto',
-            }}
-          >
+          <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, overflow: 'auto' }}>
             {model.paramsJson}
           </pre>
         </details>
-        <BuyAccessButton
-          modelObjectId={model.objectId}
-          priceMist={BigInt(model.directAccessPrice)}
-          disabled={!account}
-          alreadyOwned={ownsAccess}
-        />
-        {!account && (
-          <div data-testid="signin-hint" style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-              Sign in to buy:
-            </div>
-            <SignInButton />
+
+        {model.glbBlobId ? (
+          <Link
+            to="/launch"
+            data-testid="fork-cta"
+            style={{
+              display: 'inline-block',
+              padding: '8px 14px',
+              background: '#ffb86b',
+              color: '#15171b',
+              borderRadius: 6,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            Fork this into a collection →
+          </Link>
+        ) : (
+          <div data-testid="not-forkable" style={{ fontSize: 12, color: '#888' }}>
+            This model has no standalone GLB and can’t be forked.
           </div>
         )}
       </div>
     </div>
   );
-}
-
-function truncateAddr(a: string): string {
-  return a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a;
 }

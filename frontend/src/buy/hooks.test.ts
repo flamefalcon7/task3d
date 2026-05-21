@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { useModelById, useOwnsAccess } from './hooks';
+import { useModelById } from './hooks';
 
 function mockFetch(impl: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
   vi.stubGlobal('fetch', vi.fn(impl));
@@ -80,71 +80,5 @@ describe('useModelById', () => {
     await act(async () => {});
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.current.loading).toBe(false);
-  });
-});
-
-describe('useOwnsAccess', () => {
-
-  it('returns false when no walletAddress', async () => {
-    const fetchSpy = vi.fn();
-    mockFetch(fetchSpy);
-    const { result } = renderHook(() => useOwnsAccess(undefined, '0xMODEL'));
-    await act(async () => {});
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(result.current).toBe(false);
-  });
-
-  it('returns true when buyer owns Access with matching target_id', async () => {
-    mockFetch(async () =>
-      new Response(
-        JSON.stringify({
-          data: {
-            objects: {
-              nodes: [
-                {
-                  asMoveObject: {
-                    contents: { json: { target_id: '0xMODEL' } },
-                  },
-                },
-              ],
-            },
-          },
-        }),
-        { status: 200 },
-      ),
-    );
-    const { result } = renderHook(() =>
-      useOwnsAccess('0xBUYER', '0xMODEL'),
-    );
-    await waitFor(() => expect(result.current).toBe(true));
-  });
-
-  it('returns false when buyer has Access tokens for other models', async () => {
-    mockFetch(async () =>
-      new Response(
-        JSON.stringify({
-          data: {
-            objects: {
-              nodes: [
-                {
-                  asMoveObject: {
-                    contents: { json: { target_id: '0xOTHER' } },
-                  },
-                },
-              ],
-            },
-          },
-        }),
-        { status: 200 },
-      ),
-    );
-    const { result } = renderHook(() =>
-      useOwnsAccess('0xBUYER', '0xMODEL'),
-    );
-    // Give the effect a tick to run
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
-    expect(result.current).toBe(false);
   });
 });
