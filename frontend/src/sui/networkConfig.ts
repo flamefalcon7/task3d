@@ -20,23 +20,26 @@
 // from the @mysten/kiosk SDK's testnet-defaults constants. Frontend MUST
 // use OUR pinned value or `confirm_request` fails the rule membership check.
 
-// v4 (D-035/D-036): fresh republish of v3. Model3D is still a shared object;
-// the only TransferPolicy is for NftToken, and it now carries ONLY the royalty
-// rule (D-036 removed lock + personal_kiosk). mint_nft_token yields a plain
-// owned token; listing is a separate opt-in Kiosk PTB. `transferPolicyId`/
-// `transferPolicyCapId` hold the NftToken policy (generic field names kept for
-// config stability). Supersedes v3 0x35ba17b3….
+// v5 (D-037): fresh republish of v4. Model3D gained `glb_blob_id` (standalone
+// Walrus blob, resolved via /v1/blobs/<glb_blob_id>) — adding a field to a
+// `key` struct is not in-place upgradeable, hence the fresh package. Everything
+// else carries over from v4: Model3D is a shared object; the only TransferPolicy
+// is for NftToken and carries ONLY the royalty rule (D-036 removed lock +
+// personal_kiosk); mint_nft_token yields a plain owned token; listing is a
+// separate opt-in Kiosk PTB. `transferPolicyId`/`transferPolicyCapId` hold the
+// NftToken policy (generic field names kept for config stability). Supersedes
+// v4 0x3b6b7258….
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x3b6b7258831f43ad926d3f961b6a77edbce7c5845262c5dfb7d783147158eb03',
+    '0xe0d65c4a48c9f0b52251a5e6d97bfcec09fbd94c6b0d342c1057a019ec05309b',
   publisherId:
-    '0x09f80e91d766bfe71a0a6288e9aeab0c4e0929d60dee5c851a8e2b867dccce5e',
+    '0xcd1943f44e7cb029161b0a81be678a5a909c84287ee686bc1e7278e1c113b671',
   transferPolicyId:
-    '0x9607bcf10be57e99269f6dab4e4e3b5e9aa0527066d5ea14a7985d7ddd6f0342',
+    '0xd7677bb04c32f43f3064c3c2e5e95c9e66bc09da63c3bb7f526ca2538b4774e8',
   transferPolicyCapId:
-    '0x85de8533f4279f56c889d72c952864c73eb471719818856e3005331a475d49ff',
+    '0xb09e9a2ebee8bd75be36a48243c95a24698581aca73ecc35c74632ba695cae35',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
