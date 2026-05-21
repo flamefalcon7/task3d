@@ -1,4 +1,5 @@
 import { NodeIO } from '@gltf-transform/core';
+import { KHRMeshQuantization } from '@gltf-transform/extensions';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,12 @@ export async function swapMaterial(
   spec: VariantMaterialSpec,
   textureLoader: (id: TextureId) => Promise<Uint8Array> = loadBundledTexture,
 ): Promise<Uint8Array> {
-  const io = new NodeIO();
+  // Register KHR_mesh_quantization so quantized base GLBs (Tripo and many
+  // exporters emit these to shrink files) parse instead of failing with
+  // "Missing required extension". The extension needs no decoder — quantized
+  // vertex data passes straight through the material-only edit, and Babylon
+  // dequantizes it client-side at render time.
+  const io = new NodeIO().registerExtensions([KHRMeshQuantization]);
   const doc = await io.readBinary(baseGlb);
   const materials = doc.getRoot().listMaterials();
   if (materials.length === 0) {

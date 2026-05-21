@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Document, NodeIO } from '@gltf-transform/core';
+import { KHRMeshQuantization } from '@gltf-transform/extensions';
 import {
   swapMaterial,
   loadBundledTexture,
@@ -101,7 +102,27 @@ async function readMeshTopology(glb: Uint8Array): Promise<{ verts: number; indic
   return { verts, indices };
 }
 
+// A GLB that declares KHR_mesh_quantization in `extensionsRequired`. A reader
+// without the extension registered throws "Missing required extension" — this
+// is the Tripo-output failure mode the route surfaced as 422 glb_parse_failed.
+async function makeQuantizedFixtureGlb(): Promise<Uint8Array> {
+  const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
+  const io = new NodeIO().registerExtensions([KHRMeshQuantization]);
+  const doc = await io.readBinary(base);
+  doc.createExtension(KHRMeshQuantization).setRequired(true);
+  return io.writeBinary(doc);
+}
+
 describe('swapMaterial', () => {
+  it('parses a base GLB that requires KHR_mesh_quantization (Tripo-style)', async () => {
+    const base = await makeQuantizedFixtureGlb();
+    // Before registering the extension this threw "Missing required extension"
+    // and the route returned 422 glb_parse_failed. Now it parses + edits.
+    const out = await swapMaterial(base, { baseColorRgb: [0, 1, 0, 1] }, async () => new Uint8Array());
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out.length).toBeGreaterThan(0);
+  });
+
   it('happy path swaps baseColor on first material', async () => {
     const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
     const out = await swapMaterial(base, { baseColorRgb: [1, 0, 0, 1] }, async () => new Uint8Array());
