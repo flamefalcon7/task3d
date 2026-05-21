@@ -67,6 +67,9 @@ export function BrowsePage() {
           <Link to="/launch" style={{ color: '#ffb86b', textDecoration: 'none', fontWeight: 600 }}>
             🚀 Launch Collection
           </Link>
+          <Link to="/integrate" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
+            Integrate →
+          </Link>
           <Link to="/track" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
             Racetrack →
           </Link>

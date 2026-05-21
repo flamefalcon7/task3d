@@ -4,6 +4,7 @@ import { CreateModelPage } from './creator/CreateModelPage';
 import { ModelDetailPage } from './buy/ModelDetailPage';
 import { LaunchCollectionPage } from './collection/LaunchCollectionPage';
 import { CollectionDetailPage } from './collection/CollectionDetailPage';
+import { RegisterIntegrationPage } from './integration/RegisterIntegrationPage';
 import { TrackPage } from './track/TrackPage';
 import { CompareGlbsPage } from './dev/CompareGlbsPage';
 
@@ -22,6 +23,7 @@ function App() {
         <Route path="/model/:objectId" element={<ModelDetailPage />} />
         <Route path="/launch" element={<LaunchCollectionPage />} />
         <Route path="/collection/:slug" element={<CollectionDetailPage />} />
+        <Route path="/integrate" element={<RegisterIntegrationPage />} />
         <Route path="/track" element={<TrackPage />} />
         <Route path="/dev/compare" element={<CompareGlbsPage />} />
       </Routes>
