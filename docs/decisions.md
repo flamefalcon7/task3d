@@ -1851,6 +1851,63 @@ v4 `Model3D` stores only `lineage_blob_id` (the lineage JSON) — there is **no 
 
 ---
 
+## D-038: `launch_collection_with_tokens` batch entry fn — whole L2 launch in one signature (v6)
+
+**Status**: Accepted
+**Date**: 2026-05-21
+**Phase**: 4
+
+### Context
+
+The U12 nft-creator flow needs: launch a collection from a base `Model3D` → set a register fee → mint N owned tokens (one per quilt patch). With the current v5 surface these are separate entry fns, and they **cannot** be composed into one PTB by the frontend: `launch_collection` creates the `NftCollection` + soulbound `NftCollectionCreatorCap` *inside* the call (no chainable return), and both types are `key`-only (no `store`), so a client PTB cannot `public_share_object`/`public_transfer` them — sharing/transfer is restricted to the defining module. Result: tx3 (`launch_collection`) and tx4 (`set_register_fee` + N×`mint_nft_token`) are forced into two separate signatures, on top of the 2 Walrus-upload signatures (register + certify, owned by `@mysten/walrus`). The nft-creator therefore signs ~4 times, and the demo beat is "launch, then mint" rather than one clean action.
+
+### Decision
+
+Add a single batch entry fn that performs the entire L2 launch atomically in-module:
+
+```
+public entry fun launch_collection_with_tokens(
+    model: &Model3D,
+    payment: Coin<SUI>,
+    quilt_blob_id: String,
+    register_fee: u64,
+    token_names: vector<String>,
+    token_patch_ids: vector<String>,
+    ctx: &mut TxContext,
+)
+```
+
+It launches the collection (routes the derive fee exactly like `launch_collection`), sets `register_fee`, mints one `NftToken` per `(name, patch_id)` pair (`public_transfer` to sender — plain owned, D-036), then `share_object`s the collection and `transfer`s the soulbound cap to sender. `assert!(token_names.length == token_patch_ids.length, EBatchLenMismatch)` (new code `37`); existing per-field length bounds reused. To avoid duplication, extract package-private cores `launch_collection_internal(...) : (NftCollection, NftCollectionCreatorCap)` and `mint_nft_token_internal(collection, name, patch_id, ctx) : NftToken`; the existing `launch_collection` / `mint_nft_token` entry fns become thin wrappers over those cores (their public signatures are **unchanged**). The change is **purely additive** at the ABI level (one new public entry fn + package-private helpers).
+
+**Deploy mechanism**: ship as a fresh **v6 republish** (consistent with the project's established abandon-in-place testnet pattern — v3/v4/v5 were all fresh republishes; v5 has zero on-chain state worth preserving and the `ensure_collection_policy` re-bootstrap is ~free). A compatible in-place `sui client upgrade` (via the v5 UpgradeCap) is technically available *because* this change is additive-only, and is noted as the mainnet-era approach — but is not adopted now to avoid introducing a new deploy path (and the published-at/original-id config split) mid-sprint.
+
+### Rationale
+
+- Collapses the launch economy from 2 signatures to 1 → ~4 wallet popups down to 3; the nft-creator demo beat becomes a single "launch my collection" action.
+- Keeps `share_object`/`transfer` of the `key`-only collection + soulbound cap inside the defining module (the only legal place); the client cannot do this, so a module-side batch fn is the *only* way to get one-signature launch.
+- Additive: existing `launch_collection` / `set_register_fee` / `mint_nft_token` entries stay (still used standalone — fee edits, minting more tokens later, and the U6 builders/tests that target them).
+
+### Alternatives Considered
+
+- **Keep the 4-popup pure-frontend flow (option B)** — rejected by user choice (A); more popups, weaker demo, but zero contract change.
+- **External PTB composition (chain `launch` result into `mint` in one client PTB)** — impossible: `launch_collection` returns nothing and `NftCollection`/cap are `key`-only, so the client cannot share/transfer them.
+- **Compatible `sui client upgrade` instead of fresh republish** — viable (additive-only change preserves `original-id`, so the v5 `TransferPolicy`/`Publisher` stay valid and need no re-bootstrap), and is the right mainnet approach; deferred now for consistency + lower risk.
+- **Fold `register_fee` default and skip the param** — kept the param so the creator sets the fee in the same call (still defaults are possible by passing 0).
+
+### Consequences
+
+- ✅ One-signature collection launch + fleet mint; cleaner U12 UX and demo.
+- ⚠️ Fresh **v6 republish** (new PackageID; supersedes v5 `0xe0d65c4a…`); re-run `ensure_collection_policy`; update both config mirrors + reports (same process as U19).
+- ⚠️ New abort code `EBatchLenMismatch = 37`. New U6 builder `buildLaunchCollectionWithTokensPtb` + tests; the standalone `buildLaunchCollectionPtb`/`buildMintNftTokenPtb` remain for the descope path.
+- ⚠️ Move refactor extracts two package-private cores — existing entry fns must keep identical public signatures + behavior (covered by the existing Move tests).
+- 🔮 At mainnet this batch fn is part of the canonical ABI; the compatible-upgrade path becomes the norm once real state exists.
+
+### Related
+
+- Enables U12 (`LaunchCollectionPage`) one-signature launch. Builds on [[D-035]] (quilt `patch_id`) + [[D-036]] (owned-token mint). New units: U20 (Move v6 batch fn, test-first) + U21 (v6 republish), mirroring U18/U19. Walrus's 2 upload signatures are out of scope (SDK-owned; would need Enoki sponsored tx, a demo-day concern).
+
+---
+
 # Reserved Decision Numbers
 
-D-038 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-039 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

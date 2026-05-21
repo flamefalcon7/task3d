@@ -58,6 +58,8 @@ The Phase 4 **v2 → v3** jump (D-029, four-role collection layer) is likewise a
 
 **v5 shipped 2026-05-21 (testnet):** `package_id 0xe0d65c4a…`, `upgrade_cap 0x9642c230…`, `publisher 0xcd1943f4…`, `TransferPolicy<NftToken> 0xd7677bb0…` (+ cap `0xb09e9a2e…`). Rules VecSet verified = **royalty only** (1 rule: `0xe308bb3e…::royalty_rule::Rule`). Superseded v4 `0x3b6b7258…`. publish digest `FMfF83md…`, bootstrap digest `Fxq1XDj6…`. See `docs/reports/phase-4-v5-republish.md` + `contracts/networks/testnet.json`.
 
+**v6 (D-038) — the first ADDITIVE-only change; shipped as a fresh republish anyway (U20/U21):** v6 adds one new `public entry fun launch_collection_with_tokens` (one-signature launch + set-fee + mint-N) plus two package-private cores (`launch_collection_internal`, `mint_nft_token_internal`); the existing `launch_collection` / `set_register_fee` / `mint_nft_token` public signatures and the struct layouts are **unchanged**. Per the table above this qualifies as a **compatible upgrade** (adding a public fn is additive; preserving `original-id` would keep the v5 `TransferPolicy`/`Publisher` valid with no re-bootstrap). Per **D-038** we still ship it as a **fresh republish** for consistency with v3/v4/v5 (v5 has no on-chain state worth preserving; re-bootstrap is ~free) and to avoid introducing the published-at/original-id config split mid-sprint. The compatible `sui client upgrade` path is the mainnet-era approach once real state exists. New abort code `EBatchLenMismatch = 37`.
+
 ---
 
 ## Before any upgrade — checklist

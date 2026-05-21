@@ -107,6 +107,8 @@ const EWrongCollectionCap:   u64 = 34; // cap does not authorize this collection
 const EInsufficientDeriveFee: u64 = 35; // launch_collection payment < derivative_mint_fee
 // D-035 — mint_nft_token's patch_id exceeds MAX_PATCH_ID_LEN.
 const EPatchIdMalformed:     u64 = 36;
+// D-038 — launch_collection_with_tokens: token_names / token_patch_ids lengths differ.
+const EBatchLenMismatch:     u64 = 37;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -588,12 +590,19 @@ public entry fun ensure_creator_kiosk(ctx: &mut TxContext) {
 //
 // No `clock` param: the collection carries no timestamp and `CollectionLaunched`
 // has no `ts` field. Per-integration timestamps are set in `register_integration`.
-public entry fun launch_collection(
+// D-038 — launch core: runs the pay-to-derive coin handling + collection/cap
+// construction + `CollectionLaunched`, and RETURNS the still-unshared collection
+// and cap so a caller can compose more steps in the same tx before sharing.
+// Package-private on purpose: the ONLY legal place to `share_object` an
+// `NftCollection` or `transfer` the soulbound cap is this module, so each public
+// entry wrapper finishes the lifecycle itself (a client PTB cannot, since both
+// types are `key`-only). Behavior is identical to the pre-D-038 `launch_collection`.
+fun launch_collection_internal(
     model: &Model3D,
     mut payment: Coin<SUI>,
     quilt_blob_id: String,
     ctx: &mut TxContext,
-) {
+): (NftCollection, NftCollectionCreatorCap) {
     // D-035 — the collection's variant quilt blob (length-bounded, same ceiling
     // + abort code as the model's lineage_blob_id).
     assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
@@ -642,6 +651,16 @@ public entry fun launch_collection(
         nft_creator: ctx.sender(),
     });
 
+    (collection, cap)
+}
+
+public entry fun launch_collection(
+    model: &Model3D,
+    payment: Coin<SUI>,
+    quilt_blob_id: String,
+    ctx: &mut TxContext,
+) {
+    let (collection, cap) = launch_collection_internal(model, payment, quilt_blob_id, ctx);
     transfer::share_object(collection);
     transfer::transfer(cap, ctx.sender());
 }
@@ -683,14 +702,18 @@ public entry fun set_integration_policy(
 // Listing-for-sale is a SEPARATE opt-in step (D-036): the owner composes a
 // Kiosk `place_and_list<NftToken>` PTB when they choose to sell. Resale then
 // runs the royalty-only confirm chain (see `ensure_collection_policy`).
-public entry fun mint_nft_token(
-    cap: &NftCollectionCreatorCap,
+// D-038 — mint core: validates the per-token inputs, builds the `NftToken`, and
+// emits `NftTokenMinted`, RETURNING the (un-transferred) token. Package-private:
+// the cap-authority check lives in the public `mint_nft_token` wrapper; the batch
+// `launch_collection_with_tokens` holds the freshly-created cap inherently and so
+// skips the redundant check. `nft_creator` on the event is `ctx.sender()` (the
+// caller in both paths). Behavior is identical to the pre-D-038 `mint_nft_token`.
+fun mint_nft_token_internal(
     collection: &NftCollection,
     name: String,
     patch_id: String,
     ctx: &mut TxContext,
-) {
-    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+): NftToken {
     assert!(string::length(&name) <= MAX_NAME_LEN, ENameTooLong);
     assert!(string::length(&patch_id) <= MAX_PATCH_ID_LEN, EPatchIdMalformed);
 
@@ -708,7 +731,63 @@ public entry fun mint_nft_token(
         nft_creator: ctx.sender(),
         patch_id: token.patch_id,
     });
+    token
+}
+
+public entry fun mint_nft_token(
+    cap: &NftCollectionCreatorCap,
+    collection: &NftCollection,
+    name: String,
+    patch_id: String,
+    ctx: &mut TxContext,
+) {
+    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+    let token = mint_nft_token_internal(collection, name, patch_id, ctx);
     transfer::public_transfer(token, ctx.sender());
+}
+
+// D-038 — one-signature L2 launch: launches the collection (pay-to-derive),
+// sets `register_fee`, mints one plain owned `NftToken` per (name, patch_id)
+// pair, then shares the collection and transfers the soulbound cap — all atomic.
+// Lets the nft creator launch a whole colored fleet in a single wallet popup
+// (the standalone `launch_collection` / `set_register_fee` / `mint_nft_token`
+// entries remain for incremental flows). `token_names` and `token_patch_ids`
+// MUST be the same length (`EBatchLenMismatch`); N = 0 launches an empty
+// collection. Per-token bounds + the derive-fee routing are inherited from the
+// shared cores. The cap-authority check is unnecessary here — the cap is created
+// in this same call and provably matches the collection.
+public entry fun launch_collection_with_tokens(
+    model: &Model3D,
+    payment: Coin<SUI>,
+    quilt_blob_id: String,
+    register_fee: u64,
+    token_names: vector<String>,
+    token_patch_ids: vector<String>,
+    ctx: &mut TxContext,
+) {
+    assert!(
+        vector::length(&token_names) == vector::length(&token_patch_ids),
+        EBatchLenMismatch,
+    );
+
+    let (mut collection, cap) = launch_collection_internal(model, payment, quilt_blob_id, ctx);
+    collection.register_fee = register_fee;
+
+    let n = vector::length(&token_names);
+    let mut i = 0;
+    while (i < n) {
+        let token = mint_nft_token_internal(
+            &collection,
+            *vector::borrow(&token_names, i),
+            *vector::borrow(&token_patch_ids, i),
+            ctx,
+        );
+        transfer::public_transfer(token, ctx.sender());
+        i = i + 1;
+    };
+
+    transfer::share_object(collection);
+    transfer::transfer(cap, ctx.sender());
 }
 
 // === D-029 U4 — register_integration (B2B integration registry) ===

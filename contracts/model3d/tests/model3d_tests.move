@@ -45,6 +45,7 @@ use model3d::model3d::{
     set_integration_policy,
     ensure_collection_policy,
     mint_nft_token,
+    launch_collection_with_tokens,
     register_integration,
     destroy_collection_for_testing,
     destroy_collection_cap_for_testing,
@@ -1135,6 +1136,165 @@ fun mint_multiple_tokens_share_one_patch_id() {
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
     sc.end();
+}
+
+// === D-038 U20 — launch_collection_with_tokens (batch: launch + fee + mint N) ===
+
+// Build [s(prefix0), s(prefix1), …] of length n with a per-index byte suffix so
+// each string is distinct.
+#[test_only]
+fun str_vec(base: vector<u8>, n: u64): vector<string::String> {
+    let mut v = vector::empty<string::String>();
+    let mut i = 0;
+    while (i < n) {
+        let mut bytes = base;
+        vector::push_back(&mut bytes, (48 + (i as u8))); // ascii '0'+i
+        vector::push_back(&mut v, string::utf8(bytes));
+        i = i + 1;
+    };
+    v
+}
+
+// Happy path (D-038): one call launches the collection, sets the register fee,
+// and mints N owned tokens — all atomically. Asserts: exactly one
+// CollectionLaunched, N NftTokenMinted (in loop order, carrying each patch_id),
+// the shared collection with the supplied quilt + register_fee, the soulbound
+// cap to the caller, and N plain owned tokens in the caller's inbox.
+#[test]
+fun launch_collection_with_tokens_launches_sets_fee_and_mints_fleet() {
+    let register_fee: u64 = 2_000_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+    let model_id = object::id(&model);
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection_with_tokens(
+        &model,
+        coin::mint_for_testing<SUI>(0, sc.ctx()),
+        quilt(),
+        register_fee,
+        str_vec(b"Racer #", 3),
+        str_vec(b"patch", 3),
+        sc.ctx(),
+    );
+
+    // Exactly one CollectionLaunched.
+    let launched = event::events_by_type<model3d::CollectionLaunched>();
+    assert!(vector::length(&launched) == 1, 700);
+    assert!(model3d::collection_launched_base_model_id(vector::borrow(&launched, 0)) == model_id, 701);
+    assert!(model3d::collection_launched_nft_creator(vector::borrow(&launched, 0)) == NFT_CREATOR, 702);
+
+    // N NftTokenMinted, in loop order, each carrying its patch.
+    let minted = event::events_by_type<model3d::NftTokenMinted>();
+    assert!(vector::length(&minted) == 3, 703);
+    assert!(*string::as_bytes(model3d::nft_token_minted_patch_id(vector::borrow(&minted, 0))) == b"patch0", 704);
+    assert!(*string::as_bytes(model3d::nft_token_minted_patch_id(vector::borrow(&minted, 1))) == b"patch1", 705);
+    assert!(*string::as_bytes(model3d::nft_token_minted_patch_id(vector::borrow(&minted, 2))) == b"patch2", 706);
+
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    assert!(model3d::collection_base_model_id(&collection) == model_id, 707);
+    assert!(model3d::collection_nft_creator(&collection) == NFT_CREATOR, 708);
+    // register_fee was set inside the batch call (no separate set_register_fee tx).
+    assert!(model3d::collection_register_fee(&collection) == register_fee, 709);
+    assert!(*string::as_bytes(model3d::collection_quilt_blob_id(&collection)) == b"quiltBlobIdABC", 710);
+    assert!(model3d::cap_collection_id(&cap) == object::id(&collection), 711);
+
+    // Exactly N plain owned tokens in the caller's inbox, each linked to the collection.
+    let t0 = sc.take_from_sender<NftToken>();
+    let t1 = sc.take_from_sender<NftToken>();
+    let t2 = sc.take_from_sender<NftToken>();
+    assert!(model3d::nft_token_collection_id(&t0) == object::id(&collection), 712);
+    assert!(model3d::nft_token_collection_id(&t1) == object::id(&collection), 713);
+    assert!(model3d::nft_token_collection_id(&t2) == object::id(&collection), 714);
+    assert!(!ts::has_most_recent_for_sender<NftToken>(&sc), 715);
+    destroy_nft_token_for_testing(t0);
+    destroy_nft_token_for_testing(t1);
+    destroy_nft_token_for_testing(t2);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// The batch fn routes a non-zero derive fee to the base creator and returns the
+// remainder — same coin handling as standalone launch_collection.
+#[test]
+fun launch_collection_with_tokens_routes_derive_fee() {
+    let fee: u64 = 2_000_000;
+    let extra: u64 = 500_000;
+
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_permissionless(), fee, 500, true, true);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection_with_tokens(
+        &model,
+        coin::mint_for_testing<SUI>(fee + extra, sc.ctx()),
+        quilt(),
+        0,
+        str_vec(b"T", 1),
+        str_vec(b"p", 1),
+        sc.ctx(),
+    );
+
+    sc.next_tx(CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&fee_coin) == fee, 720);
+    coin::burn_for_testing(fee_coin);
+
+    sc.next_tx(NFT_CREATOR);
+    let change = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&change) == extra, 721);
+    coin::burn_for_testing(change);
+
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    let tok = sc.take_from_sender<NftToken>();
+    destroy_nft_token_for_testing(tok);
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// Mismatched names/patch_ids vector lengths abort EBatchLenMismatch.
+#[test]
+#[expected_failure(abort_code = model3d::EBatchLenMismatch)]
+fun launch_collection_with_tokens_length_mismatch_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    // 2 names, 3 patches → abort before any state change.
+    launch_collection_with_tokens(
+        &model,
+        coin::mint_for_testing<SUI>(0, sc.ctx()),
+        quilt(),
+        0,
+        str_vec(b"N", 2),
+        str_vec(b"p", 3),
+        sc.ctx(),
+    );
+
+    abort 0
 }
 
 // D-036 — resale of an NftToken now runs the ROYALTY-ONLY chain: the creator
