@@ -1,5 +1,27 @@
 # Phase Progress
 
+## Last Updated: 2026-05-21 (U12a + D-038 builder + U12b DONE — full nft-creator launch flow coded) — **Next = seed-publish a v6 Model3D + browser e2e of /launch, then U11 (/track) or U13 (gameDev).**
+
+### Hackathon Tracker
+- Days to submission (6/21): 31 of 38
+- Days to demo day (7/20–21): 60
+- Days to winners (8/27): 98
+
+### Shipped this session (3 commits, all green: tsc clean, 294 vitest, prod bundle builds)
+- **U12a (commit `2f35739`)** — `glb_blob_id` frontend wiring (option A). New `useWalrusUpload.uploadBlob()` (writeBlobFlow → standalone raw blob, 2 popups). `buildPublishPtb` threads `glbBlobId` into the v6 `publish` moveCall after `lineageBlobId`. `CreateModelPage` uploads the GLB standalone; `lineageBlobId = glbBlobId` (lineage.json no longer separately persisted — it was never resolved anywhere; keeps both mint paths at 3 popups). `Model3DSummary += glbBlobId`; 5 mappers read `json.glb_blob_id`.
+- **D-038 builder (commit `ee8ca91`)** — `buildLaunchCollectionWithTokensPtb({ modelId, feeMist, quiltBlobId, registerFeeMist, tokenNames[], tokenPatchIds[] })` in `collectionTxBuilders.ts`. Guards name/patch length parity client-side; structural + live-RPC build-resolution tests against v6.
+- **U12b (commit `9d0aa0a`, net −749 lines)** — new `/launch` `LaunchCollectionPage`: pick base Model3D (`useModelIndex`, forkable = non-empty `glbBlobId`) → fetch base GLB from aggregator `/v1/blobs/<glbBlobId>` → author N variants (`VariantEditor`/`VariantPreview`) → `/api/collection/build` → quilt upload → **one-signature** `launch_collection_with_tokens`. Derive fee read from base model's `license.derivative_mint_fee` (so `Model3DSummary += derivativeMintFee + derivativeRoyaltyBps`, mapped in all 5 summary builders). **Deleted dead forge path** (`ForgePage`, `buildCollectionPtb` + tests — targeted removed Move fns); kept `VariantEditor`/`VariantPreview`. Browse nav: `/forge`→`/launch`, dead `/generate`→`/create`.
+
+### Next Concrete Step — seed + e2e
+**Seed-publish a v6 Model3D** so `/launch`'s base picker has data, then browser-verify the full L1→L2 flow. Options: (a) user runs `/create` in-browser (wallet + GLB), or (b) CLI-scripted seed via `walrus store <glb>` (walrus CLI present at `~/.local/bin/walrus`; sample GLBs in `frontend/public/dev-glbs/`) + `sui client ptb` (new_license_terms → publish) under the deployer keystore — spends real testnet WAL+SUI, needs deployer WAL balance confirmed. **Not yet done — chosen approach pending.**
+
+### Notes for next session
+- `/launch` cannot be browser-tested here (wallet signing is interactive); unit wiring is covered (5 tests incl. asserting `feeMist` = base model `derivative_mint_fee`).
+- `publishPtb.ts` + `purchaseAccessPtb.ts` remain orphaned dead Phase-2 code — separate purge, not in U12 scope.
+- `forge/` dir now holds only `VariantEditor` + `VariantPreview` (reused by `/launch`); slightly misnamed but low-risk to leave.
+
+---
+
 ## Last Updated: 2026-05-21 (U20 + U21 DONE — v6 live; batch launch fn) — **Next = U12a (glb_blob_id frontend wiring, targets v6) → buildLaunchCollectionWithTokensPtb builder → U12b LaunchCollectionPage.**
 
 ### Shipped this session (D-038 + 2 units, committed)
