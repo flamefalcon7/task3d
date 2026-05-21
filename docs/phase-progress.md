@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (U12a + D-038 builder + U12b DONE — full nft-creator launch flow coded) — **Next = seed-publish a v6 Model3D + browser e2e of /launch, then U11 (/track) or U13 (gameDev).**
+## Last Updated: 2026-05-21 (U12a + D-038 builder + U12b + seed DONE — nft-creator launch flow live on v6) — **Next = browser e2e of /launch (interactive wallet), then U11 (/track) or U13 (gameDev).**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38
@@ -12,11 +12,18 @@
 - **D-038 builder (commit `ee8ca91`)** — `buildLaunchCollectionWithTokensPtb({ modelId, feeMist, quiltBlobId, registerFeeMist, tokenNames[], tokenPatchIds[] })` in `collectionTxBuilders.ts`. Guards name/patch length parity client-side; structural + live-RPC build-resolution tests against v6.
 - **U12b (commit `9d0aa0a`, net −749 lines)** — new `/launch` `LaunchCollectionPage`: pick base Model3D (`useModelIndex`, forkable = non-empty `glbBlobId`) → fetch base GLB from aggregator `/v1/blobs/<glbBlobId>` → author N variants (`VariantEditor`/`VariantPreview`) → `/api/collection/build` → quilt upload → **one-signature** `launch_collection_with_tokens`. Derive fee read from base model's `license.derivative_mint_fee` (so `Model3DSummary += derivativeMintFee + derivativeRoyaltyBps`, mapped in all 5 summary builders). **Deleted dead forge path** (`ForgePage`, `buildCollectionPtb` + tests — targeted removed Move fns); kept `VariantEditor`/`VariantPreview`. Browse nav: `/forge`→`/launch`, dead `/generate`→`/create`.
 
-### Next Concrete Step — seed + e2e
-**Seed-publish a v6 Model3D** so `/launch`'s base picker has data, then browser-verify the full L1→L2 flow. Options: (a) user runs `/create` in-browser (wallet + GLB), or (b) CLI-scripted seed via `walrus store <glb>` (walrus CLI present at `~/.local/bin/walrus`; sample GLBs in `frontend/public/dev-glbs/`) + `sui client ptb` (new_license_terms → publish) under the deployer keystore — spends real testnet WAL+SUI, needs deployer WAL balance confirmed. **Not yet done — chosen approach pending.**
+### Seed-publish DONE (CLI option b) — `/launch` base picker now has live data
+- `walrus store frontend/public/dev-glbs/p1.glb --epochs 10` → standalone blob `yCv__aLMlFZxf8MwXLGViS2Ik0cjcf3UYE61yt9ZVe8` (Blob obj `0x69439961…`, ~0.0012 WAL).
+- `sui client ptb` (`new_license_terms` 2/0.1SUI/500bps/true/false → `publish`) under deployer keystore → **seed Model3D `0x38d3bdbb4da15954e26fd1ab55cbd68962705a965618b4fe9ef8fa4a18811b42`** ("Seed Roadster"), ~0.0036 SUI.
+- Verified via the picker's exact GraphQL endpoint: `glb_blob_id` set, `license.derivative_mint_fee=100000000` (0.1 SUI), `derivative_royalty_bps=500`. Aggregator `/v1/blobs/<glb_blob_id>` → HTTP 200, 780988 B, `glTF` magic. So the base picker lists "Seed Roadster" (forkable), `feeMist=100000000n`.
+
+### Next Concrete Step
+**Browser e2e of `/launch`** (interactive — needs a wallet): connect → pick "Seed Roadster" → author variants → `/api/collection/build` → quilt upload → sign `launch_collection_with_tokens`. Then pick up **U11 (/track owned-NftToken discovery)** or **U13 (gameDev register-integration page)**.
 
 ### Notes for next session
-- `/launch` cannot be browser-tested here (wallet signing is interactive); unit wiring is covered (5 tests incl. asserting `feeMist` = base model `derivative_mint_fee`).
+- `/launch` interactive wallet path not browser-tested here; unit wiring is covered (5 tests incl. asserting `feeMist` = base model `derivative_mint_fee`), and all chain-data deps are verified live (seed above).
+- **RTK gotcha:** the curl hook summarizes `curl` stdout into a token-optimized structure (breaks JSON parsing). For raw chain/GraphQL queries use `python3 -c "...urllib..."` instead of curl.
+- Seed base for the demo: Model3D `0x38d3bdbb…` on v6.
 - `publishPtb.ts` + `purchaseAccessPtb.ts` remain orphaned dead Phase-2 code — separate purge, not in U12 scope.
 - `forge/` dir now holds only `VariantEditor` + `VariantPreview` (reused by `/launch`); slightly misnamed but low-risk to leave.
 
