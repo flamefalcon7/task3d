@@ -1,9 +1,21 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (nft-creator `/launch` VERIFIED end-to-end on v6 + a string of read-path fixes) — **Next = U11 (`/track` owned-NftToken discovery) so the user can drive a forked token.**
+## Last Updated: 2026-05-21 (U11 DONE + browser-smoke-passed — `/track` now drives owned NftTokens) — **Next = U13 (gameDev register-integration page) to light up the 4th actor.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### U11 DONE — `/track` owned-NftToken discovery (commit `1e2afd7`, browser-smoke-passed by user)
+Rewrote the dead `Access`-based discovery into owned `NftToken` → `patch_id` quilt resolution (D-035/D-036).
+- **New `frontend/src/track/useOwnedTokens.ts`**: single owned-objects GraphQL query (`objects(owner, type=<v6pkg>::model3d::NftToken)` — D-036 plain owned tokens, no Kiosk walk, no two-pass). Plus `useTokenById` for the `?model=` single-drive path. New `OwnedToken` type.
+- **`walrus/aggregator.glbUrlForToken`**: `patchId` → `by-quilt-patch-id`; `blobId` only for the `?blob=` dev hatch.
+- **`TrackPage`**: 3 discovery paths (owned carousel / `?model=` chain-resolve / `?blob=` dev hatch). PB keyed on `tokenId`. Empty-state copy now NFT-ownership framed.
+- **`carCarousel`** takes `OwnedToken[]`. **Deleted** `useOwnedVariants.{ts,test}` + `stubListingLookup.ts` (dead).
+- Verified: tsc clean, **299 fe tests green**; track-scope grep clean of `Access`/`buy_access`. User confirmed in browser ("剛測了一下沒啥問題").
+- **Four-role status: ✅ modelCreator · ✅ nftCreator · ✅ user (/track) · ⬜ gameDev (U13).**
+
+### Next Concrete Step — U13 (gameDev register-integration page, F3)
+New `frontend/src/integration/RegisterIntegrationPage.tsx` + route in `App.tsx`. Form `name` + `url` (client-validate `https:`-only, reject `javascript:`/`data:`/`http:` before submit, match U7 backend schema). **Re-fetch the collection's `register_fee` via getObject right before signing** (TOCTOU vs `EFeeTooLow`). `buildRegisterIntegrationPtb`. Map aborts → friendly copy: `ELicenseRestricted` → "doesn't accept integrations" + link to `/browse?filter=integration`; `EFeeTooLow` → "increase to ≥ {fee}"; `EAlreadyRegistered` → "already registered". Depends on U6 (builder) + U7 (backend Used-by API/indexer, already done). Covers AE3 UI half.
 
 ### Live e2e verification — `/launch` works (real wallet, in browser)
 The user ran the full nft-creator flow in-browser. Confirmed on chain (tx `DYCbVcVt…` = `launch_collection_with_tokens`, ONE signature):
@@ -20,9 +32,6 @@ The user ran the full nft-creator flow in-browser. Confirmed on chain (tx `DYCbV
 
 ### Seed data on v6 (for pickers/demo)
 - Seed L1 Model3D **`0x38d3bdbb…`** ("Seed Roadster", glb `yCv__…`, fork fee 0.1 SUI, royalty 5%). User's own L1 `0x3220615b…` (8.3 MB avocado — high-poly, not low-poly; fine functionally, small cars are better game content). User wallet topped up with 0.5 WAL (from deployer, digest `6PipeAzG…`).
-
-### Next Concrete Step — U11 (`/track` owned-NftToken discovery)
-`frontend/src/track/useOwnedVariants.ts` still queries the **deleted `Access` type** → always empty (only `?blob=` dev hatch works). Rewrite: query owned objects of type `<v6pkg>::model3d::NftToken` → read `patch_id` → resolve GLB via `glbUrlForSummary` (already handles patchId). Delete the Access-based discovery + `stubListingLookup`. Keep the `?blob=` escape hatch. The user has 2 real owned tokens (`0xb852e23…`, `0xc3a93a87…`) to test against immediately. Pure frontend, scope clear.
 
 ### Notes for next session
 - **RTK gotcha**: the curl hook summarizes `curl` stdout (breaks JSON parsing). Use `python3 -c "...urllib..."` for chain/GraphQL queries. Aggregator 403s urllib's default UA → send `User-Agent: Mozilla/5.0`.
