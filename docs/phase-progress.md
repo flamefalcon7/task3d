@@ -1,5 +1,23 @@
 # Phase Progress
 
+## Last Updated: 2026-05-21 (Plan 010 implemented — Kiosk simple marketplace, D-041) — **Next = live cross-wallet smoke (folds into U15), then U15 demo/pitch.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### Plan 010 DONE (code) — simple Kiosk marketplace (D-041 Accepted; 0 Move changes; targets v7 ids)
+Closes the last broken leg of the four-actor journey: there was **no in-app way for a separate user to acquire an NftToken** (mint transfers to the creator). Built a simple Kiosk marketplace — list-for-sale + purchase — pure frontend on the already-deployed royalty-only `TransferPolicy<NftToken>`.
+- **D-041 decision discipline:** hand-rolled raw `0x2::kiosk` moveCalls instead of `@mysten/kiosk` `KioskTransaction` (SDK is JSON-RPC-oriented; we're on dapp-kit/gRPC). The SDK's `purchaseAndResolve` doesn't fit anyway — it places the bought item into the *buyer's* kiosk and resolves against the SDK's default royalty package, not our `0xe308bb3e…`. SDK used only for **reads** (`getKiosk`/`getOwnedKiosks`), which accept a `SuiGraphQLClient` so we stay on the same GraphQL endpoint — no JSON-RPC client.
+- **U1 (`frontend/src/sui/kioskTxBuilders.ts`):** `buildListNftTokenForSalePtb` — `place_and_list<NftToken>`; creates the seller kiosk in-PTB when absent (`kiosk::new`→`place_and_list`→`public_share_object`→cap to seller). Pure builder, mirrors `collectionTxBuilders.ts`.
+- **U2 (same file):** `buildPurchaseNftTokenPtb` — royalty-only hot-potato: `kiosk::purchase` → `royalty_rule::pay` (our pkg) → `confirm_request` → `public_transfer` freed token to buyer (plain owned → /track discovers it). `royaltyOwedMist(price)` = `max(price×500/10000, 1e6)` exported for the UI.
+- **U3 (`frontend/src/market/useListings.ts`):** `useListings(kioskId, reloadKey?)` — approach (a), demo-grade: read ONE seller kiosk via `getKiosk` (GraphQL client), join `patch_id`/`name` via the standard `objects` query. Plus `fetchOwnedKiosk(addr)` (first kiosk+cap) for the list flow.
+- **U4 (`frontend/src/market/MarketPage.tsx`, route `/market`):** "For sale" grid (Buy → purchase PTB) + "Your cars" (price input → List PTB). Seller kiosk id bridged buyer↔seller via `localStorage` (`overflow2026:market:kiosk`). Browse nav "Marketplace →" added; route wired in `App.tsx`. Buy success → `/track?model=<tokenId>` link.
+- **Verified (unit):** 331/331 frontend tests (+12: 11 builder + 5 useListings + 7 MarketPage, minus overlap), tsc clean, prod build OK.
+- **Verified (LIVE on v7, cross-wallet — 2026-05-21):** keystore-signed smoke (`/tmp/market-smoke.mjs`, not committed) bootstrapped a v7 token from scratch and ran the full chain: publish Model3D `46VaNbxg…` → launch+mint `GJXfUmCr…` → **list** `39Hqw3Bh…` → **purchase** `Ziugq72a…`. Buyer `0x43d9a9…` ends up owning the token as a plain `AddressOwner` (type = v7 NftToken). PROVES the royalty-only `confirm_request` hot-potato (kiosk::purchase → royalty_rule::pay@`0xe308bb3e` → confirm_request → public_transfer) succeeds on v7 with exactly the royalty receipt, royalty = 0.05 SUI on a 1 SUI price, and no lock rule → bought token is plain-owned (so /track discovers it). Only the **dapp-kit browser signing path** remains unverified (user's UI check).
+- **v7 seed objects now live** (from the smoke): forkable Model3D `0x6f60c598f0910603f1f9895bc339146844c02e8726b8d0c6ede301a65efc2a12` (PERMISSIONLESS); NftToken `0xc88e0691d8d36de7f13d4358f74ec141b1a8d0f7f83631a8f09920e3d9bd7397` owned by `0x43d9a99cd822b27afbbc3dad3e274789b008633e67bca1f05e70f2daecb165b2`. Useful for the UI check + U15 demo.
+- Committed: `750ad7f` (D-041 + builders); UI layer commit next.
+- **Custom `purchase_with_kiosk` Move fn is retired** (v3 relic) — we use standard `0x2::kiosk::purchase`. The solutions doc `kiosk-ptb-patterns/confirm-request-hot-potato.md` is STALE (describes the v3 3-rule design); v7 is royalty-only.
+
 ## Last Updated: 2026-05-21 (Plan 009 DONE + code-reviewed — L1 license policy ENFORCED via fresh v7 republish) — **Next = commit, then Plan 010 (Kiosk simple marketplace), then U15 demo.**
 
 ### Hackathon Tracker

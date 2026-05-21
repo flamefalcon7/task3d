@@ -38,7 +38,22 @@ The bootstrap is `ensure_collection_policy` only (D-032 removed `TransferPolicy<
 - `contracts/networks/testnet.json` + `frontend/src/sui/networkConfig.ts` updated to the v7 single id; parity test (`networkConfig.test.ts`) green; full frontend suite 308/308; backend 110/110.
 - Superseded: v6 `0x57e20a13…` (+ its abandoned compatible-upgrade published-at `0x134807cd…`), and historically v5 `0xe0d65c4a…`, v4 `0x3b6b7258…`, v3 `0x35ba17b3…`, v2 `0x563ab54b…`, Phase 3 `0x18a480b3…`.
 
+## Plan 010 (D-041) marketplace smoke — LIVE cross-wallet, 2026-05-21
+
+Keystore-signed smoke (`/tmp/market-smoke.mjs`, not committed) verifying the Kiosk list+purchase chain logic end-to-end on v7. Bootstrapped a token from scratch (v7 was empty) and ran:
+
+| Step | Tx | Created |
+|---|---|---|
+| `publish` v7 Model3D (PERMISSIONLESS, 500 bps) | `46VaNbxgxMxqfALRi9vd58wRBEkNiwPQNUV8mZf1G7cM` | Model3D `0x6f60c598f0910603f1f9895bc339146844c02e8726b8d0c6ede301a65efc2a12` |
+| `launch_collection_with_tokens` (mint 1) | `GJXfUmCr8YyS3PvBmpGpsZ12QtX8escZVKG6ZBPAURpd` | NftToken `0xc88e0691d8d36de7f13d4358f74ec141b1a8d0f7f83631a8f09920e3d9bd7397` |
+| **list** (`kiosk::new` → `place_and_list` → `public_share_object` → cap to seller) | `39Hqw3Bh8Aoaw3tKzGgTPNgFPTEodimf1jEfivQvgUHE` | Kiosk `0x6e0e76604408180d3bfa6d3f17a1719d7d37e2208c49018b6a2f6ce1eeef9644` |
+| **purchase** (`kiosk::purchase` → `royalty_rule::pay`@`0xe308bb3e` → `confirm_request` → `public_transfer`) | `Ziugq72afUrKHXU3pEMgjAjWDBzaLzn2VTQkidNTpKY` | — |
+
+Seller = deployer `0x3116881c…`; buyer = `0x43d9a99c…` (funded 2 SUI). Price 1 SUI, royalty 0.05 SUI (`max(price·500/10000, 1e6)`). **Result:** the purchased NftToken ends up `AddressOwner = buyer` as a plain owned object — confirming the royalty-only `confirm_request` succeeds with exactly the royalty receipt and (no lock rule) the token is freed for /track discovery. The `kioskTxBuilders.ts` PTB shapes are thus validated against the live v7 package + policy. Only the dapp-kit browser signing path remains for a manual UI check.
+
+These objects persist as v7 seed data for the UI check / U15 demo (Model3D `0x6f60c598…` forkable; NftToken `0xc88e0691…` owned by `0x43d9a99c…`).
+
 ## Follow-up
 
 - Live cross-wallet abort confirmation (a non-creator wallet forks a RESTRICTED model → abort 38) folds into the U15 four-actor demo (needs a 2nd wallet + a published RESTRICTED model). Logic covered by Move tests.
-- Plan 010 (Kiosk marketplace) targets the v7 package + the fresh `transfer_policy_id` / `transfer_policy_cap_id` above.
+- Plan 010 (Kiosk marketplace) targets the v7 package + the fresh `transfer_policy_id` / `transfer_policy_cap_id` above. **Chain logic verified live (see smoke above); browser signing-path UI check pending.**

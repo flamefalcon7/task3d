@@ -83,6 +83,9 @@ export function BrowsePage() {
           <Link to="/integrate" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
             Integrate →
           </Link>
+          <Link to="/market" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
+            Marketplace →
+          </Link>
           <Link to="/track" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
             Racetrack →
           </Link>
