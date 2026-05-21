@@ -54,6 +54,9 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const blobId = String(blob.blob_id ?? json.blob_id ?? '');
   const lineageBlobId = String(json.lineage_blob_id ?? '');
   const glbBlobId = String(json.glb_blob_id ?? '');
+  const license = (json.license ?? {}) as Record<string, unknown>;
+  const derivativeMintFee = String(license.derivative_mint_fee ?? '0');
+  const derivativeRoyaltyBps = Number(license.derivative_royalty_bps ?? 0);
   const creator = String(json.creator ?? '');
   const shapeType = String(json.shape_type ?? '');
   const paramsJson = String(json.params_json ?? '');
@@ -83,6 +86,8 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     createdAtMs,
     lineageBlobId,
     glbBlobId,
+    derivativeMintFee,
+    derivativeRoyaltyBps,
   };
 }
 

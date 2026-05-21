@@ -42,5 +42,7 @@ export function stubListingLookup(
     createdAtMs: '0',
     lineageBlobId: '',
     glbBlobId: '',
+    derivativeMintFee: '0',
+    derivativeRoyaltyBps: 0,
   };
 }

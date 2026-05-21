@@ -36,6 +36,8 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     createdAtMs: '1700000000000',
     lineageBlobId: 'lin-1',
     glbBlobId: 'glb-1',
+    derivativeMintFee: '0',
+    derivativeRoyaltyBps: 0,
     ...overrides,
   };
 }

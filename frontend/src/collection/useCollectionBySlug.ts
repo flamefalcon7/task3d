@@ -65,6 +65,12 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     createdAtMs: String(json.created_at_ms ?? '0'),
     lineageBlobId,
     glbBlobId: String(json.glb_blob_id ?? ''),
+    derivativeMintFee: String(
+      ((json.license ?? {}) as Record<string, unknown>).derivative_mint_fee ?? '0',
+    ),
+    derivativeRoyaltyBps: Number(
+      ((json.license ?? {}) as Record<string, unknown>).derivative_royalty_bps ?? 0,
+    ),
   };
 }
 

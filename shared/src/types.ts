@@ -88,6 +88,8 @@ export interface Model3DSummary {
   createdAtMs: string;         // u64 timestamp as string
   lineageBlobId: string;       // D-015
   glbBlobId: string;           // D-037 — standalone Walrus blob id of the GLB mesh ('' if absent)
+  derivativeMintFee: string;   // license.derivative_mint_fee (u64 MIST as string) — derive fee an nft creator pays to fork
+  derivativeRoyaltyBps: number;// license.derivative_royalty_bps (u16, ≤3000 per D-004) snapshotted into L2 collections
 }
 
 // --- Phase 3 Collection Forge types (plan-003 KTD-5, U3, U5) --------------
