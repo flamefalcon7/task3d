@@ -4,6 +4,7 @@ import { useCurrentAccount } from '@mysten/dapp-kit';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useOwnedVariants } from './useOwnedVariants';
 import { stubListingLookup } from './stubListingLookup';
+import { glbUrlForSummary } from '../walrus/aggregator';
 import { CarCarousel } from './carCarousel';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
@@ -18,16 +19,6 @@ import { Countdown } from './Countdown';
 // the selected variant changes. D-004: show a loading overlay while the
 // Walrus fetch + scene-build is in flight (critical for the demo recording
 // so the canvas doesn't go blank during the swap).
-
-function aggregatorUrlForVariant(v: Model3DSummary): string {
-  // Spike-C verdict (R9): Walrus aggregator handles both quilt-patch reads
-  // and single-blob reads. Phase 3 mints have patchId set; Phase 2
-  // degenerate-of-1 mints use the blobId directly.
-  if (v.patchId) {
-    return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${v.patchId}`;
-  }
-  return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${v.blobId}`;
-}
 
 interface LastResult {
   lapMs: number;
@@ -112,7 +103,7 @@ export function TrackPage() {
     setSceneError(null);
     (async () => {
       try {
-        const url = aggregatorUrlForVariant(selected);
+        const url = glbUrlForSummary(selected);
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
         const carGlbBytes = new Uint8Array(await res.arrayBuffer());

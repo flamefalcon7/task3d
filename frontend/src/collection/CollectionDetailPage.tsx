@@ -3,6 +3,7 @@ import type { Model3DSummary } from '@overflow2026/shared';
 import { useCollectionBySlug } from './useCollectionBySlug';
 import { SignInButton } from '../auth/SignInButton';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { glbUrlForSummary } from '../walrus/aggregator';
 
 // Phase 3 (U5): Browse → collection card → here. Renders all N variants of
 // a collection as a grid of tiles, each fetched directly from the Walrus
@@ -12,13 +13,6 @@ import { PreviewCanvas } from '../babylon/PreviewCanvas';
 // Slug strategy is the collectionId verbatim (see CollectionCard header). A
 // Phase 4 indexer can switch this to human slugs without changing the route
 // signature.
-
-function aggregatorUrlForVariant(v: Model3DSummary): string {
-  if (v.patchId) {
-    return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${v.patchId}`;
-  }
-  return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${v.blobId}`;
-}
 
 function truncate(addr: string, head = 6, tail = 4): string {
   if (!addr || addr.length <= head + tail + 1) return addr;
@@ -143,7 +137,7 @@ export function CollectionDetailPage() {
                     at ~8-16 per page; collections above that count will see
                     later tiles render as black. Acceptable for v1 since the
                     cap is 16 variants per Move contract. */}
-                <PreviewCanvas glbUrl={aggregatorUrlForVariant(v)} />
+                <PreviewCanvas glbUrl={glbUrlForSummary(v)} />
               </div>
               <div style={{ padding: 10 }}>
                 <div

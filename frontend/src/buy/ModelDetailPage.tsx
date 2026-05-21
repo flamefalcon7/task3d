@@ -4,6 +4,7 @@ import { useModelById, useOwnsAccess } from './hooks';
 import { BuyAccessButton } from './BuyAccessButton';
 import { SignInButton } from '../auth/SignInButton';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { glbUrlForSummary } from '../walrus/aggregator';
 
 export function ModelDetailPage() {
   const { objectId } = useParams<{ objectId: string }>();
@@ -36,13 +37,7 @@ export function ModelDetailPage() {
     );
   }
 
-  // Phase 3 mints carry patchId addressing a specific slice inside the
-  // collection's quilt; Phase 2 degenerate-of-1 mints have patchId === ''
-  // and the whole blob IS the only patch, so falling back to the blob URL
-  // renders identically.
-  const aggregatorUrl = model.patchId
-    ? `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${model.patchId}`
-    : `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${model.blobId}`;
+  const aggregatorUrl = glbUrlForSummary(model);
 
   return (
     <div

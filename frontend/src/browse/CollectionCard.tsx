@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { glbUrlForSummary } from '../walrus/aggregator';
 
 // CollectionCard replaces ModelCard for the grouped Browse view (U5). One
 // card per Collection — its preview/name are derived from the first variant
@@ -30,18 +31,6 @@ function formatSui(mist: string): string {
   return `${sui.toFixed(sui < 0.01 ? 4 : 2)} SUI`;
 }
 
-// First variant drives the card's visual identity. If its patchId is set we
-// fetch that specific quilt patch from the Walrus testnet aggregator (R9
-// confirmed: HTTP GET on /v1/blobs/by-quilt-patch-id/<patchId>). Phase 2
-// degenerate-of-1 mints carry patchId === '', so we fall back to the whole
-// blob URL (which renders identically because the blob *is* the only patch).
-function previewUrlForVariant(v: Model3DSummary): string {
-  if (v.patchId) {
-    return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/by-quilt-patch-id/${v.patchId}`;
-  }
-  return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${v.blobId}`;
-}
-
 // Derive a human-readable collection name from the variants. For Phase 3
 // proper, U1's CollectionPublished event would carry this; until the Phase 4
 // indexer lands we approximate by stripping a trailing variant index from
@@ -58,12 +47,17 @@ export function CollectionCard({ collectionId, variants }: Props) {
   const first = variants[0]!;
   const name = collectionNameFromVariants(variants);
   const variantCount = variants.length;
-  const previewUrl = previewUrlForVariant(first);
-  const slug = collectionId;
+  const previewUrl = glbUrlForSummary(first);
+  // A v6 L1 Model3D is standalone content with no collection_id, so Browse
+  // buckets it under an `_orphan:<objectId>` group key (see groupByCollection).
+  // Those have no /collection page to resolve — route them to the existing L1
+  // /model/:objectId detail page instead of a dead collection slug.
+  const isStandalone = !collectionId || collectionId.startsWith('_orphan:');
+  const to = isStandalone ? `/model/${first.objectId}` : `/collection/${collectionId}`;
 
   return (
     <Link
-      to={`/collection/${slug}`}
+      to={to}
       data-testid={`collection-card-${collectionId}`}
       style={{
         display: 'block',

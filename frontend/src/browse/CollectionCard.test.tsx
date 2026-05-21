@@ -75,6 +75,15 @@ describe('CollectionCard', () => {
     expect(link.getAttribute('href')).toBe('/collection/0xdeadbeef');
   });
 
+  it('links a standalone L1 model (orphan group) to /model/<objectId>, not the dead collection slug', () => {
+    renderCard({
+      collectionId: '_orphan:0xstand',
+      variants: [makeModel({ objectId: '0xstand', collectionId: '', patchId: '', blobId: '', glbBlobId: 'g' })],
+    });
+    const link = screen.getByTestId('collection-card-_orphan:0xstand') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/model/0xstand');
+  });
+
   it('preview canvas uses Walrus quilt-patch URL when patchId is set', () => {
     renderCard({
       collectionId: '0xcoll',
@@ -86,10 +95,20 @@ describe('CollectionCard', () => {
     );
   });
 
-  it('preview canvas falls back to whole-blob URL when patchId is empty', () => {
+  it('preview canvas resolves a standalone L1 model via glb_blob_id (v6: no patchId/blobId)', () => {
+    renderCard({
+      collectionId: '_orphan:0xa',
+      variants: [makeModel({ patchId: '', blobId: '', glbBlobId: 'glb-standalone' })],
+    });
+    const url = screen.getByTestId('preview-canvas-stub').getAttribute('data-glb-url') ?? '';
+    expect(url).toContain('/v1/blobs/glb-standalone');
+    expect(url).not.toContain('by-quilt-patch-id');
+  });
+
+  it('preview canvas falls back to the legacy whole-blob URL only when patchId and glbBlobId are both empty', () => {
     renderCard({
       collectionId: '0xcoll',
-      variants: [makeModel({ patchId: '', blobId: 'blob-xyz' })],
+      variants: [makeModel({ patchId: '', blobId: 'blob-xyz', glbBlobId: '' })],
     });
     const stub = screen.getByTestId('preview-canvas-stub');
     const url = stub.getAttribute('data-glb-url') ?? '';
