@@ -1,9 +1,21 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (U11 DONE + browser-smoke-passed — `/track` now drives owned NftTokens) — **Next = U13 (gameDev register-integration page) to light up the 4th actor.**
+## Last Updated: 2026-05-21 (U11 + U13 DONE, both browser-smoke-passed — all 4 actors functional) — **Next = U14 (Browse integration filter + Used-by section) so registered integrations are visible in-app.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
+
+### U13 DONE — gameDev `/integrate` page (commit `a4f3826`, integrate tx succeeded on chain)
+gameDev registers an on-chain integration against a permissionless L2 collection: pick collection → {name,url} → pay register_fee → `register_integration` (fee routes to nft creator).
+- **`integration/useCollections.ts`**: GraphQL list of `NftCollection` (no on-chain name → joins `base_model_id` to `useModelIndex` Model3D.name for display) + `fetchCollectionById` (TOCTOU re-fetch of live `register_fee` right before signing).
+- **`integration/appMetadataValidation.ts`**: client mirror of backend schema — `url` **https-only** (reject http/javascript/data/schemeless), `name` ≤64 + control/bidi-char-free. Fails fast pre-popup; backend `parseAppMetadata` stays authoritative.
+- **`sui/abortMessages.ts`**: maps `register_integration` MoveAbort codes (30 closed / 31 fee-too-low / 32 already-reg / 33 metadata-too-long) → human copy (AE3), never raw code. Regex anchors on the `}` closing MoveLocation (Sui errors contain nested `)`).
+- **`RegisterIntegrationPage.tsx`**: picker filtered to `integration_policy == PERMISSIONLESS` (D-030), live-validated form, friendly abort + `/?filter=integration` link on the closed-collection case. Route `/integrate` + **Browse nav "Integrate →" link** (was missing — `/integrate` was URL-only at first).
+- Verified: tsc clean, prod build OK, **323 fe tests green** (+24); user confirmed integrate tx succeeded in browser.
+- **Four-role status: ✅ modelCreator · ✅ nftCreator · ✅ user (/track) · ✅ gameDev (/integrate).** All four actors functional on v6.
+
+### Next Concrete Step — U14 (Browse integration filter + Used-by section, XSS-safe)
+The integrate tx works but registered integrations aren't visible in-app yet (only on suiscan). Build: (1) Browse `?filter=integration` → show only collections with `integration_policy == PERMISSIONLESS` — needs Browse to query L2 `NftCollection` (today it only queries L1 Model3D via `useModelIndex`); reuse `useCollections` from U13. (2) `collection/UsedBySection.tsx` (NEW) → `GET /api/collections/:id/integrations` (U7 backend, already built) → render `name` + sanitized `<a href>` as **text nodes only** (never `dangerouslySetInnerHTML`); states: loading / "No integrations yet" / "Not accepting integrations". Covers R16/R17, AE4 (render half), AE6. Depends on U7 (done) + U8.
 
 ### U11 DONE — `/track` owned-NftToken discovery (commit `1e2afd7`, browser-smoke-passed by user)
 Rewrote the dead `Access`-based discovery into owned `NftToken` → `patch_id` quilt resolution (D-035/D-036).
