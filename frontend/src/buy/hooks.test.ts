@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useModelById } from './hooks';
 
@@ -6,14 +6,9 @@ function mockFetch(impl: (url: RequestInfo | URL, init?: RequestInit) => Promise
   vi.stubGlobal('fetch', vi.fn(impl));
 }
 
-beforeEach(() => {
-  vi.stubEnv('VITE_MODEL3D_PACKAGE_ID', '0xPKG');
-});
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
 });
 
 describe('useModelById', () => {

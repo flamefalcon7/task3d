@@ -2,18 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useModelIndex } from './useModelIndex';
 
-function stubEnv(packageId: string | undefined): void {
-  // why: vi.stubEnv mutates the shared import.meta.env that Vitest exposes to
-  // every module — assigning to the test file's import.meta.env directly only
-  // mutates the local module's view, so the hook (a different module) still
-  // sees the original value.
-  if (packageId === undefined) {
-    vi.unstubAllEnvs();
-  } else {
-    vi.stubEnv('VITE_MODEL3D_PACKAGE_ID', packageId);
-  }
-}
-
 function graphqlResponse(nodes: unknown[]): Response {
   return {
     ok: true,
@@ -46,13 +34,11 @@ function makeNode(overrides: Partial<{ address: string; json: Record<string, unk
 
 beforeEach(() => {
   globalThis.localStorage?.clear();
-  stubEnv('0x123');
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
   globalThis.localStorage?.clear();
 });
 
