@@ -20,26 +20,27 @@
 // from the @mysten/kiosk SDK's testnet-defaults constants. Frontend MUST
 // use OUR pinned value or `confirm_request` fails the rule membership check.
 
-// v5 (D-037): fresh republish of v4. Model3D gained `glb_blob_id` (standalone
-// Walrus blob, resolved via /v1/blobs/<glb_blob_id>) — adding a field to a
-// `key` struct is not in-place upgradeable, hence the fresh package. Everything
-// else carries over from v4: Model3D is a shared object; the only TransferPolicy
-// is for NftToken and carries ONLY the royalty rule (D-036 removed lock +
-// personal_kiosk); mint_nft_token yields a plain owned token; listing is a
-// separate opt-in Kiosk PTB. `transferPolicyId`/`transferPolicyCapId` hold the
-// NftToken policy (generic field names kept for config stability). Supersedes
-// v4 0x3b6b7258….
+// v6 (D-038): fresh republish of v5. Adds the batch entry fn
+// `launch_collection_with_tokens` (one-signature launch + set_register_fee +
+// mint-N + share + transfer cap); existing public signatures + struct layouts
+// are unchanged (purely additive — would qualify for a compatible upgrade, but
+// shipped fresh for consistency per D-038). Everything else carries over from
+// v5: Model3D is a shared object carrying glb_blob_id (D-037); the only
+// TransferPolicy is for NftToken and carries ONLY the royalty rule (D-036);
+// mint yields a plain owned token; listing is a separate opt-in Kiosk PTB.
+// `transferPolicyId`/`transferPolicyCapId` hold the NftToken policy (generic
+// field names kept for config stability). Supersedes v5 0xe0d65c4a….
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0xe0d65c4a48c9f0b52251a5e6d97bfcec09fbd94c6b0d342c1057a019ec05309b',
+    '0x57e20a134282476a8b338e85258790ab93f8c9b194bed6fa6120561787af4094',
   publisherId:
-    '0xcd1943f44e7cb029161b0a81be678a5a909c84287ee686bc1e7278e1c113b671',
+    '0x73ccb3d9619df33e365362b66020ca2608c94949d07735212c7e53935930e549',
   transferPolicyId:
-    '0xd7677bb04c32f43f3064c3c2e5e95c9e66bc09da63c3bb7f526ca2538b4774e8',
+    '0x0e3981e915fd3413b3a62ff6055bf80d67fc8c3e6b80fd437aade5463ffa2386',
   transferPolicyCapId:
-    '0xb09e9a2ebee8bd75be36a48243c95a24698581aca73ecc35c74632ba695cae35',
+    '0x8f049a6ec488bc39df1c1920376b766ba8b13db3cc64a41f4fcf7930f801aabc',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
