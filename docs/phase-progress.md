@@ -1,5 +1,32 @@
 # Phase Progress
 
+## Last Updated: 2026-05-21 (U20 + U21 DONE — v6 live; batch launch fn) — **Next = U12a (glb_blob_id frontend wiring, targets v6) → buildLaunchCollectionWithTokensPtb builder → U12b LaunchCollectionPage.**
+
+### Shipped this session (D-038 + 2 units, committed)
+- **D-038 (Accepted)** — `launch_collection_with_tokens` batch entry fn: one-signature launch + set_register_fee + mint-N owned tokens + share + transfer cap. Collapses the nft-creator flow from ~4 wallet popups to 3 (2 Walrus upload + 1 launch-everything). Additive-only (extract package-private cores; existing signatures unchanged) — shipped fresh-republish for consistency.
+- **U20 (commit `4313caa`)** — Move v6 source. New `launch_collection_with_tokens` + cores `launch_collection_internal`/`mint_nft_token_internal`; existing `launch_collection`/`mint_nft_token` are thin wrappers (signatures unchanged). New abort `EBatchLenMismatch=37`. Test-first; `sui move test` 54/54, build clean.
+- **U21 (commit `2c2a811`)** — v6 fresh republish to testnet. **package `0x57e20a13…af4094`**, UpgradeCap `0x03e7b1a2…`, Publisher `0x73ccb3d9…`, **`TransferPolicy<NftToken> 0x0e3981e9…`** (+ cap `0x8f049a6e…`). Bootstrap rules VecSet = 1 (royalty only). publish digest `Ck933Viq…`, bootstrap `DETEAvJU…`. Both config mirrors updated (parity green); `docs/reports/phase-4-v6-republish.md`. Supersedes v5 `0xe0d65c4a…`.
+
+### Next Concrete Step — U12, now targeting v6
+**U12a — `glb_blob_id` frontend wiring (prerequisite, no Move change):**
+- `modelTxBuilders.buildPublishPtb` (the LIVE publish builder — `publishPtb.ts` is orphaned dead code) — add `glbBlobId` to `PublishArgs` + the `publish` moveCall arg (positionally after `lineageBlobId`, matching v5/v6 signature).
+- `CreateModelPage.tsx` — upload the GLB as its **own standalone blob** (separate from the lineage quilt) so it resolves via `/v1/blobs/<id>`; pass its blob id as `glbBlobId`.
+- `shared` `Model3DSummary` + `browse/useModelIndex.ts` (+ its GraphQL query) — read `glb_blob_id`.
+- Update affected tests. Then publish one model on v6 so the U12 base picker has data.
+
+**New builder (D-038):** `buildLaunchCollectionWithTokensPtb({ modelId, feeMist, quiltBlobId, registerFeeMist, tokenNames[], tokenPatchIds[] })` in `collectionTxBuilders.ts` (+ test) — the one-signature path for U12b.
+
+**U12b — `LaunchCollectionPage`:** new `frontend/src/collection/LaunchCollectionPage.tsx` (+test); `/launch` route. Flow: pick base Model3D (`useModelIndex`) → fetch base GLB from `/v1/blobs/<glb_blob_id>` → author N variants (`VariantEditor`/`VariantPreview`) → `/api/collection/build` → upload N GLBs as one quilt (`useWalrusUpload`) → **`buildLaunchCollectionWithTokensPtb`** (one popup). **Delete dead path:** `forge/ForgePage.tsx` + `forge/buildCollectionPtb.ts`, `/forge` route, BrowsePage `/forge` link (keep `VariantEditor`/`VariantPreview`).
+
+### Decisions locked
+- Popup shape: 2 Walrus + 1 batch launch = 3 total (Walrus 2 are SDK-owned; Enoki sponsored = demo-day concern).
+- base GLB round-trip stays client-side (browser fetches aggregator → base64 → `/api/collection/build`); no backend change.
+
+### Blockers / Open Questions
+- None blocking. v6 (`0x57e20a13…`) is the active package everywhere. `publishPtb.ts` + `purchaseAccessPtb.ts` are orphaned dead Phase-2 code — flagged for a separate purge, not in U12 scope.
+
+---
+
 ## Last Updated: 2026-05-21 (U18 + U19 DONE — v5 live on testnet) — **Next = U12 (nft-creator launch page), with the U10 follow-up GLB-wiring folded into its prep.**
 
 ### Shipped this session (2 units, committed)
