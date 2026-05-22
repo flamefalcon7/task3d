@@ -28,29 +28,28 @@ export interface Listing {
 
 const NFT_TOKEN_TYPE = `${TESTNET.model3dPackageId}::model3d::NftToken`;
 
-const TOKEN_DETAILS_QUERY = /* GraphQL */ `
-  query TokenDetails($ids: [SuiAddress!]!) {
-    objects(filter: { objectIds: $ids }) {
-      nodes {
-        address
-        asMoveObject {
-          contents {
-            json
-          }
+// One object by id. Sui GraphQL's ObjectFilter has no `objectIds` field, so we
+// fetch each listed token individually (kiosk-placed items keep their object id
+// — they're stored as dynamic OBJECT fields — so this resolves them fine).
+const TOKEN_DETAIL_QUERY = /* GraphQL */ `
+  query TokenDetail($id: SuiAddress!) {
+    object(address: $id) {
+      address
+      asMoveObject {
+        contents {
+          json
         }
       }
     }
   }
 `;
 
-interface TokenDetailsResponse {
+interface TokenDetailResponse {
   data?: {
-    objects?: {
-      nodes?: Array<{
-        address?: string;
-        asMoveObject?: { contents?: { json?: Record<string, unknown> | null } | null } | null;
-      }>;
-    };
+    object?: {
+      address?: string;
+      asMoveObject?: { contents?: { json?: Record<string, unknown> | null } | null } | null;
+    } | null;
   };
   errors?: Array<{ message: string }>;
 }
@@ -102,42 +101,38 @@ export async function fetchListedRefs(kioskId: string): Promise<ListedRef[]> {
     }));
 }
 
+async function fetchTokenJson(tokenId: string): Promise<Record<string, unknown>> {
+  const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: TOKEN_DETAIL_QUERY, variables: { id: tokenId } }),
+  });
+  if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
+  const json = (await resp.json()) as TokenDetailResponse;
+  if (json.errors?.length) {
+    throw new Error(json.errors.map((e) => e.message).join('; '));
+  }
+  return json.data?.object?.asMoveObject?.contents?.json ?? {};
+}
+
 async function joinTokenDetails(
   refs: ListedRef[],
   kioskId: string,
 ): Promise<Listing[]> {
   if (refs.length === 0) return [];
-  const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      query: TOKEN_DETAILS_QUERY,
-      variables: { ids: refs.map((r) => r.tokenId) },
+  return Promise.all(
+    refs.map(async (ref) => {
+      const j = await fetchTokenJson(ref.tokenId);
+      return {
+        tokenId: ref.tokenId,
+        priceMist: ref.priceMist,
+        name: String(j.name ?? ''),
+        patchId: String(j.patch_id ?? ''),
+        collectionId: String(j.collection_id ?? ''),
+        kioskId,
+      };
     }),
-  });
-  if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
-  const json = (await resp.json()) as TokenDetailsResponse;
-  if (json.errors?.length) {
-    throw new Error(json.errors.map((e) => e.message).join('; '));
-  }
-
-  const detailsById = new Map<string, Record<string, unknown>>();
-  for (const node of json.data?.objects?.nodes ?? []) {
-    const j = node.asMoveObject?.contents?.json;
-    if (node.address && j) detailsById.set(node.address, j);
-  }
-
-  return refs.map((ref) => {
-    const j = detailsById.get(ref.tokenId) ?? {};
-    return {
-      tokenId: ref.tokenId,
-      priceMist: ref.priceMist,
-      name: String(j.name ?? ''),
-      patchId: String(j.patch_id ?? ''),
-      collectionId: String(j.collection_id ?? ''),
-      kioskId,
-    };
-  });
+  );
 }
 
 export interface UseListingsResult {

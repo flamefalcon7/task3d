@@ -14,23 +14,18 @@ vi.mock('@mysten/kiosk', () => ({
   KioskClient: vi.fn(() => ({ getKiosk: getKioskMock })),
 }));
 
-function detailsResponse(
-  nodes: Array<{ address: string; json: Record<string, unknown> }>,
-): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      data: {
-        objects: {
-          nodes: nodes.map((n) => ({
-            address: n.address,
-            asMoveObject: { contents: { json: n.json } },
-          })),
-        },
-      },
-    }),
-  } as unknown as Response;
+// Per-id object(address:) responder. `byId` maps a tokenId to its Move json;
+// the mock reads variables.id from the request body and returns that token.
+function tokenDetailFetch(byId: Record<string, Record<string, unknown>>) {
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    const id = JSON.parse((init?.body as string) ?? '{}').variables?.id as string;
+    const json = byId[id] ?? null;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { object: json ? { address: id, asMoveObject: { contents: { json } } } : null } }),
+    } as unknown as Response;
+  });
 }
 
 afterEach(() => {
@@ -49,12 +44,10 @@ describe('useListings', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        detailsResponse([
-          { address: TOKEN_A, json: { name: 'Racer A', patch_id: 'pA', collection_id: '0xc1' } },
-          { address: TOKEN_B, json: { name: 'Racer B', patch_id: 'pB', collection_id: '0xc1' } },
-        ]),
-      ),
+      tokenDetailFetch({
+        [TOKEN_A]: { name: 'Racer A', patch_id: 'pA', collection_id: '0xc1' },
+        [TOKEN_B]: { name: 'Racer B', patch_id: 'pB', collection_id: '0xc1' },
+      }),
     );
 
     const { result } = renderHook(() => useListings(KIOSK_ID));
@@ -74,18 +67,19 @@ describe('useListings', () => {
         { objectId: OTHER, type: '0x2::foo::Bar', listing: { price: '5' } }, // wrong type
       ],
     });
-    const fetchSpy = vi.fn(async () =>
-      detailsResponse([{ address: TOKEN_A, json: { name: 'A', patch_id: 'pA', collection_id: '0xc1' } }]),
-    );
+    const fetchSpy = tokenDetailFetch({
+      [TOKEN_A]: { name: 'A', patch_id: 'pA', collection_id: '0xc1' },
+    });
     vi.stubGlobal('fetch', fetchSpy);
 
     const { result } = renderHook(() => useListings(KIOSK_ID));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.listings.map((l) => l.tokenId)).toEqual([TOKEN_A]);
     // the detail query is asked only for the one listed token
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     const init = (fetchSpy.mock.calls[0] as unknown[])[1] as RequestInit;
     const body = JSON.parse(init.body as string);
-    expect(body.variables.ids).toEqual([TOKEN_A]);
+    expect(body.variables.id).toBe(TOKEN_A);
   });
 
   it('skips fetching and returns empty when no kioskId is given', async () => {
