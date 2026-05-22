@@ -2020,6 +2020,38 @@ Build a *simple* marketplace on **Sui Kiosk** (the standard primitive) — not a
 
 ---
 
+## D-042: NftToken resale royalty = global 5% with a 0.001 SUI floor
+
+**Status**: Accepted
+**Date**: 2026-05-22
+**Phase**: 4 (retroactive capture — the constants shipped in plan-007 U3 without a dedicated ADR; this records the rationale we are committing to)
+
+### Context
+The shared `TransferPolicy<NftToken>` carries a single Mysten built-in `royalty_rule`, configured in `ensure_collection_policy` via `royalty_rule::add(policy, cap, AMOUNT_BP_DEFAULT, MIN_ROYALTY_AMOUNT_MIST)`. Two parameters are ours to choose; the rule's charge formula is the framework's:
+`royalty_owed = max(price * amount_bp / 10_000, MIN_ROYALTY_AMOUNT_MIST)`.
+
+The **rate** (5% / 500 bps) had a recorded rationale (brainstorm `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md`); the **floor** (`MIN_ROYALTY_AMOUNT_MIST = 1_000_000` = 0.001 SUI) shipped without one. This ADR closes that gap.
+
+### Decision
+Keep both parameters as set in `contracts/model3d/sources/model3d.move`:
+- `AMOUNT_BP_DEFAULT = 500` (5%) — a single **global** rate applied to every NftToken Kiosk resale (not per-collection).
+- `MIN_ROYALTY_AMOUNT_MIST = 1_000_000` (0.001 SUI) — a minimum royalty floor.
+
+### Rationale
+- **Rate (5%)**: industry-standard creator royalty (within OpenSea's 2.5–10% range); large enough to render visibly in the demo's on-screen royalty receipt; not punitive.
+- **Floor (0.001 SUI)**: prevents a zero- or dust-priced listing from paying ~0 royalty. Without a floor a free/1-mist sale routes no value to the policy, which both undermines the "creators are paid on resale" pitch claim and is an obvious wash-trade / royalty-bypass vector. `royalty_rule`'s `min_amount` parameter exists precisely for this; 0.001 SUI is a negligible buyer cost while guaranteeing a non-trivial creator floor.
+
+### Consequences
+- ✅ Every resale (even free/dust listings) routes a non-zero royalty to the policy.
+- ⚠️ For prices **below ~0.02 SUI** the floor dominates, so the *effective* rate exceeds 5% (e.g. a 0.01 SUI sale pays 0.001 = 10%). The `amount * 10_000 / price == 500` invariant only holds at price ≥ 0.02 SUI — an indexer must handle both branches (already noted in the model3d.move constant doc-block).
+- ⚠️ Global, not per-collection: a creator's per-license `derivative_royalty_bps` (cap 30%, `MAX_DERIVATIVE_ROYALTY_BPS`, [[D-004]]) is **stored but not charged on resale** in v1 — that needs a custom `split_royalty_rule` deferred to v1.1.
+- 🔮 Changing either value requires `remove_rule` + re-add (TransferPolicyCap authority) or a fresh republish, since RoyaltyRule's Config has no setter.
+
+### Related
+- Set in `contracts/model3d/sources/model3d.move` (`AMOUNT_BP_DEFAULT`, `MIN_ROYALTY_AMOUNT_MIST`, `ensure_collection_policy`); royalty-only policy from [[D-036]]; rate rationale in the Phase-4 brainstorm; distinct from the deferred L2 derivative royalty ([[D-004]]).
+
+---
+
 # Reserved Decision Numbers
 
-D-042 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-043 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
