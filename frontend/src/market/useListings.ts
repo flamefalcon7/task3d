@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { KioskClient } from '@mysten/kiosk';
 import { SuiGraphQLClient } from '@mysten/sui/graphql';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
-import { TESTNET } from '../sui/networkConfig';
 
 // plan-010 U3 (D-041) — discover NftTokens currently listed for sale.
 //
@@ -25,8 +24,6 @@ export interface Listing {
   collectionId: string;
   kioskId: string; // the kiosk the buyer purchases from
 }
-
-const NFT_TOKEN_TYPE = `${TESTNET.model3dPackageId}::model3d::NftToken`;
 
 // One object by id. Sui GraphQL's ObjectFilter has no `objectIds` field, so we
 // fetch each listed token individually (kiosk-placed items keep their object id
@@ -86,19 +83,61 @@ export async function fetchOwnedKiosk(address: string): Promise<OwnedKioskRef | 
   return { kioskId: cap.kioskId, kioskCapId: cap.objectId };
 }
 
-/** Read the kiosk's listed NftToken refs (id + price). Exported for testing. */
+// Read the kiosk's `Listing` dynamic fields directly. We do NOT use
+// @mysten/kiosk's getKiosk for prices: in this SDK version its
+// `withListingPrices` decode is broken and returns garbage u64s (e.g.
+// 6778647746668833948 for a real price of 10000000). The raw dynamic field is
+// authoritative — name is `0x2::kiosk::Listing { id, is_exclusive }` (id = the
+// listed item) and value is the u64 price in MIST.
+const KIOSK_LISTINGS_QUERY = /* GraphQL */ `
+  query KioskListings($id: SuiAddress!) {
+    object(address: $id) {
+      dynamicFields {
+        nodes {
+          name { type { repr } json }
+          value { __typename ... on MoveValue { json } }
+        }
+      }
+    }
+  }
+`;
+
+interface KioskListingsResponse {
+  data?: {
+    object?: {
+      dynamicFields?: {
+        nodes?: Array<{
+          name?: { type?: { repr?: string }; json?: { id?: string } | null } | null;
+          value?: { __typename?: string; json?: unknown } | null;
+        }>;
+      } | null;
+    } | null;
+  };
+  errors?: Array<{ message: string }>;
+}
+
+/** Read the kiosk's listed token refs (id + price). Exported for testing. */
 export async function fetchListedRefs(kioskId: string): Promise<ListedRef[]> {
-  const kioskClient = makeKioskClient();
-  const { items } = await kioskClient.getKiosk({
-    id: kioskId,
-    options: { withListingPrices: true },
+  const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: KIOSK_LISTINGS_QUERY, variables: { id: kioskId } }),
   });
-  return items
-    .filter((item) => item.type === NFT_TOKEN_TYPE && item.listing?.price != null)
-    .map((item) => ({
-      tokenId: item.objectId,
-      priceMist: BigInt(item.listing!.price as string),
-    }));
+  if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
+  const json = (await resp.json()) as KioskListingsResponse;
+  if (json.errors?.length) {
+    throw new Error(json.errors.map((e) => e.message).join('; '));
+  }
+  const refs: ListedRef[] = [];
+  for (const node of json.data?.object?.dynamicFields?.nodes ?? []) {
+    if (!node.name?.type?.repr?.includes('::kiosk::Listing')) continue;
+    const tokenId = node.name.json?.id;
+    const price = node.value?.json; // u64 emitted as a decimal string
+    if (tokenId && (typeof price === 'string' || typeof price === 'number')) {
+      refs.push({ tokenId, priceMist: BigInt(price) });
+    }
+  }
+  return refs;
 }
 
 async function fetchTokenJson(tokenId: string): Promise<Record<string, unknown>> {
