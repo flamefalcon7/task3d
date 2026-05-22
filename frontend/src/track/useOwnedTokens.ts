@@ -98,6 +98,9 @@ export interface UseOwnedTokensResult {
 
 export function useOwnedTokens(
   walletAddress: string | undefined,
+  // Bump to force a refetch (e.g. after a purchase mints ownership) — owned
+  // objects change without the address changing, so this is the refresh hook.
+  reloadKey?: unknown,
 ): UseOwnedTokensResult {
   const [tokens, setTokens] = useState<OwnedToken[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,7 +144,7 @@ export function useOwnedTokens(
     return () => {
       cancelled = true;
     };
-  }, [walletAddress]);
+  }, [walletAddress, reloadKey]);
 
   return { tokens, loading, error };
 }

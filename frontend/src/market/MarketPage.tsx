@@ -9,7 +9,7 @@
 // A global, multi-seller marketplace would index kiosk::ItemListed events
 // (deferred post-submission).
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { SignInButton } from '../auth/SignInButton';
@@ -59,14 +59,48 @@ export function MarketPage() {
     reloadKey,
   );
 
-  const { tokens, loading: tokensLoading } = useOwnedTokens(account?.address);
+  const { tokens, loading: tokensLoading } = useOwnedTokens(account?.address, reloadKey);
 
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>('idle');
+  const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [boughtTokenId, setBoughtTokenId] = useState<string | null>(null);
 
   const busy = phase === 'busy';
+
+  // Avoid setState after unmount when the post-tx poll is still running.
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
+
+  // signAndExecute resolves on fullnode execution, but the GraphQL endpoint we
+  // read from indexes a beat later — a single immediate refetch comes back
+  // stale. Poll a few times so the new listing/ownership shows without a manual
+  // page refresh. `resolveOwnKiosk` re-reads the seller's kiosk id after a
+  // listing (it may be a brand-new kiosk); a buyer must NOT overwrite kioskId.
+  const pollRefresh = useCallback(
+    async (resolveOwnKiosk: boolean) => {
+      setSyncing(true);
+      for (let i = 0; i < 5 && aliveRef.current; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!aliveRef.current) return;
+        if (resolveOwnKiosk && account) {
+          try {
+            const k = await fetchOwnedKiosk(account.address);
+            if (k && aliveRef.current) {
+              writeStoredKiosk(k.kioskId);
+              setKioskId(k.kioskId);
+            }
+          } catch {
+            // transient indexer error — keep polling
+          }
+        }
+        if (aliveRef.current) setReloadKey((v) => v + 1);
+      }
+      if (aliveRef.current) setSyncing(false);
+    },
+    [account],
+  );
 
   // Tokens already listed are filtered out of the "list" section so the seller
   // can't double-list the same object.
@@ -107,12 +141,13 @@ export function MarketPage() {
         }
         setReloadKey((k) => k + 1);
         setPhase('idle');
+        void pollRefresh(true);
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : 'Listing was rejected.');
         setPhase('error');
       }
     },
-    [account, priceInputs, signAndExecute],
+    [account, priceInputs, signAndExecute, pollRefresh],
   );
 
   const onBuy = useCallback(
@@ -131,12 +166,13 @@ export function MarketPage() {
         setBoughtTokenId(tokenId);
         setReloadKey((k) => k + 1);
         setPhase('idle');
+        void pollRefresh(false);
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : 'Purchase was rejected.');
         setPhase('error');
       }
     },
-    [account, signAndExecute],
+    [account, signAndExecute, pollRefresh],
   );
 
   if (!account) {
@@ -158,7 +194,14 @@ export function MarketPage() {
 
       {/* For sale */}
       <section data-testid="for-sale" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 15 }}>For sale</h2>
+        <h2 style={{ fontSize: 15 }}>
+          For sale{' '}
+          {syncing && (
+            <span data-testid="market-syncing" style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>
+              · updating…
+            </span>
+          )}
+        </h2>
         {listingsError && (
           <p data-testid="listings-error" style={{ color: 'crimson' }}>
             Couldn’t load listings: {listingsError.message}
