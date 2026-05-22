@@ -1,6 +1,35 @@
 # Phase Progress
 
-## Last Updated: 2026-05-21 (Plan 010 implemented — Kiosk simple marketplace, D-041) — **Next = live cross-wallet smoke (folds into U15), then U15 demo/pitch.**
+## Last Updated: 2026-05-22 (Plan 010 shipped + browser-hardening bug-fix chain) — **Next = (optional) market type-filter, then U15 demo/pitch.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 30 of 38 · demo day (7/20–21): 59 · winners (8/27): 97
+
+### This session — Plan 010 live + a chain of browser-test bug fixes (all committed, 335 fe tests green, build clean)
+Plan 010 marketplace (D-041) is implemented (U1–U4: `bc89d78`, `750ad7f`) and chain-logic verified live cross-wallet (see the v7 report). User then browser-tested `/create` → `/launch` → `/market` and surfaced a series of real bugs, all fixed:
+- **`a87f706` + `bb3555a`** — `/api/collection/build` 422 on Tripo GLBs. Backend `gltf-transform` NodeIO registered no extensions → rejected `KHR_mesh_quantization` **and** `EXT_meshopt_compression`. Registered both (+`meshoptimizer` codec for meshopt decode/encode). Verified against the user's real 1.29 MB `penis_small` GLB.
+- **`9f8e38a` + `cc8dcdd`** — expired-JWT UX. 24h token expiry showed raw 401. Added `useSession.clearSession()` + `isJwtExpired()`; expired stored tokens are dropped on read (both pages gate to sign-in); `/launch` build 401 → re-sign-in prompt; `/create` guards the SUI payment behind an expiry pre-check (no charge-then-401).
+- **`813038f`** — market listings query used `objects(filter:{objectIds})` which this Sui GraphQL schema lacks → fetch each token by `object(address:)`.
+- **`b2d2c42`** — `@mysten/kiosk` `getKiosk` `withListingPrices` returns **garbage prices** (6.7e18 for a real 1e7) on both GraphQL+JSON-RPC paths in this SDK version. Now read the `0x2::kiosk::Listing` dynamic field directly (authoritative).
+- **`458037a`** — auto-refresh after list/buy (poll the indexer ~7.5s; signAndExecute resolves before GraphQL indexes). Threaded `reloadKey` into `useOwnedTokens`.
+- **`49b354d`** — marketplace now aggregates listings across a SET of kiosks (connected wallet's own via `getOwnedKiosks` ∪ kiosks listed-into on this browser, localStorage). Fixes "listing vanished" when a listing landed in a kiosk other than the single one tracked. `useListings` now takes `string[]`.
+- **`4a52051`** — D-042 ADR: royalty = global 5% + 0.001 SUI floor rationale (retroactive capture; floor stops dust-price royalty bypass).
+
+### Live testnet state (v7) for the demo / next session
+- Kiosk `0x7480cefaa623…` (owned by `0xc731848b…`): 3 listings @ 0.01 SUI (tokens a197/cc6b/ea96).
+- Kiosk `0x6e0e766044…` (owned by capy `0x3116881c…`): 1 listing `penis_small #1` (ced9) @ 0.1 SUI.
+- v7 Model3D: `penis_small` `0x3a86f02661…` (glb `gJLPqfep…`, creator 0xc731), `Smoke Model` `0x6f60c598…` (capy).
+- The user's uploaded car GLBs live in `frontend/public/dev-glbs/` (`turbo-v1.glb`, `turbo-seg.glb`, `v1.4.glb`, + `p1.glb` seed) — committed in git.
+
+### Open / deferred (decide next session)
+- **PENDING (not done): market type-filter.** `useListings.fetchListedRefs` reads ALL Listing dynamic fields in a kiosk with NO type filter — a non-model3d NFT in the same kiosk would show as a blank-name/broken-preview listing. Fix = also fetch each token's `type` in `joinTokenDetails` and drop non-`<v7pkg>::model3d::NftToken`. Cheap (one extra field). User was asked, hasn't confirmed.
+- **Discovery is approach (a)** (known-kiosk set, demo-grade); true global marketplace = option (b) `kiosk::ItemListed` event indexer (extend U7), deferred post-submission (D-041).
+- Network-mismatch guard (block when wallet ≠ testnet) — suggested, not built.
+- U15 (four-actor demo recording + pitch + README + honest disclosure) still the big remaining item.
+
+---
+
+## (2026-05-21) Plan 010 implemented — Kiosk simple marketplace, D-041
 
 ### Hackathon Tracker
 - Days to submission (6/21): 31 of 38 · demo day (7/20–21): 60 · winners (8/27): 98
