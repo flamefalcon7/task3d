@@ -7,7 +7,7 @@ import {
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { generate } from '../lib/api';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
-import { useSession } from '../auth/useSession';
+import { useSession, isJwtExpired } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { MintButton, type MintStatus } from './MintButton';
 import {
@@ -96,7 +96,7 @@ export function CreateModelPage() {
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
 
-  const { session } = useSession();
+  const { session, clearSession } = useSession();
   const account = useCurrentAccount();
   const { uploadBlob, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
@@ -117,6 +117,14 @@ export function CreateModelPage() {
   // Tripo: pay the SUI service fee, then call the gated /api/generate.
   const onGenerate = useCallback(async () => {
     if (!session || !prompt.trim()) return;
+    // Guard the payment: if the JWT is already expired, bail BEFORE charging
+    // SUI — otherwise the user pays and the gated /api/generate then 401s.
+    if (isJwtExpired(session.jwt)) {
+      clearSession();
+      setGenError('Your session expired. Please sign in again, then retry — you have not been charged.');
+      setGenStatus('error');
+      return;
+    }
     setGenError(null);
     try {
       setGenStatus('paying');
@@ -131,10 +139,18 @@ export function CreateModelPage() {
       setGlbBytes(result.glbBytes);
       setGenStatus('idle');
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // Token expired mid-flight (after the pre-check, before/at the call).
+      // Clear the session so the page re-gates to sign-in.
+      if (/HTTP 401/.test(msg)) {
+        clearSession();
+        setGenError('Your session expired. Please sign in again, then retry.');
+      } else {
+        setGenError(msg);
+      }
       setGenStatus('error');
     }
-  }, [session, prompt, signAndExecute, setGlbBytes]);
+  }, [session, prompt, signAndExecute, setGlbBytes, clearSession]);
 
   const onUpload = useCallback(
     async (file: File) => {

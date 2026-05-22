@@ -13,6 +13,14 @@ import { SignInButton } from './SignInButton';
 
 const ADDRESS = `0x${'a'.repeat(64)}`;
 
+// useSession now drops expired tokens on read, so an active-session fixture
+// needs a real future exp claim (header.payload.sig with exp = now + 1h).
+function makeJwt(expSecondsFromNow: number): string {
+  const enc = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, '');
+  const exp = Math.floor(Date.now() / 1000) + expSecondsFromNow;
+  return `${enc({ alg: 'HS256', typ: 'JWT' })}.${enc({ sub: ADDRESS, exp })}.sig`;
+}
+
 const mockConnect = vi.fn();
 const mockDisconnect = vi.fn();
 const mockSignPersonalMessage = vi.fn();
@@ -77,7 +85,7 @@ describe('SignInButton', () => {
     mockAccount = { address: ADDRESS };
     localStorage.setItem(
       'overflow2026.session',
-      JSON.stringify({ address: ADDRESS, jwt: 'jwt-1' }),
+      JSON.stringify({ address: ADDRESS, jwt: makeJwt(3600) }),
     );
     render(<SignInButton />);
     expect(screen.getByTestId('session-active')).toBeTruthy();

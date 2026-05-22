@@ -27,12 +27,36 @@ function challengeMessage(nonce: string): string {
   return `overflow2026 sign-in: ${nonce}`;
 }
 
+// Decode a JWT's `exp` (seconds) and report whether it has passed. A token we
+// can't parse, or one without a numeric exp, is treated as expired (fail
+// closed). Used so a stale 24h token never presents as a live session — which
+// previously let the UI show "signed in" and, worse, let /create take the SUI
+// payment before the gated call 401'd.
+export function isJwtExpired(jwt: string): boolean {
+  try {
+    const payload = jwt.split('.')[1];
+    if (!payload) return true;
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as {
+      exp?: unknown;
+    };
+    if (typeof claims.exp !== 'number') return true;
+    return claims.exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+}
+
 function readStoredSession(): Session | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Session;
     if (!parsed.address || !parsed.jwt) return null;
+    // Drop an expired token so the app gates to sign-in instead of trusting it.
+    if (isJwtExpired(parsed.jwt)) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
     return parsed;
   } catch {
     return null;

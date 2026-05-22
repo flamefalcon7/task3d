@@ -11,7 +11,12 @@ vi.mock('@mysten/dapp-kit', () => ({
 }));
 
 const useSessionMock = vi.fn();
-vi.mock('../auth/useSession', () => ({ useSession: () => useSessionMock() }));
+const clearSessionMock = vi.fn();
+const isJwtExpiredMock = vi.fn((_jwt?: string) => false);
+vi.mock('../auth/useSession', () => ({
+  useSession: () => useSessionMock(),
+  isJwtExpired: (jwt: string) => isJwtExpiredMock(jwt),
+}));
 
 const uploadBlobMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
@@ -30,7 +35,10 @@ const ADDR = '0x' + '3'.repeat(64);
 
 beforeEach(() => {
   useCurrentAccountMock.mockReturnValue({ address: ADDR });
-  useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' } });
+  clearSessionMock.mockReset();
+  isJwtExpiredMock.mockReset();
+  isJwtExpiredMock.mockReturnValue(false);
+  useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   signAndExecuteMock.mockReset();
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
@@ -87,6 +95,25 @@ describe('CreateModelPage', () => {
     const body = JSON.parse((firstCall[1] as RequestInit).body as string);
     expect(body).toMatchObject({ prompt: 'a sword', paymentDigest: 'PAYDIGEST123' });
     expect(screen.getByTestId('confirm-model')).toBeTruthy();
+  });
+
+  it('does NOT pay when the session is expired — clears it and prompts re-sign-in', async () => {
+    isJwtExpiredMock.mockReturnValue(true);
+    signAndExecuteMock.mockResolvedValue({ digest: 'SHOULD_NOT_BE_CALLED' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<CreateModelPage />);
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button'));
+    });
+
+    // Critical: no SUI charged, no backend call — bailed before payment.
+    expect(signAndExecuteMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(clearSessionMock).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
   });
 
   it('offers only Open/Restricted policy options (no allow-list), defaulting to Open (D-040)', async () => {
