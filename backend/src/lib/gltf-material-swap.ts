@@ -1,5 +1,6 @@
 import { NodeIO } from '@gltf-transform/core';
-import { KHRMeshQuantization } from '@gltf-transform/extensions';
+import { KHRMeshQuantization, EXTMeshoptCompression } from '@gltf-transform/extensions';
+import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -51,12 +52,19 @@ export async function swapMaterial(
   spec: VariantMaterialSpec,
   textureLoader: (id: TextureId) => Promise<Uint8Array> = loadBundledTexture,
 ): Promise<Uint8Array> {
-  // Register KHR_mesh_quantization so quantized base GLBs (Tripo and many
-  // exporters emit these to shrink files) parse instead of failing with
-  // "Missing required extension". The extension needs no decoder — quantized
-  // vertex data passes straight through the material-only edit, and Babylon
-  // dequantizes it client-side at render time.
-  const io = new NodeIO().registerExtensions([KHRMeshQuantization]);
+  // Tripo (and many exporters) ship compressed GLBs: KHR_mesh_quantization
+  // and/or EXT_meshopt_compression listed in `extensionsRequired`. Without
+  // these registered, gltf-transform throws "Missing required extension" and
+  // the route returned 422 glb_parse_failed. Quantization is decoder-free, but
+  // meshopt needs the wasm codec wired in as a dependency (decoder to read,
+  // encoder to re-serialize the geometry after the material-only edit).
+  await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
+  const io = new NodeIO()
+    .registerExtensions([KHRMeshQuantization, EXTMeshoptCompression])
+    .registerDependencies({
+      'meshopt.decoder': MeshoptDecoder,
+      'meshopt.encoder': MeshoptEncoder,
+    });
   const doc = await io.readBinary(baseGlb);
   const materials = doc.getRoot().listMaterials();
   if (materials.length === 0) {

@@ -28,6 +28,9 @@ importers:
       hono:
         specifier: ^4.6.0
         version: 4.12.18
+      meshoptimizer:
+        specifier: ^1.1.1
+        version: 1.1.1
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -2959,6 +2962,10 @@ packages:
     resolution: {integrity: sha512-1N4qp+jE0pL5Xv4uEcwVUhIkwdUO3S/9gML90nqKA7v7FcOS5vUtatfzok9S9U1EJU8dHWlcv95WLnKmmxZI9w==}
     dependencies:
       '@babel/runtime': 7.29.2
+    dev: false
+
+  /meshoptimizer@1.1.1:
+    resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
     dev: false
 
   /mime-db@1.52.0:

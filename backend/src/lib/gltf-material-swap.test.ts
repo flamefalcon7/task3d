@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { KHRMeshQuantization } from '@gltf-transform/extensions';
+import { KHRMeshQuantization, EXTMeshoptCompression } from '@gltf-transform/extensions';
+import { MeshoptEncoder } from 'meshoptimizer';
 import {
   swapMaterial,
   loadBundledTexture,
@@ -113,12 +114,32 @@ async function makeQuantizedFixtureGlb(): Promise<Uint8Array> {
   return io.writeBinary(doc);
 }
 
+// A GLB compressed with EXT_meshopt_compression — the real Tripo failure mode
+// (needs the meshopt wasm decoder, not just extension registration).
+async function makeMeshoptFixtureGlb(): Promise<Uint8Array> {
+  const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
+  await MeshoptEncoder.ready;
+  const io = new NodeIO()
+    .registerExtensions([EXTMeshoptCompression])
+    .registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
+  const doc = await io.readBinary(base);
+  doc.createExtension(EXTMeshoptCompression).setRequired(true);
+  return io.writeBinary(doc);
+}
+
 describe('swapMaterial', () => {
   it('parses a base GLB that requires KHR_mesh_quantization (Tripo-style)', async () => {
     const base = await makeQuantizedFixtureGlb();
     // Before registering the extension this threw "Missing required extension"
     // and the route returned 422 glb_parse_failed. Now it parses + edits.
     const out = await swapMaterial(base, { baseColorRgb: [0, 1, 0, 1] }, async () => new Uint8Array());
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it('parses a base GLB compressed with EXT_meshopt_compression (Tripo-style)', async () => {
+    const base = await makeMeshoptFixtureGlb();
+    const out = await swapMaterial(base, { baseColorRgb: [0, 0, 1, 1] }, async () => new Uint8Array());
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBeGreaterThan(0);
   });
