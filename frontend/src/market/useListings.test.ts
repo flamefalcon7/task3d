@@ -60,7 +60,7 @@ describe('useListings', () => {
       ]),
     );
 
-    const { result } = renderHook(() => useListings(KIOSK_ID));
+    const { result } = renderHook(() => useListings([KIOSK_ID]));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBeNull();
     expect(result.current.listings).toEqual([
@@ -78,7 +78,7 @@ describe('useListings', () => {
       ),
     );
 
-    const { result } = renderHook(() => useListings(KIOSK_ID));
+    const { result } = renderHook(() => useListings([KIOSK_ID]));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.listings.map((l) => l.tokenId)).toEqual([TOKEN_A]);
   });
@@ -86,7 +86,7 @@ describe('useListings', () => {
   it('skips fetching and returns empty when no kioskId is given', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
-    const { result } = renderHook(() => useListings(undefined));
+    const { result } = renderHook(() => useListings([]));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.listings).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ describe('useListings', () => {
 
   it('surfaces a GraphQL non-2xx as an error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502 }) as unknown as Response));
-    const { result } = renderHook(() => useListings(KIOSK_ID));
+    const { result } = renderHook(() => useListings([KIOSK_ID]));
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.listings).toEqual([]);
   });
@@ -102,7 +102,7 @@ describe('useListings', () => {
   it('does not issue any detail query when the kiosk has no listings', async () => {
     const fetchSpy = marketFetch([]);
     vi.stubGlobal('fetch', fetchSpy);
-    const { result } = renderHook(() => useListings(KIOSK_ID));
+    const { result } = renderHook(() => useListings([KIOSK_ID]));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.listings).toEqual([]);
     // only the dynamicFields query fired — no per-token detail queries

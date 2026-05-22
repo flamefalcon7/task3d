@@ -83,6 +83,13 @@ export async function fetchOwnedKiosk(address: string): Promise<OwnedKioskRef | 
   return { kioskId: cap.kioskId, kioskCapId: cap.objectId };
 }
 
+/** All kiosk ids the wallet owns (a wallet may have several). */
+export async function fetchOwnedKioskIds(address: string): Promise<string[]> {
+  const kioskClient = makeKioskClient();
+  const { kioskOwnerCaps } = await kioskClient.getOwnedKiosks({ address });
+  return kioskOwnerCaps.map((c) => c.kioskId);
+}
+
 // Read the kiosk's `Listing` dynamic fields directly. We do NOT use
 // @mysten/kiosk's getKiosk for prices: in this SDK version its
 // `withListingPrices` decode is broken and returns garbage u64s (e.g.
@@ -181,19 +188,26 @@ export interface UseListingsResult {
 }
 
 /**
- * Listings currently for sale in a single seller kiosk (approach (a)).
- * Pass `undefined` to render an empty marketplace (no kiosk known yet).
+ * Listings currently for sale across the given kiosks (approach (a),
+ * demo-grade). Aggregates every kiosk we know about — the connected wallet's
+ * own kiosks plus any kiosk listed into on this browser — so a listing always
+ * shows regardless of which seller kiosk it landed in. Empty array → empty
+ * marketplace.
  */
 export function useListings(
-  kioskId: string | undefined,
+  kioskIds: string[],
   reloadKey?: unknown,
 ): UseListingsResult {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  // Stable primitive dep so the effect doesn't refire on a new-but-equal array.
+  const key = [...kioskIds].sort().join(',');
+
   useEffect(() => {
-    if (!kioskId) {
+    const ids = key ? key.split(',') : [];
+    if (ids.length === 0) {
       setListings([]);
       setLoading(false);
       return;
@@ -203,9 +217,10 @@ export function useListings(
     setError(null);
     (async () => {
       try {
-        const refs = await fetchListedRefs(kioskId);
-        const joined = await joinTokenDetails(refs, kioskId);
-        if (!cancelled) setListings(joined);
+        const perKiosk = await Promise.all(
+          ids.map(async (id) => joinTokenDetails(await fetchListedRefs(id), id)),
+        );
+        if (!cancelled) setListings(perKiosk.flat());
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
       } finally {
@@ -215,7 +230,7 @@ export function useListings(
     return () => {
       cancelled = true;
     };
-  }, [kioskId, reloadKey]);
+  }, [key, reloadKey]);
 
   return { listings, loading, error };
 }

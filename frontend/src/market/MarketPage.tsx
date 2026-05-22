@@ -14,28 +14,38 @@ import { Link } from 'react-router-dom';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { SignInButton } from '../auth/SignInButton';
 import { useOwnedTokens } from '../track/useOwnedTokens';
-import { useListings, fetchOwnedKiosk } from './useListings';
+import { useListings, fetchOwnedKiosk, fetchOwnedKioskIds } from './useListings';
 import {
   buildListNftTokenForSalePtb,
   buildPurchaseNftTokenPtb,
   royaltyOwedMist,
 } from '../sui/kioskTxBuilders';
 
-const MARKET_KIOSK_KEY = 'overflow2026:market:kiosk';
+// A SET of kiosk ids the marketplace knows about, so a listing shows no matter
+// which seller kiosk it landed in (a wallet can own several; different wallets
+// own different ones). Persisted so a buyer on this browser sees a seller's
+// kiosk that was listed into earlier. (Legacy single-id key is migrated in.)
+const MARKET_KIOSKS_KEY = 'overflow2026:market:kiosks';
+const LEGACY_KIOSK_KEY = 'overflow2026:market:kiosk';
 
-function readStoredKiosk(): string | undefined {
+function readStoredKiosks(): string[] {
   try {
-    return globalThis.localStorage?.getItem(MARKET_KIOSK_KEY) ?? undefined;
+    const raw = globalThis.localStorage?.getItem(MARKET_KIOSKS_KEY);
+    const arr = raw ? (JSON.parse(raw) as string[]) : [];
+    const legacy = globalThis.localStorage?.getItem(LEGACY_KIOSK_KEY);
+    return Array.from(new Set([...arr, ...(legacy ? [legacy] : [])]));
   } catch {
-    return undefined;
+    return [];
   }
 }
-function writeStoredKiosk(id: string): void {
+function addStoredKiosks(ids: string[]): string[] {
+  const merged = Array.from(new Set([...readStoredKiosks(), ...ids]));
   try {
-    globalThis.localStorage?.setItem(MARKET_KIOSK_KEY, id);
+    globalThis.localStorage?.setItem(MARKET_KIOSKS_KEY, JSON.stringify(merged));
   } catch {
     // ignore (private mode / disabled storage) — demo continues without it
   }
+  return merged;
 }
 
 function mistToSui(mist: bigint): string {
@@ -52,10 +62,10 @@ export function MarketPage() {
   const account = useCurrentAccount();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
-  const [kioskId, setKioskId] = useState<string | undefined>(readStoredKiosk);
+  const [kioskIds, setKioskIds] = useState<string[]>(readStoredKiosks);
   const [reloadKey, setReloadKey] = useState(0);
   const { listings, loading: listingsLoading, error: listingsError } = useListings(
-    kioskId,
+    kioskIds,
     reloadKey,
   );
 
@@ -73,34 +83,42 @@ export function MarketPage() {
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
 
+  // Resolve the kiosk set: the connected wallet's own kiosks ∪ any kiosk
+  // previously listed into on this browser (persisted). Re-runs on each
+  // reloadKey bump so a freshly created/used kiosk gets picked up once indexed.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let owned: string[] = [];
+      if (account) {
+        try {
+          owned = await fetchOwnedKioskIds(account.address);
+        } catch {
+          // indexer lag / transient — keep whatever we already have
+        }
+      }
+      if (cancelled) return;
+      setKioskIds(addStoredKiosks(owned));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.address, reloadKey]);
+
   // signAndExecute resolves on fullnode execution, but the GraphQL endpoint we
   // read from indexes a beat later — a single immediate refetch comes back
-  // stale. Poll a few times so the new listing/ownership shows without a manual
-  // page refresh. `resolveOwnKiosk` re-reads the seller's kiosk id after a
-  // listing (it may be a brand-new kiosk); a buyer must NOT overwrite kioskId.
-  const pollRefresh = useCallback(
-    async (resolveOwnKiosk: boolean) => {
-      setSyncing(true);
-      for (let i = 0; i < 5 && aliveRef.current; i++) {
-        await new Promise((r) => setTimeout(r, 1500));
-        if (!aliveRef.current) return;
-        if (resolveOwnKiosk && account) {
-          try {
-            const k = await fetchOwnedKiosk(account.address);
-            if (k && aliveRef.current) {
-              writeStoredKiosk(k.kioskId);
-              setKioskId(k.kioskId);
-            }
-          } catch {
-            // transient indexer error — keep polling
-          }
-        }
-        if (aliveRef.current) setReloadKey((v) => v + 1);
-      }
-      if (aliveRef.current) setSyncing(false);
-    },
-    [account],
-  );
+  // stale. Poll a few times (bumping reloadKey re-runs the kiosk-set resolve +
+  // listings + owned-tokens) so a new listing/ownership shows without a manual
+  // page refresh.
+  const pollRefresh = useCallback(async () => {
+    setSyncing(true);
+    for (let i = 0; i < 5 && aliveRef.current; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (!aliveRef.current) return;
+      setReloadKey((v) => v + 1);
+    }
+    if (aliveRef.current) setSyncing(false);
+  }, []);
 
   // Tokens already listed are filtered out of the "list" section so the seller
   // can't double-list the same object.
@@ -132,16 +150,14 @@ export function MarketPage() {
           kioskCapId: owned?.kioskCapId,
         });
         await signAndExecute({ transaction: tx });
-        // The listing now lives in the seller's kiosk; resolve + remember it so
-        // the marketplace (and a buyer on this browser) can find it.
-        const after = await fetchOwnedKiosk(account.address);
-        if (after) {
-          writeStoredKiosk(after.kioskId);
-          setKioskId(after.kioskId);
-        }
+        // Remember the kiosk we listed into so it shows now AND a buyer on this
+        // browser finds it later. If we reused an existing kiosk we know its id;
+        // for a brand-new kiosk the kiosk-set resolve effect picks it up via
+        // getOwnedKiosks once indexed (the poll gives it time).
+        if (owned?.kioskId) addStoredKiosks([owned.kioskId]);
         setReloadKey((k) => k + 1);
         setPhase('idle');
-        void pollRefresh(true);
+        void pollRefresh();
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : 'Listing was rejected.');
         setPhase('error');
@@ -166,7 +182,7 @@ export function MarketPage() {
         setBoughtTokenId(tokenId);
         setReloadKey((k) => k + 1);
         setPhase('idle');
-        void pollRefresh(false);
+        void pollRefresh();
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : 'Purchase was rejected.');
         setPhase('error');

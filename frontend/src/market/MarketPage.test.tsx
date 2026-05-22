@@ -15,9 +15,11 @@ vi.mock('../auth/SignInButton', () => ({
 
 const useListingsMock = vi.fn();
 const fetchOwnedKioskMock = vi.fn();
+const fetchOwnedKioskIdsMock = vi.fn(async (_addr?: string) => [] as string[]);
 vi.mock('./useListings', () => ({
   useListings: (...args: unknown[]) => useListingsMock(...args),
   fetchOwnedKiosk: (...args: unknown[]) => fetchOwnedKioskMock(...args),
+  fetchOwnedKioskIds: (...args: unknown[]) => fetchOwnedKioskIdsMock(...(args as [string])),
 }));
 
 const useOwnedTokensMock = vi.fn();
