@@ -103,7 +103,7 @@ function mistToSui(mist: string): string {
 }
 
 export function LaunchCollectionPage() {
-  const { session } = useSession();
+  const { session, clearSession } = useSession();
   const account = useCurrentAccount();
   const signer = useDappKitSigner(account?.address ?? null);
   const { uploadFiles, stage: uploadStage } = useWalrusUpload();
@@ -158,6 +158,13 @@ export function LaunchCollectionPage() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.jwt}` },
       body: JSON.stringify(buildReq),
     });
+    if (res.status === 401) {
+      // Expired/invalid JWT (24h TTL). Clear the stale session so the page
+      // falls back to the sign-in gate; the wallet stays connected, so the
+      // user just signs a fresh challenge and retries.
+      clearSession();
+      throw new Error('Your session expired. Please sign in again, then retry.');
+    }
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       throw new Error(`build: HTTP ${res.status} ${txt}`);
@@ -166,7 +173,7 @@ export function LaunchCollectionPage() {
     const swapped = body.variants.map((v) => base64ToBytes(v.glbBase64));
     setVariantGlbs(swapped);
     return swapped;
-  }, [session, baseGlb, editorState]);
+  }, [session, baseGlb, editorState, clearSession]);
 
   const onPreview = useCallback(async () => {
     if (!session || !baseGlb) return;

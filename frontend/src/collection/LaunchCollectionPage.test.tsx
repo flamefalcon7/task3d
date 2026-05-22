@@ -13,6 +13,7 @@ vi.mock('@mysten/dapp-kit', () => ({
 }));
 
 const useSessionMock = vi.fn();
+const clearSessionMock = vi.fn();
 vi.mock('../auth/useSession', () => ({ useSession: () => useSessionMock() }));
 
 const useModelIndexMock = vi.fn();
@@ -67,7 +68,8 @@ function renderPage() {
 
 beforeEach(() => {
   useCurrentAccountMock.mockReturnValue({ address: ADDR });
-  useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' } });
+  clearSessionMock.mockReset();
+  useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   useModelIndexMock.mockReturnValue({ models: [summary()], loading: false, error: null, refetch: vi.fn() });
   uploadFilesMock.mockReset();
   signAndExecuteMock.mockReset();
@@ -158,5 +160,27 @@ describe('LaunchCollectionPage', () => {
     expect(args.tokenNames).toHaveLength(1);
     expect(args.tokenPatchIds).toEqual(['patch-0']);
     await waitFor(() => expect(screen.getByTestId('launch-success')).toBeTruthy());
+  });
+
+  it('on an expired session (build 401) clears the session and shows a re-sign-in message', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      // /api/collection/build — simulate an expired JWT
+      return new Response(JSON.stringify({ error: 'auth_invalid' }), { status: 401 });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(clearSessionMock).toHaveBeenCalledOnce());
+    expect(screen.getByTestId('launch-error').textContent).toMatch(/session expired/i);
   });
 });

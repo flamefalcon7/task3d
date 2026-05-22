@@ -53,6 +53,10 @@ export interface UseSession {
   signIn: () => Promise<Session>;
   /** Clear local session + disconnect wallet. */
   disconnect: () => void;
+  /** Clear only the JWT session (keep the wallet connected) — used when the
+   *  server rejects an expired/invalid token so the user can re-sign-in
+   *  without reconnecting the wallet. */
+  clearSession: () => void;
   /** Connected wallet address (no JWT yet) — useful for UX. */
   address: string | null;
 }
@@ -105,16 +109,21 @@ export function useSession(): UseSession {
     return next;
   }, [account, signPersonalMessage]);
 
-  const disconnect = useCallback(() => {
+  const clearSession = useCallback(() => {
     setSession(null);
     writeStoredSession(null);
+  }, []);
+
+  const disconnect = useCallback(() => {
+    clearSession();
     disconnectWallet();
-  }, [disconnectWallet]);
+  }, [clearSession, disconnectWallet]);
 
   return {
     session,
     signIn,
     disconnect,
+    clearSession,
     address: account?.address ?? null,
   };
 }
