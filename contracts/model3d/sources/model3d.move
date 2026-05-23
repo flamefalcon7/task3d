@@ -128,6 +128,12 @@ const MAX_PATCH_ID_LEN:     u64 = 128;
 // safety ceiling with linear cost in `validate_publish_inputs`. Each element
 // reuses MAX_TAG_LEN (32) for per-label string length — identical pattern to
 // `tags`, distinct vector cap so the two bounds can evolve independently.
+//
+// LOCKSTEP CONTRACT: this constant must equal `MAX_PARTS_FE` in
+// `shared/src/types.ts`. A divergence ships as either an unforkable base (TS
+// allows publish, Move rejects) or wasted UI surface (TS rejects, Move would
+// have accepted). No cross-language enforcement is feasible at hackathon
+// scope; the safety net is grep + code review.
 const MAX_PARTS:            u64 = 64;
 // D-029 — on-chain length cap on register_integration's app_metadata blob.
 // Length-only guard; the backend (U7) validates the full UTF-8 JSON schema

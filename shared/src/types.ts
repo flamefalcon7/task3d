@@ -122,6 +122,11 @@ export type TextureId = (typeof TEXTURE_LIBRARY)[number];
 // plan-013 — mirrors Move's MAX_PARTS=64. Frontend zod cap on per-variant
 // `partColors` length. Bumping requires the Move constant to move in lockstep
 // (segmented GLBs exceeding the on-chain ceiling can't be published anyway).
+//
+// LOCKSTEP CONTRACT: this constant must equal `MAX_PARTS` in
+// `contracts/model3d/sources/model3d.move`. See that file's comment block on
+// MAX_PARTS for the lockstep policy. No cross-language enforcement is
+// feasible at hackathon scope.
 export const MAX_PARTS_FE = 64;
 
 // Per-variant material specification — input to the backend material-swap
@@ -173,13 +178,21 @@ export const collectionBuildRequestSchema = z.object({
           .refine(
             (s) => {
               try {
-                JSON.parse(s);
-                return true;
+                const parsed: unknown = JSON.parse(s);
+                // plan-013 (review pass S3): tighten to object — plan-013 R10
+                // says paramsJson stores the canonical palette/lineage shape
+                // (`{ palette, texture }`) for round-trip on collection re-open.
+                // The old `JSON.parse` no-throw check accepted `'null'`, `'42'`,
+                // `'"foo"'`, `'[]'` — all of which break the U7 round-trip
+                // (`JSON.parse(paramsJson).palette` → undefined / TypeError).
+                return (
+                  typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+                );
               } catch {
                 return false;
               }
             },
-            { message: 'paramsJson must be valid JSON <= 1024 bytes' },
+            { message: 'paramsJson must be a JSON object (not null/array/scalar) <= 1024 bytes' },
           ),
       }),
     )

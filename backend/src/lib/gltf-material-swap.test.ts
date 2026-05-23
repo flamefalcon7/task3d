@@ -16,9 +16,26 @@ import type { TextureId } from '@overflow2026/shared';
 // regardless of insertion order (`createMaterial` alone doesn't attach the
 // material to a primitive, but the underlying root listing returns it
 // anyway — we attach to be defensive).
+// plan-013 review pass S1 — minimal 1x1 PNG. Lets fixtures pre-seed materials
+// with a baseColorTexture so TINT-mode preservation tests can actually
+// distinguish "preserved" from "never set". This is a real PNG, not a stub,
+// so the GLB writer's image-MIME-type check accepts it.
+const STUB_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+  0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00,
+  0x00, 0x05, 0x00, 0x01, 0xa1, 0x69, 0x35, 0x91, 0x00, 0x00, 0x00, 0x00,
+  0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+]);
+
 async function makeFixtureGlb(opts: {
   materialColors?: Array<[number, number, number, number]>;
   noMaterial?: boolean;
+  // plan-013 review pass S1 — when true, every material is seeded with a
+  // baseColorTexture so swap-pipeline tests can assert "TINT mode preserved
+  // the baked PBR texture" rather than the vacuous "no texture was added".
+  seedBakedTextures?: boolean;
 } = {}): Promise<Uint8Array> {
   const colors = opts.noMaterial ? [] : (opts.materialColors ?? [[1, 1, 1, 1]]);
   const doc = new Document();
@@ -58,6 +75,18 @@ async function makeFixtureGlb(opts: {
     primitive.setMaterial(firstMat);
     for (let i = 1; i < colors.length; i++) {
       doc.createMaterial(`mat_${i}`).setBaseColorFactor(colors[i]!);
+    }
+    if (opts.seedBakedTextures) {
+      // plan-013 review pass S1 — seed every material with a pre-existing
+      // baseColorTexture so TINT-mode preservation can be observed.
+      const mats = doc.getRoot().listMaterials();
+      for (let i = 0; i < mats.length; i++) {
+        const tex = doc
+          .createTexture(`baked_${i}`)
+          .setImage(STUB_PNG)
+          .setMimeType('image/png');
+        mats[i]!.setBaseColorTexture(tex);
+      }
     }
   }
 
@@ -240,11 +269,19 @@ describe('swapMaterial', () => {
     expect(colors[3]).toEqual([1, 1, 0, 1]);
   });
 
-  it('plan-013 — applies per-part textureId only where supplied (TINT mode boundary)', async () => {
-    // 4-material fixture; only partColors[2] sets a textureId. Other parts keep
-    // their existing baseColorTexture (null in this fixture; the production
-    // case is "keep the Tripo-baked PBR baseColorTexture unchanged"). This is
-    // the exact boundary that distinguishes TINT mode from FLAT mode.
+  it('plan-013 — TINT mode preserves the baked baseColorTexture on parts without an override', async () => {
+    // 4-material fixture WITH baseColorTexture pre-seeded on every material
+    // (review pass S1 — the production case is "Tripo's mesh_segmentation
+    // emits per-part PBR-baked textures"). The TINT contract: setting only
+    // `baseColorFactor` per part must leave each material's existing
+    // baseColorTexture intact. partColors[2] overrides its texture as well —
+    // that override IS expected to replace the baked texture for material 2.
+    // Materials 0, 1, 3 must keep their baked textures.
+    //
+    // This is the headline visual boundary between TINT and FLAT. A regression
+    // that ever stripped baseColorTexture in the no-textureId branch (e.g.,
+    // `target.setBaseColorTexture(null)`) would flip material 0/1/3 to false
+    // and fail this test.
     const base = await makeFixtureGlb({
       materialColors: [
         [1, 1, 1, 1],
@@ -252,6 +289,7 @@ describe('swapMaterial', () => {
         [1, 1, 1, 1],
         [1, 1, 1, 1],
       ],
+      seedBakedTextures: true,
     });
     const out = await swapMaterial(base, {
       partColors: [
@@ -262,7 +300,10 @@ describe('swapMaterial', () => {
       ],
     });
     const flags = await readMaterialTextureFlags(out);
-    expect(flags).toEqual([false, false, true, false]);
+    // All four materials have a baseColorTexture: 0/1/3 the baked one,
+    // 2 the variant-override one. The discriminator that distinguishes TINT
+    // from FLAT is "did 0/1/3 stay true", not just "did 2 become true".
+    expect(flags).toEqual([true, true, true, true]);
   });
 
   it('plan-013 — throws PartCountMismatchError when partColors.length !== materials.length', async () => {

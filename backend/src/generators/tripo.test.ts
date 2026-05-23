@@ -58,6 +58,10 @@ describe('TripoGenerator', () => {
       gen.generate({ shape: 'tripo', prompt: 'a tiny dragon' }),
     ).rejects.toBeInstanceOf(TripoTimeoutError);
     expect(client.downloadGlb).not.toHaveBeenCalled();
+    // plan-013 review pass S4 — assert step-2 was actually attempted (catches
+    // a "skipped step 2 entirely; timed out on step-1's second poll" regression
+    // that the downloadGlb-not-called check alone wouldn't distinguish).
+    expect(client.submitMeshSegmentation).toHaveBeenCalledWith('task-1');
   });
 
   it('throws on empty prompt', async () => {

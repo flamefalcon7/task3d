@@ -112,7 +112,7 @@ describe('useModelIndex', () => {
     const { result } = renderHook(() => useModelIndex());
     await waitFor(() => expect(result.current.models).toHaveLength(1));
 
-    const raw = globalThis.localStorage?.getItem('overflow2026:model-index:v1');
+    const raw = globalThis.localStorage?.getItem('overflow2026:model-index:v2');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed.models).toHaveLength(1);

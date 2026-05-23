@@ -14,7 +14,11 @@ export interface UseModelIndexResult {
   refetch: () => void;
 }
 
-const CACHE_KEY = 'overflow2026:model-index:v1';
+// plan-013 — bumped v1 → v2 when Model3DSummary gained `partLabels`. Old
+// cached entries don't carry the field; rehydrating them and then doing
+// `model.partLabels.map(...)` (U7) would TypeError on first paint. Bumping
+// invalidates pre-deploy caches; the next GraphQL fetch repopulates v2.
+const CACHE_KEY = 'overflow2026:model-index:v2';
 
 // Single source of truth for the deployed package: the pinned TESTNET config
 // (mirrored from contracts/networks/testnet.json, guarded by networkConfig.test).
