@@ -9,6 +9,7 @@
 // wallet's own kiosks). No localStorage tracking — a buyer sees a listing made
 // from any wallet.
 
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
@@ -21,6 +22,18 @@ import {
   royaltyOwedMist,
 } from '../sui/kioskTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
+import {
+  buttonOutline,
+  buttonPrimary,
+  displayHeadline,
+  eyebrow,
+  input as inputStyle,
+  monoLabel,
+  pagePaper,
+  statusBanner,
+  tokens,
+  viewerWell,
+} from '../ux/tokens';
 
 function mistToSui(mist: bigint): string {
   return (Number(mist) / 1e9).toString();
@@ -62,6 +75,164 @@ function parseOwnedNftToken(resp: unknown): OwnedToken | null {
 type Phase = 'idle' | 'busy' | 'error';
 type ConfirmStatus = 'idle' | 'syncing' | 'confirmed' | 'failed';
 
+// Page-local styles (page-level helpers come from tokens).
+
+const mainStyle: CSSProperties = {
+  maxWidth: 1280,
+  margin: '0 auto',
+  padding: '32px 24px 64px',
+};
+
+const headerStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 32 };
+const sectionH2: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.lg,
+  fontWeight: tokens.weight.medium,
+  marginBottom: 16,
+};
+
+const sectionHeaderRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 12,
+  marginBottom: 16,
+};
+
+const updatingHint: CSSProperties = { ...monoLabel, color: tokens.color.hint };
+
+const cardGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+  border: tokens.border.primary,
+  background: tokens.color.paperPure,
+};
+
+// Editorial grid: each card has right + bottom hairlines; the outer container's
+// left + top borders close the frame. Adjacent cards share borders cleanly.
+const gridCell: CSSProperties = {
+  borderRight: tokens.border.primary,
+  borderBottom: tokens.border.primary,
+  padding: 16,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  background: tokens.color.paperPure,
+};
+
+const cardWell: CSSProperties = {
+  ...viewerWell,
+  aspectRatio: '4 / 3',
+  position: 'relative',
+};
+
+const cardWellPlaceholder: CSSProperties = {
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.4)',
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const cardCounter: CSSProperties = {
+  ...monoLabel,
+  position: 'absolute',
+  top: 8,
+  left: 8,
+  color: 'rgba(255,255,255,0.6)',
+};
+
+const cardLayerBadge: CSSProperties = {
+  ...monoLabel,
+  position: 'absolute',
+  top: 8,
+  right: 8,
+  color: tokens.color.accent,
+  letterSpacing: '1.5px',
+};
+
+const cardName: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+  color: tokens.color.ink,
+};
+
+const cardMeta: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  letterSpacing: '0.5px',
+  textTransform: 'none',
+  fontSize: 11,
+};
+
+const priceRow: CSSProperties = {
+  paddingTop: 12,
+  borderTop: tokens.border.divider,
+  display: 'flex',
+  alignItems: 'baseline',
+  justifyContent: 'space-between',
+  gap: 12,
+};
+
+const priceMain: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.lg,
+  fontWeight: tokens.weight.medium,
+};
+
+const priceRoyalty: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  letterSpacing: '1px',
+};
+
+const emptyState: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  padding: 24,
+  border: `1.5px dashed ${tokens.color.ink}`,
+  textAlign: 'center',
+};
+
+const errorBanner: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  marginTop: 16,
+  padding: '10px 12px',
+  border: `1.5px solid ${tokens.color.err}`,
+};
+
+const statusBannerStack: CSSProperties = {
+  marginTop: 24,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 1,
+  background: tokens.color.ink,
+};
+
+const driveLink: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  textDecoration: 'underline',
+  marginLeft: 'auto',
+};
+
+const trackLink: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.wellInk,
+  textDecoration: 'underline',
+  marginLeft: 4,
+};
+
+const accentText: CSSProperties = { color: tokens.color.accent, fontWeight: 500 };
+
 export function MarketPage() {
   const account = useCurrentAccount();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
@@ -73,7 +244,7 @@ export function MarketPage() {
     reloadKey,
   );
 
-  const { tokens, loading: tokensLoading } = useOwnedTokens(account?.address, reloadKey);
+  const { tokens: ownedTokens, loading: tokensLoading } = useOwnedTokens(account?.address, reloadKey);
 
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>('idle');
@@ -141,14 +312,14 @@ export function MarketPage() {
     [visibleListings],
   );
   const sellable = useMemo(() => {
-    const owned = tokens.filter((t) => !listedIds.has(t.tokenId));
+    const owned = ownedTokens.filter((t) => !listedIds.has(t.tokenId));
     // Inject the fullnode-confirmed buy immediately, ahead of GraphQL indexer
     // catching up. Dedups when useOwnedTokens eventually returns the same id.
     if (confirmedToken && !owned.some((t) => t.tokenId === confirmedToken.tokenId)) {
       owned.push(confirmedToken);
     }
     return owned;
-  }, [tokens, listedIds, confirmedToken]);
+  }, [ownedTokens, listedIds, confirmedToken]);
 
   const onList = useCallback(
     async (tokenId: string) => {
@@ -244,156 +415,213 @@ export function MarketPage() {
 
   if (!account) {
     return (
-      <div data-testid="market-page" style={pageStyle}>
-        <h1>Marketplace</h1>
-        <p>Connect a wallet to buy and sell NFT cars.</p>
-        <SignInButton />
+      <div data-testid="market-page" style={pagePaper}>
+        <main style={mainStyle}>
+          <div style={headerStack}>
+            <span style={eyebrow}>— L2 / MARKET</span>
+            <h1 style={displayHeadline}>The marketplace.</h1>
+            <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px' }}>
+              Connect a wallet to buy and sell NFT cars.
+            </p>
+          </div>
+          <SignInButton />
+        </main>
       </div>
     );
   }
 
   return (
-    <div data-testid="market-page" style={pageStyle}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>Marketplace</h1>
-        <Link to="/" style={{ color: '#7aa2ff' }}>← Browse</Link>
-      </header>
+    <div data-testid="market-page" style={pagePaper}>
+      <main style={mainStyle}>
+        <div style={headerStack}>
+          <span style={eyebrow}>— L2 / MARKET</span>
+          <h1 style={displayHeadline}>The marketplace.</h1>
+        </div>
 
-      {/* For sale */}
-      <section data-testid="for-sale" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 15 }}>
-          For sale{' '}
-          {syncing && (
-            <span data-testid="market-syncing" style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>
-              · updating…
-            </span>
+        {/* For sale */}
+        <section data-testid="for-sale" style={{ marginBottom: 40 }}>
+          <div style={sectionHeaderRow}>
+            <h2 style={sectionH2}>For sale.</h2>
+            {syncing && (
+              <span data-testid="market-syncing" style={updatingHint}>
+                · UPDATING…
+              </span>
+            )}
+          </div>
+          {listingsError && (
+            <p data-testid="listings-error" style={{ ...monoLabel, color: tokens.color.err, letterSpacing: '0.5px', textTransform: 'none' }}>
+              × FAILED · Couldn't load listings: {listingsError.message}
+            </p>
           )}
-        </h2>
-        {listingsError && (
-          <p data-testid="listings-error" style={{ color: 'crimson' }}>
-            Couldn’t load listings: {listingsError.message}
-          </p>
-        )}
-        {listingsLoading && <p style={{ color: '#888' }}>Loading listings…</p>}
-        {!listingsLoading && visibleListings.length === 0 && (
-          <p data-testid="no-listings" style={{ color: '#888' }}>
-            Nothing for sale yet. List one of your cars below.
-          </p>
-        )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          {visibleListings.map((l) => {
-            const total = l.priceMist + royaltyOwedMist(l.priceMist);
-            return (
-              <div
-                key={l.tokenId}
-                data-testid={`listing-${l.tokenId}`}
-                style={cardStyle}
-              >
-                <div style={{ fontWeight: 600 }}>{l.name || truncate(l.tokenId)}</div>
-                <div style={{ fontSize: 12, color: '#9aa' }}>
-                  {mistToSui(l.priceMist)} SUI (asking) ·{' '}
-                  {mistToSui(total)} SUI (you pay, incl. 5% royalty)
+          {listingsLoading && (
+            <p style={{ ...monoLabel, color: tokens.color.hint }}>— SYNCING LISTINGS</p>
+          )}
+          {!listingsLoading && visibleListings.length === 0 && (
+            <p data-testid="no-listings" style={emptyState}>
+              NOTHING FOR SALE YET — LIST ONE OF YOUR CARS BELOW
+            </p>
+          )}
+          {visibleListings.length > 0 && (
+            <div style={cardGrid}>
+              {visibleListings.map((l, idx) => {
+                const royalty = royaltyOwedMist(l.priceMist);
+                const total = l.priceMist + royalty;
+                const royaltyPct = (Number(royalty) / Number(l.priceMist)) * 100;
+                return (
+                  <div
+                    key={l.tokenId}
+                    data-testid={`listing-${l.tokenId}`}
+                    style={gridCell}
+                  >
+                    <div style={cardWell}>
+                      <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(visibleListings.length).padStart(3, '0')}</span>
+                      <span style={cardLayerBadge}>L2 NFT</span>
+                      <span style={cardWellPlaceholder}>— PREVIEW</span>
+                    </div>
+                    <div>
+                      <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
+                      <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
+                    </div>
+                    <div style={priceRow}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={priceMain}>{mistToSui(l.priceMist)} SUI</span>
+                        <span style={priceRoyalty}>
+                          + {mistToSui(royalty)} ROYALTY ({royaltyPct.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid={`buy-${l.tokenId}`}
+                        disabled={busy}
+                        onClick={() => void onBuy(l.tokenId, l.priceMist, l.kioskId)}
+                        style={buttonPrimary}
+                      >
+                        {busy ? 'APPROVE…' : `BUY · ${mistToSui(total)} SUI`}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Your NFTs → list */}
+        <section data-testid="your-nfts">
+          <h2 style={sectionH2}>Your cars.</h2>
+          {tokensLoading && (
+            <p style={{ ...monoLabel, color: tokens.color.hint }}>— SYNCING OWNERSHIP</p>
+          )}
+          {!tokensLoading && sellable.length === 0 && (
+            <p data-testid="no-owned" style={emptyState}>
+              YOU DON'T OWN ANY UNLISTED CARS — MINT A COLLECTION ON{' '}
+              <Link to="/launch" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>/LAUNCH</Link>
+            </p>
+          )}
+          {sellable.length > 0 && (
+            <div style={cardGrid}>
+              {sellable.map((t, idx) => (
+                <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
+                  <div style={cardWell}>
+                    <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
+                    <span style={cardLayerBadge}>YOURS</span>
+                    <span style={cardWellPlaceholder}>— PREVIEW</span>
+                  </div>
+                  <div>
+                    <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
+                    <div style={cardMeta}>{truncate(t.tokenId)}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: tokens.border.divider }}>
+                    <input
+                      data-testid={`price-${t.tokenId}`}
+                      placeholder="PRICE IN SUI"
+                      value={priceInputs[t.tokenId] ?? ''}
+                      onChange={(e) =>
+                        setPriceInputs((p) => ({ ...p, [t.tokenId]: e.target.value }))
+                      }
+                      disabled={busy}
+                      style={{ ...inputStyle, width: '100%' }}
+                    />
+                    <button
+                      type="button"
+                      data-testid={`list-${t.tokenId}`}
+                      disabled={busy}
+                      onClick={() => void onList(t.tokenId)}
+                      style={buttonOutline}
+                    >
+                      {busy ? 'APPROVE…' : 'LIST FOR SALE'}
+                    </button>
+                  </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {phase === 'error' && errorMsg && (
+          <div data-testid="market-error" style={errorBanner}>
+            × FAILED · {errorMsg}
+          </div>
+        )}
+
+        {(boughtTokenId || confirmStatus !== 'idle') && (
+          <div style={statusBannerStack}>
+            {boughtTokenId && (
+              <div data-testid="buy-success" style={statusBanner}>
+                <span style={accentText}>✓ PURCHASED</span>
+                <span>· {truncate(boughtTokenId)} → YOUR WALLET ·</span>
+                <Link
+                  to={`/track?model=${boughtTokenId}`}
+                  style={trackLink}
+                >
+                  DRIVE IT ON THE TRACK →
+                </Link>
+              </div>
+            )}
+            {confirmStatus === 'syncing' && (
+              <div data-testid="confirm-syncing" style={statusBanner}>
+                <span style={accentText}>— SYNCING</span>
+                <span>· READING NEW TOKEN FROM FULLNODE</span>
+              </div>
+            )}
+            {confirmStatus === 'confirmed' && (
+              <div data-testid="confirm-ok" style={statusBanner}>
+                <span style={accentText}>✓ CONFIRMED</span>
+                <span>· YOUR NEW CAR IS IN YOUR CARS</span>
+              </div>
+            )}
+            {confirmStatus === 'failed' && (
+              <div data-testid="confirm-failed" style={statusBanner}>
+                <span style={{ ...accentText, color: tokens.color.err }}>× CONFIRM FAILED</span>
+                <span>· {confirmErrorMsg ?? 'Could not confirm via fullnode.'} ·</span>
                 <button
                   type="button"
-                  data-testid={`buy-${l.tokenId}`}
-                  disabled={busy}
-                  onClick={() => void onBuy(l.tokenId, l.priceMist, l.kioskId)}
-                  style={{ marginTop: 8 }}
+                  onClick={() => setReloadKey((k) => k + 1)}
+                  style={{
+                    ...monoLabel,
+                    background: 'none',
+                    border: `1px solid ${tokens.color.wellInk}`,
+                    color: tokens.color.wellInk,
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    marginLeft: 'auto',
+                  }}
                 >
-                  {busy ? 'Approve in wallet…' : `Buy — ${mistToSui(total)} SUI`}
+                  REFRESH
                 </button>
               </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Your NFTs → list */}
-      <section data-testid="your-nfts">
-        <h2 style={{ fontSize: 15 }}>Your cars</h2>
-        {tokensLoading && <p style={{ color: '#888' }}>Loading your NFTs…</p>}
-        {!tokensLoading && sellable.length === 0 && (
-          <p data-testid="no-owned" style={{ color: '#888' }}>
-            You don’t own any unlisted cars. Mint a collection on{' '}
-            <Link to="/launch" style={{ color: '#7aa2ff' }}>/launch</Link>.
-          </p>
+            )}
+            {boughtTokenId && (
+              <div style={{ ...statusBanner, paddingTop: 4, paddingBottom: 12 }}>
+                <Link
+                  to={`/track?model=${boughtTokenId}`}
+                  style={driveLink}
+                />
+              </div>
+            )}
+          </div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          {sellable.map((t) => (
-            <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={cardStyle}>
-              <div style={{ fontWeight: 600 }}>{t.name || truncate(t.tokenId)}</div>
-              <input
-                data-testid={`price-${t.tokenId}`}
-                placeholder="price in SUI"
-                value={priceInputs[t.tokenId] ?? ''}
-                onChange={(e) =>
-                  setPriceInputs((p) => ({ ...p, [t.tokenId]: e.target.value }))
-                }
-                disabled={busy}
-                style={{ marginTop: 8, width: '90%' }}
-              />
-              <button
-                type="button"
-                data-testid={`list-${t.tokenId}`}
-                disabled={busy}
-                onClick={() => void onList(t.tokenId)}
-                style={{ marginTop: 8 }}
-              >
-                {busy ? 'Approve in wallet…' : 'List for sale'}
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {phase === 'error' && errorMsg && (
-        <div data-testid="market-error" style={{ color: 'crimson', marginTop: 12 }}>
-          {errorMsg}
-        </div>
-      )}
-      {boughtTokenId && (
-        <div data-testid="buy-success" style={{ color: '#7CFC00', marginTop: 12 }}>
-          Purchased!{' '}
-          <Link to={`/track?model=${boughtTokenId}`} style={{ color: '#7aa2ff' }}>
-            Drive it on the track →
-          </Link>
-        </div>
-      )}
-      {confirmStatus === 'syncing' && (
-        <div data-testid="confirm-syncing" style={{ color: '#9bd', marginTop: 8 }}>
-          ⏳ Reading your new token from fullnode…
-        </div>
-      )}
-      {confirmStatus === 'confirmed' && (
-        <div data-testid="confirm-ok" style={{ color: '#7CFC00', marginTop: 8 }}>
-          ✅ Confirmed — your new car is in Your cars below.
-        </div>
-      )}
-      {confirmStatus === 'failed' && (
-        <div data-testid="confirm-failed" style={{ color: '#fcb', marginTop: 8 }}>
-          ⚠️ {confirmErrorMsg ?? 'Could not confirm via fullnode.'}{' '}
-          <button type="button" onClick={() => setReloadKey((k) => k + 1)}>
-            Refresh
-          </button>
-        </div>
-      )}
+      </main>
     </div>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: 24,
-  color: '#ddd',
-  background: '#15171b',
-  minHeight: '100vh',
-  fontFamily: 'system-ui',
-};
-
-const cardStyle: React.CSSProperties = {
-  padding: 12,
-  minWidth: 200,
-  background: '#1a1c20',
-  border: '1px solid #333',
-  borderRadius: 8,
-};
