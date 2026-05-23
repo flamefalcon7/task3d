@@ -38,16 +38,16 @@ function makeScheduler(): {
 }
 
 describe('Countdown', () => {
-  it('renders 3, 2, 1, GO! in sequence', () => {
+  it('renders 3, 2, 1, GO. in sequence (italic-serif with editorial period per D-044)', () => {
     const { scheduler, flushOne } = makeScheduler();
     render(<Countdown onComplete={() => {}} scheduler={scheduler} />);
-    expect(screen.getByTestId('countdown-overlay').textContent).toBe('3');
+    expect(screen.getByTestId('countdown-overlay').textContent).toBe('3.');
     act(() => flushOne());
-    expect(screen.getByTestId('countdown-overlay').textContent).toBe('2');
+    expect(screen.getByTestId('countdown-overlay').textContent).toBe('2.');
     act(() => flushOne());
-    expect(screen.getByTestId('countdown-overlay').textContent).toBe('1');
+    expect(screen.getByTestId('countdown-overlay').textContent).toBe('1.');
     act(() => flushOne());
-    expect(screen.getByTestId('countdown-overlay').textContent).toBe('GO!');
+    expect(screen.getByTestId('countdown-overlay').textContent).toBe('GO.');
   });
 
   it('invokes onComplete after the GO! display step + fade', () => {

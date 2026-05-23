@@ -1,13 +1,17 @@
-// Plan-006 U8 — pre-race countdown overlay. Plays "3 → 2 → 1 → GO!"
-// with ~700ms per step, then invokes onComplete and fades out.
+// Plan-006 U8 — pre-race countdown overlay. Plays "3. → 2. → 1. → GO." with
+// ~700ms per step, then invokes onComplete and fades out.
 //
 // React-owned animation (setTimeout chain). The scene's intro orbit ends
 // and TrackPage mounts this; on GO display, TrackPage routes the
 // onComplete callback back to the scene as `dispatchIntroComplete()`.
+//
+// Brutalist editorial styling per D-044: italic-serif numerals, white on
+// transparent, period after each step as an editorial detail.
 
 import { useEffect, useState, type ReactElement } from 'react';
+import { tokens } from '../ux/tokens';
 
-const STEPS = ['3', '2', '1', 'GO!'] as const;
+const STEPS = ['3.', '2.', '1.', 'GO.'] as const;
 const STEP_DURATION_MS = 700;
 const FADE_DURATION_MS = 400;
 
@@ -44,8 +48,8 @@ export function Countdown({
       const cancel = scheduler(() => setPhase(phase + 1), STEP_DURATION_MS);
       return cancel;
     }
-    // Phase is at the final step (GO!). Hold for STEP_DURATION_MS so the
-    // player reads "GO!", then begin the fade and notify the caller AFTER
+    // Phase is at the final step (GO.). Hold for STEP_DURATION_MS so the
+    // player reads "GO.", then begin the fade and notify the caller AFTER
     // FADE_DURATION_MS so the visual fade actually renders. The previous
     // order (onComplete then setPhase('fading')) caused the parent's gate
     // (lapState.status === 'intro') to unmount Countdown before fading
@@ -83,12 +87,12 @@ export function Countdown({
       <span
         style={{
           fontSize: '15vw',
-          fontWeight: 800,
-          color: '#fff',
-          textShadow: '0 4px 24px rgba(0,0,0,0.6)',
-          fontFamily:
-            'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-          letterSpacing: '-0.02em',
+          fontFamily: tokens.font.display,
+          fontStyle: 'italic',
+          fontWeight: tokens.weight.medium,
+          color: tokens.color.wellInk,
+          lineHeight: 1,
+          letterSpacing: '-0.04em',
         }}
       >
         {label}

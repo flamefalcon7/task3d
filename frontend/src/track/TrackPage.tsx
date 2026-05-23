@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
@@ -11,18 +12,135 @@ import { getPb, setPb } from './personalBest';
 import { ResultOverlay } from './ResultOverlay';
 import { formatHudTime } from './formatLapTime';
 import { Countdown } from './Countdown';
+import { displayHeadline, eyebrow, monoLabel, tokens } from '../ux/tokens';
 
 // Phase 3 U6 / U11 — /track page. Wraps the Babylon scene in a React shell:
 // query owned NftTokens → render carousel + canvas → rebuild scene each time
 // the selected token changes. D-004: show a loading overlay while the Walrus
 // fetch + scene-build is in flight (critical for the demo recording so the
 // canvas doesn't go blank during the swap).
+//
+// Brutalist editorial styling per D-044: chrome recedes, full-bleed black
+// canvas, mono uppercase HUDs without borders, italic-serif empty/error
+// states. The page IS the well.
 
 interface LastResult {
   lapMs: number;
   previousPbMs: number | null;
   isNewPb: boolean;
 }
+
+// Page-level styles.
+
+const wellPage: CSSProperties = {
+  background: tokens.color.well,
+  color: tokens.color.wellInk,
+  minHeight: '100vh',
+};
+
+const wellMain: CSSProperties = {
+  padding: '24px 24px 48px',
+  maxWidth: 1400,
+  margin: '0 auto',
+};
+
+const pageHeader: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  marginBottom: 16,
+};
+
+const wellEyebrow: CSSProperties = {
+  ...eyebrow,
+  color: 'rgba(255,255,255,0.7)',
+};
+
+const wellHeadline: CSSProperties = {
+  ...displayHeadline,
+  color: tokens.color.wellInk,
+  fontSize: 28,
+};
+
+const canvasShell: CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  height: '68vh',
+  background: tokens.color.well,
+  overflow: 'hidden',
+  border: '1.5px solid rgba(255,255,255,0.15)',
+};
+
+const sceneOverlay: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(0, 0, 0, 0.85)',
+  color: tokens.color.wellInk,
+};
+
+const sceneOverlayCenter: CSSProperties = {
+  textAlign: 'center',
+  padding: 24,
+};
+
+const hudLap: CSSProperties = {
+  position: 'absolute',
+  top: 16,
+  left: 24,
+  ...monoLabel,
+  color: tokens.color.wellInk,
+  letterSpacing: '2px',
+  fontSize: 18,
+  textTransform: 'none',
+};
+
+const hudBest: CSSProperties = {
+  position: 'absolute',
+  top: 16,
+  right: 24,
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.7)',
+  letterSpacing: '1.5px',
+  fontSize: 13,
+  textTransform: 'none',
+};
+
+const driveHint: CSSProperties = {
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.5)',
+  marginTop: 16,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+};
+
+const emptyStack: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  alignItems: 'flex-start',
+};
+
+const emptyTitle: CSSProperties = {
+  ...displayHeadline,
+  color: tokens.color.wellInk,
+  fontSize: 36,
+};
+
+const emptySub: CSSProperties = {
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.6)',
+  letterSpacing: '0.5px',
+  textTransform: 'none',
+};
+
+const emptyLink: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.accent,
+  textDecoration: 'underline',
+};
 
 export function TrackPage() {
   const account = useCurrentAccount();
@@ -62,7 +180,7 @@ export function TrackPage() {
     loading: ownedLoading,
     error: ownedError,
   } = useOwnedTokens(isOverrideMode ? undefined : account?.address);
-  const tokens: OwnedToken[] = blobToken
+  const tokensList: OwnedToken[] = blobToken
     ? [blobToken]
     : modelToken
       ? [modelToken]
@@ -99,10 +217,10 @@ export function TrackPage() {
   // Keep selectedIdx in range when the token list changes (initial fetch
   // or post-mint refresh).
   useEffect(() => {
-    if (selectedIdx >= tokens.length) setSelectedIdx(0);
-  }, [tokens.length, selectedIdx]);
+    if (selectedIdx >= tokensList.length) setSelectedIdx(0);
+  }, [tokensList.length, selectedIdx]);
 
-  const selected = tokens[selectedIdx];
+  const selected = tokensList[selectedIdx];
 
   // U4/U5 — when the selected variant changes (carousel switch), reset
   // React-side game state and re-read the PB for the new car.
@@ -277,164 +395,138 @@ export function TrackPage() {
   // override modes (?model= / ?blob=) resolve a token without one.
   if (!isOverrideMode && !account) {
     return (
-      <div style={{ padding: 32 }} data-testid="track-needs-signin">
-        <h2>Tiny Racetrack</h2>
-        <p>Connect a wallet to drive the NFTs you own.</p>
+      <div style={wellPage} data-testid="track-needs-signin">
+        <div style={wellMain}>
+          <div style={pageHeader}>
+            <span style={wellEyebrow}>— L3 / DRIVE</span>
+            <h1 style={wellHeadline}>Tiny Racetrack.</h1>
+          </div>
+          <div style={emptyStack}>
+            <p style={emptyTitle}>Connect a wallet.</p>
+            <p style={emptySub}>TO DRIVE THE NFTS YOU OWN</p>
+          </div>
+        </div>
       </div>
     );
   }
   if (tokensLoading) {
     return (
-      <div style={{ padding: 32 }} data-testid="track-loading-variants">
-        Loading your NFTs…
+      <div style={wellPage} data-testid="track-loading-variants">
+        <div style={wellMain}>
+          <p style={{ ...monoLabel, color: 'rgba(255,255,255,0.7)' }}>— LOADING YOUR NFTS</p>
+        </div>
       </div>
     );
   }
   if (tokensError) {
     return (
-      <div style={{ padding: 32, color: 'crimson' }} data-testid="track-variants-error">
-        Couldn't load your NFTs: {tokensError.message}
+      <div style={wellPage} data-testid="track-variants-error">
+        <div style={wellMain}>
+          <p style={{ ...monoLabel, color: tokens.color.err, textTransform: 'none', letterSpacing: '0.5px' }}>
+            × FAILED · Couldn't load your NFTs: {tokensError.message}
+          </p>
+        </div>
       </div>
     );
   }
-  if (tokens.length === 0) {
+  if (tokensList.length === 0) {
     return (
-      <div style={{ padding: 32 }} data-testid="track-empty">
-        <h2>No drivable NFTs yet</h2>
-        <p>
-          Mint or collect an NFT first to drive it.{' '}
-          <Link to="/" data-testid="track-empty-browse">
-            Browse the marketplace
-          </Link>
-          .
-        </p>
+      <div style={wellPage} data-testid="track-empty">
+        <div style={wellMain}>
+          <div style={pageHeader}>
+            <span style={wellEyebrow}>— L3 / DRIVE</span>
+            <h1 style={wellHeadline}>Tiny Racetrack.</h1>
+          </div>
+          <div style={emptyStack}>
+            <p style={emptyTitle}>Nothing to drive yet.</p>
+            <p style={emptySub}>
+              MINT A COLLECTION ON{' '}
+              <Link to="/launch" style={emptyLink}>/LAUNCH</Link>{' '}
+              OR BUY ONE ON{' '}
+              <Link to="/market" style={emptyLink}>/MARKET</Link>.
+            </p>
+            <Link to="/" data-testid="track-empty-browse" style={emptyLink}>
+              ← BROWSE
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto' }} data-testid="track-page">
-      <h2 style={{ marginTop: 0 }}>Tiny Racetrack</h2>
-      <CarCarousel
-        tokens={tokens}
-        selectedIdx={selectedIdx}
-        onSelect={setSelectedIdx}
-      />
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '70vh',
-          background: '#222',
-          borderRadius: 8,
-          overflow: 'hidden',
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          data-testid="track-canvas"
-          style={{ width: '100%', height: '100%', display: 'block' }}
+    <div style={wellPage} data-testid="track-page">
+      <div style={wellMain}>
+        <div style={pageHeader}>
+          <span style={wellEyebrow}>— L3 / DRIVE</span>
+          <h1 style={wellHeadline}>Tiny Racetrack.</h1>
+        </div>
+        <CarCarousel
+          tokens={tokensList}
+          selectedIdx={selectedIdx}
+          onSelect={setSelectedIdx}
         />
-        {sceneLoading && (
-          <div
-            data-testid="track-scene-loading"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0, 0, 0, 0.55)',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: 18,
-            }}
-          >
-            Loading variant…
-          </div>
-        )}
-        {sceneError && !sceneLoading && (
-          <div
-            data-testid="track-scene-error"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(80, 0, 0, 0.7)',
-              color: '#fff',
-              padding: 16,
-              textAlign: 'center',
-            }}
-          >
-            Couldn't load this variant: {sceneError}
-          </div>
-        )}
-        {/* Plan-006 U8 — countdown overlay. Mounts only when the camera
-            orbit completes AND the lap state is still 'intro' (i.e. user
-            hasn't skipped via hold-W). On GO step, fires onComplete →
-            scene.dispatchIntroComplete → lapState transitions to waiting
-            → this overlay unmounts. */}
-        {!sceneError &&
-          orbitDone &&
-          lapState.status === 'intro' && (
-            <Countdown onComplete={handleCountdownComplete} />
-          )}
-        {/* U4 — HUD overlay (KTD-3, React not Babylon GUI). Stays mounted
-            during scene reload so the values for the new car are immediately
-            visible behind the loading overlay (no flash on carousel switch). */}
-        {!sceneError && (
-          <>
-            <div
-              data-testid="track-hud-lap"
-              style={{
-                position: 'absolute',
-                top: 12,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'rgba(0,0,0,0.55)',
-                color: '#fff',
-                padding: '6px 18px',
-                borderRadius: 6,
-                fontSize: 22,
-                fontWeight: 700,
-                fontFamily: 'monospace',
-                letterSpacing: 1,
-              }}
-            >
-              Lap: {formatHudTime(lapState.currentLapMs)}
-            </div>
-            <div
-              data-testid="track-hud-best"
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                background: 'rgba(0,0,0,0.55)',
-                color: '#ddd',
-                padding: '6px 14px',
-                borderRadius: 6,
-                fontSize: 14,
-                fontFamily: 'monospace',
-              }}
-            >
-              Best: {pb !== null ? formatHudTime(pb) : '—'}
-            </div>
-          </>
-        )}
-        {lastResult && (
-          <ResultOverlay
-            lapMs={lastResult.lapMs}
-            previousPbMs={lastResult.previousPbMs}
-            isNewPb={lastResult.isNewPb}
-            onRetry={handleRetry}
+        <div style={canvasShell}>
+          <canvas
+            ref={canvasRef}
+            data-testid="track-canvas"
+            style={{ width: '100%', height: '100%', display: 'block' }}
           />
-        )}
+          {sceneLoading && (
+            <div data-testid="track-scene-loading" style={sceneOverlay}>
+              <div style={sceneOverlayCenter}>
+                <p style={{ ...monoLabel, fontSize: 14, letterSpacing: '2px' }}>
+                  — LOADING TRACK · BABYLON + HAVOK
+                </p>
+              </div>
+            </div>
+          )}
+          {sceneError && !sceneLoading && (
+            <div data-testid="track-scene-error" style={{ ...sceneOverlay, background: 'rgba(40, 0, 0, 0.85)' }}>
+              <div style={sceneOverlayCenter}>
+                <p style={{ ...monoLabel, color: tokens.color.err, fontSize: 14, letterSpacing: '2px', marginBottom: 8 }}>
+                  × LOAD FAILED
+                </p>
+                <p style={{ ...monoLabel, color: tokens.color.wellInk, textTransform: 'none', letterSpacing: '0.5px' }}>
+                  {sceneError}
+                </p>
+              </div>
+            </div>
+          )}
+          {/* Plan-006 U8 — countdown overlay. Mounts only when the camera
+              orbit completes AND the lap state is still 'intro' (i.e. user
+              hasn't skipped via hold-W). On GO step, fires onComplete →
+              scene.dispatchIntroComplete → lapState transitions to waiting
+              → this overlay unmounts. */}
+          {!sceneError &&
+            orbitDone &&
+            lapState.status === 'intro' && (
+              <Countdown onComplete={handleCountdownComplete} />
+            )}
+          {/* U4 — HUD overlay (KTD-3, React not Babylon GUI). Stays mounted
+              during scene reload so the values for the new car are immediately
+              visible behind the loading overlay (no flash on carousel switch). */}
+          {!sceneError && (
+            <>
+              <div data-testid="track-hud-lap" style={hudLap}>
+                Lap: {formatHudTime(lapState.currentLapMs)}
+              </div>
+              <div data-testid="track-hud-best" style={hudBest}>
+                Best: {pb !== null ? formatHudTime(pb) : '—'}
+              </div>
+            </>
+          )}
+          {lastResult && (
+            <ResultOverlay
+              lapMs={lastResult.lapMs}
+              previousPbMs={lastResult.previousPbMs}
+              isNewPb={lastResult.isNewPb}
+              onRetry={handleRetry}
+            />
+          )}
+        </div>
+        <p style={driveHint}>WASD or arrow keys to drive. Press <kbd style={{ fontFamily: tokens.font.mono, padding: '0 4px', border: '1px solid rgba(255,255,255,0.3)' }}>R</kbd> to retry.</p>
       </div>
-      <p style={{ marginTop: 12, color: '#888' }}>
-        WASD or arrow keys to drive. Press <kbd>R</kbd> to retry.
-      </p>
     </div>
   );
 }
