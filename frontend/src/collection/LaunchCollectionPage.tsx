@@ -40,6 +40,8 @@ import {
 } from '../forge/VariantEditor';
 import { VariantPreview } from '../forge/VariantPreview';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
+import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { glbUrlForSummary } from '../walrus/aggregator';
 import {
   buttonOutline,
   buttonPrimary,
@@ -50,6 +52,7 @@ import {
   monoLabel,
   pagePaper,
   tokens,
+  viewerWell,
 } from '../ux/tokens';
 
 const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
@@ -142,15 +145,28 @@ function baseOptionStyle(active: boolean): CSSProperties {
   return {
     ...card,
     border: active ? `2px solid ${tokens.color.accent}` : tokens.border.primary,
-    padding: 16,
+    padding: 0,
     cursor: 'pointer',
     textAlign: 'left',
     display: 'flex',
     flexDirection: 'column',
-    gap: 6,
     background: tokens.color.paperPure,
+    overflow: 'hidden',
   };
 }
+
+const baseOptionPreview: CSSProperties = {
+  ...viewerWell,
+  aspectRatio: '4 / 3',
+  width: '100%',
+};
+
+const baseOptionBody: CSSProperties = {
+  padding: 12,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
 
 const baseOptionName: CSSProperties = {
   fontFamily: tokens.font.display,
@@ -388,10 +404,15 @@ export function LaunchCollectionPage() {
                   aria-pressed={picked}
                   style={baseOptionStyle(picked)}
                 >
-                  <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
-                  <span style={baseOptionMeta}>
-                    fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
-                  </span>
+                  <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
+                    <PreviewCanvas glbUrl={glbUrlForSummary(m)} />
+                  </div>
+                  <div style={baseOptionBody}>
+                    <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                    <span style={baseOptionMeta}>
+                      fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
+                    </span>
+                  </div>
                 </button>
               );
             })}
