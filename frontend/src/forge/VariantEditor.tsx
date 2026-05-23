@@ -2,9 +2,15 @@
 // Per-variant pricing toggle (D-005): default off (all rows share globalPrice).
 // AE5: variant count is hard-capped at 16 by the Move contract (MAX_VARIANTS)
 // AND by the UI here so users can't even ask for more than the chain allows.
+//
+// Brutalist editorial styling per D-044: paper-pure rows separated by ink
+// hairlines, mono uppercase labels, no rounded corners, accent border on
+// active inputs (via CSS focus state).
 
+import type { CSSProperties } from 'react';
 import { useCallback } from 'react';
 import { TEXTURE_LIBRARY, type TextureId } from '@overflow2026/shared';
+import { buttonOutline, input as inputStyle, monoLabel, tokens } from '../ux/tokens';
 
 export const MIN_VARIANTS = 1;
 export const MAX_VARIANTS = 16;
@@ -56,6 +62,66 @@ export function hexToBaseColorRgb(hex: string): [number, number, number, number]
   const n = parseInt(m[1]!, 16);
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255, 1];
 }
+
+const headerRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  justifyContent: 'space-between',
+  marginBottom: 12,
+};
+
+const countLabel: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+};
+
+const stepperBtn: CSSProperties = {
+  ...buttonOutline,
+  padding: '4px 12px',
+  fontSize: 14,
+  minWidth: 36,
+};
+
+const stepperRow: CSSProperties = { display: 'flex', gap: 8 };
+
+const pricingRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 16,
+  flexWrap: 'wrap',
+  marginBottom: 16,
+  paddingBottom: 16,
+  borderBottom: tokens.border.primary,
+};
+
+const sublabel: CSSProperties = { ...monoLabel, color: tokens.color.muted };
+
+const table: CSSProperties = {
+  borderCollapse: 'collapse',
+  width: '100%',
+  border: tokens.border.primary,
+};
+
+const thStyle: CSSProperties = {
+  ...monoLabel,
+  textAlign: 'left',
+  padding: '8px 10px',
+  borderBottom: tokens.border.primary,
+  background: tokens.color.paperPure,
+  color: tokens.color.muted,
+};
+
+const tdStyle: CSSProperties = {
+  padding: '8px 10px',
+  borderBottom: '0.5px solid rgba(0,0,0,0.2)',
+  fontFamily: tokens.font.body,
+  fontSize: 14,
+};
+
+const rowIndex: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+};
 
 export function VariantEditor({ state, onChange, disabled }: VariantEditorProps) {
   const canAdd = state.variants.length < MAX_VARIANTS;
@@ -119,30 +185,35 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
 
   return (
     <div data-testid="variant-editor">
-      <div style={{ marginBottom: 8 }}>
-        <strong>{state.variants.length}</strong> variant
-        {state.variants.length === 1 ? '' : 's'}{' '}
-        <button
-          type="button"
-          onClick={addRow}
-          disabled={disabled || !canAdd}
-          data-testid="variant-add"
-        >
-          +
-        </button>{' '}
-        <button
-          type="button"
-          onClick={removeRow}
-          disabled={disabled || !canRemove}
-          data-testid="variant-remove"
-        >
-          −
-        </button>
+      <div style={headerRow}>
+        <span style={countLabel}>
+          — {state.variants.length} VARIANT{state.variants.length === 1 ? '' : 'S'} (MAX {MAX_VARIANTS})
+        </span>
+        <div style={stepperRow}>
+          <button
+            type="button"
+            onClick={removeRow}
+            disabled={disabled || !canRemove}
+            data-testid="variant-remove"
+            style={stepperBtn}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={addRow}
+            disabled={disabled || !canAdd}
+            data-testid="variant-add"
+            style={stepperBtn}
+          >
+            +
+          </button>
+        </div>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <label>
-          Price per variant (MIST):{' '}
+      <div style={pricingRow}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={sublabel}>PRICE PER VARIANT (MIST)</span>
           <input
             type="text"
             inputMode="numeric"
@@ -153,44 +224,45 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
               setGlobalPrice(v === '' ? 0n : BigInt(v));
             }}
             data-testid="global-price-input"
-            style={{ width: 140 }}
+            style={{ ...inputStyle, width: 160 }}
           />
-        </label>{' '}
-        <label>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="checkbox"
             checked={state.perVariantPricing}
             disabled={disabled}
             onChange={togglePerVariantPricing}
             data-testid="per-variant-pricing-toggle"
-          />{' '}
-          Per-variant pricing
+          />
+          <span style={sublabel}>PER-VARIANT PRICING</span>
         </label>
       </div>
 
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+      <table style={table}>
         <thead>
-          <tr style={{ textAlign: 'left', fontSize: 12, color: '#888' }}>
-            <th>#</th>
-            <th>Color</th>
-            <th>Texture</th>
-            {state.perVariantPricing && <th>Price (MIST)</th>}
+          <tr>
+            <th style={thStyle}>#</th>
+            <th style={thStyle}>COLOR</th>
+            <th style={thStyle}>TEXTURE</th>
+            {state.perVariantPricing && <th style={thStyle}>PRICE (MIST)</th>}
           </tr>
         </thead>
         <tbody>
           {state.variants.map((row, i) => (
             <tr key={i} data-testid={`variant-row-${i}`}>
-              <td>{i + 1}</td>
-              <td>
+              <td style={{ ...tdStyle, ...rowIndex }}>{String(i + 1).padStart(3, '0')}</td>
+              <td style={tdStyle}>
                 <input
                   type="color"
                   value={row.colorHex}
                   disabled={disabled}
                   onChange={(e) => updateRow(i, { colorHex: e.target.value })}
                   data-testid={`variant-color-${i}`}
+                  style={{ border: tokens.border.primary, padding: 0, width: 40, height: 28, background: 'none' }}
                 />
               </td>
-              <td>
+              <td style={tdStyle}>
                 <select
                   value={row.textureId}
                   disabled={disabled}
@@ -198,6 +270,7 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
                     updateRow(i, { textureId: e.target.value as TextureId })
                   }
                   data-testid={`variant-texture-${i}`}
+                  style={{ ...inputStyle, padding: '4px 8px', fontSize: 13 }}
                 >
                   {TEXTURE_LIBRARY.map((t) => (
                     <option key={t} value={t}>
@@ -207,7 +280,7 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
                 </select>
               </td>
               {state.perVariantPricing && (
-                <td>
+                <td style={tdStyle}>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -218,7 +291,7 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
                       updateRow(i, { priceMist: v === '' ? 0n : BigInt(v) });
                     }}
                     data-testid={`variant-price-${i}`}
-                    style={{ width: 120 }}
+                    style={{ ...inputStyle, width: 140 }}
                   />
                 </td>
               )}

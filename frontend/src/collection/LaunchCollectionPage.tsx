@@ -15,6 +15,7 @@
 // license.derivative_mint_fee (D-002 pay-to-derive) — read from the picked
 // Model3DSummary, NOT a user input, so the nft creator can't underpay and abort.
 
+import type { CSSProperties } from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -39,6 +40,17 @@ import {
 } from '../forge/VariantEditor';
 import { VariantPreview } from '../forge/VariantPreview';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
+import {
+  buttonOutline,
+  buttonPrimary,
+  card,
+  displayHeadline,
+  eyebrow,
+  input as inputStyle,
+  monoLabel,
+  pagePaper,
+  tokens,
+} from '../ux/tokens';
 
 const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
 
@@ -101,6 +113,97 @@ function mistToSui(mist: string): string {
   if (!Number.isFinite(n)) return '0';
   return (n / 1e9).toString();
 }
+
+// Page-local styles.
+
+const mainStyle: CSSProperties = {
+  maxWidth: 1040,
+  margin: '0 auto',
+  padding: '32px 24px 64px',
+};
+
+const headerStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 32 };
+const sectionLabel: CSSProperties = { ...monoLabel, display: 'block', marginBottom: 12 };
+const sectionH2: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.lg,
+  fontWeight: tokens.weight.medium,
+  marginBottom: 16,
+};
+
+const basePickerGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+  gap: 12,
+};
+
+function baseOptionStyle(active: boolean): CSSProperties {
+  return {
+    ...card,
+    border: active ? `2px solid ${tokens.color.accent}` : tokens.border.primary,
+    padding: 16,
+    cursor: 'pointer',
+    textAlign: 'left',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    background: tokens.color.paperPure,
+  };
+}
+
+const baseOptionName: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+  color: tokens.color.ink,
+};
+
+const baseOptionMeta: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  letterSpacing: '0.5px',
+  textTransform: 'none',
+  fontSize: 11,
+};
+
+const formGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, 1fr)',
+  gap: 16,
+  marginBottom: 24,
+};
+
+const launchHelper: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  marginTop: 8,
+  letterSpacing: '1px',
+};
+
+const errorBanner: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  marginTop: 16,
+  padding: '10px 12px',
+  border: `1.5px solid ${tokens.color.err}`,
+};
+
+const successBanner: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.accent,
+  marginTop: 16,
+  padding: '10px 12px',
+  border: `1.5px solid ${tokens.color.accent}`,
+};
+
+const explorerLink: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  textDecoration: 'underline',
+  marginLeft: 8,
+};
 
 export function LaunchCollectionPage() {
   const { session, clearSession } = useSession();
@@ -222,10 +325,17 @@ export function LaunchCollectionPage() {
 
   if (!session) {
     return (
-      <div data-testid="launch-page" style={{ padding: 24, color: '#ddd', background: '#15171b', minHeight: '100vh' }}>
-        <h1>Launch an NFT Collection</h1>
-        <p>Sign in to fork a base model into a collection.</p>
-        <SignInButton />
+      <div data-testid="launch-page" style={pagePaper}>
+        <main style={mainStyle}>
+          <div style={headerStack}>
+            <span style={eyebrow}>— L2 / MINT</span>
+            <h1 style={displayHeadline}>Launch a collection.</h1>
+            <p style={{ ...monoLabel, color: tokens.color.muted, letterSpacing: '0.5px', textTransform: 'none' }}>
+              Sign in to fork a base model into a collection.
+            </p>
+          </div>
+          <SignInButton />
+        </main>
       </div>
     );
   }
@@ -234,123 +344,145 @@ export function LaunchCollectionPage() {
     phase === 'building-variants' || phase === 'uploading' || phase === 'signing';
 
   const launchLabel = (() => {
-    if (phase === 'building-variants') return `Material-swapping ${editorState.variants.length} variants…`;
+    if (phase === 'building-variants') return `— BUILDING ${editorState.variants.length} VARIANTS`;
     if (phase === 'uploading') {
       if (uploadStage === 'awaiting-register') return 'Step 1 of 3 — approve Walrus register…';
       if (uploadStage === 'awaiting-certify') return 'Step 2 of 3 — approve Walrus certify…';
       return 'Uploading variants to Walrus…';
     }
     if (phase === 'signing') return `Step 3 of 3 — approve launch (collection + ${editorState.variants.length} tokens)…`;
-    if (phase === 'success') return 'Launched ✓';
-    return `Launch collection (${editorState.variants.length} tokens) — 3 signatures`;
+    if (phase === 'success') return 'LAUNCHED';
+    return `LAUNCH COLLECTION (${editorState.variants.length} TOKENS) →`;
   })();
 
   return (
-    <div data-testid="launch-page" style={{ padding: 24, color: '#ddd', background: '#15171b', minHeight: '100vh', fontFamily: 'system-ui' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>Launch an NFT Collection</h1>
-        <Link to="/" style={{ color: '#7aa2ff' }}>← Browse</Link>
-      </header>
-
-      {/* Step 1 — pick the base Model3D to fork */}
-      <section data-testid="base-picker" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 15 }}>1. Pick a base model to fork</h2>
-        {modelsLoading && <p style={{ color: '#888' }}>Loading models…</p>}
-        {!modelsLoading && forkable.length === 0 && (
-          <p style={{ color: '#888' }} data-testid="no-base-models">
-            No forkable models yet — publish one on <Link to="/create" style={{ color: '#7aa2ff' }}>/create</Link> first.
-          </p>
-        )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {forkable.map((m) => {
-            const picked = base?.objectId === m.objectId;
-            return (
-              <button
-                key={m.objectId}
-                type="button"
-                onClick={() => void onPickBase(m)}
-                disabled={busy}
-                data-testid={`base-option-${m.objectId}`}
-                aria-pressed={picked}
-                style={{
-                  textAlign: 'left',
-                  padding: 10,
-                  minWidth: 180,
-                  background: picked ? '#1f2630' : '#1a1c20',
-                  border: picked ? '2px solid #7aa2ff' : '2px solid #333',
-                  color: '#ddd',
-                  cursor: 'pointer',
-                  borderRadius: 6,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{m.name || '(unnamed)'}</div>
-                <div style={{ fontSize: 12, color: '#9aa' }}>
-                  fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
-                </div>
-              </button>
-            );
-          })}
+    <div data-testid="launch-page" style={pagePaper}>
+      <main style={mainStyle}>
+        <div style={headerStack}>
+          <span style={eyebrow}>— L2 / MINT</span>
+          <h1 style={displayHeadline}>Launch a collection.</h1>
         </div>
-      </section>
 
-      {base && (
-        <section data-testid="authoring" style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 15 }}>2. Author variants</h2>
-          <p style={{ fontSize: 12, color: '#9aa' }}>
-            Forking <strong>{base.name}</strong> — you pay{' '}
-            <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> to its creator, and inherit a{' '}
-            <strong>{(base.derivativeRoyaltyBps / 100).toFixed(2)}%</strong> resale royalty back to them.
-          </p>
-
-          <label style={{ display: 'block', marginBottom: 8 }}>
-            Collection name{' '}
-            <input
-              data-testid="collection-name-input"
-              value={collectionName}
-              onChange={(e) => setCollectionName(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <label style={{ display: 'block', marginBottom: 12 }}>
-            Register fee for game devs (SUI){' '}
-            <input
-              data-testid="register-fee-input"
-              value={registerFeeSui}
-              onChange={(e) => setRegisterFeeSui(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          <VariantEditor state={editorState} onChange={setEditorState} disabled={busy} />
-          <VariantPreview
-            variants={editorState.variants}
-            variantGlbs={variantGlbs ?? undefined}
-            selectedIndex={selectedPreview}
-            onSelect={setSelectedPreview}
-          />
-
-          <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button type="button" onClick={() => void onPreview()} disabled={busy} data-testid="preview-button">
-              Preview variants
-            </button>
-            <button type="button" onClick={() => void onLaunch()} disabled={busy} data-testid="launch-button">
-              {launchLabel}
-            </button>
+        {/* Step 1 — pick the base Model3D to fork */}
+        <section data-testid="base-picker" style={{ marginBottom: 32 }}>
+          <h2 style={sectionH2}>1. Pick a base model to fork.</h2>
+          {modelsLoading && (
+            <p style={{ ...monoLabel, color: tokens.color.hint }}>— LOADING MODELS</p>
+          )}
+          {!modelsLoading && forkable.length === 0 && (
+            <p style={{ ...monoLabel, color: tokens.color.hint, textTransform: 'none', letterSpacing: '0.5px' }} data-testid="no-base-models">
+              No forkable models yet — publish one on{' '}
+              <Link to="/create" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>/create</Link> first.
+            </p>
+          )}
+          <div style={basePickerGrid}>
+            {forkable.map((m) => {
+              const picked = base?.objectId === m.objectId;
+              return (
+                <button
+                  key={m.objectId}
+                  type="button"
+                  onClick={() => void onPickBase(m)}
+                  disabled={busy}
+                  data-testid={`base-option-${m.objectId}`}
+                  aria-pressed={picked}
+                  style={baseOptionStyle(picked)}
+                >
+                  <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                  <span style={baseOptionMeta}>
+                    fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
-      )}
 
-      {errorMsg && (
-        <div data-testid="launch-error" style={{ color: 'crimson', marginTop: 12 }}>{errorMsg}</div>
-      )}
-      {phase === 'success' && txDigest && (
-        <div data-testid="launch-success" style={{ color: '#7CFC00', marginTop: 12 }}>
-          Collection launched —{' '}
-          <a href={`https://suiscan.xyz/testnet/tx/${txDigest}`} target="_blank" rel="noreferrer" style={{ color: '#7aa2ff' }}>
-            view tx
-          </a>
-        </div>
-      )}
+        {base && (
+          <section data-testid="authoring" style={{ marginBottom: 32 }}>
+            <h2 style={sectionH2}>2. Author variants.</h2>
+            <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px', marginBottom: 16 }}>
+              Forking <strong>{base.name}</strong> — you pay{' '}
+              <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> to its creator, and inherit a{' '}
+              <strong>{(base.derivativeRoyaltyBps / 100).toFixed(2)}%</strong> resale royalty back to them.
+            </p>
+
+            <div style={formGrid}>
+              <label>
+                <span style={sectionLabel}>COLLECTION NAME</span>
+                <input
+                  data-testid="collection-name-input"
+                  value={collectionName}
+                  onChange={(e) => setCollectionName(e.target.value)}
+                  disabled={busy}
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+              </label>
+              <label>
+                <span style={sectionLabel}>REGISTER FEE FOR GAME DEVS (SUI)</span>
+                <input
+                  data-testid="register-fee-input"
+                  value={registerFeeSui}
+                  onChange={(e) => setRegisterFeeSui(e.target.value)}
+                  disabled={busy}
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+              </label>
+            </div>
+
+            <VariantEditor state={editorState} onChange={setEditorState} disabled={busy} />
+            <div style={{ marginTop: 24 }}>
+              <VariantPreview
+                variants={editorState.variants}
+                variantGlbs={variantGlbs ?? undefined}
+                selectedIndex={selectedPreview}
+                onSelect={setSelectedPreview}
+              />
+            </div>
+
+            <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => void onPreview()}
+                disabled={busy}
+                data-testid="preview-button"
+                style={buttonOutline}
+              >
+                PREVIEW VARIANTS
+              </button>
+              <button
+                type="button"
+                onClick={() => void onLaunch()}
+                disabled={busy}
+                data-testid="launch-button"
+                style={buttonPrimary}
+              >
+                {launchLabel}
+              </button>
+            </div>
+            <p style={launchHelper}>SIGNS 3× · PAYS GAS · MINTS L2</p>
+          </section>
+        )}
+
+        {errorMsg && (
+          <div data-testid="launch-error" style={errorBanner}>
+            × FAILED · {errorMsg}
+          </div>
+        )}
+        {phase === 'success' && txDigest && (
+          <div data-testid="launch-success" style={successBanner}>
+            ✓ LAUNCHED ·
+            <a
+              href={`https://suiscan.xyz/testnet/tx/${txDigest}`}
+              target="_blank"
+              rel="noreferrer"
+              style={explorerLink}
+            >
+              VIEW TX →
+            </a>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

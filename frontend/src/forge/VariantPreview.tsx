@@ -6,13 +6,14 @@
 // CEO mode-review plan note explicitly allows this split (see U4 §Approach
 // "PICK THE LATTER FOR V1").
 //
-// Reuses PreviewCanvas's Babylon lifecycle pattern (engine + scene + dispose
-// on unmount) by simply rendering PreviewCanvas underneath, scoped to the
-// selected variant's GLB URL.
+// Brutalist editorial styling per D-044: pure-black viewer well, mono caption
+// labels, 1.5px ink borders on tiles with accent on the active variant.
 
+import type { CSSProperties } from 'react';
 import { useEffect, useMemo } from 'react';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import type { VariantRow } from './VariantEditor';
+import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
 export interface VariantPreviewProps {
   variants: VariantRow[];
@@ -21,6 +22,37 @@ export interface VariantPreviewProps {
   variantGlbs?: Uint8Array[];
   selectedIndex: number;
   onSelect: (i: number) => void;
+}
+
+const wellSized: CSSProperties = {
+  ...viewerWell,
+  height: 320,
+  marginBottom: 12,
+  border: tokens.border.primary,
+};
+
+const placeholderText: CSSProperties = {
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.6)',
+  textAlign: 'center',
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const tilesRow: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 };
+
+function tileStyle(active: boolean, colorHex: string): CSSProperties {
+  return {
+    width: 40,
+    height: 40,
+    background: colorHex,
+    border: active ? `2px solid ${tokens.color.accent}` : tokens.border.primary,
+    cursor: 'pointer',
+    padding: 0,
+  };
 }
 
 export function VariantPreview({
@@ -46,38 +78,18 @@ export function VariantPreview({
 
   return (
     <div data-testid="variant-preview">
-      <div
-        style={{
-          height: 320,
-          background: '#15171b',
-          marginBottom: 8,
-          position: 'relative',
-        }}
-        data-testid="variant-preview-canvas"
-      >
+      <div style={wellSized} data-testid="variant-preview-canvas">
         {selectedGlbUrl ? (
           <PreviewCanvas glbUrl={selectedGlbUrl} />
         ) : (
-          <div
-            style={{
-              color: '#666',
-              padding: 16,
-              fontSize: 12,
-              textAlign: 'center',
-              lineHeight: '288px',
-            }}
-            data-testid="variant-preview-placeholder"
-          >
+          <div style={placeholderText} data-testid="variant-preview-placeholder">
             {variantGlbs
-              ? 'Select a variant to preview'
-              : 'Click Preview to build variants for preview'}
+              ? '— SELECT A VARIANT TO PREVIEW'
+              : '— CLICK PREVIEW TO BUILD VARIANTS'}
           </div>
         )}
       </div>
-      <div
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
-        data-testid="variant-tiles"
-      >
+      <div style={tilesRow} data-testid="variant-tiles">
         {variants.map((v, i) => {
           const selected = i === selectedIndex;
           return (
@@ -88,14 +100,7 @@ export function VariantPreview({
               data-testid={`variant-tile-${i}`}
               aria-pressed={selected}
               title={`Variant ${i + 1} — ${v.textureId}`}
-              style={{
-                width: 36,
-                height: 36,
-                background: v.colorHex,
-                border: selected ? '2px solid #fff' : '2px solid #333',
-                cursor: 'pointer',
-                padding: 0,
-              }}
+              style={tileStyle(selected, v.colorHex)}
             />
           );
         })}
