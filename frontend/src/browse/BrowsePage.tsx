@@ -1,10 +1,19 @@
+import type { CSSProperties } from 'react';
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useModelIndex } from './useModelIndex';
 import { CollectionCard } from './CollectionCard';
-import { SignInButton } from '../auth/SignInButton';
 import { useCollections, POLICY_PERMISSIONLESS } from '../integration/useCollections';
+import {
+  buttonOutline,
+  displayHeadline,
+  eyebrow,
+  monoLabel,
+  pagePaper,
+  tokens,
+  viewerWell,
+} from '../ux/tokens';
 
 // Phase 3 (U5): Browse renders one card per Collection rather than per
 // Model3D variant. Phase 2 "degenerate-of-1" mints whose collectionId points
@@ -15,6 +24,12 @@ import { useCollections, POLICY_PERMISSIONLESS } from '../integration/useCollect
 // are bucketed under the synthetic '_orphans' key so they remain visible.
 // Each orphan still gets its own card via objectId fallback so we don't
 // confusingly merge unrelated assets.
+//
+// Brutalist editorial styling per D-044: the landing page is the only place
+// that explains the product before the user clicks. Hero sells the three-tier
+// thesis; editorial card grid sells the catalog; three-CTA row at the foot
+// dispatches the demo arc.
+
 export function groupByCollection(
   models: Model3DSummary[],
 ): Map<string, Model3DSummary[]> {
@@ -30,6 +45,183 @@ export function groupByCollection(
   }
   return groups;
 }
+
+const mainStyle: CSSProperties = {
+  maxWidth: 1280,
+  margin: '0 auto',
+  padding: '32px 24px 64px',
+};
+
+const heroStack: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  marginBottom: 40,
+  maxWidth: 720,
+};
+
+const heroParagraph: CSSProperties = {
+  fontFamily: tokens.font.body,
+  fontSize: tokens.size.md,
+  lineHeight: 1.5,
+  color: tokens.color.muted,
+  margin: 0,
+};
+
+const layerPill: CSSProperties = {
+  fontFamily: tokens.font.mono,
+  fontSize: 11,
+  letterSpacing: '1px',
+  textTransform: 'uppercase',
+  color: tokens.color.accent,
+  fontWeight: 500,
+};
+
+const filterRow: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+  alignItems: 'center',
+  marginBottom: 24,
+  paddingBottom: 16,
+  borderBottom: tokens.border.primary,
+};
+
+function chip(active: boolean): CSSProperties {
+  return {
+    ...monoLabel,
+    background: active ? tokens.color.accent : tokens.color.paperPure,
+    color: active ? tokens.color.accentInk : tokens.color.ink,
+    border: tokens.border.primary,
+    padding: '6px 12px',
+    cursor: 'pointer',
+    fontSize: 11,
+  };
+}
+
+const chipsLabel: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  marginRight: 8,
+};
+
+const grid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+  gap: 0,
+  border: tokens.border.primary,
+};
+
+const gridCell: CSSProperties = {
+  borderRight: tokens.border.primary,
+  borderBottom: tokens.border.primary,
+  background: tokens.color.paperPure,
+};
+
+const emptyState: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  padding: 32,
+  border: `1.5px dashed ${tokens.color.ink}`,
+  textAlign: 'center',
+};
+
+const errorState: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  padding: 16,
+  border: `1.5px solid ${tokens.color.err}`,
+};
+
+const ctaRow: CSSProperties = {
+  marginTop: 48,
+  paddingTop: 32,
+  borderTop: tokens.border.primary,
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, 1fr)',
+  gap: 0,
+  border: tokens.border.primary,
+};
+
+const ctaCell: CSSProperties = {
+  borderRight: tokens.border.primary,
+  padding: 20,
+  background: tokens.color.paperPure,
+  textDecoration: 'none',
+  color: tokens.color.ink,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
+
+const ctaThumb: CSSProperties = {
+  ...viewerWell,
+  height: 100,
+  marginBottom: 4,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const ctaLabel: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.accent,
+  letterSpacing: '1.5px',
+};
+
+const ctaTagline: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+};
+
+const ctaArrow: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  fontSize: 11,
+  marginTop: 'auto',
+};
+
+const ctaWellLabel: CSSProperties = {
+  ...monoLabel,
+  color: 'rgba(255,255,255,0.5)',
+};
+
+const integrationGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+  gap: 0,
+  border: tokens.border.primary,
+};
+
+const integrationCell: CSSProperties = {
+  ...gridCell,
+  padding: 16,
+  textDecoration: 'none',
+  color: tokens.color.ink,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
+
+const integrationName: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+};
+
+const integrationMeta: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  letterSpacing: '0.5px',
+  fontSize: 11,
+};
 
 export function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -65,78 +257,81 @@ export function BrowsePage() {
   const collectionGroups = useMemo(() => groupByCollection(models), [models]);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#15171b', color: '#ddd', fontFamily: 'system-ui' }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 24px',
-          borderBottom: '1px solid #222',
-        }}
-      >
-        <h1 style={{ fontSize: 18, margin: 0 }}>overflow2026 — Browse</h1>
-        <nav style={{ display: 'flex', gap: 16, fontSize: 14, alignItems: 'center' }}>
-          <Link to="/launch" style={{ color: '#ffb86b', textDecoration: 'none', fontWeight: 600 }}>
-            🚀 Launch Collection
-          </Link>
-          <Link to="/integrate" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
-            Integrate →
-          </Link>
-          <Link to="/market" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
-            Marketplace →
-          </Link>
-          <Link to="/track" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
-            Racetrack →
-          </Link>
-          <Link to="/create" style={{ color: '#7aa2ff', textDecoration: 'none' }}>
-            Single mint →
-          </Link>
-          <div style={{ minWidth: 200 }}>
-            <SignInButton />
-          </div>
-        </nav>
-      </header>
+    <div style={pagePaper}>
+      <main style={mainStyle}>
+        <section style={heroStack}>
+          <span style={eyebrow}>— SUI OVERFLOW 2026 / WALRUS TRACK</span>
+          <h1 style={displayHeadline}>A model marketplace. On Sui. With composable IP.</h1>
+          <p style={heroParagraph}>
+            <span style={layerPill}>L1 PUBLISH</span> creator commits a 3D model to Walrus and sets license terms.{' '}
+            <span style={layerPill}>L2 MINT</span> someone forks it into a token collection, paying the derive fee.{' '}
+            <span style={layerPill}>L3 DRIVE</span> a buyer takes a token from the kiosk and drives it in-game,
+            with royalty enforced at the protocol layer.
+          </p>
+        </section>
 
-      <section style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
-          <label style={{ fontSize: 12, color: '#888' }}>
-            Tag:{' '}
-            <select
-              data-testid="tag-filter"
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
+        <div style={filterRow}>
+          <span style={chipsLabel}>TAGS ·</span>
+          <button
+            type="button"
+            data-testid="tag-filter-all"
+            onClick={() => setTagFilter('')}
+            disabled={integrationFilter}
+            style={chip(!tagFilter)}
+          >
+            ALL
+          </button>
+          {allTags.map((t) => (
+            <button
+              key={t}
+              type="button"
+              data-testid={`tag-filter-${t}`}
+              onClick={() => setTagFilter(t)}
               disabled={integrationFilter}
-              style={{ marginLeft: 4 }}
+              style={chip(tagFilter === t)}
             >
-              <option value="">All</option>
-              {allTags.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </label>
+              {t.toUpperCase()}
+            </button>
+          ))}
+          {/* Hidden select kept for backwards-compatible test-id; semantically
+              equivalent to the chips above. */}
+          <select
+            data-testid="tag-filter"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            disabled={integrationFilter}
+            style={{ display: 'none' }}
+          >
+            <option value="">All</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+
+          <span style={{ flex: 1 }} />
+
           <button
             onClick={refetch}
             data-testid="refresh-button"
-            style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+            style={buttonOutline}
           >
-            Refresh
+            REFRESH
           </button>
           {integrationFilter ? (
             <button
               data-testid="clear-integration-filter"
               onClick={() => setSearchParams({})}
-              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+              style={buttonOutline}
             >
-              ← Show all models
+              ← SHOW ALL MODELS
             </button>
           ) : (
             <button
               data-testid="integration-filter"
               onClick={() => setSearchParams({ filter: 'integration' })}
-              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+              style={buttonOutline}
             >
-              Open for game integration
+              OPEN FOR INTEGRATION
             </button>
           )}
         </div>
@@ -145,29 +340,22 @@ export function BrowsePage() {
         {integrationFilter && (
           <div data-testid="integration-view">
             {collectionsLoading && (
-              <div data-testid="integration-loading" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
-                Loading collections…
+              <div data-testid="integration-loading" style={{ ...monoLabel, color: tokens.color.hint, padding: 32, textAlign: 'center' }}>
+                — LOADING COLLECTIONS
               </div>
             )}
             {collectionsError && !collectionsLoading && (
-              <div role="alert" data-testid="integration-error" style={{ color: 'salmon', padding: 20 }}>
-                Couldn't load collections: {collectionsError.message}
+              <div role="alert" data-testid="integration-error" style={errorState}>
+                × FAILED · Couldn't load collections: {collectionsError.message}
               </div>
             )}
             {!collectionsLoading && !collectionsError && openCollections.length === 0 && (
-              <div data-testid="integration-empty" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
-                No collections are open for integration yet.
+              <div data-testid="integration-empty" style={emptyState}>
+                NO COLLECTIONS ARE OPEN FOR INTEGRATION YET
               </div>
             )}
             {!collectionsLoading && !collectionsError && openCollections.length > 0 && (
-              <div
-                data-testid="integration-grid"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                  gap: 16,
-                }}
-              >
+              <div data-testid="integration-grid" style={integrationGrid}>
                 {openCollections.map((c) => {
                   const baseModel = models.find((m) => m.objectId === c.baseModelId);
                   const label = baseModel?.name ? `${baseModel.name} collection` : 'Collection';
@@ -177,20 +365,12 @@ export function BrowsePage() {
                       key={c.collectionId}
                       to={`/collection/${c.collectionId}`}
                       data-testid={`integration-card-${c.collectionId}`}
-                      style={{
-                        display: 'block',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                        border: '1px solid #2a2d33',
-                        borderRadius: 8,
-                        background: '#1a1c20',
-                        padding: 14,
-                      }}
+                      style={integrationCell}
                     >
-                      <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
-                      <div style={{ fontSize: 12, color: '#9aa' }}>
-                        register fee: {feeSui > 0 ? `${feeSui} SUI` : 'Free'}
-                      </div>
+                      <span style={integrationName}>{label}</span>
+                      <span style={integrationMeta}>
+                        REGISTER FEE: {feeSui > 0 ? `${feeSui} SUI` : 'FREE'}
+                      </span>
                     </Link>
                   );
                 })}
@@ -200,40 +380,70 @@ export function BrowsePage() {
         )}
 
         {!integrationFilter && loading && (
-          <div data-testid="loading-state" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
-            Loading…
+          <div data-testid="loading-state" style={{ ...monoLabel, color: tokens.color.hint, padding: 32, textAlign: 'center' }}>
+            — SYNCING CATALOG
           </div>
         )}
 
         {!integrationFilter && error && !loading && (
-          <div role="alert" data-testid="error-state" style={{ color: 'salmon', padding: 20 }}>
-            Couldn't load index: {error.message}{' '}
-            <button onClick={refetch} style={{ marginLeft: 8 }}>Retry</button>
+          <div role="alert" data-testid="error-state" style={errorState}>
+            × FAILED · Couldn't load index: {error.message}{' '}
+            <button onClick={refetch} style={{ ...buttonOutline, marginLeft: 8 }}>Retry</button>
           </div>
         )}
 
         {!integrationFilter && !loading && !error && models.length === 0 && (
-          <div data-testid="empty-state" style={{ color: '#888', padding: 40, textAlign: 'center' }}>
-            No models published yet — be the first to{' '}
-            <Link to="/create" style={{ color: '#7aa2ff' }}>mint one</Link>.
+          <div data-testid="empty-state" style={emptyState}>
+            NO MODELS PUBLISHED YET — BE THE FIRST TO{' '}
+            <Link to="/create" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>MINT ONE</Link>
           </div>
         )}
 
         {!integrationFilter && !loading && !error && models.length > 0 && (
-          <div
-            data-testid="model-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: 16,
-            }}
-          >
+          <div data-testid="model-grid" style={grid}>
             {Array.from(collectionGroups.entries()).map(([cid, variants]) => (
-              <CollectionCard key={cid} collectionId={cid} variants={variants} />
+              <div key={cid} style={gridCell}>
+                <CollectionCard collectionId={cid} variants={variants} />
+              </div>
             ))}
           </div>
         )}
-      </section>
+
+        {/* Three-CTA row — dispatches the demo arc roles. Only on the default
+            view so the integration view doesn't get crowded. */}
+        {!integrationFilter && (
+          <div style={ctaRow}>
+            <Link to="/create" style={ctaCell} data-testid="cta-creators">
+              <div style={ctaThumb}>
+                <span style={ctaWellLabel}>L1</span>
+              </div>
+              <span style={ctaLabel}>FOR CREATORS</span>
+              <span style={ctaTagline}>Publish a model.</span>
+              <span style={ctaArrow}>/CREATE →</span>
+            </Link>
+            <Link to="/market" style={ctaCell} data-testid="cta-buyers">
+              <div style={ctaThumb}>
+                <span style={ctaWellLabel}>L2</span>
+              </div>
+              <span style={ctaLabel}>FOR BUYERS</span>
+              <span style={ctaTagline}>Buy a car.</span>
+              <span style={ctaArrow}>/MARKET →</span>
+            </Link>
+            <Link
+              to="/track"
+              style={{ ...ctaCell, borderRight: 'none' }}
+              data-testid="cta-drivers"
+            >
+              <div style={ctaThumb}>
+                <span style={ctaWellLabel}>L3</span>
+              </div>
+              <span style={ctaLabel}>FOR DRIVERS</span>
+              <span style={ctaTagline}>Drive it.</span>
+              <span style={ctaArrow}>/TRACK →</span>
+            </Link>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

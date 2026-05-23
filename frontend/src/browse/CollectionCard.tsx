@@ -1,18 +1,16 @@
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
+import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
 // CollectionCard replaces ModelCard for the grouped Browse view (U5). One
 // card per Collection — its preview/name are derived from the first variant
 // in the group, and the "N variants" badge advertises the collection size.
 //
-// Slug strategy (v1 pragmatic): we route by `collectionId` directly. A nicer
-// human slug would require either a CollectionPublished event indexer (Phase
-// 4) or a `collection:slug:<foo>` tag convention; both are out of scope for
-// U5. Using collectionId guarantees uniqueness and round-trips losslessly
-// through useCollectionBySlug. URLs look like `/collection/0xabc…` which is
-// ugly but bulletproof — listed as a Phase 4 follow-up.
+// Brutalist editorial styling per D-044: paper-pure card body with 1.5px
+// ink border, pure-black viewer well, italic-serif name, mono creator/price.
 
 interface Props {
   collectionId: string;
@@ -43,6 +41,76 @@ function collectionNameFromVariants(variants: Model3DSummary[]): string {
   return stripped || first.name || 'Collection';
 }
 
+const linkStyle: CSSProperties = {
+  display: 'block',
+  textDecoration: 'none',
+  color: tokens.color.ink,
+  background: tokens.color.paperPure,
+  border: tokens.border.primary,
+  overflow: 'hidden',
+};
+
+const wellStyle: CSSProperties = {
+  ...viewerWell,
+  aspectRatio: '1 / 1',
+};
+
+const badgeStyle: CSSProperties = {
+  ...monoLabel,
+  position: 'absolute',
+  top: 8,
+  right: 8,
+  padding: '2px 8px',
+  background: 'rgba(0, 0, 0, 0.75)',
+  color: tokens.color.accent,
+  border: `1px solid ${tokens.color.accent}`,
+  letterSpacing: '1.5px',
+};
+
+const bodyStyle: CSSProperties = {
+  padding: 14,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  borderTop: tokens.border.primary,
+};
+
+const nameStyle: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const creatorStyle: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  letterSpacing: '0.5px',
+  fontSize: 11,
+};
+
+const priceRow: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+};
+
+const shapeChip: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  fontSize: 10,
+};
+
+const priceStyle: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: tokens.size.md,
+  fontWeight: tokens.weight.medium,
+};
+
 export function CollectionCard({ collectionId, variants }: Props) {
   const first = variants[0]!;
   const name = collectionNameFromVariants(variants);
@@ -56,79 +124,25 @@ export function CollectionCard({ collectionId, variants }: Props) {
   const to = isStandalone ? `/model/${first.objectId}` : `/collection/${collectionId}`;
 
   return (
-    <Link
-      to={to}
-      data-testid={`collection-card-${collectionId}`}
-      style={{
-        display: 'block',
-        textDecoration: 'none',
-        color: 'inherit',
-        border: '1px solid #2a2d33',
-        borderRadius: 8,
-        background: '#1a1c20',
-        overflow: 'hidden',
-        transition: 'border-color 120ms',
-        position: 'relative',
-      }}
-    >
-      <div
-        style={{
-          aspectRatio: '1 / 1',
-          background: '#15171b',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-        data-testid="collection-card-preview"
-      >
+    <Link to={to} data-testid={`collection-card-${collectionId}`} style={linkStyle}>
+      <div style={wellStyle} data-testid="collection-card-preview">
         {/* One Babylon canvas per card. Browsers cap WebGL contexts at
             ~8-16 per page — if the marketplace grows past ~6 cards, later
             cards will render black. Tracked as a Phase 5 follow-up
             (IntersectionObserver lazy-mount, or shared-engine thumbnails). */}
         <PreviewCanvas glbUrl={previewUrl} />
-        <span
-          data-testid="collection-card-badge"
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            fontSize: 11,
-            padding: '2px 8px',
-            background: 'rgba(20, 22, 25, 0.85)',
-            color: '#ddd',
-            borderRadius: 12,
-            border: '1px solid #2a2d33',
-          }}
-        >
+        <span data-testid="collection-card-badge" style={badgeStyle}>
           {variantCount} variant{variantCount === 1 ? '' : 's'}
         </span>
       </div>
-      <div style={{ padding: 12 }}>
-        <div
-          data-testid="collection-card-name"
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            marginBottom: 4,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {name}
+      <div style={bodyStyle}>
+        <div data-testid="collection-card-name" style={nameStyle}>{name}</div>
+        <div style={creatorStyle}>
+          BY <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
         </div>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>
-          by <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 8,
-          }}
-        >
-          <span style={{ fontSize: 12, color: '#aaa' }}>{first.shapeType}</span>
-          <span data-testid="collection-card-price" style={{ fontSize: 13, fontWeight: 600 }}>
+        <div style={priceRow}>
+          <span style={shapeChip}>{first.shapeType}</span>
+          <span data-testid="collection-card-price" style={priceStyle}>
             {formatSui(first.directAccessPrice)}
           </span>
         </div>
