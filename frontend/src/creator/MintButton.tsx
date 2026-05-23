@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react';
 import type { UploadStage } from '../walrus/useWalrusUpload';
+import { buttonPrimary, monoLabel, tokens } from '../ux/tokens';
 
 export type MintStatus = 'idle' | 'uploading' | 'signing' | 'success' | 'error';
 
@@ -11,6 +13,29 @@ interface Props {
   errorMessage?: string;
   explorerUrl?: string;
 }
+
+const errorPrefix: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  display: 'inline-block',
+  marginRight: 8,
+};
+
+const errorBody: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  letterSpacing: '0.5px',
+  textTransform: 'none',
+  fontSize: 12,
+};
+
+const explorerLink: CSSProperties = {
+  ...monoLabel,
+  display: 'inline-block',
+  marginTop: 12,
+  color: tokens.color.ink,
+  textDecoration: 'underline',
+};
 
 export function MintButton({
   status,
@@ -39,7 +64,7 @@ export function MintButton({
   } else if (status === 'signing') {
     label = 'Step 3 of 3 — approve Sui publish…';
   } else if (status === 'success') {
-    label = 'Minted ✓';
+    label = 'Minted';
   } else if (status === 'error') {
     label = 'Failed — retry';
   }
@@ -52,15 +77,16 @@ export function MintButton({
         onClick={onClick}
         disabled={disabled || busy}
         data-testid="mint-button"
+        style={buttonPrimary}
       >
         {label}
       </button>
       {status === 'error' && errorMessage && (
-        <div
-          style={{ color: 'crimson', fontSize: 12 }}
-          data-testid="mint-error"
-        >
-          {errorMessage}
+        <div style={{ marginTop: 12 }}>
+          <span style={errorPrefix}>× FAILED ·</span>
+          <span data-testid="mint-error" style={errorBody}>
+            {errorMessage}
+          </span>
         </div>
       )}
       {status === 'success' && explorerUrl && (
@@ -68,10 +94,10 @@ export function MintButton({
           href={explorerUrl}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ display: 'block', marginTop: 8 }}
+          style={explorerLink}
           data-testid="explorer-link"
         >
-          View on Sui Explorer
+          VIEW ON SUI EXPLORER →
         </a>
       )}
     </div>

@@ -1,3 +1,5 @@
+import { input as inputStyle } from '../ux/tokens';
+
 interface Props {
   value: string;
   onChange: (v: string) => void;
@@ -14,7 +16,7 @@ export function NameInput({ value, onChange, disabled }: Props) {
       onChange={(e) => onChange(e.target.value.slice(0, MAX))}
       placeholder="Model name (required)"
       disabled={disabled}
-      style={{ width: '100%' }}
+      style={{ ...inputStyle, width: '100%' }}
       maxLength={MAX}
       data-testid="name-input"
     />

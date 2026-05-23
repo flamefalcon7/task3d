@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useCurrentAccount,
@@ -15,6 +16,18 @@ import {
   buildPublishPtb,
   TRIPO_FEE_MIST,
 } from '../sui/modelTxBuilders';
+import {
+  buttonOutline,
+  buttonPrimary,
+  card,
+  displayHeadline,
+  eyebrow,
+  input as inputStyle,
+  monoLabel,
+  pagePaper,
+  tokens,
+  viewerWell,
+} from '../ux/tokens';
 
 // D-032/D-033/D-034: the canonical creator mint page. Two GLB sources —
 // Tripo prompt (SUI-fee-gated, D-034) or a user-uploaded .glb — both converge
@@ -32,8 +45,8 @@ const MAX_GLB_BYTES = 12 * 1024 * 1024;
 // is creator-only. ALLOW_LIST (1) is dropped — it has no on-chain address list
 // in v1 and the contract treats any non-permissionless value as creator-only.
 const POLICIES = [
-  { value: 2, label: 'Open — anyone can fork (permissionless)' },
-  { value: 0, label: 'Restricted — only I can fork' },
+  { value: 2, label: 'Open', sub: 'Anyone can fork (permissionless)' },
+  { value: 0, label: 'Restricted', sub: 'Only I can fork' },
 ] as const;
 
 type PolicyValue = (typeof POLICIES)[number]['value'];
@@ -76,11 +89,136 @@ function useDappKitSigner(address: string | null) {
   }, [address, signTx]);
 }
 
+// Inline styles for this page. Page-level helpers live in tokens.ts; the rest
+// are page-local primitives (toggle cells, policy cards, viewer aspect-ratio).
+
+const mainStyle: CSSProperties = {
+  maxWidth: 920,
+  margin: '0 auto',
+  padding: '32px 24px 64px',
+};
+
+const headerStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 32 };
+
+const sectionLabel: CSSProperties = { ...monoLabel, marginBottom: 8, display: 'block' };
+
+const toggleRow: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  border: tokens.border.primary,
+  marginBottom: 24,
+};
+
+function toggleCell(active: boolean): CSSProperties {
+  return {
+    background: active ? tokens.color.accent : tokens.color.paperPure,
+    color: active ? tokens.color.accentInk : tokens.color.ink,
+    fontFamily: tokens.font.mono,
+    fontSize: 12,
+    letterSpacing: '1px',
+    textTransform: 'uppercase',
+    padding: '12px 16px',
+    cursor: 'pointer',
+    border: 'none',
+    borderRight: active ? 'none' : tokens.border.primary,
+    textAlign: 'center',
+  };
+}
+
+const promptArea: CSSProperties = {
+  ...inputStyle,
+  width: '100%',
+  resize: 'vertical',
+  minHeight: 80,
+};
+
+const viewerWellSized: CSSProperties = {
+  ...viewerWell,
+  aspectRatio: '16 / 10',
+  marginTop: 24,
+  border: tokens.border.primary,
+};
+
+const metadataGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, 1fr)',
+  gap: 24,
+  marginTop: 24,
+};
+
+const fullRow: CSSProperties = { gridColumn: '1 / -1' };
+
+const policyCardRow: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 12,
+};
+
+function policyCard(active: boolean): CSSProperties {
+  return {
+    ...card,
+    border: active ? `2px solid ${tokens.color.accent}` : tokens.border.primary,
+    padding: 16,
+    cursor: 'pointer',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  };
+}
+
+const errorBanner: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.err,
+  marginTop: 16,
+  padding: '10px 12px',
+  border: `1.5px solid ${tokens.color.err}`,
+};
+
+const statusPill: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  marginLeft: 12,
+  display: 'inline-block',
+};
+
+const wireframeOverlay: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: tokens.color.wellInk,
+  pointerEvents: 'none',
+};
+
+// SVG wireframe-cube placeholder used in the empty viewer well. Stroke + opacity
+// per docs/ux/design-tokens.md §6 viewer-well guidance.
+function WireframePlaceholder() {
+  return (
+    <svg width="120" height="120" viewBox="0 0 100 100" style={wireframeOverlay} aria-hidden>
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeOpacity="0.3"
+      >
+        <polygon points="30,30 70,30 80,40 80,80 40,80 30,70" />
+        <polyline points="30,30 30,70 40,80" />
+        <polyline points="30,70 70,70 80,80" />
+        <polyline points="70,30 70,70" />
+        <polyline points="40,40 80,40 80,80" />
+        <polyline points="40,40 40,80" />
+      </g>
+    </svg>
+  );
+}
+
 export function CreateModelPage() {
   const [sourceMode, setSourceMode] = useState<SourceMode>('tripo');
   const [prompt, setPrompt] = useState('');
   const [genStatus, setGenStatus] = useState<GenStatus>('idle');
   const [genError, setGenError] = useState<string | null>(null);
+  const [genElapsed, setGenElapsed] = useState(0);
 
   const [glb, setGlb] = useState<Uint8Array | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
@@ -106,6 +244,17 @@ export function CreateModelPage() {
     if (!glbUrl) return;
     return () => URL.revokeObjectURL(glbUrl);
   }, [glbUrl]);
+
+  // Tick the elapsed-seconds counter while generating (— GENERATING (Ns)).
+  useEffect(() => {
+    if (genStatus !== 'paying' && genStatus !== 'generating') {
+      setGenElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => setGenElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [genStatus]);
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
@@ -207,10 +356,17 @@ export function CreateModelPage() {
 
   if (!session) {
     return (
-      <div data-testid="create-page">
-        <h1>Create a Model</h1>
-        <p>Sign in to publish a model.</p>
-        <SignInButton />
+      <div data-testid="create-page" style={pagePaper}>
+        <main style={mainStyle}>
+          <div style={headerStack}>
+            <span style={eyebrow}>— L1 / PUBLISH</span>
+            <h1 style={displayHeadline}>Make a model.</h1>
+            <p style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
+              Sign in to publish a model
+            </p>
+          </div>
+          <SignInButton />
+        </main>
       </div>
     );
   }
@@ -218,120 +374,168 @@ export function CreateModelPage() {
   const haveModel = glb !== null;
   const genBusy = genStatus === 'paying' || genStatus === 'generating';
 
+  const generateLabel =
+    genStatus === 'paying'
+      ? `— APPROVING FEE (${genElapsed}s)`
+      : genStatus === 'generating'
+        ? `— GENERATING (${genElapsed}s)`
+        : haveModel
+          ? `GENERATE AGAIN (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
+          : `PAY ${Number(TRIPO_FEE_MIST) / 1e9} SUI & GENERATE`;
+
   return (
-    <div data-testid="create-page">
-      <h1>Create a Model</h1>
+    <div data-testid="create-page" style={pagePaper}>
+      <main style={mainStyle}>
+        <div style={headerStack}>
+          <span style={eyebrow}>— L1 / PUBLISH</span>
+          <h1 style={displayHeadline}>Make a model.</h1>
+        </div>
 
-      <div role="radiogroup" aria-label="source">
-        <label>
-          <input
-            type="radio"
-            name="source"
-            checked={sourceMode === 'tripo'}
-            onChange={() => setSourceMode('tripo')}
-          />
-          Generate with Tripo (prompt)
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="source"
-            checked={sourceMode === 'upload'}
-            onChange={() => setSourceMode('upload')}
-          />
-          Upload my own .glb
-        </label>
-      </div>
-
-      {sourceMode === 'tripo' ? (
-        <div>
-          <textarea
-            data-testid="prompt-input"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the model…"
-            rows={3}
-          />
+        <span style={sectionLabel}>SOURCE</span>
+        <div role="radiogroup" aria-label="source" style={toggleRow}>
           <button
-            data-testid="generate-button"
-            onClick={onGenerate}
-            disabled={genBusy || !prompt.trim()}
+            type="button"
+            role="radio"
+            aria-checked={sourceMode === 'tripo'}
+            onClick={() => setSourceMode('tripo')}
+            style={toggleCell(sourceMode === 'tripo')}
           >
-            {genStatus === 'paying'
-              ? `Approve ${Number(TRIPO_FEE_MIST) / 1e9} SUI fee…`
-              : genStatus === 'generating'
-                ? 'Generating…'
-                : haveModel
-                  ? `Generate again (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
-                  : `Pay ${Number(TRIPO_FEE_MIST) / 1e9} SUI & generate`}
+            Generate with Tripo
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={sourceMode === 'upload'}
+            aria-label="Upload my own .glb"
+            onClick={() => setSourceMode('upload')}
+            style={toggleCell(sourceMode === 'upload')}
+          >
+            Upload my own .glb
           </button>
         </div>
-      ) : (
-        <div>
-          <input
-            data-testid="glb-file-input"
-            type="file"
-            accept=".glb"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void onUpload(f);
-            }}
-          />
-        </div>
-      )}
 
-      {genError && (
-        <div data-testid="gen-error" style={{ color: 'crimson' }}>
-          {genError}
-        </div>
-      )}
+        {sourceMode === 'tripo' ? (
+          <div>
+            <span style={sectionLabel}>PROMPT</span>
+            <textarea
+              data-testid="prompt-input"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
+              rows={3}
+              style={promptArea}
+            />
+            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                data-testid="generate-button"
+                onClick={onGenerate}
+                disabled={genBusy || !prompt.trim()}
+                style={buttonPrimary}
+              >
+                {generateLabel}
+              </button>
+              {genBusy && <span style={statusPill}>— SUI FEE-GATED · ~30S TYPICAL</span>}
+            </div>
+          </div>
+        ) : (
+          <div>
+            <span style={sectionLabel}>GLB FILE</span>
+            <input
+              data-testid="glb-file-input"
+              type="file"
+              accept=".glb"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onUpload(f);
+              }}
+              style={{ ...inputStyle, padding: 8 }}
+            />
+            <p style={{ ...monoLabel, color: tokens.color.hint, marginTop: 8 }}>
+              MAX 12 MB · MUST START WITH GLTF MAGIC
+            </p>
+          </div>
+        )}
 
-      {haveModel && (
-        <>
-          <PreviewCanvas glbUrl={glbUrl} />
-          {sourceMode === 'tripo' && !confirmed && (
-            <button data-testid="confirm-model" onClick={() => setConfirmed(true)}>
-              Use this model
+        {genError && (
+          <div data-testid="gen-error" style={errorBanner}>
+            FAILED · {genError}
+          </div>
+        )}
+
+        <div style={viewerWellSized}>
+          {haveModel ? <PreviewCanvas glbUrl={glbUrl} /> : <WireframePlaceholder />}
+        </div>
+
+        {haveModel && sourceMode === 'tripo' && !confirmed && (
+          <div style={{ marginTop: 16 }}>
+            <button
+              data-testid="confirm-model"
+              onClick={() => setConfirmed(true)}
+              style={buttonOutline}
+            >
+              USE THIS MODEL →
             </button>
-          )}
+          </div>
+        )}
 
-          {(sourceMode === 'upload' || confirmed) && (
-            <div data-testid="metadata-form">
-              <label>
-                Name
-                <input data-testid="name-input" value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-              <label>
-                Tags (comma-separated)
-                <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} />
-              </label>
-              <fieldset>
-                <legend>Access policy</legend>
+        {haveModel && (sourceMode === 'upload' || confirmed) && (
+          <div data-testid="metadata-form" style={metadataGrid}>
+            <label style={fullRow}>
+              <span style={sectionLabel}>MODEL NAME</span>
+              <input
+                data-testid="name-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+            </label>
+            <label style={fullRow}>
+              <span style={sectionLabel}>TAGS (COMMA-SEPARATED)</span>
+              <input
+                value={tagsStr}
+                onChange={(e) => setTagsStr(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+            </label>
+            <fieldset style={{ ...fullRow, border: 'none', padding: 0, margin: 0 }}>
+              <legend style={sectionLabel}>LICENSE POLICY</legend>
+              <div style={policyCardRow}>
                 {POLICIES.map((p) => (
-                  <label key={p.value}>
+                  <label key={p.value} style={policyCard(policy === p.value)}>
                     <input
                       type="radio"
                       name="policy"
                       data-testid={`policy-${p.value}`}
                       checked={policy === p.value}
                       onChange={() => setPolicy(p.value)}
+                      style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                     />
-                    {p.label}
+                    <span style={{ ...monoLabel, color: tokens.color.ink }}>{p.label}</span>
+                    <span style={{ ...monoLabel, color: tokens.color.hint, letterSpacing: '0.5px', textTransform: 'none' }}>
+                      {p.sub}
+                    </span>
                   </label>
                 ))}
-              </fieldset>
-              <label>
-                Derivative mint fee (SUI)
-                <input value={feeSui} onChange={(e) => setFeeSui(e.target.value)} />
-              </label>
-              <label>
-                Derivative royalty (bps, ≤3000)
-                <input
-                  type="number"
-                  value={royaltyBps}
-                  onChange={(e) => setRoyaltyBps(Math.min(3000, Math.max(0, Number(e.target.value))))}
-                />
-              </label>
+              </div>
+            </fieldset>
+            <label>
+              <span style={sectionLabel}>DERIVATIVE MINT FEE (SUI)</span>
+              <input
+                value={feeSui}
+                onChange={(e) => setFeeSui(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+            </label>
+            <label>
+              <span style={sectionLabel}>DERIVATIVE ROYALTY (BPS, ≤3000)</span>
+              <input
+                type="number"
+                value={royaltyBps}
+                onChange={(e) => setRoyaltyBps(Math.min(3000, Math.max(0, Number(e.target.value))))}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+            </label>
+            <div style={fullRow}>
               <MintButton
                 status={mintStatus}
                 uploadStage={uploadStage}
@@ -341,9 +545,9 @@ export function CreateModelPage() {
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
             </div>
-          )}
-        </>
-      )}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
