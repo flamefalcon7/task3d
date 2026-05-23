@@ -37,6 +37,14 @@ vi.mock('../sui/kioskTxBuilders', () => ({
   royaltyOwedMist: () => 50_000_000n,
 }));
 
+// Babylon needs WebGL — jsdom doesn't have it. Stub PreviewCanvas so the
+// market-card preview wells don't try to instantiate an Engine in tests.
+vi.mock('../babylon/PreviewCanvas', () => ({
+  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
+    <div data-testid="preview-canvas-mock">{glbUrl ?? 'no url'}</div>
+  ),
+}));
+
 import { MarketPage } from './MarketPage';
 
 const ADDR = '0x' + '3'.repeat(64);

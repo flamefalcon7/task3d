@@ -22,6 +22,8 @@ import {
   royaltyOwedMist,
 } from '../sui/kioskTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
+import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { glbUrlForToken } from '../walrus/aggregator';
 import {
   buttonOutline,
   buttonPrimary,
@@ -474,9 +476,13 @@ export function MarketPage() {
                     style={gridCell}
                   >
                     <div style={cardWell}>
+                      {l.patchId ? (
+                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
+                      ) : (
+                        <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                      )}
                       <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(visibleListings.length).padStart(3, '0')}</span>
                       <span style={cardLayerBadge}>L2 NFT</span>
-                      <span style={cardWellPlaceholder}>— PREVIEW</span>
                     </div>
                     <div>
                       <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
@@ -523,9 +529,13 @@ export function MarketPage() {
               {sellable.map((t, idx) => (
                 <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
                   <div style={cardWell}>
+                    {t.patchId || t.blobId ? (
+                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                    ) : (
+                      <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                    )}
                     <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
                     <span style={cardLayerBadge}>YOURS</span>
-                    <span style={cardWellPlaceholder}>— PREVIEW</span>
                   </div>
                   <div>
                     <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
