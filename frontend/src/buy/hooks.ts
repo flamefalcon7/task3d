@@ -39,6 +39,8 @@ function jsonToSummary(
   const blobId = String(blob.blob_id ?? json.blob_id ?? '');
   const lineageBlobId = String(json.lineage_blob_id ?? '');
   const rawTags = Array.isArray(json.tags) ? (json.tags as unknown[]) : [];
+  // plan-013 — segmented-mesh per-part labels; empty on pre-republish objects.
+  const rawPartLabels = Array.isArray(json.part_labels) ? (json.part_labels as unknown[]) : [];
   // Phase 3 (U1): see useModelIndex nodeToSummary for the same migration.
   const collectionId = String(json.collection_id ?? '');
   const patchId = String(json.patch_id ?? '');
@@ -53,6 +55,7 @@ function jsonToSummary(
     name: String(json.name ?? ''),
     directAccessPrice: String(json.direct_access_price ?? '0'),
     tags: rawTags.map((t) => String(t)),
+    partLabels: rawPartLabels.map((l) => String(l)),
     createdAtMs: String(json.created_at_ms ?? '0'),
     lineageBlobId,
     glbBlobId: String(json.glb_blob_id ?? ''),

@@ -266,9 +266,17 @@ export function LaunchCollectionPage() {
     if (!session || !baseGlb) throw new Error('build: session + base GLB required');
     const buildReq: CollectionBuildRequest = {
       baseGlbBase64: bytesToBase64(baseGlb),
+      // plan-013 — positional per-part color array; U7 will expand this from a
+      // single `row.colorHex` to a per-label resolution
+      // (`base.partLabels.map(label => ...)`). For now (single-material UX)
+      // the array is length-1 and material[0] receives the variant color.
       variants: editorState.variants.map((row) => ({
-        baseColorRgb: hexToBaseColorRgb(row.colorHex),
-        textureId: row.textureId,
+        partColors: [
+          {
+            baseColorRgb: hexToBaseColorRgb(row.colorHex),
+            textureId: row.textureId,
+          },
+        ],
         paramsJson: JSON.stringify({ color: row.colorHex, texture: row.textureId }),
       })),
     };

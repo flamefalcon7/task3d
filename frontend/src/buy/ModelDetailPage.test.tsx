@@ -39,6 +39,7 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     name: 'Demo Chest',
     directAccessPrice: '0',
     tags: ['fantasy', 'chest'],
+    partLabels: [],
     createdAtMs: '0',
     lineageBlobId: 'walrus_blob_lineage',
     glbBlobId: 'glb_demo',

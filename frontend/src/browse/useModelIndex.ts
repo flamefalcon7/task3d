@@ -67,6 +67,11 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const createdAtMs = String(json.created_at_ms ?? '0');
   const rawTags = Array.isArray(json.tags) ? (json.tags as unknown[]) : [];
   const tags = rawTags.map((t) => String(t));
+  // plan-013 — per-part semantic labels (segmented-mesh GLB). Absent on
+  // pre-republish testnet objects → empty array = legacy single-material
+  // sentinel; LaunchCollectionPage routes those through the single-row editor.
+  const rawPartLabels = Array.isArray(json.part_labels) ? (json.part_labels as unknown[]) : [];
+  const partLabels = rawPartLabels.map((l) => String(l));
   // Phase 3 (U1): Model3D now carries collection_id + patch_id instead of
   // blob. Read them from the GraphQL response if present; fall back to '' for
   // pre-U2 Phase 2 fixtures and degenerate-of-1 mints (patch_id == '').
@@ -85,6 +90,7 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     name,
     directAccessPrice,
     tags,
+    partLabels,
     createdAtMs,
     lineageBlobId,
     glbBlobId,

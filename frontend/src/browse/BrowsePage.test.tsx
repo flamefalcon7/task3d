@@ -44,6 +44,7 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     name: 'Demo Box',
     directAccessPrice: '100000000',
     tags: ['weapon'],
+    partLabels: [],
     createdAtMs: '1700000000000',
     lineageBlobId: 'lin-1',
     glbBlobId: 'glb-1',

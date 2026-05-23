@@ -49,6 +49,7 @@ function summary(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     name: 'Base Car',
     directAccessPrice: '0',
     tags: [],
+    partLabels: [],
     createdAtMs: '0',
     lineageBlobId: '',
     glbBlobId: 'glb-base-1',

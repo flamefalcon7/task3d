@@ -85,6 +85,13 @@ export interface Model3DSummary {
   name: string;
   directAccessPrice: string;   // u64 as string
   tags: string[];
+  // plan-013 — per-part semantic labels for a segmented-mesh base GLB (Tripo
+  // mesh_segmentation output). One entry per material/node index. Empty array
+  // is the legacy single-material sentinel: LaunchCollectionPage routes those
+  // bases through the pre-segmentation single-row VariantEditor unchanged.
+  // Populated by the indexer from the ModelPublished event's `part_labels`
+  // payload (no extra getObject required).
+  partLabels: string[];
   createdAtMs: string;         // u64 timestamp as string
   lineageBlobId: string;       // D-015
   glbBlobId: string;           // D-037 — standalone Walrus blob id of the GLB mesh ('' if absent)
@@ -112,14 +119,28 @@ export const TEXTURE_LIBRARY = [
 
 export type TextureId = (typeof TEXTURE_LIBRARY)[number];
 
+// plan-013 — mirrors Move's MAX_PARTS=64. Frontend zod cap on per-variant
+// `partColors` length. Bumping requires the Move constant to move in lockstep
+// (segmented GLBs exceeding the on-chain ceiling can't be published anyway).
+export const MAX_PARTS_FE = 64;
+
 // Per-variant material specification — input to the backend material-swap
-// endpoint. baseColorRgb is RGBA in 0-1 range (matches glTF PBR convention).
-// textureId is optional; if absent, the variant only changes the base color
-// factor and keeps the base GLB's existing baseColorTexture (typically null
-// for Tripo-generated cars).
+// endpoint. plan-013: positional per-part array (one entry per material/node
+// index in the segmented base GLB). Backend asserts
+// `partColors.length === materials.length` at build time and fails closed with
+// PartCountMismatchError (422 part_count_mismatch) on drift. Legacy
+// single-material bases use a length-1 array (one entry → materials[0]); the
+// editor surfaces this as a one-row palette UX.
+//
+// baseColorRgb is RGBA in 0-1 range (matches glTF PBR convention). textureId
+// is per-part optional; if absent for a given part, the swap pipeline keeps
+// THAT material's existing baseColorTexture and only sets baseColorFactor
+// (TINT mode: factor × baked texture).
 export interface VariantMaterialSpec {
-  baseColorRgb: [number, number, number, number];
-  textureId?: TextureId;
+  partColors: Array<{
+    baseColorRgb: [number, number, number, number];
+    textureId?: TextureId;
+  }>;
 }
 
 // Zod schema for the backend /api/collection/build request body. Hard caps
@@ -128,13 +149,24 @@ export interface VariantMaterialSpec {
 // ceiling the /create GLB upload enforces (CreateModelPage MAX_GLB_BYTES) so any
 // model that can be published can also be forked — 12 MiB → ceil(n/3)*4 ≈
 // 16,777,216 chars; rounded up to 16,800,000 for padding margin.
+//
+// plan-013 — `baseColorRgb` + `textureId` collapsed into a positional
+// `partColors` array (1..MAX_PARTS_FE). The pre-segmentation single-color
+// shape is now expressed as a length-1 `partColors` array, not a flat field.
 export const collectionBuildRequestSchema = z.object({
   baseGlbBase64: z.string().min(1).max(16_800_000),
   variants: z
     .array(
       z.object({
-        baseColorRgb: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-        textureId: z.enum(TEXTURE_LIBRARY).optional(),
+        partColors: z
+          .array(
+            z.object({
+              baseColorRgb: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+              textureId: z.enum(TEXTURE_LIBRARY).optional(),
+            }),
+          )
+          .min(1)
+          .max(MAX_PARTS_FE),
         paramsJson: z
           .string()
           .max(1024)
