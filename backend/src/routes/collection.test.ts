@@ -116,7 +116,7 @@ describe('POST /api/collection/build — input validation', () => {
   it('rejects 17 variants (zod max — AE5 enforcement)', async () => {
     const baseGlbBase64 = await buildBaseGlbBase64();
     const variants = Array.from({ length: 17 }, () => ({
-      baseColorRgb: [1, 0, 0, 1],
+      partColors: [{ baseColorRgb: [1, 0, 0, 1] }],
       paramsJson: '{}',
     }));
     const res = await app.request('/api/collection/build', {
@@ -129,14 +129,14 @@ describe('POST /api/collection/build — input validation', () => {
     expect(body.error).toBe('invalid_params');
   });
 
-  it('rejects invalid baseColorRgb (3-tuple instead of 4-tuple)', async () => {
+  it('rejects invalid baseColorRgb (3-tuple instead of 4-tuple) inside partColors', async () => {
     const baseGlbBase64 = await buildBaseGlbBase64();
     const res = await app.request('/api/collection/build', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
       body: JSON.stringify({
         baseGlbBase64,
-        variants: [{ baseColorRgb: [1, 0, 0], paramsJson: '{}' }],
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0] }], paramsJson: '{}' }],
       }),
     });
     expect(res.status).toBe(400);
@@ -149,7 +149,22 @@ describe('POST /api/collection/build — input validation', () => {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
       body: JSON.stringify({
         baseGlbBase64,
-        variants: [{ baseColorRgb: [1, 0, 0, 1], textureId: 'velvet', paramsJson: '{}' }],
+        variants: [
+          { partColors: [{ baseColorRgb: [1, 0, 0, 1], textureId: 'velvet' }], paramsJson: '{}' },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects 0 partColors (zod min — plan-013)', async () => {
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const res = await app.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [{ partColors: [], paramsJson: '{}' }],
       }),
     });
     expect(res.status).toBe(400);
@@ -165,7 +180,7 @@ describe('POST /api/collection/build — input validation', () => {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
       body: JSON.stringify({
         baseGlbBase64: oversized,
-        variants: [{ baseColorRgb: [1, 0, 0, 1], paramsJson: '{}' }],
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' }],
       }),
     });
     // Either the bodyLimit middleware fires (413) or zod field-cap fires
@@ -178,12 +193,21 @@ describe('POST /api/collection/build — input validation', () => {
 // --- Happy path ------------------------------------------------------------
 
 describe('POST /api/collection/build — happy path', () => {
-  it('returns N variant GLBs for N valid variant specs', async () => {
+  it('returns N variant GLBs for N valid variant specs (AE3 — TINT-mode loop)', async () => {
     const baseGlbBase64 = await buildBaseGlbBase64();
+    // The fixture base has 1 material, so each variant supplies a length-1
+    // partColors array (the legacy single-material UX form). Length-N
+    // segmented bases are exercised by gltf-material-swap.test.ts.
     const variants = [
-      { baseColorRgb: [1, 0, 0, 1], paramsJson: '{}' },
-      { baseColorRgb: [0, 1, 0, 1], textureId: 'gold', paramsJson: '{"v":1}' },
-      { baseColorRgb: [0, 0, 1, 1], textureId: 'chrome', paramsJson: '{}' },
+      { partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' },
+      {
+        partColors: [{ baseColorRgb: [0, 1, 0, 1], textureId: 'gold' }],
+        paramsJson: '{"v":1}',
+      },
+      {
+        partColors: [{ baseColorRgb: [0, 0, 1, 1], textureId: 'chrome' }],
+        paramsJson: '{}',
+      },
     ];
     const res = await app.request('/api/collection/build', {
       method: 'POST',
@@ -202,5 +226,40 @@ describe('POST /api/collection/build — happy path', () => {
       expect(decoded[2]).toBe(0x54);
       expect(decoded[3]).toBe(0x46);
     }
+  });
+});
+
+// --- plan-013 — part_count_mismatch envelope ------------------------------
+
+describe('POST /api/collection/build — plan-013 part_count_mismatch', () => {
+  it('returns 422 part_count_mismatch with material + supplied counts when partColors.length != base materials', async () => {
+    // 1-material fixture; variant supplies 3 partColors entries — drift surfaces
+    // as a distinct 422 envelope so the L2 editor can show "your base has 1
+    // part; you sent 3" instead of the generic glb_parse_failed.
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const variants = [
+      {
+        partColors: [
+          { baseColorRgb: [1, 0, 0, 1] },
+          { baseColorRgb: [0, 1, 0, 1] },
+          { baseColorRgb: [0, 0, 1, 1] },
+        ],
+        paramsJson: '{}',
+      },
+    ];
+    const res = await app.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({ baseGlbBase64, variants }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      materialCount: number;
+      partColorsCount: number;
+    };
+    expect(body.error).toBe('part_count_mismatch');
+    expect(body.materialCount).toBe(1);
+    expect(body.partColorsCount).toBe(3);
   });
 });

@@ -3,7 +3,11 @@ import { bodyLimit } from 'hono/body-limit';
 import { collectionBuildRequestSchema } from '@overflow2026/shared';
 import type { CollectionBuildResponse } from '@overflow2026/shared';
 import { Buffer } from 'node:buffer';
-import { swapMaterial, loadBundledTexture } from '../lib/gltf-material-swap.js';
+import {
+  swapMaterial,
+  loadBundledTexture,
+  PartCountMismatchError,
+} from '../lib/gltf-material-swap.js';
 import type { JwtSigner } from '../lib/jwt.js';
 
 export interface CollectionRouteDeps {
@@ -80,6 +84,22 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
       };
       return c.json(response);
     } catch (err) {
+      // plan-013 — surface a distinct 422 envelope when the per-variant
+      // partColors array length disagrees with the base GLB's material count.
+      // Frontend uses materialCount + partColorsCount to show "your base has
+      // N parts; you sent M" so the L2 creator can regenerate or pick a
+      // different base. Distinct from `no_material_in_base_glb` (no materials
+      // at all) and `glb_parse_failed` (malformed bytes).
+      if (err instanceof PartCountMismatchError) {
+        return c.json(
+          {
+            error: 'part_count_mismatch',
+            materialCount: err.materialCount,
+            partColorsCount: err.partColorsCount,
+          },
+          422,
+        );
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (message === 'no_material_in_base_glb') {
         return c.json({ error: 'no_material_in_base_glb' }, 422);

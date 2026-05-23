@@ -31,6 +31,25 @@ export class NoMaterialInBaseGlbError extends Error {
   }
 }
 
+// plan-013 — surfaces when the per-variant `partColors` array length does not
+// match the base GLB's material count. The route layer turns this into a 422
+// `part_count_mismatch` envelope. Distinct from `NoMaterialInBaseGlbError`
+// (which fires only when the base has zero materials) so the frontend can
+// give a specific "your base has 9 parts; the variant editor sent 12" hint.
+export class PartCountMismatchError extends Error {
+  readonly materialCount: number;
+  readonly partColorsCount: number;
+  constructor(materialCount: number, partColorsCount: number) {
+    super(
+      `part_count_mismatch: base GLB has ${materialCount} material(s) but ` +
+        `variant spec supplied ${partColorsCount} partColors entries`,
+    );
+    this.name = 'PartCountMismatchError';
+    this.materialCount = materialCount;
+    this.partColorsCount = partColorsCount;
+  }
+}
+
 export async function loadBundledTexture(id: TextureId): Promise<Uint8Array> {
   const candidate = path.join(TEXTURES_DIR, `${id}.png`);
   const resolved = path.resolve(candidate);
@@ -42,11 +61,20 @@ export async function loadBundledTexture(id: TextureId): Promise<Uint8Array> {
   return fs.promises.readFile(resolved);
 }
 
-// Pure function (modulo the injected textureLoader). Reads `baseGlb`,
-// mutates the FIRST material slot's baseColorFactor + (optionally)
-// baseColorTexture, writes back to GLB bytes. R2 mitigation: if the base
-// has multiple materials (rare for Tripo P1 output but possible for
-// composed scenes), only the first is touched — others pass through.
+// Pure function (modulo the injected textureLoader). Reads `baseGlb`, loops
+// over ALL materials in the segmented base, sets each material's
+// `baseColorFactor` from the matching `partColors[i]` entry, and optionally
+// overrides that material's `baseColorTexture` if its `partColors[i].textureId`
+// is supplied. plan-013 TINT mode: when no `textureId` is provided for a part,
+// the material's existing (Tripo-baked PBR) `baseColorTexture` is preserved —
+// the factor multiplies it. This is the visual difference that reads as
+// "tinted red car" instead of "flat-color plastic": baked PBR detail (normals,
+// metallic-roughness) is untouched, only the diffuse base color is shifted.
+//
+// Length contract: `spec.partColors.length === materials.length`. Drift
+// surfaces as `PartCountMismatchError` (route layer → 422 part_count_mismatch).
+// Legacy single-material bases pass `partColors: [{...}]` (length-1) and run
+// the same loop unchanged.
 export async function swapMaterial(
   baseGlb: Uint8Array,
   spec: VariantMaterialSpec,
@@ -70,19 +98,28 @@ export async function swapMaterial(
   if (materials.length === 0) {
     throw new NoMaterialInBaseGlbError();
   }
-  const target = materials[0];
-  if (!target) {
-    // Unreachable given length check above; appeases noUncheckedIndexedAccess.
-    throw new NoMaterialInBaseGlbError();
+  if (spec.partColors.length !== materials.length) {
+    throw new PartCountMismatchError(materials.length, spec.partColors.length);
   }
-  target.setBaseColorFactor(spec.baseColorRgb);
-  if (spec.textureId) {
-    const pngBytes = await textureLoader(spec.textureId);
-    const tex = doc
-      .createTexture(`variant_${spec.textureId}`)
-      .setImage(pngBytes)
-      .setMimeType('image/png');
-    target.setBaseColorTexture(tex);
+  for (let i = 0; i < materials.length; i++) {
+    const target = materials[i];
+    const partSpec = spec.partColors[i];
+    if (!target || !partSpec) {
+      // Unreachable given the length-equality check above; appeases
+      // noUncheckedIndexedAccess.
+      throw new PartCountMismatchError(materials.length, spec.partColors.length);
+    }
+    target.setBaseColorFactor(partSpec.baseColorRgb);
+    if (partSpec.textureId) {
+      const pngBytes = await textureLoader(partSpec.textureId);
+      const tex = doc
+        .createTexture(`variant_${i}_${partSpec.textureId}`)
+        .setImage(pngBytes)
+        .setMimeType('image/png');
+      target.setBaseColorTexture(tex);
+    }
+    // No `else` branch — preserving the material's existing baseColorTexture
+    // is the TINT-mode contract. Setting it to null would strip baked PBR.
   }
   return io.writeBinary(doc);
 }

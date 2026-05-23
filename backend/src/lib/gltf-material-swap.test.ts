@@ -7,6 +7,7 @@ import {
   loadBundledTexture,
   TexturePathEscapeError,
   NoMaterialInBaseGlbError,
+  PartCountMismatchError,
 } from './gltf-material-swap.js';
 import type { TextureId } from '@overflow2026/shared';
 
@@ -86,6 +87,15 @@ async function readFirstMaterialHasTexture(glb: Uint8Array): Promise<boolean> {
   return mats[0]!.getBaseColorTexture() !== null;
 }
 
+async function readMaterialTextureFlags(glb: Uint8Array): Promise<boolean[]> {
+  const io = new NodeIO();
+  const doc = await io.readBinary(glb);
+  return doc
+    .getRoot()
+    .listMaterials()
+    .map((m) => m.getBaseColorTexture() !== null);
+}
+
 async function readMeshTopology(glb: Uint8Array): Promise<{ verts: number; indices: number }> {
   const io = new NodeIO();
   const doc = await io.readBinary(glb);
@@ -132,39 +142,56 @@ describe('swapMaterial', () => {
     const base = await makeQuantizedFixtureGlb();
     // Before registering the extension this threw "Missing required extension"
     // and the route returned 422 glb_parse_failed. Now it parses + edits.
-    const out = await swapMaterial(base, { baseColorRgb: [0, 1, 0, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      { partColors: [{ baseColorRgb: [0, 1, 0, 1] }] },
+      async () => new Uint8Array(),
+    );
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBeGreaterThan(0);
   });
 
   it('parses a base GLB compressed with EXT_meshopt_compression (Tripo-style)', async () => {
     const base = await makeMeshoptFixtureGlb();
-    const out = await swapMaterial(base, { baseColorRgb: [0, 0, 1, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      { partColors: [{ baseColorRgb: [0, 0, 1, 1] }] },
+      async () => new Uint8Array(),
+    );
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBeGreaterThan(0);
   });
 
-  it('happy path swaps baseColor on first material', async () => {
+  it('happy path swaps baseColor on the single material (legacy 1-material base)', async () => {
     const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
-    const out = await swapMaterial(base, { baseColorRgb: [1, 0, 0, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      { partColors: [{ baseColorRgb: [1, 0, 0, 1] }] },
+      async () => new Uint8Array(),
+    );
     const colors = await readMaterialColors(out);
     expect(colors).toHaveLength(1);
     expect(colors[0]).toEqual([1, 0, 0, 1]);
   });
 
-  it('adds baseColorTexture when textureId is provided', async () => {
+  it('adds baseColorTexture when textureId is provided on a part', async () => {
     const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
-    // Provide a syntactically-valid 1x1 PNG via the bundled loader so the
-    // GLB writer accepts the image MIME type without complaining.
+    // Bundled PNG so the GLB writer accepts the image MIME type.
     const tex: TextureId = 'gold';
-    const out = await swapMaterial(base, { baseColorRgb: [1, 1, 1, 1], textureId: tex });
+    const out = await swapMaterial(base, {
+      partColors: [{ baseColorRgb: [1, 1, 1, 1], textureId: tex }],
+    });
     expect(await readFirstMaterialHasTexture(out)).toBe(true);
   });
 
   it('preserves mesh topology (vertex + index counts unchanged)', async () => {
     const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
     const before = await readMeshTopology(base);
-    const out = await swapMaterial(base, { baseColorRgb: [0.2, 0.4, 0.6, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      { partColors: [{ baseColorRgb: [0.2, 0.4, 0.6, 1] }] },
+      async () => new Uint8Array(),
+    );
     const after = await readMeshTopology(out);
     expect(after.verts).toBe(before.verts);
     expect(after.indices).toBe(before.indices);
@@ -173,29 +200,102 @@ describe('swapMaterial', () => {
   it('throws NoMaterialInBaseGlbError on input GLB without any materials', async () => {
     const base = await makeFixtureGlb({ noMaterial: true });
     await expect(
-      swapMaterial(base, { baseColorRgb: [1, 0, 0, 1] }, async () => new Uint8Array()),
+      swapMaterial(
+        base,
+        { partColors: [{ baseColorRgb: [1, 0, 0, 1] }] },
+        async () => new Uint8Array(),
+      ),
     ).rejects.toBeInstanceOf(NoMaterialInBaseGlbError);
   });
 
-  it('only swaps the first material when multiple are present (R2 defensive)', async () => {
+  it('plan-013 — loops over N materials, applies a distinct color to each part', async () => {
+    // 4-material fixture (≈ a 4-part segmented mesh) gets a distinct color per
+    // part. Replaces the pre-plan-013 "only swaps the first material" test —
+    // that R2-era defensive behavior is the boundary this plan reverses.
     const base = await makeFixtureGlb({
       materialColors: [
         [1, 1, 1, 1],
-        [0.5, 0.5, 0.5, 1],
-        [0.1, 0.2, 0.3, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
       ],
     });
-    const out = await swapMaterial(base, { baseColorRgb: [1, 0, 0, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      {
+        partColors: [
+          { baseColorRgb: [1, 0, 0, 1] }, // red
+          { baseColorRgb: [0, 1, 0, 1] }, // green
+          { baseColorRgb: [0, 0, 1, 1] }, // blue
+          { baseColorRgb: [1, 1, 0, 1] }, // yellow
+        ],
+      },
+      async () => new Uint8Array(),
+    );
     const colors = await readMaterialColors(out);
-    expect(colors).toHaveLength(3);
+    expect(colors).toHaveLength(4);
     expect(colors[0]).toEqual([1, 0, 0, 1]);
-    expect(colors[1]).toEqual([0.5, 0.5, 0.5, 1]);
-    expect(colors[2]).toEqual([0.1, 0.2, 0.3, 1]);
+    expect(colors[1]).toEqual([0, 1, 0, 1]);
+    expect(colors[2]).toEqual([0, 0, 1, 1]);
+    expect(colors[3]).toEqual([1, 1, 0, 1]);
+  });
+
+  it('plan-013 — applies per-part textureId only where supplied (TINT mode boundary)', async () => {
+    // 4-material fixture; only partColors[2] sets a textureId. Other parts keep
+    // their existing baseColorTexture (null in this fixture; the production
+    // case is "keep the Tripo-baked PBR baseColorTexture unchanged"). This is
+    // the exact boundary that distinguishes TINT mode from FLAT mode.
+    const base = await makeFixtureGlb({
+      materialColors: [
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+      ],
+    });
+    const out = await swapMaterial(base, {
+      partColors: [
+        { baseColorRgb: [1, 0, 0, 1] },
+        { baseColorRgb: [0, 1, 0, 1] },
+        { baseColorRgb: [0, 0, 1, 1], textureId: 'gold' },
+        { baseColorRgb: [1, 1, 0, 1] },
+      ],
+    });
+    const flags = await readMaterialTextureFlags(out);
+    expect(flags).toEqual([false, false, true, false]);
+  });
+
+  it('plan-013 — throws PartCountMismatchError when partColors.length !== materials.length', async () => {
+    const base = await makeFixtureGlb({
+      materialColors: [
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+      ],
+    });
+    await expect(
+      swapMaterial(
+        base,
+        {
+          partColors: [
+            { baseColorRgb: [1, 0, 0, 1] },
+            { baseColorRgb: [0, 1, 0, 1] },
+            { baseColorRgb: [0, 0, 1, 1] },
+          ],
+        },
+        async () => new Uint8Array(),
+      ),
+    ).rejects.toBeInstanceOf(PartCountMismatchError);
   });
 
   it('round-trips base64 without corrupting bytes', async () => {
     const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1]] });
-    const out = await swapMaterial(base, { baseColorRgb: [0, 1, 0, 1] }, async () => new Uint8Array());
+    const out = await swapMaterial(
+      base,
+      { partColors: [{ baseColorRgb: [0, 1, 0, 1] }] },
+      async () => new Uint8Array(),
+    );
     const roundtripped = Uint8Array.from(Buffer.from(Buffer.from(out).toString('base64'), 'base64'));
     expect(roundtripped.length).toBe(out.length);
     const colors = await readMaterialColors(roundtripped);
