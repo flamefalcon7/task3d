@@ -1,6 +1,56 @@
 # Phase Progress
 
-## Last Updated: 2026-05-23 (night — plan-012 SHIPPED, D-044 Brutalist editorial rolled out across the full demo arc) — **Next = browser-QA the polished arc, then U15 demo recording / pitch / README.**
+## Last Updated: 2026-05-23 (late evening — mesh segmentation per-part coloring brainstorm) — **Next = `/ce-plan` on the new requirements doc.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+
+### This session — Tripo `mesh_segmentation` validated + per-part coloring requirements written
+
+User asked whether we can swap to a Tripo segmented model and recolor each segment dynamically — the current variant flow only mutates `materials[0].baseColorFactor` on a single-mesh GLB, which produces "same car, different body color" variants that read flat in the L2 collection grid.
+
+**What got validated (60 Tripo credits, 440 → 380 balance):**
+- Tripo segmentation is a **two-step API**, not a `text_to_model` parameter as third-party aggregators claim. `text_to_model` (Turbo, ~20cr, ~35s) returns a `task_id`; `mesh_segmentation` with `original_model_task_id` referencing it (~40cr, ~85s) returns a 12-part GLB with per-part PBR materials.
+- Output structure matches the reference `frontend/public/dev-glbs/turbo-seg.glb` exactly: `tripo_part_N` nodes, per-part materials with baked `baseColorTexture`, no `baseColorFactor`.
+- **Part count is non-deterministic** (reference 9, spike 12). Variable N must be handled in product UX.
+- **Tripo exposes zero semantic part labels** — `extras` is `undefined` everywhere in the GLB and the task response only has model URL + thumbnail. Visually the cuts ARE along natural body/wheel/glass boundaries, but the API never tells you which.
+- **TINT mode wins** the color-strategy spike — set `baseColorFactor` per material while keeping each material's baked `baseColorTexture`; the multiplication produces clean reds without losing PBR surface detail. Flat-color (texture-stripped) variants read as plastic.
+
+**Spike artifacts:**
+- `backend/scripts/spike-tripo-segmentation.ts` — two-step API reference flow (kept).
+- `backend/scripts/spike-seg-color-modes.ts` — generates TINT / FLAT / MULTI-FLAT comparison variants from the spike-seg base (kept).
+- `frontend/public/dev-glbs/spike-gen-2026-05-23T12-05-45.glb` (683KB, upstream single-mesh).
+- `frontend/public/dev-glbs/spike-seg-2026-05-23T12-05-45.glb` (6.0MB, 12 parts — base for the color-mode variants).
+- `frontend/public/dev-glbs/spike-seg-{tint-red,flat-red,multi-flat}.glb` (4 visual-compare GLBs).
+- `frontend/src/dev/CompareGlbsPage.tsx` — extended SAMPLES with 4 spike rows for visual comparison.
+- Three throwaway probe scripts (version-probe / seg-probe / seg-metadata) deleted after their evidence was captured.
+
+**Requirements doc:** `docs/brainstorms/2026-05-23-mesh-segmentation-per-part-coloring-requirements.md` — 11 R-IDs, 4 AEs, 5 key decisions, 6 deferred-to-planning questions, zero resolve-before-planning blockers.
+
+### Decisions baked into the requirements doc
+- **Two-step Tripo flow** = canonical (`text_to_model` → `mesh_segmentation`).
+- **TINT over FLAT** for variant coloring.
+- **Manual tagging at L1 publish** over geometric heuristics — demo isn't domain-limited to cars, so largest-bbox-equals-body breaks on animals / furniture / weapons.
+- **Free-text labels with 4 dropdown presets** (`primary` / `secondary` / `accent` / `detail`) — domain-agnostic, low cognitive load.
+- **Lineage canonical = resolved per-part color array** `[ColorHex × N]`, not label-keyed palette — keeps on-chain shape stable across UI label-vocabulary changes, and makes the eventual painter UI (option `a`) a pure UI add-on.
+
+### Next concrete step
+Run `/ce-plan` against `docs/brainstorms/2026-05-23-mesh-segmentation-per-part-coloring-requirements.md`. Plan should decompose into: backend swap pipeline N-material refactor, Move contract changes (Model3D gains `partLabels`, Variant stores per-part color array), L1 tagging UI in `/create`, L2 variant editor refactor (`/launch` VariantEditor → label-grouped rows), Babylon click-to-select interaction.
+
+### Open / deferred (next session)
+- **Phase 4 demo-arc browser QA + U15 recording / pitch / README** still pending from the plan-012 closeout earlier today. Mesh-seg work and demo-recording work are independent; prioritize against the 6/21 submission deadline (29 days).
+- **Walrus mainnet storage cost** for 6 MB × 16 variant collections — flagged in the new doc's Deferred-to-Planning section. Influences whether ce-plan chooses "store full GLB per variant" vs "store base+factor-array overrides".
+- **Tripo segmentation cross-domain reliability** — confirmed on cars only; one 60cr spike per additional domain category covers it.
+- All open items from the plan-012 closeout below carry forward (browser QA the polished arc, auxiliary routes, network-mismatch guard, etc.).
+
+### Notes for next session
+- Don't reopen the TINT vs FLAT decision; it's locked with visual evidence at `/dev/compare`.
+- The "Path 3 — no semantic labels, dumb N-tuple palette" approach is dead — was killed when Tripo's API was confirmed to expose zero part labels AND the user confirmed segmentation cuts ARE semantically meaningful, making manual tagging worth the small UX cost.
+- L1 SUI fee gate (D-034) currently anchors on Turbo's ~15cr cost; new ~60cr flow is 4× more expensive — ce-plan should re-derive the fee threshold.
+
+---
+
+## Previous Last-Updated: 2026-05-23 (night — plan-012 SHIPPED, D-044 Brutalist editorial rolled out across the full demo arc) — **Next = browser-QA the polished arc, then U15 demo recording / pitch / README.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96

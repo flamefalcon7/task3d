@@ -16,7 +16,12 @@ const SAMPLES: Sample[] = [
   { label: 'Turbo-v1.0-20250506',        file: 'turbo-v1.glb',  cost: '~15 cr', time: '~15s', size: '638 KB' },
   { label: 'v1.4-20240625',              file: 'v1.4.glb',      cost: '~15 cr', time: '~25s', size: '1.78 MB' },
   { label: 'P1-20260311',                file: 'p1.glb',        cost: '~50 cr', time: '~40s', size: '762 KB' },
-  { label: 'Turbo + mesh_segmentation',  file: 'turbo-seg.glb', cost: '+40 cr', time: '+30s', size: '?' },
+  { label: 'Turbo + mesh_segmentation (reference)', file: 'turbo-seg.glb',                          cost: '+40 cr', time: '+30s', size: '5.0 MB' },
+  // Spike B: per-segment color strategies on a freshly-generated 12-part seg GLB.
+  { label: 'seg ORIGINAL (12 parts)',               file: 'spike-seg-2026-05-23T12-05-45.glb',      cost: '60 cr',  time: '~2min', size: '6.0 MB' },
+  { label: 'seg TINT red (factor × tex)',           file: 'spike-seg-tint-red.glb',                 cost: '0',      time: '0',     size: '6.0 MB' },
+  { label: 'seg FLAT red (baseTex stripped)',       file: 'spike-seg-flat-red.glb',                 cost: '0',      time: '0',     size: '5.0 MB' },
+  { label: 'seg MULTI-FLAT (palette per part)',     file: 'spike-seg-multi-flat.glb',               cost: '0',      time: '0',     size: '5.0 MB' },
 ];
 
 export function CompareGlbsPage() {
