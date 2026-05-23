@@ -111,6 +111,9 @@ const EPatchIdMalformed:     u64 = 36;
 const EBatchLenMismatch:     u64 = 37;
 // D-040 — base model's license.policy is non-permissionless and caller is not the creator.
 const EPolicyRestricted:     u64 = 38;
+// plan-013 — per-part label bounds on the segmented-mesh `part_labels` vector.
+const ETooManyParts:         u64 = 39;
+const EPartLabelTooLong:     u64 = 40;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -120,6 +123,12 @@ const MAX_BLOB_ID_LEN:      u64 = 128;
 // D-035 — bound on an NftToken's quilt-patch id (URL-safe base64 quilt patch
 // identifier). Same generous 128-byte ceiling as a Walrus blob id.
 const MAX_PATCH_ID_LEN:     u64 = 128;
+// plan-013 — bound on the segmented-mesh per-part label vector. Tripo's
+// mesh_segmentation produces variable N (spike: 12 parts on a car); 64 is the
+// safety ceiling with linear cost in `validate_publish_inputs`. Each element
+// reuses MAX_TAG_LEN (32) for per-label string length — identical pattern to
+// `tags`, distinct vector cap so the two bounds can evolve independently.
+const MAX_PARTS:            u64 = 64;
 // D-029 — on-chain length cap on register_integration's app_metadata blob.
 // Length-only guard; the backend (U7) validates the full UTF-8 JSON schema
 // (name+url). 512 bytes comfortably holds {name<=64, url<=256} + JSON syntax.
@@ -159,6 +168,14 @@ public struct Model3D has key, store {
     // nft creator forks it. Mirrors lineage_blob_id exactly (same
     // MAX_BLOB_ID_LEN bound + EBlobIdMalformed code).
     glb_blob_id: String,
+    // plan-013 — per-part semantic labels for a segmented-mesh GLB (one entry
+    // per material/node index from Tripo's mesh_segmentation output). Empty
+    // vector is the legacy sentinel ("single-material base, route through the
+    // pre-segmentation editor"). Variant authoring derives `uniqueLabels` from
+    // this vector and resolves a per-label palette to a positional per-part
+    // color array at build time. Length-bounded by MAX_PARTS; per-element by
+    // MAX_TAG_LEN.
+    part_labels: vector<String>,
     is_encrypted: bool,
     license: LicenseTerms,
     created_at_ms: u64,
@@ -244,6 +261,10 @@ public struct ModelPublished has copy, drop {
     creator: address,
     policy: u8,
     lineage_blob_id: String,
+    // plan-013 — carried so the indexer populates `Model3DSummary.partLabels`
+    // straight from the event payload (no follow-up `getObject` on the new
+    // shared model).
+    part_labels: vector<String>,
 }
 
 // D-029 — emitted by `launch_collection` when an nft creator derives a
@@ -376,6 +397,7 @@ public fun name(model: &Model3D): &String { &model.name }
 public fun tags(model: &Model3D): &vector<String> { &model.tags }
 public fun lineage_blob_id(model: &Model3D): &String { &model.lineage_blob_id }
 public fun glb_blob_id(model: &Model3D): &String { &model.glb_blob_id }
+public fun part_labels(model: &Model3D): &vector<String> { &model.part_labels }
 public fun is_encrypted(model: &Model3D): bool { model.is_encrypted }
 public fun license(model: &Model3D): &LicenseTerms { &model.license }
 public fun created_at_ms(model: &Model3D): u64 { model.created_at_ms }
@@ -419,6 +441,7 @@ public(package) fun validate_publish_inputs(
     tags: &vector<String>,
     lineage_blob_id: &String,
     glb_blob_id: &String,
+    part_labels: &vector<String>,
     license: &LicenseTerms,
 ) {
     assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
@@ -434,6 +457,16 @@ public(package) fun validate_publish_inputs(
     assert!(string::length(lineage_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
     // D-037 — same bound + abort code as lineage_blob_id.
     assert!(string::length(glb_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    // plan-013 — bound the per-part label vector (cap + per-element string len).
+    // Reuses MAX_TAG_LEN for label string length so labels and tags share the
+    // same per-string ceiling; MAX_PARTS is the dedicated cap on the count.
+    assert!(vector::length(part_labels) <= MAX_PARTS, ETooManyParts);
+    let mut j = 0;
+    let m = vector::length(part_labels);
+    while (j < m) {
+        assert!(string::length(vector::borrow(part_labels, j)) <= MAX_TAG_LEN, EPartLabelTooLong);
+        j = j + 1;
+    };
 }
 
 // === Model3D constructor (foundation; `publish` shares it — D-032) ===
@@ -464,12 +497,13 @@ public(package) fun new_model(
     tags: vector<String>,
     lineage_blob_id: String,
     glb_blob_id: String,
+    part_labels: vector<String>,
     is_encrypted: bool,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
 ): Model3D {
-    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &glb_blob_id, &license);
+    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &glb_blob_id, &part_labels, &license);
 
     // Fixed Blob lifecycle (see fn-header note): transferred to creator BEFORE
     // model construction. Walrus storage stays paid for the registered epoch
@@ -489,6 +523,7 @@ public(package) fun new_model(
         tags,
         lineage_blob_id,
         glb_blob_id,
+        part_labels,
         is_encrypted,
         license,
         created_at_ms: clock.timestamp_ms(),
@@ -498,6 +533,7 @@ public(package) fun new_model(
         creator: ctx.sender(),
         policy: license.policy,
         lineage_blob_id: model.lineage_blob_id,
+        part_labels: model.part_labels,
     });
     model
 }
@@ -519,6 +555,7 @@ public entry fun publish(
     tags: vector<String>,
     lineage_blob_id: String,
     glb_blob_id: String,
+    part_labels: vector<String>,
     is_encrypted: bool,
     license: LicenseTerms,
     clock: &Clock,
@@ -532,6 +569,7 @@ public entry fun publish(
         tags,
         lineage_blob_id,
         glb_blob_id,
+        part_labels,
         is_encrypted,
         license,
         clock,
@@ -868,6 +906,7 @@ public entry fun register_integration(
 #[test_only] public fun model_published_model_id(e: &ModelPublished): ID { e.model_id }
 #[test_only] public fun model_published_creator(e: &ModelPublished): address { e.creator }
 #[test_only] public fun model_published_policy(e: &ModelPublished): u8 { e.policy }
+#[test_only] public fun model_published_part_labels(e: &ModelPublished): &vector<String> { &e.part_labels }
 
 #[test_only] public fun nft_token_minted_token_id(e: &NftTokenMinted): ID { e.token_id }
 #[test_only] public fun nft_token_minted_collection_id(e: &NftTokenMinted): ID { e.collection_id }
@@ -906,6 +945,7 @@ public fun destroy_model_for_testing(model: Model3D) {
         tags: _,
         lineage_blob_id: _,
         glb_blob_id: _,
+        part_labels: _,
         is_encrypted: _,
         license: _,
         created_at_ms: _,

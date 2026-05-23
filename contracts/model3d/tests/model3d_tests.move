@@ -107,6 +107,32 @@ fun empty_tags(): vector<string::String> {
     vector::empty<string::String>()
 }
 
+// plan-013 — per-part label helpers. `make_part_labels(n)` produces n copies of
+// `"part"` for cap/length tests; `four_label_palette()` returns the canonical
+// (primary, secondary, accent, detail) preset for the happy-path scenarios.
+fun empty_part_labels(): vector<string::String> {
+    vector::empty<string::String>()
+}
+
+fun make_part_labels(n: u64): vector<string::String> {
+    let mut v = vector::empty<string::String>();
+    let mut i = 0;
+    while (i < n) {
+        vector::push_back(&mut v, s(b"part"));
+        i = i + 1;
+    };
+    v
+}
+
+fun four_label_palette(): vector<string::String> {
+    let mut v = vector::empty<string::String>();
+    vector::push_back(&mut v, s(b"primary"));
+    vector::push_back(&mut v, s(b"secondary"));
+    vector::push_back(&mut v, s(b"accent"));
+    vector::push_back(&mut v, s(b"detail"));
+    v
+}
+
 // D-035 — default quilt blob id (the L2 collection's one Walrus quilt) and a
 // default patch id (one colored variant patch inside it) for collection tests.
 fun quilt(): string::String { s(b"quiltBlobIdABC") }
@@ -177,6 +203,7 @@ fun model3d_has_key_and_store_abilities() {
         make_tags(2),
         s(b"lineageBlobIdABC"),
         s(b"glbBlobIdABC"),
+        empty_part_labels(),
         false,
         default_license(),
         &clk,
@@ -221,6 +248,7 @@ fun new_model_emits_model_published_and_transfers_blob() {
         make_tags(1),
         s(b"lineageBlobZ"),
         s(b"glbBlobZ"),
+        empty_part_labels(),
         false,
         default_license(),
         &clk,
@@ -270,6 +298,67 @@ fun new_model_emits_model_published_and_transfers_blob() {
     sc.end();
 }
 
+// === plan-013 — part_labels carried through new_model + ModelPublished event ===
+//
+// Verifies that a segmented-mesh publish (the 4-label palette case) stores the
+// vector on the Model3D struct AND emits it on the ModelPublished event so the
+// indexer can populate `Model3DSummary.partLabels` without a follow-up
+// `getObject`. The "happy path: variable N" plan scenario is covered indirectly
+// here by selecting 4 labels (vs the existing empty-vector tests which cover
+// legacy single-material bases).
+
+#[test]
+fun new_model_stores_and_emits_part_labels() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let b = mint_blob(&mut system, sc.ctx());
+    let clk = clock::create_for_testing(sc.ctx());
+
+    let model = new_model(
+        b,
+        s(b"car"),
+        s(b"{}"),
+        s(b"Segmented"),
+        empty_tags(),
+        s(b"lineageSeg"),
+        s(b"glbSeg"),
+        four_label_palette(),
+        false,
+        default_license(),
+        &clk,
+        sc.ctx(),
+    );
+
+    // (a) Field is stored on the Model3D and accessor returns it.
+    let labels = model3d::part_labels(&model);
+    assert!(vector::length(labels) == 4, 320);
+    assert!(*string::as_bytes(vector::borrow(labels, 0)) == b"primary", 321);
+    assert!(*string::as_bytes(vector::borrow(labels, 1)) == b"secondary", 322);
+    assert!(*string::as_bytes(vector::borrow(labels, 2)) == b"accent", 323);
+    assert!(*string::as_bytes(vector::borrow(labels, 3)) == b"detail", 324);
+
+    // (b) ModelPublished event carries the same vector (indexer entry point).
+    let events = event::events_by_type<model3d::ModelPublished>();
+    assert!(vector::length(&events) == 1, 325);
+    let ep = vector::borrow(&events, 0);
+    let evt_labels = model3d::model_published_part_labels(ep);
+    assert!(vector::length(evt_labels) == 4, 326);
+    assert!(*string::as_bytes(vector::borrow(evt_labels, 0)) == b"primary", 327);
+    assert!(*string::as_bytes(vector::borrow(evt_labels, 3)) == b"detail", 328);
+
+    transfer::public_transfer(model, CREATOR);
+    sc.next_tx(CREATOR);
+    let blob_in_inbox = sc.take_from_sender<Blob>();
+    sc.return_to_sender(blob_in_inbox);
+    let received_model = sc.take_from_sender<Model3D>();
+    destroy_model_for_testing(received_model);
+
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
 // === Phase 2 entry-fn removal — implicit at compile-time ===
 //
 // `publish_and_share` and `purchase_model_access` no longer exist in the
@@ -282,7 +371,7 @@ fun new_model_emits_model_published_and_transfers_blob() {
 
 #[test]
 fun validate_inputs_happy_minimum() {
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &empty_part_labels(), &default_license());
 }
 
 #[test]
@@ -293,6 +382,7 @@ fun validate_inputs_happy_ten_tags() {
         &make_tags(10),
         &s(b"abc123"),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -300,37 +390,37 @@ fun validate_inputs_happy_ten_tags() {
 #[test, expected_failure(abort_code = model3d::ERoyaltyTooHigh)]
 fun validate_inputs_rejects_royalty_over_cap() {
     let bad = new_license_terms(policy_permissionless(), 0, max_derivative_royalty_bps() + 1, true, true);
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &bad);
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &empty_part_labels(), &bad);
 }
 
 #[test]
 fun validate_inputs_accepts_royalty_at_cap() {
     let edge = new_license_terms(policy_permissionless(), 0, max_derivative_royalty_bps(), true, true);
-    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &edge);
+    validate_publish_inputs(&s(b""), &s(b""), &empty_tags(), &s(b""), &s(b""), &empty_part_labels(), &edge);
 }
 
 #[test, expected_failure(abort_code = model3d::ETooManyTags)]
 fun validate_inputs_rejects_17_tags() {
-    validate_publish_inputs(&s(b""), &s(b""), &make_tags(17), &s(b""), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &make_tags(17), &s(b""), &s(b""), &empty_part_labels(), &default_license());
 }
 
 #[test]
 fun validate_inputs_accepts_16_tags() {
-    validate_publish_inputs(&s(b""), &s(b""), &make_tags(16), &s(b""), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &make_tags(16), &s(b""), &s(b""), &empty_part_labels(), &default_license());
 }
 
 #[test, expected_failure(abort_code = model3d::ETagTooLong)]
 fun validate_inputs_rejects_tag_33_chars() {
     let mut tags = empty_tags();
     vector::push_back(&mut tags, repeat_byte(ASCII_A, 33));
-    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &empty_part_labels(), &default_license());
 }
 
 #[test]
 fun validate_inputs_accepts_tag_32_chars() {
     let mut tags = empty_tags();
     vector::push_back(&mut tags, repeat_byte(ASCII_A, 32));
-    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &default_license());
+    validate_publish_inputs(&s(b""), &s(b""), &tags, &s(b""), &s(b""), &empty_part_labels(), &default_license());
 }
 
 #[test, expected_failure(abort_code = model3d::EParamsJsonTooLong)]
@@ -341,6 +431,7 @@ fun validate_inputs_rejects_params_json_4097() {
         &empty_tags(),
         &s(b""),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -353,6 +444,7 @@ fun validate_inputs_accepts_params_json_4096() {
         &empty_tags(),
         &s(b""),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -365,6 +457,7 @@ fun validate_inputs_rejects_name_129() {
         &empty_tags(),
         &s(b""),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -377,6 +470,7 @@ fun validate_inputs_accepts_name_128() {
         &empty_tags(),
         &s(b""),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -389,6 +483,7 @@ fun validate_inputs_rejects_lineage_blob_id_129() {
         &empty_tags(),
         &repeat_byte(ASCII_B, 129),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -401,6 +496,7 @@ fun validate_inputs_accepts_lineage_blob_id_128() {
         &empty_tags(),
         &repeat_byte(ASCII_B, 128),
         &s(b""),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -416,6 +512,7 @@ fun validate_inputs_rejects_glb_blob_id_129() {
         &empty_tags(),
         &s(b""),
         &repeat_byte(ASCII_B, 129),
+        &empty_part_labels(),
         &default_license(),
     );
 }
@@ -428,6 +525,78 @@ fun validate_inputs_accepts_glb_blob_id_128() {
         &empty_tags(),
         &s(b""),
         &repeat_byte(ASCII_B, 128),
+        &empty_part_labels(),
+        &default_license(),
+    );
+}
+
+// === plan-013 — part_labels bounds (MAX_PARTS + per-element MAX_TAG_LEN) ===
+
+#[test]
+fun validate_inputs_accepts_four_label_palette() {
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &s(b""),
+        &four_label_palette(),
+        &default_license(),
+    );
+}
+
+#[test]
+fun validate_inputs_accepts_max_parts_64() {
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &s(b""),
+        &make_part_labels(64),
+        &default_license(),
+    );
+}
+
+#[test, expected_failure(abort_code = model3d::ETooManyParts)]
+fun validate_inputs_rejects_part_labels_65() {
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &s(b""),
+        &make_part_labels(65),
+        &default_license(),
+    );
+}
+
+#[test]
+fun validate_inputs_accepts_part_label_32_chars() {
+    let mut labels = empty_part_labels();
+    vector::push_back(&mut labels, repeat_byte(ASCII_A, 32));
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &s(b""),
+        &labels,
+        &default_license(),
+    );
+}
+
+#[test, expected_failure(abort_code = model3d::EPartLabelTooLong)]
+fun validate_inputs_rejects_part_label_33_chars() {
+    let mut labels = empty_part_labels();
+    vector::push_back(&mut labels, repeat_byte(ASCII_A, 33));
+    validate_publish_inputs(
+        &s(b""),
+        &s(b""),
+        &empty_tags(),
+        &s(b""),
+        &s(b""),
+        &labels,
         &default_license(),
     );
 }
@@ -469,6 +638,7 @@ fun publish_shares_model_and_emits_model_published() {
         make_tags(1),
         s(b"lineageBlobPub"),
         s(b"glbBlobPub"),
+        empty_part_labels(),
         false,
         default_license(),
         &clk,
@@ -614,6 +784,7 @@ fun mint_base_model(
         make_tags(1),
         s(b"lineageBlobBase"),
         s(b"glbBlobBase"),
+        empty_part_labels(),
         false,
         license,
         clk,
