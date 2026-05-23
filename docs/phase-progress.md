@@ -1,5 +1,38 @@
 # Phase Progress
 
+## Last Updated: 2026-05-23 (very late — plan-013 U1-U4 shipped) — **Next = U5 TaggingCanvas (Babylon click-to-select picker).**
+
+### Hackathon Tracker
+- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+
+### This session — plan-013 backend + types + Move foundation landed
+
+`/ce-work` against `docs/plans/2026-05-23-013-feat-mesh-segmentation-per-part-coloring-plan.md` shipped 4 of 7 implementation units. Tree is fully green: Move 64/64, backend 121/121, frontend 353/353.
+
+**Commits (this session):**
+- `6fa45c0` U1 Move contract — `part_labels: vector<String>` on Model3D + ModelPublished event, MAX_PARTS=64, ETooManyParts=39, EPartLabelTooLong=40, validate_publish_inputs extended, destroy_model_for_testing destructure, 7 new test scenarios.
+- `9c62dee` U2 Shared types — positional `VariantMaterialSpec.partColors`, `Model3DSummary.partLabels`, `MAX_PARTS_FE=64`, `collectionBuildRequestSchema` per-variant `partColors` array. Removed old top-level `baseColorRgb` from schema (callers migrated). 4 frontend test mocks updated with `partLabels: []`.
+- `8fb2940` U4 Backend swap pipeline N-material refactor — `swapMaterial` loops all N materials in TINT mode (baseColorFactor per part, baseColorTexture preserved unless overridden). New `PartCountMismatchError` → 422 `part_count_mismatch` envelope with materialCount + partColorsCount. R2-era "only swap first material" test replaced; +3 new scenarios.
+- `bf1be58` U3 Backend Tripo two-step chain — `TripoClient.submitMeshSegmentation(originalTaskId)` + `TripoGenerator.generate` chains text_to_model → poll(90s) → mesh_segmentation → poll(180s) → downloadGlb. +5 new tests including "step-2 timeout discards step-1 bytes".
+
+### Remaining plan-013 units
+- **U5 TaggingCanvas** (frontend, new component): Babylon click-to-select picker with HighlightLayer. Imperative Engine/Scene mirroring PreviewCanvas. StrictMode useRef setup+cleanup discipline. Controlled component, parent owns `selectedIndex`.
+- **U6 L1 publish + tagging step** (frontend): TaggingStep between Tripo `confirmed` and metadata form. `buildPublishPtb` gains `partLabels: vector<String>` arg. TRIPO_FEE_MIST 0.1 → 0.4 SUI (4× credit cost). Depends on U1, U2, U3, U5, U9.
+- **U7 L2 variant editor** (frontend): VariantRow.palette `Record<label, hex>`. VariantEditor renders one row per uniqueLabel. LaunchCollectionPage resolves palette × base.partLabels → positional partColors before POSTing /api/collection/build. Depends on U1, U2, U4, U9.
+- **U9 Move republish ceremony + networkConfig pin**: adding `part_labels` is breaking; full package republish. Update contracts/Published.toml + frontend/src/sui/networkConfig.ts. Existing testnet objects abandoned (acceptable per hackathon phase).
+- **ADRs**: 8 captures pending (two-step Tripo, TINT, manual tagging, free-text + 4 presets, lineage = per-part array, full-GLB v1, fee bump, republish ceremony).
+
+### Next concrete step
+Continue `/ce-work plan-013`. U5 (TaggingCanvas) is the natural next unit — independent of U6/U7, unblocks U6. Read `docs/solutions/integration-issues/babylon-gpu-particle-emission-control-and-getactivecount-misread-2026-05-18.md` on first Babylon surprise (HighlightLayer.addMesh, sub-mesh picking).
+
+### Notes for next session
+- Backend tree is GREEN; U2's removal of the old single-color `VariantMaterialSpec` shape forced the LaunchCollectionPage to migrate to a length-1 `partColors` array (the legacy single-material UX form). U7 will then expand that to a per-label resolution.
+- The `Model3D` struct shape change in U1 means existing testnet demo objects from prior phases are abandoned at U9 republish — acceptable per CLAUDE.md "Don't gold-plate during build phases."
+- `partLabels = []` is the legacy single-material sentinel. LaunchCollectionPage in U7 will route empty-array bases through the existing single-row VariantEditor unchanged. No data migration needed.
+- ADR captures deferred until ship: keep momentum on units; capture all 8 decisions in one PR-ready batch before U9 republish ceremony.
+
+---
+
 ## Last Updated: 2026-05-23 (late evening — mesh segmentation per-part coloring brainstorm) — **Next = `/ce-plan` on the new requirements doc.**
 
 ### Hackathon Tracker
