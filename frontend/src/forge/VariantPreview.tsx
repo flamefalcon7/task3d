@@ -20,6 +20,10 @@ export interface VariantPreviewProps {
   // The per-variant GLB bytes after the backend material-swap. Undefined while
   // /api/collection/build is still in-flight or hasn't been called yet.
   variantGlbs?: Uint8Array[];
+  // The base GLB bytes — rendered as a "preview of the fork" while variantGlbs
+  // is still undefined, so picking a base immediately shows what you're about
+  // to mint. Once variantGlbs arrives it takes over.
+  baseGlb?: Uint8Array;
   selectedIndex: number;
   onSelect: (i: number) => void;
 }
@@ -55,14 +59,25 @@ function tileStyle(active: boolean, colorHex: string): CSSProperties {
   };
 }
 
+const baseCaption: CSSProperties = {
+  ...monoLabel,
+  position: 'absolute',
+  bottom: 10,
+  left: 12,
+  color: 'rgba(255,255,255,0.7)',
+  letterSpacing: '1.5px',
+  pointerEvents: 'none',
+};
+
 export function VariantPreview({
   variants,
   variantGlbs,
+  baseGlb,
   selectedIndex,
   onSelect,
 }: VariantPreviewProps) {
-  // Resolve a blob URL only for the currently-selected variant — sidesteps the
-  // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
+  // Variant render takes priority once it exists; base is the fallback so the
+  // user sees what they're about to fork the moment they pick a base model.
   const selectedGlbUrl = useMemo(() => {
     const bytes = variantGlbs?.[selectedIndex];
     if (!bytes) return null;
@@ -71,21 +86,43 @@ export function VariantPreview({
     );
   }, [variantGlbs, selectedIndex]);
 
+  const baseGlbUrl = useMemo(() => {
+    if (!baseGlb || variantGlbs) return null;
+    return URL.createObjectURL(
+      new Blob([baseGlb as BlobPart], { type: 'model/gltf-binary' }),
+    );
+  }, [baseGlb, variantGlbs]);
+
   useEffect(() => {
     if (!selectedGlbUrl) return;
     return () => URL.revokeObjectURL(selectedGlbUrl);
   }, [selectedGlbUrl]);
 
+  useEffect(() => {
+    if (!baseGlbUrl) return;
+    return () => URL.revokeObjectURL(baseGlbUrl);
+  }, [baseGlbUrl]);
+
+  const renderUrl = selectedGlbUrl ?? baseGlbUrl;
+  const showingBase = !selectedGlbUrl && !!baseGlbUrl;
+
   return (
     <div data-testid="variant-preview">
       <div style={wellSized} data-testid="variant-preview-canvas">
-        {selectedGlbUrl ? (
-          <PreviewCanvas glbUrl={selectedGlbUrl} />
+        {renderUrl ? (
+          <>
+            <PreviewCanvas glbUrl={renderUrl} />
+            {showingBase && (
+              <span style={baseCaption} data-testid="variant-preview-base-caption">
+                — BASE MODEL · CLICK PREVIEW TO APPLY VARIANTS
+              </span>
+            )}
+          </>
         ) : (
           <div style={placeholderText} data-testid="variant-preview-placeholder">
             {variantGlbs
               ? '— SELECT A VARIANT TO PREVIEW'
-              : '— CLICK PREVIEW TO BUILD VARIANTS'}
+              : '— PICK A BASE MODEL ABOVE'}
           </div>
         )}
       </div>
