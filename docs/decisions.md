@@ -2089,6 +2089,56 @@ Adopt approach (b) **client-side** (no backend indexer): `useListings` discovers
 
 ---
 
+## D-044: Frontend visual identity = Brutalist editorial
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 5 (U15 UX polish window — submission prep)
+
+### Context
+Frontend is prototype-grade — inline `React.CSSProperties`, `system-ui` font, ad-hoc dark page bg in `MarketPage` but no shared design system across `/create`, `/launch`, `/market`, `/track`, `/`. Submission deadline 6/21 (29 days out). Judges scoring with Product/UX = 20% (4× the weight of Presentation) will see the live site directly via screencap recording.
+
+The four-actor demo arc is the polish target — every screen on the arc needs a coherent visual language by 6/21. Inconsistent ad-hoc styling across screens makes the product read as a prototype regardless of feature completeness.
+
+Visual identity also needs to satisfy a specific product constraint: a 3D model viewer is the page hero on `/create` and inside card grids on `/market` and `/`. Light page backgrounds wash out 3D content unless mitigated.
+
+### Decision
+Lock a single visual identity for the entire frontend: **Brutalist editorial.** Defined as: off-white page (`#F5F5F0`), pure white surfaces (`#FFFFFF`), heavy black borders (1.5px), zero rounded corners, italic-serif display type (Newsreader), sans body (Inter), monospace for chain data (JetBrains Mono), and a single accent (`#FF4500` red-orange) rationed to primary CTAs and exception states. The 3D viewer is rendered into a pure-black inset well so the white frame becomes a feature rather than a 3D-washout problem.
+
+Full token reference: `docs/ux/design-tokens.md`. Per-screen polish backlog: `docs/ux/polish-backlog.md`.
+
+### Rationale
+- **Differentiation in the Overflow submission pile.** Sui ecosystem visual default is light + clean + blue (Sui Foundation, Mysten, Suiet, Walrus). Brutalist editorial stands out at a glance for a judge scanning many decks.
+- **Black wells solve 3D washout.** Apple-product-page move — white frame around dark stage. Contrast makes the wireframes pop *more* than they did in any dark theme.
+- **Editorial reads as taste.** The italic-serif + heavy-border + sparse-accent language signals craft and confidence. Aligns with "Strong projects… polished UX… long-term potential beyond hackathon" judge framing in handbook scoring guidance.
+- **Production discipline suits a backend engineer.** No gradients, no shadows, no dark-mode parity, no fine-tuned glow halos. The system rewards rule-following over taste calls — appropriate for the user's stated experience profile.
+- **Inline-style implementation matches existing pattern.** No Tailwind / CSS-modules refactor required; new `tokens.ts` module slots into the existing `React.CSSProperties` convention in `MarketPage.tsx` et al.
+
+### Alternatives Considered
+- **Dark techno** (cool dark + cyan accent). Best 3D-content contrast of the dark options; widely understood in crypto. Rejected as visually generic in an Overflow pile (OpenSea, Aave, Suiet all converge here).
+- **Industrial studio** (warm dark + amber accent). Felt closest to Sketchfab/Unreal — strong signal for a 3D-asset product. Rejected after seeing the Brutalist render — Brutalist gives more visual identity per unit of effort.
+- **Dark + amber hybrid.** Cool-dark surfaces + warm amber accent. Aesthetic compromise; rejected for same reason as Industrial.
+- **Toy soft pastel** (cream + rounded + warm pastel accent). Approachable creator-economy feel; rejected because it actively fights the D-031 narrative (L1 = serious access economy, L2 = composable IP). Also same 3D-washout problem as Brutalist *without* the black-well mitigation move.
+
+### Consequences
+- ✅ Single visual system across all routes; new screens have a non-trivial style reference instead of ad-hoc CSS.
+- ✅ 3D content reads stronger than in any other tested vibe (black wells maximize contrast).
+- ✅ Implementation is light — `tokens.ts` + `index.css` + per-screen inline-style refactor; no library swap.
+- ✅ Defensible aesthetic story for the demo video / pitch (judges score Product/UX 20%).
+- ⚠️ Demands typography confidence. Without the recommended display serif (Newsreader / Source Serif), the system collapses to "unstyled black-on-white." 30 min budget for font selection is a hard prerequisite.
+- ⚠️ Lack of motion / glow / depth cues makes a 30-second screencap feel slightly *still* compared to a dark-themed video. Mitigate with subtle 3D-viewer rotation (Babylon scene supports natively) + accent-color flicker on state transitions.
+- ⚠️ Bright `#FF4500` accent must be rationed (≤5 instances per page) or the system collapses to "loud" instead of "editorial." Anti-patterns codified in `design-tokens.md` §8.
+- 🔮 Post-submission tweaks are easy (token-level swaps); reversing to another vibe is medium effort (~1 dev-day of inline-style edits). Lock for 6/21 submission, reassess if scope changes.
+
+### Related
+- spec.md section: §1.7 (composable creator economy framing — narrative guides the "tool for makers" feel)
+- ADR template source: `CLAUDE.md` lightweight variant
+- Token spec: `docs/ux/design-tokens.md`
+- Polish backlog (per-screen): `docs/ux/polish-backlog.md`
+- Style exploration session (4 vibes + hybrid rendered live as mockups): chat 2026-05-23
+
+---
+
 # Reserved Decision Numbers
 
-D-044 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-045 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

@@ -1,6 +1,38 @@
 # Phase Progress
 
-## Last Updated: 2026-05-23 (Plan 011 D-043 shipped + full multi-agent review + buyer fullnode read-back + StrictMode latent bug fix) — **Next = commit + U15 demo/pitch.**
+## Last Updated: 2026-05-23 (evening — U15 UX polish kickoff: D-044 Brutalist editorial locked) — **Next = foundation (tokens.ts + TopNav) then walk demo-arc screen by screen.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+
+### This session — Visual identity locked + UX polish plan written (no code changes yet)
+
+Interactive style exploration walked four candidate visual systems with full-fidelity mockups of `/market` in each: Dark techno (cool dark + cyan), Industrial studio (warm dark + amber), Toy soft pastel, Brutalist editorial — plus a Dark+amber hybrid. After comparing all five on the same page content, locked **Brutalist editorial** (D-044). Off-white #F5F5F0 paper, 1.5px black borders, italic-serif (Newsreader), monospace chain data (JetBrains Mono), single accent #FF4500 rationed to primary CTAs + exception states. Pure-black inset wells for 3D viewer areas solve white-bg 3D-content washout (Apple-product-page move).
+
+**Three deliverables this session** (all cross-linked):
+- `docs/ux/design-tokens.md` — full 4+2+4 system: 12 color tokens, type scale (Newsreader / Inter / JetBrains Mono — 3 families, 6 sizes, 2 weights), 6-value spacing scale, component primitives (button/input/card/badge/viewer-well/statusBanner/navBar), 11-item anti-patterns list, drop-in `frontend/src/ux/tokens.ts` + `index.css` block + Google Fonts `<link>`. Implementation order: tokens → App shell + TopNav → /create → /launch → /market → /track → /. ~14 hrs estimated polish work, fits U15 window.
+- `docs/decisions.md` D-044 — full ADR per CLAUDE.md template. Alternatives rejected: Dark techno (visually generic in Overflow pile), Industrial studio (less differentiation per effort), Dark+amber hybrid (same), Toy soft pastel (fights D-031 narrative + 3D washout). Reserved D-045+.
+- `docs/ux/polish-backlog.md` — per-screen MUST/NICE/POST polish items for every demo-arc route in execute order. Includes "definition of done" checklist per screen, plus out-of-scope list (Move contracts, backend API, logo, pitch deck, README, mainnet deploy).
+
+### Other notes
+- Recon: frontend uses inline `React.CSSProperties` (no Tailwind, no CSS modules) — design system written to match. `tokens.ts` exports plain CSSProperties objects.
+- `App.tsx` currently has NO global nav — each page rolls its own chrome or none. Adding `<TopNav>` once is the biggest cross-screen consistency fix.
+- `MarketPage` ad-hoc dark theme (`#15171b` bg, `#1a1c20` cards, status emojis) is the most prototype-looking screen and the headline new feature — highest polish yield per hour.
+- D-044 honest tradeoff: Brutalist demands typography confidence. Without the recommended display serif, the system collapses to "unstyled black-on-white." 30 min budget for font selection as hard prerequisite.
+- Mockups from the style exploration (4 vibes + hybrid) live only in the chat transcript; re-render and save to `pitch/` if needed for the pitch deck.
+
+### Next concrete step
+Cross-cutting foundation (~1–2 hrs): create `frontend/src/ux/tokens.ts` from the spec, add CSS variables + body reset to `frontend/src/index.css`, add Google Fonts `<link>` to `frontend/index.html`, build `<TopNav>` component at `frontend/src/ux/TopNav.tsx` and mount in `App.tsx` above `<Routes>`. Then start applying to `/create` per polish-backlog §1.
+
+### Open / deferred (decide next session)
+- Babylon `PreviewCanvas` clearColor → `#000000` to seam with the viewer well (cross-cutting MUST item).
+- Auxiliary routes (`/model/:id`, `/collection/:slug`, `/integrate`) — only if time remains.
+- `/dev/compare` route — production-hide before demo recording.
+- Carry-over from earlier 5-23 session below (commits + market type-filter + Tier C indexer — all still pending).
+
+---
+
+## Previous Last-Updated: 2026-05-23 (Plan 011 D-043 shipped + full multi-agent review + buyer fullnode read-back + StrictMode latent bug fix) — **Next = commit + U15 demo/pitch.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
