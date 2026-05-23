@@ -16,7 +16,7 @@ import '@babylonjs/loaders/glTF/index.js';
 // a fixed radius makes some render as a speck and clips others. We size the
 // orbit radius to the bounding sphere + the vertical FOV (+ padding), recenter
 // the target, and widen the near/far planes so neither tiny nor huge meshes clip.
-function frameCameraToMeshes(camera: ArcRotateCamera, meshes: AbstractMesh[]): void {
+export function frameCameraToMeshes(camera: ArcRotateCamera, meshes: AbstractMesh[]): void {
   let min: Vector3 | null = null;
   let max: Vector3 | null = null;
   for (const mesh of meshes) {
