@@ -73,6 +73,51 @@ describe('TripoClient', () => {
     });
   });
 
+  describe('submitMeshSegmentation (plan-013 step 2)', () => {
+    it('returns the segmentation task_id and sends the documented body shape', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { task_id: 'seg-xyz' } }));
+      const client = new TripoClient('key');
+      const id = await client.submitMeshSegmentation('task-abc');
+      expect(id).toBe('seg-xyz');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.tripo3d.ai/v2/openapi/task',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ Authorization: 'Bearer key' }),
+          body: JSON.stringify({
+            type: 'mesh_segmentation',
+            original_model_task_id: 'task-abc',
+          }),
+        }),
+      );
+    });
+
+    it('throws TripoAuthError on 401', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'unauthorized' }));
+      const client = new TripoClient('bad');
+      await expect(client.submitMeshSegmentation('task-abc')).rejects.toBeInstanceOf(
+        TripoAuthError,
+      );
+    });
+
+    it('throws TripoFormatError when task_id missing', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: {} }));
+      const client = new TripoClient('key');
+      await expect(client.submitMeshSegmentation('task-abc')).rejects.toBeInstanceOf(
+        TripoFormatError,
+      );
+    });
+
+    it('throws TripoTimeoutError when the HTTP request is aborted by AbortSignal', async () => {
+      const abortErr = new DOMException('aborted', 'TimeoutError');
+      fetchMock.mockRejectedValueOnce(abortErr);
+      const client = new TripoClient('key', { requestTimeoutMs: 50 });
+      await expect(client.submitMeshSegmentation('task-abc')).rejects.toBeInstanceOf(
+        TripoTimeoutError,
+      );
+    });
+  });
+
   describe('pollTask', () => {
     const noSleep = () => Promise.resolve();
 

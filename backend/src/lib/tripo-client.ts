@@ -109,6 +109,53 @@ export class TripoClient {
     return taskId;
   }
 
+  // plan-013 — chain step 2 of the L1 segmented base mint. References the
+  // `text_to_model` task by `original_model_task_id` (the only required field
+  // — Tripo populates model_version from the upstream task internally). 40
+  // credits per call on top of the upstream submitTask. Body shape validated
+  // by `backend/scripts/spike-tripo-segmentation.ts` (commit 0ba975c).
+  async submitMeshSegmentation(originalTaskId: string): Promise<string> {
+    let res: Response;
+    try {
+      res = await fetch(`${TRIPO_BASE}/task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          type: 'mesh_segmentation',
+          original_model_task_id: originalTaskId,
+        }),
+        signal: this.signal(),
+      });
+    } catch (e) {
+      if (isAbortError(e)) {
+        throw new TripoTimeoutError(
+          `Tripo submitMeshSegmentation timed out after ${this.requestTimeoutMs}ms`,
+        );
+      }
+      throw e;
+    }
+
+    if (res.status === 401) throw new TripoAuthError();
+    if (!res.ok) {
+      const errBody = (await res.text().catch(() => '')).slice(0, 200);
+      throw new TripoFailedError(
+        `Tripo submitMeshSegmentation returned ${res.status}: ${errBody}`,
+      );
+    }
+
+    const body = (await res.json()) as { data?: { task_id?: string } };
+    const taskId = body?.data?.task_id;
+    if (!taskId || typeof taskId !== 'string') {
+      throw new TripoFormatError(
+        'Tripo submitMeshSegmentation response missing data.task_id',
+      );
+    }
+    return taskId;
+  }
+
   async pollTask(taskId: string, opts: PollOpts = {}): Promise<{ url: string }> {
     const maxWaitMs = opts.maxWaitMs ?? 60_000;
     const sleep = opts.sleep ?? defaultSleep;
