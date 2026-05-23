@@ -1,19 +1,31 @@
 # Phase Progress
 
-## Last Updated: 2026-05-23 (very late — plan-013 U1-U4 shipped) — **Next = U5 TaggingCanvas (Babylon click-to-select picker).**
+## Last Updated: 2026-05-24 (after midnight — plan-013 U1-U4 + review pass shipped) — **Next = U5 TaggingCanvas (Babylon click-to-select picker).**
 
 ### Hackathon Tracker
-- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+- Days to submission (6/21): 28 of 38 · demo day (7/20–21): 57 · winners (8/27): 95
 
-### This session — plan-013 backend + types + Move foundation landed
+### This session — plan-013 backend + types + Move foundation landed AND review-pass S1-S5 cleared
 
-`/ce-work` against `docs/plans/2026-05-23-013-feat-mesh-segmentation-per-part-coloring-plan.md` shipped 4 of 7 implementation units. Tree is fully green: Move 64/64, backend 121/121, frontend 353/353.
+`/ce-work` against `docs/plans/2026-05-23-013-feat-mesh-segmentation-per-part-coloring-plan.md` shipped 4 of 7 implementation units. After committing all four, ran a parallel ce-reviewer pass (correctness + testing + data-migrations + api-contract + adversarial) and addressed 5 review findings (S1-S5) before pausing. Tree is fully green: Move 64/64, backend 121/121, frontend 353/353.
 
 **Commits (this session):**
 - `6fa45c0` U1 Move contract — `part_labels: vector<String>` on Model3D + ModelPublished event, MAX_PARTS=64, ETooManyParts=39, EPartLabelTooLong=40, validate_publish_inputs extended, destroy_model_for_testing destructure, 7 new test scenarios.
 - `9c62dee` U2 Shared types — positional `VariantMaterialSpec.partColors`, `Model3DSummary.partLabels`, `MAX_PARTS_FE=64`, `collectionBuildRequestSchema` per-variant `partColors` array. Removed old top-level `baseColorRgb` from schema (callers migrated). 4 frontend test mocks updated with `partLabels: []`.
 - `8fb2940` U4 Backend swap pipeline N-material refactor — `swapMaterial` loops all N materials in TINT mode (baseColorFactor per part, baseColorTexture preserved unless overridden). New `PartCountMismatchError` → 422 `part_count_mismatch` envelope with materialCount + partColorsCount. R2-era "only swap first material" test replaced; +3 new scenarios.
 - `bf1be58` U3 Backend Tripo two-step chain — `TripoClient.submitMeshSegmentation(originalTaskId)` + `TripoGenerator.generate` chains text_to_model → poll(90s) → mesh_segmentation → poll(180s) → downloadGlb. +5 new tests including "step-2 timeout discards step-1 bytes".
+- `a04aa0d` Review-pass S1-S5 — TINT-mode preservation test no longer vacuous (fixtures pre-seed baked textures; assert flags `[true,true,true,true]` post-swap). localStorage cache bumped v1→v2 to invalidate pre-`partLabels` entries. `paramsJson` zod refine tightened to require non-null object. Step-2 timeout test asserts `submitMeshSegmentation` was actually called. MAX_PARTS ↔ MAX_PARTS_FE lockstep documented in both files.
+
+### Review findings DEFERRED (no fix this session)
+- **A1 (operational)**: D-034 SUI fee `paymentVerifier.spent.add` fires before Tripo touched; step-2 failure burns SUI + 40 Tripo credits with no retry path. Re-credit-on-failure OR document acceptance for hackathon.
+- **A2 (frontend safety)**: Move can't enforce `part_labels.length == materials.length`; mismatched publish creates a permanently-unforkable Model3D. **U6 must validate at publish time.**
+- **A3 (load)**: 16-variant × 12 MiB × 64-parts `Promise.all(swapMaterial)` could OOM at max-allowed payload. Already in plan Open Questions.
+- **A4 (test pin)**: `partColors[i] → materials[i]` ordering relies on `listMaterials()` stability across gltf-transform versions; no test pins it. Consider in U7 cleanup.
+- **A5 (cosmetic)**: `equal-count PartCountMismatchError` unreachable branch could mask malformed-GLB bugs as confusing envelopes. Minor.
+
+### Coordination blockers from review (resolved by normal sequencing)
+- **B1**: `frontend/src/sui/modelTxBuilders.ts` `buildPublishPtb` still passes 9 args; post-U9 republish Move requires 10. **U6 must ship before U9** (it does in the plan order).
+- **B2**: `LaunchCollectionPage` unconditionally sends length-1 `partColors`; any segmented base published via U6 would fail every Forge build with 422. **U7 must ship before any segmented base goes live**.
 
 ### Remaining plan-013 units
 - **U5 TaggingCanvas** (frontend, new component): Babylon click-to-select picker with HighlightLayer. Imperative Engine/Scene mirroring PreviewCanvas. StrictMode useRef setup+cleanup discipline. Controlled component, parent owns `selectedIndex`.
