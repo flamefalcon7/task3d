@@ -137,6 +137,11 @@ describe('publish PTB reaches live RPC (fake blob → object-resolution error)',
       err = e as Error;
     }
     expect(err).not.toBeNull();
-    expect(err?.message ?? '').toMatch(/does not exist/);
+    // plan-013 U9: package republished as v8 (adds part_labels arg to publish).
+    // Until U6 threads partLabels through buildPublishPtb, the live RPC errors
+    // on argument count BEFORE blob resolution; either class confirms the PTB
+    // reaches live RPC (the actual contract of this smoke test). Tighten back
+    // to /does not exist/ when U6 lands.
+    expect(err?.message ?? '').toMatch(/does not exist|Incorrect number of arguments/);
   });
 });

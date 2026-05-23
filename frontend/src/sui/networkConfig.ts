@@ -20,34 +20,37 @@
 // from the @mysten/kiosk SDK's testnet-defaults constants. Frontend MUST
 // use OUR pinned value or `confirm_request` fails the rule membership check.
 
-// v7 (D-040): fresh republish of v6. Adds L1 license-policy ENFORCEMENT — a new
-// `EPolicyRestricted = 38` abort + an assert in `launch_collection_internal` so
-// a RESTRICTED (or ALLOW_LIST, which collapses to creator-only in v1) base model
-// can only be forked by its creator; PERMISSIONLESS stays open to any payer.
+// v8 (plan-013 U1): fresh republish of v7. Adds `part_labels: vector<String>`
+// to the Model3D `key` struct (and to the ModelPublished event payload) for
+// per-part semantic tagging of segmented base GLBs (Tripo mesh_segmentation
+// output). The `publish` and `new_model` entry-fn signatures gain a
+// `part_labels` parameter, threaded through `validate_publish_inputs` with
+// new bounds (MAX_PARTS=64, MAX_TAG_LEN carry-forward) and abort codes
+// (ETooManyParts=39, EPartLabelTooLong=40).
 //
-// Shipped as a FRESH republish (not a compatible `sui client upgrade`): a
-// compatible upgrade leaves the prior, UNENFORCED package version permanently
-// callable (a hand-crafted PTB targeting the old id bypasses the gate). A fresh
-// republish has no prior version of itself, so enforcement holds for ALL content
-// under this package id — and it keeps a single package id (no published-at /
-// original-id split). Consistent with the v3–v6 republish precedent (D-038).
-// Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only, D-036).
+// Shipped as a FRESH republish (not a compatible `sui client upgrade`):
+// adding a field to an existing `key` struct mutates on-chain layout —
+// incompatible per Sui upgrade rules. The entry-fn signature change is
+// independently breaking. Consistent with the v3–v7 republish precedent.
+// Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only,
+// D-036 carry-forward).
 //
-// Everything else carries over from v6: Model3D is a shared object carrying
-// glb_blob_id (D-037); mint yields a plain owned token; listing is a separate
-// opt-in Kiosk PTB. `transferPolicyId`/`transferPolicyCapId` hold the NftToken
-// policy. Supersedes v6 0x57e20a13… (abandoned on testnet).
+// Everything else carries over from v7: L1 license-policy enforcement
+// (D-040); Model3D shared object w/ glb_blob_id (D-037); mint yields a
+// plain owned token; listing is a separate opt-in Kiosk PTB.
+// `transferPolicyId`/`transferPolicyCapId` hold the NftToken policy.
+// Supersedes v7 0x3f53506b… (abandoned on testnet).
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x3f53506b076bb9e43fbf8fc1333375530aeb97ad54e2ad81fdd36a9d595d0861',
+    '0x9e673aa768928a5bd8f5e4e1c1538b3bffd8a0f8e0cd7b2cba6939b796ff892c',
   publisherId:
-    '0xee62b4643aaa22db193d8044748df0a05a70b6769c13f2ec509ae0c71457ad03',
+    '0xd966383845ae5835a70b192270460235d6c8eff3c89e66d631baaaeb301642ec',
   transferPolicyId:
-    '0x3ffa22b3472adcc89c7b9d11749d8b17ae0ced2dddfda38e191dc846d2bb2146',
+    '0x308fc8932a6587acb55a51cf89728ed4abaedb690daa8e9e05da21cb1566fe49',
   transferPolicyCapId:
-    '0x76cc696054ce4475989a750c12b1775796e5872137df27f003900382201cf48b',
+    '0x46ed256d43192ab5a216c1e72804a4021de2ddf6bed17fa237a94171152db052',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
