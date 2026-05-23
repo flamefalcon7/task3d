@@ -1,6 +1,45 @@
 # Phase Progress
 
-## Last Updated: 2026-05-22 (Plan 010 shipped + browser-hardening bug-fix chain) — **Next = (optional) market type-filter, then U15 demo/pitch.**
+## Last Updated: 2026-05-23 (Plan 011 D-043 shipped + full multi-agent review + buyer fullnode read-back + StrictMode latent bug fix) — **Next = commit + U15 demo/pitch.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+
+### This session — Plan 011 marketplace event discovery + full code review + buyer-side fullnode read-back + StrictMode latent bug
+
+**Plan 011 shipped (D-043).** localStorage kiosk tracking in `/market` replaced with frontend-only event discovery: `useListings.fetchListedKioskIds()` queries Sui GraphQL `kiosk::ItemListed<NftToken>` events (∪ wallet's own kiosks) → reconciles against each kiosk's current `Listing` dynamic fields. `joinTokenDetails` now strict full-type guards against foreign NFTs (also resolves yesterday's pending type-filter). Marketplace shows cross-wallet listings regardless of which browser made them. No backend. See `docs/solutions/integration-issues/sui-graphql-events-type-indexed-discovery-2026-05-23.md` for the verified testnet GraphQL schema gotcha (`type` not `eventType`, `contents.type.repr` for event type).
+
+**Full multi-agent code review (12 reviewers, narrow scope `base:1c59e4b`).** Applied 11 fixes across P1/P2 — `Promise.allSettled` per-kiosk + soft-fail wallet leg (regression vs pre-D-043), strict full-type equality (security: stops `0xEVIL::model3d::NftToken` spoof), D-041 status reversal-protocol fix, pollRefresh in-flight guard, MAX_PAGES=100 cap + AbortSignal plumbing, 15s fetch timeout, solution-doc relocation to `integration-issues/` subdir + frontmatter `problem_type` correction, dead-export hygiene. Suppressed 2 false-positive "loading=stuck" claims (JS spec: `try { return } finally {}` runs finally).
+
+**Buyer-side fullnode read-back (Path Y).** User pushed back on optimistic UI; spike confirmed RPC `getObject` is ~300ms vs GraphQL indexer lag of seconds-to-minutes. `MarketPage.onBuy` now calls `useSuiClient().getObject({ id, options })` directly after `signAndExecute` resolves. Bought NftToken parsed and injected into "Your cars" immediately with `⏳ → ✅` status banner. Failure → `⚠️` + Refresh button. Hides bought item from "For sale". Honest UX — no optimistic lying.
+
+**Discovered + fixed silent `aliveRef` StrictMode bug.** Pattern `useEffect(() => () => { aliveRef.current = false; }, [])` (cleanup-only) is broken under React.StrictMode: refs persist across the dev-mode mount→cleanup→mount cycle, leaving `aliveRef.current = false` permanently. This silently no-opped `pollRefresh` AND the new buy-confirm IIFE. Fix: setup MUST re-assert `true`. Captured in new solution doc `react-strictmode-cleanup-only-effect-with-useref-2026-05-23.md`. **Root cause for yesterday's "buy → My item not refreshing" symptom** (pollRefresh was no-op all along).
+
+**Tests: StrictMode wrap added to `MarketPage.test.tsx` `renderPage()`.** Verified empirically — revert aliveRef fix → 3 buy-confirm tests fail loudly with DOM dump; restore → green. Scope intentionally narrow (this file only) to avoid 39-file audit; expanding test-wide is a Phase-5 follow-up.
+
+**UX polish.** `useListings` + `useOwnedTokens` both gained `hasLoadedRef` → only first fetch shows "Loading…" placeholder; subsequent `reloadKey` bumps swap silently (header `·updating…` is the refresh hint). Listing card now reads `0.X SUI (asking) · 0.Y SUI (you pay, incl. 5% royalty)` instead of the ambiguous `price · +royalty` split.
+
+**Verification:** 345 frontend tests green (+10 new across plan-011 + review fixes + StrictMode wrap), `tsc -b` clean, `vite build` clean. Live-verified via testnet GraphQL probe + RPC spike + browser smoke (user-driven).
+
+### Live testnet state (unchanged from yesterday)
+- v7 package `0x3f53506b…`; royalty-only `TransferPolicy<NftToken>` `0x3ffa22b3…`; kiosk-apps `0xe308bb3e…`.
+- Live listings: kiosk `0x7480ce…` + kiosk `0x6e0e76…` (capy's) + new listings made by user this session. All visible cross-wallet via D-043 event discovery.
+
+### Uncommitted (suggest split into 2 or 3 commits before U15)
+- **docs**: D-041 status + D-043 ADR + plan-011 + 2 new solution docs (sui-graphql-events-type-indexed-discovery, react-strictmode-cleanup-only-effect-with-useref)
+- **feat(market): D-043 network-wide marketplace event discovery + buyer fullnode read-back + UX polish** — `frontend/src/market/{useListings,MarketPage}.{ts,tsx}` + tests + `frontend/src/track/useOwnedTokens.ts`
+- (judgment call whether to split feat into "base D-043" + "review hardening + read-back" — they touch overlapping lines so single feat commit is cleaner)
+
+### Open / deferred (decide next session)
+- **Network-mismatch guard** (block when wallet ≠ testnet) — still not built.
+- **Tier C backend indexer** for marketplace listings — deferred per D-043 to whenever the backend is hosted for U15.
+- **StrictMode wrap on all tests** — Phase-5 audit task; only MarketPage is wrapped today.
+- **Stale-listing → buy abort cascade** (adv-003 from code review): re-check kiosk Listing before signing if listed item delisted between render and click. Not done.
+- `KIOSK_LISTINGS_QUERY` is unpaginated (CR-003, pre-existing from D-041). Demo-OK; review tagged pre-existing.
+
+---
+
+## Previous Last-Updated: 2026-05-22 (Plan 010 shipped + browser-hardening bug-fix chain) — **Next = (optional) market type-filter, then U15 demo/pitch.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 30 of 38 · demo day (7/20–21): 59 · winners (8/27): 97

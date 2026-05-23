@@ -1988,7 +1988,7 @@ The fresh republish also keeps a **single package id** (no published-at/original
 
 ## D-041: Simple marketplace via Sui Kiosk — primary list + purchase of NftTokens
 
-**Status**: Accepted
+**Status**: Accepted (discovery sub-decision superseded by D-043)
 **Date**: 2026-05-21
 **Phase**: 4
 
@@ -2052,6 +2052,43 @@ Keep both parameters as set in `contracts/model3d/sources/model3d.move`:
 
 ---
 
+## D-043: Marketplace discovery via `kiosk::ItemListed` event query (frontend), replacing localStorage tracking
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4
+
+### Context
+D-041 shipped marketplace discovery as **approach (a)**: track seller kiosk ids in browser `localStorage` and query only those. This cannot surface a listing made from any wallet/browser the local client never recorded — so a buyer can't find a seller's listing unless the demo pre-seeds the kiosk id. D-041 explicitly deferred **approach (b)** (a `kiosk::ItemListed` event indexer) as the scalable path.
+
+A read-only testnet probe (2026-05-23) confirmed (b) is cheap to do **frontend-only**: the Sui GraphQL `events` query, filtered by the full type-indexed `0x2::kiosk::ItemListed<…::model3d::NftToken>`, returns every listing of our token network-wide (6 events, no pagination, correct prices, cross-wallet) — no backend, no recurring cost. See `docs/solutions/integration-issues/sui-graphql-events-type-indexed-discovery-2026-05-23.md`.
+
+### Decision
+Adopt approach (b) **client-side** (no backend indexer): `useListings` discovers candidate kiosks by querying `ItemListed<NftToken>` events via GraphQL, then reads each kiosk's current `Listing` dynamic fields (existing `fetchListedRefs`) for the authoritative active set + price. Remove the `localStorage` kiosk tracking from `MarketPage` / `useListings`. This is the deferred (b) path from D-041, pulled forward because the probe showed it is small and free; it does **not** reverse the D-041 marketplace decision itself (Kiosk primitive, list + purchase PTBs, royalty-only policy all unchanged).
+
+### Rationale
+- Discovers cross-wallet listings (the actual bug with (a)); zero hosting cost; reinforces the decentralization narrative (no central server in the discovery path).
+- Type-indexed event filter returns only our `NftToken`, so foreign NFTs sharing a kiosk are excluded at discovery.
+- Reuses already-verified read code (`fetchListedRefs` + `joinTokenDetails`); ~half-day, single frontend PR.
+
+### Alternatives Considered
+- **Backend `ItemListed` indexer (Tier C)** — mirrors U7, gives shared cache + server-side sort/search/push, but needs an always-on host ($0–7/mo) + ~1.5–2 days + a single point of failure. Deferred to whenever the backend is deployed for U15; at current volume (6 listings) it gives no visible UX gain. See [[D-041]] consequences.
+- **Keep localStorage (a)** — rejected: can't discover cross-wallet listings.
+
+### Consequences
+- ✅ Marketplace shows all on-chain listings of our token regardless of which wallet/browser made them.
+- ✅ No infra, no recurring cost; immune to the broken `@mysten/kiosk` `getKiosk` price decode (reads dynamic fields directly).
+- ⚠️ Each marketplace load does 1 events query + N kiosk dynamic-field reads + N token detail reads (parallelized). Fine at demo scale; grows linearly — Tier C is the answer if volume balloons.
+- ⚠️ `ItemListed` is append-only history (same item can recur across relists/kiosks); discovery must reconcile against current `Listing` dynamic fields, not render events directly (handled by the discover→truth split).
+- 🔮 Backend indexer (Tier C) remains the post-volume / product-feature path; this ADR is the bridge that makes it unnecessary for submission.
+
+### Related
+- Supersedes the discovery sub-decision in [[D-041]] (approach (a) → (b) frontend); marketplace core unchanged.
+- Verified query + schema-drift gotcha: `docs/solutions/integration-issues/sui-graphql-events-type-indexed-discovery-2026-05-23.md`.
+- Implementation: `frontend/src/market/useListings.ts`, `frontend/src/market/MarketPage.tsx`.
+
+---
+
 # Reserved Decision Numbers
 
-D-043 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-044 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
