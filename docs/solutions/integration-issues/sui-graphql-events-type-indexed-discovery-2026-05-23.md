@@ -102,6 +102,10 @@ listed right now". This avoids reconciling Purchased/Delisted ordering by hand.
 
 ## Related
 
+- The two-layer reconciliation pattern in the Critical caveat section ("events
+  for discovery, dynamic fields for truth") is a concrete instance of the
+  by-filter vs by-id read-strategy rule formalized with measured latency in
+  `docs/solutions/tooling-decisions/sui-read-layer-indexer-vs-fullnode-2026-05-23.md`.
 - Supersedes the `localStorage` discovery in D-041 approach (a); see [[D-043]].
 - Kiosk PTB choreography: `docs/solutions/kiosk-ptb-patterns/confirm-request-hot-potato.md`.
 - SDK note: `@mysten/kiosk@1.2.6` `getKiosk` `withListingPrices` decode is broken
