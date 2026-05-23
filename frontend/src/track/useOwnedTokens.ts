@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
 import { TESTNET } from '../sui/networkConfig';
 
@@ -105,6 +105,10 @@ export function useOwnedTokens(
   const [tokens, setTokens] = useState<OwnedToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  // Only show the "Loading your NFTs…" placeholder on the FIRST fetch. Once we
+  // have data, reloadKey bumps (MarketPage.pollRefresh fires 10× over 15 s) keep
+  // existing cards on screen and swap silently to avoid placeholder flicker.
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!walletAddress) {
@@ -113,7 +117,7 @@ export function useOwnedTokens(
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     (async () => {
       try {
@@ -138,7 +142,10 @@ export function useOwnedTokens(
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          hasLoadedRef.current = true;
+        }
       }
     })();
     return () => {

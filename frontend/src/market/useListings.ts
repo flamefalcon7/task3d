@@ -1,20 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KioskClient } from '@mysten/kiosk';
 import { SuiGraphQLClient } from '@mysten/sui/graphql';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
+import { TESTNET } from '../sui/networkConfig';
 
-// plan-010 U3 (D-041) — discover NftTokens currently listed for sale.
+// plan-011 (D-043) — discover NftTokens currently listed for sale, network-wide.
 //
-// Approach (a), demo-grade (see D-041 / plan §U3): we read ONE seller kiosk by
-// id (tracked from the list PTB / the team-controlled seller wallet) rather
-// than indexing kiosk::ItemListed events globally. The scalable path (a backend
-// event indexer, mirroring U7) is deferred post-submission.
+// Approach (b), frontend-only (supersedes D-041 approach (a)'s localStorage
+// tracking): we DISCOVER the set of kiosks that have ever listed our token by
+// querying `kiosk::ItemListed<NftToken>` events on Sui GraphQL, unioned with the
+// connected wallet's own kiosks (so a seller sees their just-made listing before
+// the event is indexed). Events are append-only HISTORY (the same item recurs
+// across relists / kiosk moves), so they answer only "which kiosks to look at" —
+// the TRUTH (what is actually listed now + price) comes from each kiosk's current
+// `Listing` dynamic fields (`fetchListedRefs`). A backend event indexer (Tier C,
+// mirroring U7) stays deferred until the backend is hosted.
 //
-// Read mechanism: @mysten/kiosk's `getKiosk` decodes the kiosk's Item/Listing
-// dynamic fields for us. It accepts a `SuiGraphQLClient`, so this stays on the
-// same GraphQL endpoint as every other read hook — no JSON-RPC client. We then
-// join each listed token's `patch_id`/`name` via the standard `objects` query
-// so the marketplace card can preview the variant (glbUrlForToken) and label it.
+// Read mechanism notes + the verified query/schema-drift gotcha live in
+// `docs/solutions/sui-graphql-events-type-indexed-discovery-2026-05-23.md`. We do
+// NOT use @mysten/kiosk's getKiosk for prices (its withListingPrices decode is
+// broken in 1.2.6); the raw `Listing` dynamic field is authoritative.
 
 export interface Listing {
   tokenId: string;
@@ -34,6 +39,7 @@ const TOKEN_DETAIL_QUERY = /* GraphQL */ `
       address
       asMoveObject {
         contents {
+          type { repr }
           json
         }
       }
@@ -45,10 +51,130 @@ interface TokenDetailResponse {
   data?: {
     object?: {
       address?: string;
-      asMoveObject?: { contents?: { json?: Record<string, unknown> | null } | null } | null;
+      asMoveObject?: {
+        contents?: { type?: { repr?: string } | null; json?: Record<string, unknown> | null } | null;
+      } | null;
     } | null;
   };
   errors?: Array<{ message: string }>;
+}
+
+// A discovered kiosk may hold listings of OTHER projects' NFTs; only ours are
+// shown. Match on the FULL package-qualified type, not a suffix — `endsWith`
+// would accept `0xEVIL::model3d::NftToken` from any attacker-deployed package
+// (the wallet-union path can pull such kiosks before the event-side type filter
+// gets to apply). Republishes update `TESTNET.model3dPackageId` anyway, so the
+// "survive republishes" rationale for suffix-matching never paid off.
+const NFT_TOKEN_TYPE = `${TESTNET.model3dPackageId}::model3d::NftToken`;
+
+// Hard bounds so a misbehaving GraphQL endpoint can't hang the marketplace.
+// FETCH_TIMEOUT_MS caps every individual fetch. MAX_EVENT_PAGES caps the
+// ItemListed pagination loop — 100 pages * 50 events = 5000 historical events
+// ceiling. At demo scale we expect 1 page; the cap exists so adversarial event
+// spam or unbounded organic growth degrades gracefully instead of hanging.
+const FETCH_TIMEOUT_MS = 15_000;
+const MAX_EVENT_PAGES = 100;
+
+/** Combine an upstream AbortSignal with a per-call timeout. Prefers
+ * `AbortSignal.any` (modern wallet browsers + Node 20.3+); falls back to a
+ * manual merge for older runtimes (notably the jsdom test environment). */
+function withFetchTimeout(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  if (!signal) return timeout;
+  const anyFn = (AbortSignal as unknown as {
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  }).any;
+  if (typeof anyFn === 'function') return anyFn.call(AbortSignal, [signal, timeout]);
+  const merged = new AbortController();
+  const forward = (src: AbortSignal) => {
+    if (src.aborted) merged.abort(src.reason);
+    else src.addEventListener('abort', () => merged.abort(src.reason), { once: true });
+  };
+  forward(signal);
+  forward(timeout);
+  return merged.signal;
+}
+
+/** Race a promise against a wall-clock deadline. Used for KioskClient calls
+ * that don't expose an AbortSignal (background work isn't cancelled — the
+ * leaked promise will settle eventually — but the caller stops waiting). */
+function withDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timeout after ${ms}ms`)),
+      ms,
+    );
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+// Event-based discovery: which kiosks have listed our NftToken (network-wide).
+// `ItemListed<T>` is type-indexed, so the full generic type returns only our
+// token's listings. The filter field is `type` (NOT `eventType`); the kiosk id
+// lives in `contents.json.kiosk` (the live endpoint's Event has no top-level
+// `type` field). See the solution doc for the verified shape.
+const ITEM_LISTED_EVENT_TYPE = `0x2::kiosk::ItemListed<${NFT_TOKEN_TYPE}>`;
+
+const ITEM_LISTED_EVENTS_QUERY = /* GraphQL */ `
+  query ListedKiosks($type: String!, $after: String) {
+    events(filter: { type: $type }, first: 50, after: $after) {
+      nodes { contents { json } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+interface ItemListedEventsResponse {
+  data?: {
+    events?: {
+      nodes?: Array<{ contents?: { json?: { kiosk?: string } | null } | null }>;
+      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    } | null;
+  };
+  errors?: Array<{ message: string }>;
+}
+
+/** Distinct kiosk ids that have ever listed our NftToken. Public primitive —
+ * shaped for direct reuse by other discovery surfaces (e.g. a future agent
+ * tool); tests cover it indirectly via useListings. */
+export async function fetchListedKioskIds(signal?: AbortSignal): Promise<string[]> {
+  const ids = new Set<string>();
+  let after: string | null = null;
+  for (let page = 0; page < MAX_EVENT_PAGES; page++) {
+    const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        query: ITEM_LISTED_EVENTS_QUERY,
+        variables: { type: ITEM_LISTED_EVENT_TYPE, after },
+      }),
+      signal: withFetchTimeout(signal),
+    });
+    if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
+    const json = (await resp.json()) as ItemListedEventsResponse;
+    if (json.errors?.length) {
+      throw new Error(json.errors.map((e) => e.message).join('; '));
+    }
+    const events = json.data?.events;
+    for (const node of events?.nodes ?? []) {
+      const kiosk = node.contents?.json?.kiosk;
+      if (typeof kiosk === 'string') ids.add(kiosk);
+    }
+    if (events?.pageInfo?.hasNextPage && events.pageInfo.endCursor) {
+      after = events.pageInfo.endCursor;
+      if (page === MAX_EVENT_PAGES - 1) {
+        console.warn(
+          `[useListings] hit ${MAX_EVENT_PAGES}-page cap on ItemListed scan; results may be incomplete (Tier C backend indexer is the long-term fix).`,
+        );
+      }
+    } else {
+      break;
+    }
+  }
+  return Array.from(ids);
 }
 
 /** Listed-token id + price as decoded from the seller kiosk. */
@@ -83,8 +209,9 @@ export async function fetchOwnedKiosk(address: string): Promise<OwnedKioskRef | 
   return { kioskId: cap.kioskId, kioskCapId: cap.objectId };
 }
 
-/** All kiosk ids the wallet owns (a wallet may have several). */
-export async function fetchOwnedKioskIds(address: string): Promise<string[]> {
+/** All kiosk ids the wallet owns (a wallet may have several). Internal to the
+ * hook's wallet-union path; not exported since no external caller uses it. */
+async function fetchOwnedKioskIds(address: string): Promise<string[]> {
   const kioskClient = makeKioskClient();
   const { kioskOwnerCaps } = await kioskClient.getOwnedKiosks({ address });
   return kioskOwnerCaps.map((c) => c.kioskId);
@@ -124,11 +251,15 @@ interface KioskListingsResponse {
 }
 
 /** Read the kiosk's listed token refs (id + price). Exported for testing. */
-export async function fetchListedRefs(kioskId: string): Promise<ListedRef[]> {
+export async function fetchListedRefs(
+  kioskId: string,
+  signal?: AbortSignal,
+): Promise<ListedRef[]> {
   const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query: KIOSK_LISTINGS_QUERY, variables: { id: kioskId } }),
+    signal: withFetchTimeout(signal),
   });
   if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
   const json = (await resp.json()) as KioskListingsResponse;
@@ -147,28 +278,37 @@ export async function fetchListedRefs(kioskId: string): Promise<ListedRef[]> {
   return refs;
 }
 
-async function fetchTokenJson(tokenId: string): Promise<Record<string, unknown>> {
+async function fetchTokenDetail(
+  tokenId: string,
+  signal?: AbortSignal,
+): Promise<{ json: Record<string, unknown>; typeRepr: string }> {
   const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query: TOKEN_DETAIL_QUERY, variables: { id: tokenId } }),
+    signal: withFetchTimeout(signal),
   });
   if (!resp.ok) throw new Error(`Sui GraphQL ${resp.status}`);
   const json = (await resp.json()) as TokenDetailResponse;
   if (json.errors?.length) {
     throw new Error(json.errors.map((e) => e.message).join('; '));
   }
-  return json.data?.object?.asMoveObject?.contents?.json ?? {};
+  const contents = json.data?.object?.asMoveObject?.contents;
+  return { json: contents?.json ?? {}, typeRepr: contents?.type?.repr ?? '' };
 }
 
 async function joinTokenDetails(
   refs: ListedRef[],
   kioskId: string,
+  signal?: AbortSignal,
 ): Promise<Listing[]> {
   if (refs.length === 0) return [];
-  return Promise.all(
+  const joined = await Promise.all(
     refs.map(async (ref) => {
-      const j = await fetchTokenJson(ref.tokenId);
+      const { json: j, typeRepr } = await fetchTokenDetail(ref.tokenId, signal);
+      // Drop foreign NFTs that happen to share a discovered kiosk. Strict
+      // full-type equality, not endsWith — see the NFT_TOKEN_TYPE constant.
+      if (typeRepr !== NFT_TOKEN_TYPE) return null;
       return {
         tokenId: ref.tokenId,
         priceMist: ref.priceMist,
@@ -176,9 +316,10 @@ async function joinTokenDetails(
         patchId: String(j.patch_id ?? ''),
         collectionId: String(j.collection_id ?? ''),
         kioskId,
-      };
+      } satisfies Listing;
     }),
   );
+  return joined.filter((l): l is Listing => l !== null);
 }
 
 export interface UseListingsResult {
@@ -188,49 +329,83 @@ export interface UseListingsResult {
 }
 
 /**
- * Listings currently for sale across the given kiosks (approach (a),
- * demo-grade). Aggregates every kiosk we know about — the connected wallet's
- * own kiosks plus any kiosk listed into on this browser — so a listing always
- * shows regardless of which seller kiosk it landed in. Empty array → empty
- * marketplace.
+ * Listings currently for sale across the network (approach (b), D-043). Kiosks
+ * are discovered from `ItemListed<NftToken>` events, unioned with the connected
+ * wallet's own kiosks (so a seller sees their just-made listing before the event
+ * is indexed); each kiosk's current `Listing` dynamic fields then give the
+ * authoritative active set + price. No listing → empty marketplace.
  */
 export function useListings(
-  kioskIds: string[],
+  walletAddress?: string,
   reloadKey?: unknown,
 ): UseListingsResult {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-
-  // Stable primitive dep so the effect doesn't refire on a new-but-equal array.
-  const key = [...kioskIds].sort().join(',');
+  // Only show the "Loading listings…" placeholder on the FIRST fetch. Once we
+  // have data, subsequent reloadKey bumps (pollRefresh fires 10× over 15 s
+  // after a tx) keep the existing cards on screen and swap silently — the
+  // MarketPage header's "·updating…" indicator is the refresh hint.
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
-    const ids = key ? key.split(',') : [];
-    if (ids.length === 0) {
-      setListings([]);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
-    setLoading(true);
+    const controller = new AbortController();
+    const signal = controller.signal;
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     (async () => {
       try {
-        const perKiosk = await Promise.all(
-          ids.map(async (id) => joinTokenDetails(await fetchListedRefs(id), id)),
+        // Wallet-leg soft-fails: a transient KioskClient error during indexer
+        // lag must not blank the marketplace (D-041 → D-043 preserved this
+        // tolerance; the regression of bundling it into Promise.all with the
+        // events fetch was found in code review). KioskClient doesn't expose
+        // an AbortSignal so we bound it with a wall-clock deadline.
+        const [fromEvents, fromWallet] = await Promise.all([
+          fetchListedKioskIds(signal),
+          walletAddress
+            ? withDeadline(
+                fetchOwnedKioskIds(walletAddress),
+                FETCH_TIMEOUT_MS,
+                'fetchOwnedKioskIds',
+              ).catch(() => [] as string[])
+            : Promise.resolve<string[]>([]),
+        ]);
+        const ids = Array.from(new Set([...fromEvents, ...fromWallet]));
+        if (ids.length === 0) {
+          if (!cancelled) setListings([]);
+          return;
+        }
+        // Per-kiosk soft-fail: one bad kiosk (deleted, transient 5xx, malformed
+        // id from a stale event) must not wipe every other kiosk's listings.
+        const perKioskResults = await Promise.allSettled(
+          ids.map(async (id) =>
+            joinTokenDetails(await fetchListedRefs(id, signal), id, signal),
+          ),
         );
+        const perKiosk: Listing[][] = [];
+        for (const r of perKioskResults) {
+          if (r.status === 'fulfilled') perKiosk.push(r.value);
+          else console.warn('[useListings] kiosk read failed:', r.reason);
+        }
         if (!cancelled) setListings(perKiosk.flat());
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
+        // AbortError on cleanup is expected; don't surface to the user.
+        if (cancelled) return;
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setError(e instanceof Error ? e : new Error(String(e)));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          hasLoadedRef.current = true;
+        }
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [key, reloadKey]);
+  }, [walletAddress, reloadKey]);
 
   return { listings, loading, error };
 }

@@ -1,12 +1,16 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { TESTNET } from '../sui/networkConfig';
 
 const useCurrentAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
+const getObjectMock = vi.fn();
 vi.mock('@mysten/dapp-kit', () => ({
   useCurrentAccount: () => useCurrentAccountMock(),
   useSignAndExecuteTransaction: () => ({ mutateAsync: signAndExecuteMock }),
+  useSuiClient: () => ({ getObject: getObjectMock }),
 }));
 
 vi.mock('../auth/SignInButton', () => ({
@@ -15,11 +19,9 @@ vi.mock('../auth/SignInButton', () => ({
 
 const useListingsMock = vi.fn();
 const fetchOwnedKioskMock = vi.fn();
-const fetchOwnedKioskIdsMock = vi.fn(async (_addr?: string) => [] as string[]);
 vi.mock('./useListings', () => ({
   useListings: (...args: unknown[]) => useListingsMock(...args),
   fetchOwnedKiosk: (...args: unknown[]) => fetchOwnedKioskMock(...args),
-  fetchOwnedKioskIds: (...args: unknown[]) => fetchOwnedKioskIdsMock(...(args as [string])),
 }));
 
 const useOwnedTokensMock = vi.fn();
@@ -55,11 +57,17 @@ function listing(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Wrap in StrictMode to mirror main.tsx — catches the class of bug where a
+// useRef + cleanup-only useEffect leaves a "alive" flag stuck false after
+// React's dev-mode double-mount cycle (mount → cleanup → mount), silently
+// no-opping aliveRef-guarded async work.
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <MarketPage />
-    </MemoryRouter>,
+    <StrictMode>
+      <MemoryRouter>
+        <MarketPage />
+      </MemoryRouter>
+    </StrictMode>,
   );
 }
 
@@ -79,6 +87,19 @@ beforeEach(() => {
   buildListMock.mockReturnValue({ tx: {} });
   buildPurchaseMock.mockReturnValue({ tx: {} });
   signAndExecuteMock.mockResolvedValue({ digest: '0xdig' });
+  getObjectMock.mockReset();
+  // Default fullnode read-back: a well-shaped NftToken — the post-buy
+  // confirmation succeeds, the new card lands in "Your cars" instantly.
+  getObjectMock.mockResolvedValue({
+    data: {
+      objectId: TOKEN,
+      type: `${TESTNET.model3dPackageId}::model3d::NftToken`,
+      content: {
+        dataType: 'moveObject',
+        fields: { name: 'Bought Car', patch_id: 'pX', collection_id: '0xcX', base_model_id: '0xbX' },
+      },
+    },
+  });
   globalThis.localStorage?.clear();
 });
 
@@ -149,6 +170,54 @@ describe('MarketPage', () => {
     expect(signAndExecuteMock).not.toHaveBeenCalled();
   });
 
+  it('reads the bought token back from fullnode and injects it into Your cars instantly', async () => {
+    useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
+    // useOwnedTokens still returns empty (indexer hasn't caught up) — the
+    // confirmed token alone must drive the Your cars card.
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    renderPage();
+
+    fireEvent.click(screen.getByTestId(`buy-${TOKEN}`));
+    await waitFor(() => expect(screen.getByTestId('confirm-ok')).toBeTruthy());
+    expect(getObjectMock).toHaveBeenCalledWith({
+      id: TOKEN,
+      options: { showContent: true, showOwner: true, showType: true },
+    });
+    // The just-bought item is hidden from "For sale"...
+    expect(screen.queryByTestId(`listing-${TOKEN}`)).toBeNull();
+    // ...and appears in "Your cars" purely from the fullnode read-back.
+    expect(screen.getByTestId(`owned-${TOKEN}`)).toBeTruthy();
+  });
+
+  it('shows a ⚠️ banner with a Refresh button when fullnode read-back fails', async () => {
+    useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
+    getObjectMock.mockRejectedValue(new Error('fullnode 503'));
+    renderPage();
+
+    fireEvent.click(screen.getByTestId(`buy-${TOKEN}`));
+    await waitFor(() => expect(screen.getByTestId('confirm-failed')).toBeTruthy());
+    expect(screen.getByTestId('confirm-failed').textContent).toMatch(/fullnode 503/);
+    // Purchase succeeded (chain tx confirmed), so the "Purchased" link still shows.
+    expect(screen.getByTestId('buy-success')).toBeTruthy();
+  });
+
+  it('flags a fullnode response with a mismatched type as failed (no silent inject)', async () => {
+    useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
+    getObjectMock.mockResolvedValue({
+      data: {
+        objectId: TOKEN,
+        type: '0xabc::other::Thing',
+        content: { dataType: 'moveObject', fields: {} },
+      },
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByTestId(`buy-${TOKEN}`));
+    await waitFor(() => expect(screen.getByTestId('confirm-failed')).toBeTruthy());
+    // Nothing injected into Your cars.
+    expect(screen.queryByTestId(`owned-${TOKEN}`)).toBeNull();
+  });
+
   it('surfaces a wallet rejection on buy', async () => {
     useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
     signAndExecuteMock.mockRejectedValue(new Error('User rejected the request'));
@@ -157,6 +226,22 @@ describe('MarketPage', () => {
     fireEvent.click(screen.getByTestId(`buy-${TOKEN}`));
     await waitFor(() => expect(screen.getByTestId('market-error')).toBeTruthy());
     expect(screen.getByTestId('market-error').textContent).toMatch(/rejected/i);
+  });
+
+  it('does not read or write localStorage (D-043 removed the kiosk tracking)', () => {
+    const getSpy = vi.spyOn(Storage.prototype, 'getItem');
+    const setSpy = vi.spyOn(Storage.prototype, 'setItem');
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [{ tokenId: OWNED, name: 'My Car', patchId: 'p', collectionId: '0xc', baseModelId: '0xb', blobId: '' }],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    const ours = (k: unknown) => typeof k === 'string' && k.startsWith('overflow2026:market:');
+    expect(getSpy.mock.calls.some((c) => ours(c[0]))).toBe(false);
+    expect(setSpy.mock.calls.some((c) => ours(c[0]))).toBe(false);
+    getSpy.mockRestore();
+    setSpy.mockRestore();
   });
 
   it('hides already-listed tokens from the sell section', () => {
