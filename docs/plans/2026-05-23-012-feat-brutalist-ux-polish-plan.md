@@ -1,5 +1,6 @@
 ---
-status: active
+status: completed
+completed: 2026-05-23
 plan_id: 2026-05-23-012-feat-brutalist-ux-polish
 created: 2026-05-23
 type: feat

@@ -1,6 +1,56 @@
 # Phase Progress
 
-## Last Updated: 2026-05-23 (evening — U15 UX polish kickoff: D-044 Brutalist editorial locked) — **Next = foundation (tokens.ts + TopNav) then walk demo-arc screen by screen.**
+## Last Updated: 2026-05-23 (night — plan-012 SHIPPED, D-044 Brutalist editorial rolled out across the full demo arc) — **Next = browser-QA the polished arc, then U15 demo recording / pitch / README.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
+
+### This session — plan-012 shipped end-to-end (6 units + 2 follow-ups, 11 commits)
+
+D-044 Brutalist editorial applied to every demo-arc screen. Off-white #F5F5F0 paper + 1.5px black borders + italic-serif (Newsreader) + monospace (JetBrains Mono) + accent #FF4500 rationed to primary CTAs / exception states + pure-black inset viewer wells for 3D content. Cross-cutting `frontend/src/ux/tokens.ts` is the single source of truth; CSS variables in `index.css` mirror it for the body reset and `:focus-visible` rings.
+
+**Commit chain** (`088dba2` → `c1fc28e`, 11 commits):
+- `088dba2` docs: D-044 + design-tokens + polish-backlog
+- `8e1be5b` docs(plans): plan-012 — brutalist UX polish rollout
+- `e23ae4b` **U1** foundation — `frontend/src/ux/tokens.ts` (+ inline-style primitives), `frontend/src/ux/TopNav.tsx` + `TopNav.test.tsx` (brand mark, 4 route links, wallet pill, TESTNET badge, NavGuard hides on `/dev/compare`), `index.css` rewritten (brutalist `:root` + body reset + italic-serif h1/h2/h3 + `border-radius: 0` global), Google Fonts `<link>` in `index.html`, `PreviewCanvas.tsx` clearColor → pure black
+- `027ff4b` **U2** /create — paper bg + `— L1 / PUBLISH` eyebrow + `Make a model.` h1, two-cell source-mode toggle (accent fill on active), prompt textarea with `tokens.input`, mono uppercase ticking generate label, black PreviewCanvas well with wireframe-cube SVG empty state, two-card license policy (Open / Restricted), MintButton → `tokens.buttonPrimary`, error UI `× FAILED · {reason}`
+- `854a321` **U3** /launch — `— L2 / MINT` header, base picker grid (cards initially text-only — see follow-up), VariantEditor table with brutalist hairlines + mono header cells, VariantPreview well + tiles with accent borders, outline preview / primary launch buttons + `SIGNS 3× · PAYS GAS · MINTS L2` helper row
+- `9202191` **U4** /market — replaces ad-hoc #15171b dark theme. Editorial card grid with shared borders, viewer wells (black, 4:3, counter `001/004` + L2 NFT / YOURS badge), italic-serif name + mono KIOSK attribution, two-line price (`0.10 SUI` + mono `+ 0.005 ROYALTY (5.0%)`), emoji status → mono pills in page-foot status banner stack (`✓ CONFIRMED`, `× CONFIRM FAILED`, `— SYNCING`), drive-it link ink not blue
+- `47ef20d` **U5** /track — full-bleed black page (canvas is the well, no border), mono HUDs without boxed chrome, Countdown italic-serif 15vw numerals (`3. → 2. → 1. → GO.` with editorial period), ResultOverlay → paper card with italic-serif 56px lap time + mono accent NEW PB banner, carCarousel mono `— SELECTED` label on active
+- `d9c22ec` /launch — base mesh fallback in VariantPreview well *(reverted by `3bcc118` — user intended preview in the picker grid, not the lower well)*
+- `5f11334` **U6** / landing — paper-only page (TopNav supplies chrome, in-header SignInButton row removed), hero (`— SUI OVERFLOW 2026 / WALRUS TRACK` eyebrow + `A model marketplace. On Sui. With composable IP.` h1 + L1/L2/L3 inline pills paragraph), mono uppercase tag chips with accent active fill, editorial-shared-border catalog grid, CollectionCard brutalist refit, three-CTA row (FOR CREATORS / FOR BUYERS / FOR DRIVERS → /create /market /track)
+- `3bcc118` revert d9c22ec (user clarified intent)
+- `b522c67` /launch — **base picker** cards now render a 4:3 mini PreviewCanvas above name + meta (user's actual intent from the d9c22ec correction)
+- `c1fc28e` /market — render the actual mesh in listing + owned-card viewer wells (U4 had left a "— PREVIEW" placeholder; wired up `glbUrlForToken({ patchId, blobId })` with PreviewCanvas mock added to MarketPage.test.tsx)
+
+**Verification end state:** `pnpm typecheck` clean · `pnpm test` 353/353 green (+8 new TopNav tests; copy assertions all survived via CSS textTransform; PreviewCanvas tests confirmed clearColor change is value-agnostic per plan KD5) · `pnpm build` clean (bundle warnings pre-existing — Babylon chunk).
+
+### Decisions / lessons baked in
+- **Inline-style primitives stay** (no Tailwind / CSS-modules). Matches the existing `MarketPage.tsx` pattern; `tokens.ts` exports both the `tokens` object and pre-built `React.CSSProperties` helpers (`buttonPrimary`, `card`, `viewerWell`, `statusBanner`, `navBar`, `pagePaper`, `eyebrow`, `displayHeadline`, `monoLabel`).
+- **CSS `textTransform: uppercase` keeps DOM textContent intact** — test assertions like `toMatch(/Step 1 of 3/)`, `toBe('Mint')`, `getAllByText('Retry')` all survive without label rewrites.
+- **NavGuard pattern** for global chrome — `useLocation()` hide-list (`/dev/compare`) inside a small co-located component, tested independently of the full App provider chain.
+- **WebGL context cap accepted** — one Babylon canvas per card (CollectionCard, base picker, market cards). At demo catalog size this is fine; lazy-mount / shared-engine thumbnails is a Phase 5 follow-up.
+- **PreviewCanvas mocking in tests** — jsdom has no WebGL; tests that render cards with PreviewCanvas must stub it. New mock added to MarketPage.test.tsx; existing mocks already in CreateModelPage / LaunchCollectionPage / TrackPage.
+
+### Open / deferred (next session)
+- **Browser QA the polished arc** end-to-end: `/ → /create → /launch → /market → /track` on testnet (live v7 listings still up). Spot the anti-pattern misses (accent count >5 per page, accidental rounded corners, off-system tints).
+- **Auxiliary routes** — `/model/:id`, `/collection/:slug`, `/integrate` still unstyled (polish-backlog §6 POST). Demo path doesn't link to them, but they're reachable.
+- **`/dev/compare`** — render is hidden by NavGuard but the route still mounts. Polish-backlog calls for production 404; not done.
+- **NICE items deferred:** `<PageHeader>` / `<StatusBanner>` / `<MonoPill>` helper extraction (still inlined, ≤3 sites each), PreviewCanvas auto-rotation motion mitigation (D-044 ⚠️ stillness consequence), `/market` Kiosk grouping divider, `/track` race-time HUD bar + lineage badge.
+- **U15 remaining**: demo-arc recording (four-actor screencap), pitch deck (re-render the 4 vibe mockups from Cowork chat into `pitch/` if needed), README hero + honest disclosure, logo (OQ-016 §2).
+- **Pre-existing carry-overs**: network-mismatch guard (block wrong-network wallet), Tier C backend indexer for /market, stale-listing → buy abort cascade (CR adv-003), full-test-suite StrictMode wrap.
+
+### Next concrete step
+**Browser smoke test the polished demo arc** before recording. Run `pnpm --filter frontend dev`, walk `/ → /create → /launch → /market → /track`, validate against `docs/ux/polish-backlog.md` §8 definition-of-done per screen (paper bg, no emoji, no rounded corners, ≤5 accent uses per page, three font families loaded, loading + empty + error states all use the system). If everything reads coherent, start U15 demo recording.
+
+### Notes for next session
+- Plan-012 file `docs/plans/2026-05-23-012-feat-brutalist-ux-polish-plan.md` is frontmatter-flipped to `status: completed`.
+- All mockups + visual exploration from this morning's Cowork session live ONLY in chat transcript. If pitch deck needs them, re-render to `pitch/`.
+- `d9c22ec` was a misread of "preview in the box" — interpreted as the VariantPreview lower well; user actually wanted preview in each picker card. Lesson: when ambiguous, ask which "box" before writing.
+
+---
+
+## Previous Last-Updated: 2026-05-23 (evening — U15 UX polish kickoff: D-044 Brutalist editorial locked) — **Next = foundation (tokens.ts + TopNav) then walk demo-arc screen by screen.**
 
 ### Hackathon Tracker
 - Days to submission (6/21): 29 of 38 · demo day (7/20–21): 58 · winners (8/27): 96
