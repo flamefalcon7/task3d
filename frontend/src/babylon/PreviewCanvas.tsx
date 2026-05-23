@@ -55,7 +55,7 @@ export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
     const scene = new Scene(engine);
-    scene.clearColor.set(0.08, 0.09, 0.11, 1);
+    scene.clearColor.set(0, 0, 0, 1); // pure-black well per D-044
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
     camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;
