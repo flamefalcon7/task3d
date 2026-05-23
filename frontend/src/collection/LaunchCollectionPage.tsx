@@ -435,7 +435,6 @@ export function LaunchCollectionPage() {
               <VariantPreview
                 variants={editorState.variants}
                 variantGlbs={variantGlbs ?? undefined}
-                baseGlb={baseGlb ?? undefined}
                 selectedIndex={selectedPreview}
                 onSelect={setSelectedPreview}
               />
