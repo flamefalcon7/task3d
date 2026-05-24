@@ -12,8 +12,18 @@
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo } from 'react';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import type { VariantRow } from './VariantEditor';
+import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
+
+const TILE_FALLBACK = '#cccccc';
+
+// plan-013 U7 — tile swatch resolves to `palette.primary` for legacy bases,
+// or the first palette entry as a stable fallback. The tile is a thumbnail
+// for selection; the canvas viewport renders the actual swapped GLB so the
+// per-segment colors are visible there.
+function tileColorFor(row: VariantRow): string {
+  return row.palette[LEGACY_LABEL] ?? Object.values(row.palette)[0] ?? TILE_FALLBACK;
+}
 
 export interface VariantPreviewProps {
   variants: VariantRow[];
@@ -100,7 +110,7 @@ export function VariantPreview({
               data-testid={`variant-tile-${i}`}
               aria-pressed={selected}
               title={`Variant ${i + 1} — ${v.textureId}`}
-              style={tileStyle(selected, v.colorHex)}
+              style={tileStyle(selected, tileColorFor(v))}
             />
           );
         })}

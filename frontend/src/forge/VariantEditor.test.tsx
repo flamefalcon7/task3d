@@ -16,18 +16,26 @@ import {
   VariantEditor,
   MAX_VARIANTS,
   newVariantEditorState,
+  newVariantRow,
   hexToBaseColorRgb,
+  deriveUniqueLabels,
   type VariantEditorState,
 } from './VariantEditor';
 
 afterEach(() => cleanup());
 
 // Tiny harness — VariantEditor is fully controlled; tests need a stateful host.
-function Harness({ initial }: { initial?: VariantEditorState }) {
+function Harness({
+  initial,
+  partLabels,
+}: {
+  initial?: VariantEditorState;
+  partLabels?: string[];
+}) {
   const [state, setState] = useState<VariantEditorState>(
-    initial ?? newVariantEditorState(),
+    initial ?? newVariantEditorState(deriveUniqueLabels(partLabels ?? [])),
   );
-  return <VariantEditor state={state} onChange={setState} />;
+  return <VariantEditor state={state} onChange={setState} partLabels={partLabels} />;
 }
 
 describe('VariantEditor', () => {
@@ -72,9 +80,9 @@ describe('VariantEditor', () => {
       ...newVariantEditorState(),
       globalPriceMist: 500n,
       variants: [
-        { colorHex: '#ff0000', textureId: 'matte', priceMist: 500n },
-        { colorHex: '#00ff00', textureId: 'chrome', priceMist: 500n },
-        { colorHex: '#0000ff', textureId: 'gold', priceMist: 500n },
+        { palette: { primary: '#ff0000' }, textureId: 'matte', priceMist: 500n },
+        { palette: { primary: '#00ff00' }, textureId: 'chrome', priceMist: 500n },
+        { palette: { primary: '#0000ff' }, textureId: 'gold', priceMist: 500n },
       ],
       perVariantPricing: false,
     };
@@ -95,8 +103,8 @@ describe('VariantEditor', () => {
       ...newVariantEditorState(),
       globalPriceMist: 100n,
       variants: [
-        { colorHex: '#ff0000', textureId: 'matte', priceMist: 100n },
-        { colorHex: '#00ff00', textureId: 'chrome', priceMist: 100n },
+        { palette: { primary: '#ff0000' }, textureId: 'matte', priceMist: 100n },
+        { palette: { primary: '#00ff00' }, textureId: 'chrome', priceMist: 100n },
       ],
       perVariantPricing: false,
     };
@@ -154,6 +162,82 @@ describe('VariantEditor', () => {
     expect(
       (screen.getByTestId('variant-price-2') as HTMLInputElement).value,
     ).toBe('777');
+  });
+
+  // ----- plan-013 U7 — label-grouped palette ------------------------------
+
+  it('renders one color picker per unique label (4 distinct labels)', () => {
+    render(<Harness partLabels={['primary', 'secondary', 'accent', 'detail']} />);
+    expect(screen.getByTestId('variant-color-0-primary')).toBeTruthy();
+    expect(screen.getByTestId('variant-color-0-secondary')).toBeTruthy();
+    expect(screen.getByTestId('variant-color-0-accent')).toBeTruthy();
+    expect(screen.getByTestId('variant-color-0-detail')).toBeTruthy();
+  });
+
+  it('deduplicates labels: 12-part GLB with 4 unique labels → 4 pickers per row (AE2, AE4)', () => {
+    const partLabels = [
+      'primary', 'primary', 'primary',
+      'secondary', 'secondary',
+      'accent', 'accent',
+      'detail', 'detail', 'detail', 'detail', 'detail',
+    ];
+    render(<Harness partLabels={partLabels} />);
+    expect(screen.getAllByTestId(/^variant-color-0-/)).toHaveLength(4);
+    expect(screen.getByTestId('palette-col-primary')).toBeTruthy();
+    expect(screen.getByTestId('palette-col-detail')).toBeTruthy();
+  });
+
+  it('legacy (partLabels = []) renders exactly one color picker per variant', () => {
+    render(<Harness partLabels={[]} />);
+    expect(screen.getAllByTestId(/^variant-color-0-/)).toHaveLength(1);
+    expect(screen.getByTestId('variant-color-0-primary')).toBeTruthy();
+    expect(screen.queryByTestId('variant-color-0-secondary')).toBeNull();
+  });
+
+  it('changing primary color mutates only palette.primary; other labels unchanged', () => {
+    const initial: VariantEditorState = {
+      ...newVariantEditorState(['primary', 'secondary', 'accent']),
+      variants: [
+        newVariantRow({ uniqueLabels: ['primary', 'secondary', 'accent'] }),
+      ],
+    };
+    render(<Harness initial={initial} partLabels={['primary', 'secondary', 'accent']} />);
+    const before = (screen.getByTestId('variant-color-0-secondary') as HTMLInputElement).value;
+    act(() => {
+      fireEvent.change(screen.getByTestId('variant-color-0-primary'), {
+        target: { value: '#abcdef' },
+      });
+    });
+    expect((screen.getByTestId('variant-color-0-primary') as HTMLInputElement).value).toBe('#abcdef');
+    expect((screen.getByTestId('variant-color-0-secondary') as HTMLInputElement).value).toBe(before);
+    expect((screen.getByTestId('variant-color-0-accent') as HTMLInputElement).value).toBe(before);
+  });
+
+  it('16 variants × 5 unique labels = 80 color pickers render without crashing', () => {
+    const labels = ['primary', 'secondary', 'accent', 'detail', 'trim'];
+    const initial: VariantEditorState = {
+      variants: Array.from({ length: 16 }, () => newVariantRow({ uniqueLabels: labels })),
+      globalPriceMist: 100_000_000n,
+      perVariantPricing: false,
+    };
+    render(<Harness initial={initial} partLabels={labels} />);
+    expect(screen.queryAllByTestId(/^variant-color-/)).toHaveLength(80);
+  });
+
+  it('custom free-text label "fur" renders alongside the four presets', () => {
+    const partLabels = ['primary', 'secondary', 'accent', 'fur'];
+    render(<Harness partLabels={partLabels} />);
+    expect(screen.getByTestId('palette-col-fur')).toBeTruthy();
+    expect(screen.getByTestId('variant-color-0-fur')).toBeTruthy();
+  });
+
+  it('deriveUniqueLabels preserves first-occurrence order and dedupes', () => {
+    expect(deriveUniqueLabels(['accent', 'primary', 'accent', 'detail', 'primary'])).toEqual([
+      'accent',
+      'primary',
+      'detail',
+    ]);
+    expect(deriveUniqueLabels([])).toEqual(['primary']);
   });
 
   it('hexToBaseColorRgb_converts_to_glTF_PBR_floats', () => {

@@ -15,10 +15,22 @@ import { buttonOutline, input as inputStyle, monoLabel, tokens } from '../ux/tok
 export const MIN_VARIANTS = 1;
 export const MAX_VARIANTS = 16;
 
+// plan-013 U7 — per-variant palette is a label→hex map. Each entry covers a
+// single unique semantic part label (typically 3-5 entries: primary, secondary,
+// accent, detail). `LaunchCollectionPage.runBuildVariants` resolves the palette
+// against the base model's `partLabels` array to produce the positional
+// `partColors[]` the backend swap pipeline consumes. The legacy single-material
+// shape collapses to `{ primary: '#cc3333' }` (uniqueLabels = ['primary']).
+export const LEGACY_LABEL = 'primary';
+const DEFAULT_HEX = '#cc3333';
+
 export interface VariantRow {
-  // Hex color string from <input type="color"> (e.g., '#ff0033').
-  // Converted to [r,g,b,1] 0-1 floats by toBaseColorRgb at mint time.
-  colorHex: string;
+  /**
+   * Hex colors keyed by part label. Hex format mirrors `<input type="color">`
+   * output (e.g., '#ff0033'). Converted to [r,g,b,1] 0-1 floats by
+   * `hexToBaseColorRgb` at build-request time.
+   */
+  palette: Record<string, string>;
   textureId: TextureId;
   // Per-variant price in MIST. Only consulted when pricing toggle is on.
   priceMist: bigint;
@@ -35,21 +47,51 @@ export interface VariantEditorState {
 export interface VariantEditorProps {
   state: VariantEditorState;
   onChange: (next: VariantEditorState) => void;
+  /**
+   * Positional per-part labels from the base Model3D (plan-013). Empty array
+   * is the legacy single-material sentinel; the editor renders one color
+   * picker per unique label (typically 3-5 rows for segmented bases, 1 for
+   * legacy bases).
+   */
+  partLabels?: string[];
   disabled?: boolean;
 }
 
-export function newVariantRow(seed: Partial<VariantRow> = {}): VariantRow {
+/**
+ * Derive the ordered list of distinct labels driving the editor UI. Order is
+ * first-occurrence in `partLabels` so the palette columns reflect GLB node
+ * order. Legacy (empty) bases collapse to `['primary']` — one color picker
+ * per variant, preserving the pre-segmentation UX.
+ */
+export function deriveUniqueLabels(partLabels: string[]): string[] {
+  if (partLabels.length === 0) return [LEGACY_LABEL];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const l of partLabels) {
+    if (!seen.has(l)) {
+      seen.add(l);
+      out.push(l);
+    }
+  }
+  return out;
+}
+
+export function newVariantRow(opts: { uniqueLabels?: string[]; seed?: Partial<VariantRow> } = {}): VariantRow {
+  const labels = opts.uniqueLabels ?? [LEGACY_LABEL];
+  const palette: Record<string, string> = Object.fromEntries(
+    labels.map((l) => [l, DEFAULT_HEX]),
+  );
   return {
-    colorHex: '#cc3333',
+    palette,
     textureId: TEXTURE_LIBRARY[0],
     priceMist: 100_000_000n,
-    ...seed,
+    ...opts.seed,
   };
 }
 
-export function newVariantEditorState(): VariantEditorState {
+export function newVariantEditorState(uniqueLabels?: string[]): VariantEditorState {
   return {
-    variants: [newVariantRow({ colorHex: '#cc3333' })],
+    variants: [newVariantRow({ uniqueLabels })],
     globalPriceMist: 100_000_000n,
     perVariantPricing: false,
   };
@@ -123,9 +165,10 @@ const rowIndex: CSSProperties = {
   color: tokens.color.muted,
 };
 
-export function VariantEditor({ state, onChange, disabled }: VariantEditorProps) {
+export function VariantEditor({ state, onChange, partLabels, disabled }: VariantEditorProps) {
   const canAdd = state.variants.length < MAX_VARIANTS;
   const canRemove = state.variants.length > MIN_VARIANTS;
+  const uniqueLabels = deriveUniqueLabels(partLabels ?? []);
 
   const updateRow = useCallback(
     (i: number, patch: Partial<VariantRow>) => {
@@ -137,15 +180,31 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
     [state, onChange],
   );
 
+  const setRowPalette = useCallback(
+    (i: number, label: string, hex: string) => {
+      const next = state.variants.map((row, idx) =>
+        idx === i ? { ...row, palette: { ...row.palette, [label]: hex } } : row,
+      );
+      onChange({ ...state, variants: next });
+    },
+    [state, onChange],
+  );
+
   const addRow = useCallback(() => {
     if (!canAdd) return;
-    const seed: Partial<VariantRow> = {
-      // When per-variant pricing is off, seed each new row with the current
-      // global price so it's correct if the user later toggles on.
-      priceMist: state.globalPriceMist,
-    };
-    onChange({ ...state, variants: [...state.variants, newVariantRow(seed)] });
-  }, [state, onChange, canAdd]);
+    onChange({
+      ...state,
+      variants: [
+        ...state.variants,
+        newVariantRow({
+          uniqueLabels,
+          // When per-variant pricing is off, seed each new row with the current
+          // global price so it's correct if the user later toggles on.
+          seed: { priceMist: state.globalPriceMist },
+        }),
+      ],
+    });
+  }, [state, onChange, canAdd, uniqueLabels]);
 
   const removeRow = useCallback(() => {
     if (!canRemove) return;
@@ -243,7 +302,11 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
         <thead>
           <tr>
             <th style={thStyle}>#</th>
-            <th style={thStyle}>COLOR</th>
+            {uniqueLabels.map((label) => (
+              <th key={label} style={thStyle} data-testid={`palette-col-${label}`}>
+                {label.toUpperCase()}
+              </th>
+            ))}
             <th style={thStyle}>TEXTURE</th>
             {state.perVariantPricing && <th style={thStyle}>PRICE (MIST)</th>}
           </tr>
@@ -252,16 +315,18 @@ export function VariantEditor({ state, onChange, disabled }: VariantEditorProps)
           {state.variants.map((row, i) => (
             <tr key={i} data-testid={`variant-row-${i}`}>
               <td style={{ ...tdStyle, ...rowIndex }}>{String(i + 1).padStart(3, '0')}</td>
-              <td style={tdStyle}>
-                <input
-                  type="color"
-                  value={row.colorHex}
-                  disabled={disabled}
-                  onChange={(e) => updateRow(i, { colorHex: e.target.value })}
-                  data-testid={`variant-color-${i}`}
-                  style={{ border: tokens.border.primary, padding: 0, width: 40, height: 28, background: 'none' }}
-                />
-              </td>
+              {uniqueLabels.map((label) => (
+                <td key={label} style={tdStyle}>
+                  <input
+                    type="color"
+                    value={row.palette[label] ?? DEFAULT_HEX}
+                    disabled={disabled}
+                    onChange={(e) => setRowPalette(i, label, e.target.value)}
+                    data-testid={`variant-color-${i}-${label}`}
+                    style={{ border: tokens.border.primary, padding: 0, width: 40, height: 28, background: 'none' }}
+                  />
+                </td>
+              ))}
               <td style={tdStyle}>
                 <select
                   value={row.textureId}

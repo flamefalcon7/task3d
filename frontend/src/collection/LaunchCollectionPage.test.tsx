@@ -163,6 +163,131 @@ describe('LaunchCollectionPage', () => {
     await waitFor(() => expect(screen.getByTestId('launch-success')).toBeTruthy());
   });
 
+  // ----- plan-013 U7 — palette → partColors resolution (AE2, AE4) ----------
+
+  it('build request resolves variants[i].partColors via base.partLabels → palette lookup', async () => {
+    // Segmented base: 4 unique labels across 4 parts.
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({
+          objectId: '0xseg',
+          glbBlobId: 'glb-seg',
+          partLabels: ['primary', 'secondary', 'accent', 'detail'],
+        }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const buildBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/v1/blobs/')) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      if (init?.body) buildBodies.push(init.body as string);
+      return new Response(
+        JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xseg'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(buildBodies.length).toBeGreaterThan(0));
+    const body = JSON.parse(buildBodies[0]!);
+    expect(body.variants[0].partColors).toHaveLength(4);
+    // Default palette hex from newVariantRow is '#cc3333' for every label, so
+    // each resolved baseColorRgb maps to the same float tuple. Asserting the
+    // length + tuple shape confirms the positional contract: one entry per
+    // partLabels element, in order.
+    const expected = [204 / 255, 51 / 255, 51 / 255, 1];
+    for (const pc of body.variants[0].partColors) {
+      pc.baseColorRgb.forEach((n: number, idx: number) =>
+        expect(n).toBeCloseTo(expected[idx]!, 5),
+      );
+    }
+    // paramsJson round-trip stores the palette + texture (U7 lineage shape).
+    const params = JSON.parse(body.variants[0].paramsJson);
+    expect(params.palette).toMatchObject({
+      primary: '#cc3333',
+      secondary: '#cc3333',
+      accent: '#cc3333',
+      detail: '#cc3333',
+    });
+    expect(typeof params.texture).toBe('string');
+  });
+
+  it('palette { primary: red, accent: green } + partLabels [primary,primary,accent] → partColors[0,1] red, [2] green', async () => {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({
+          objectId: '0xmix',
+          glbBlobId: 'glb-mix',
+          partLabels: ['primary', 'primary', 'accent'],
+        }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const buildBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/v1/blobs/')) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      if (init?.body) buildBodies.push(init.body as string);
+      return new Response(
+        JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xmix'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+
+    // Drive both pickers in variant 0: primary → red, accent → green.
+    act(() => {
+      fireEvent.change(screen.getByTestId('variant-color-0-primary'), {
+        target: { value: '#ff0000' },
+      });
+    });
+    act(() => {
+      fireEvent.change(screen.getByTestId('variant-color-0-accent'), {
+        target: { value: '#00ff00' },
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(buildBodies.length).toBeGreaterThan(0));
+    const body = JSON.parse(buildBodies[0]!);
+    const pc = body.variants[0].partColors;
+    expect(pc).toHaveLength(3);
+    // Indices 0,1 → primary → red.
+    expect(pc[0].baseColorRgb[0]).toBeCloseTo(1, 5);
+    expect(pc[0].baseColorRgb[1]).toBeCloseTo(0, 5);
+    expect(pc[1].baseColorRgb[0]).toBeCloseTo(1, 5);
+    expect(pc[1].baseColorRgb[1]).toBeCloseTo(0, 5);
+    // Index 2 → accent → green.
+    expect(pc[2].baseColorRgb[0]).toBeCloseTo(0, 5);
+    expect(pc[2].baseColorRgb[1]).toBeCloseTo(1, 5);
+  });
+
   it('on an expired session (build 401) clears the session and shows a re-sign-in message', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });

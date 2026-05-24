@@ -35,6 +35,7 @@ import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import {
   VariantEditor,
   newVariantEditorState,
+  deriveUniqueLabels,
   hexToBaseColorRgb,
   type VariantEditorState,
 } from '../forge/VariantEditor';
@@ -248,6 +249,11 @@ export function LaunchCollectionPage() {
     setErrorMsg(null);
     setBase(model);
     setVariantGlbs(null);
+    // plan-013 U7 — reset the editor state with the base's unique labels so
+    // the palette starts with one entry per semantic label (or `['primary']`
+    // for legacy bases). Switching between bases of different label shapes
+    // is rare during a launch session but supported via this reset.
+    setEditorState(newVariantEditorState(deriveUniqueLabels(model.partLabels)));
     setPhase('building-variants'); // reuse spinner state while the GLB downloads
     try {
       const res = await fetch(`${WALRUS_AGGREGATOR}/v1/blobs/${model.glbBlobId}`);
@@ -263,22 +269,37 @@ export function LaunchCollectionPage() {
   }, [collectionName]);
 
   const runBuildVariants = useCallback(async (): Promise<Uint8Array[]> => {
-    if (!session || !baseGlb) throw new Error('build: session + base GLB required');
+    if (!session || !baseGlb || !base) throw new Error('build: session + base GLB required');
+    // plan-013 U7 — resolve each variant's label→hex palette into the
+    // backend's positional `partColors[]` by mapping `base.partLabels[i]` to
+    // `row.palette[label]`. Missing palette entries (e.g., a base whose
+    // labels diverged from the picker's uniqueLabels) fall back to a neutral
+    // gray so the build endpoint always sees a complete array. Legacy bases
+    // (`partLabels = []`) skip this loop entirely — the single-row editor
+    // emits `palette = { primary: ... }` and the resolved array is length-1.
+    const partLabels = base.partLabels;
+    const resolvePartColors = (palette: Record<string, string>) => {
+      if (partLabels.length === 0) {
+        const hex = palette.primary ?? Object.values(palette)[0] ?? '#cccccc';
+        return [{ baseColorRgb: hexToBaseColorRgb(hex), textureId: undefined }];
+      }
+      return partLabels.map((label) => ({
+        baseColorRgb: hexToBaseColorRgb(palette[label] ?? '#cccccc'),
+        textureId: undefined as unknown as undefined,
+      }));
+    };
     const buildReq: CollectionBuildRequest = {
       baseGlbBase64: bytesToBase64(baseGlb),
-      // plan-013 — positional per-part color array; U7 will expand this from a
-      // single `row.colorHex` to a per-label resolution
-      // (`base.partLabels.map(label => ...)`). For now (single-material UX)
-      // the array is length-1 and material[0] receives the variant color.
-      variants: editorState.variants.map((row) => ({
-        partColors: [
-          {
-            baseColorRgb: hexToBaseColorRgb(row.colorHex),
-            textureId: row.textureId,
-          },
-        ],
-        paramsJson: JSON.stringify({ color: row.colorHex, texture: row.textureId }),
-      })),
+      variants: editorState.variants.map((row) => {
+        const partColors = resolvePartColors(row.palette).map((pc) => ({
+          baseColorRgb: pc.baseColorRgb,
+          textureId: row.textureId,
+        }));
+        return {
+          partColors,
+          paramsJson: JSON.stringify({ palette: row.palette, texture: row.textureId }),
+        };
+      }),
     };
     const res = await fetch('/api/collection/build', {
       method: 'POST',
@@ -459,7 +480,12 @@ export function LaunchCollectionPage() {
               </label>
             </div>
 
-            <VariantEditor state={editorState} onChange={setEditorState} disabled={busy} />
+            <VariantEditor
+              state={editorState}
+              onChange={setEditorState}
+              partLabels={base?.partLabels ?? []}
+              disabled={busy}
+            />
             <div style={{ marginTop: 24 }}>
               <VariantPreview
                 variants={editorState.variants}
