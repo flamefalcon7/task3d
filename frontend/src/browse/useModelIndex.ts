@@ -16,9 +16,16 @@ export interface UseModelIndexResult {
 
 // plan-013 — bumped v1 → v2 when Model3DSummary gained `partLabels`. Old
 // cached entries don't carry the field; rehydrating them and then doing
-// `model.partLabels.map(...)` (U7) would TypeError on first paint. Bumping
-// invalidates pre-deploy caches; the next GraphQL fetch repopulates v2.
-const CACHE_KEY = 'overflow2026:model-index:v2';
+// `model.partLabels.map(...)` (U7) would TypeError on first paint.
+//
+// The key ALSO embeds a slice of the active package id so a republish
+// (which abandons existing on-chain objects under a fresh `original-id`)
+// auto-invalidates any cached objectIds from the prior package — otherwise
+// the LaunchCollectionPage fork flow would post a v(N-1) objectId to a v(N)
+// `launch_collection` PTB and the wallet would surface a raw Move abort.
+// Schema-only bumps (e.g., a new optional field) keep the trailing `v2`
+// tag to invalidate cleanly; package-id bumps fire automatically.
+const CACHE_KEY = `overflow2026:model-index:${TESTNET.model3dPackageId.slice(0, 10)}:v2`;
 
 // Single source of truth for the deployed package: the pinned TESTNET config
 // (mirrored from contracts/networks/testnet.json, guarded by networkConfig.test).

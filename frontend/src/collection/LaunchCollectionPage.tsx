@@ -321,7 +321,12 @@ export function LaunchCollectionPage() {
     const swapped = body.variants.map((v) => base64ToBytes(v.glbBase64));
     setVariantGlbs(swapped);
     return swapped;
-  }, [session, baseGlb, editorState, clearSession]);
+    // `base` is read for `base.partLabels` (line above) and is updated
+    // atomically with `baseGlb` in `onPickBase`, so this dep is currently a
+    // co-change of `baseGlb`. Listed explicitly so a future refactor that
+    // decouples them (e.g. lazy GLB fetch, swap-base-keep-blob) can't
+    // silently capture a stale base in this closure.
+  }, [session, baseGlb, base, editorState, clearSession]);
 
   const onPreview = useCallback(async () => {
     if (!session || !baseGlb) return;

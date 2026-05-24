@@ -58,6 +58,11 @@ type PolicyValue = (typeof POLICIES)[number]['value'];
 // single-material sentinel (upload mode or pre-v8 base).
 const LABEL_PRESETS = ['primary', 'secondary', 'accent', 'detail'] as const;
 const DEFAULT_LABEL = 'detail';
+// plan-013 — mirrors Move's MAX_TAG_LEN bound on part_labels. A user-typed
+// label longer than this triggers EPartLabelTooLong on publish — AFTER the
+// Walrus upload and SUI gas have been charged. Cap at the input layer so
+// the on-chain assertion can never fire on a label that survived the editor.
+const MAX_LABEL_LEN = 32;
 
 function isValidGlb(bytes: Uint8Array): boolean {
   if (bytes.length < 12 || bytes.length > MAX_GLB_BYTES) return false;
@@ -252,9 +257,19 @@ const taggingActionRow: CSSProperties = {
 function TaggingStep({
   glbUrl,
   onContinue,
+  disabled,
 }: {
   glbUrl: string | null;
   onContinue: (partLabels: string[]) => void;
+  /**
+   * plan-013 fix-pass — parent passes `genBusy` while regenerate is in
+   * flight; clicking Continue against the stale GLB during regen would emit
+   * partLabels that get reset by setGlbBytes anyway (visible UI jank +
+   * silently-discarded user input). We also lock-out Continue when the
+   * canvas hasn't loaded yet (partCount === 0 → emit would silently produce
+   * the legacy `partLabels = []` sentinel).
+   */
+  disabled?: boolean;
 }) {
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -264,7 +279,10 @@ function TaggingStep({
   const setLabel = useCallback((i: number, label: string) => {
     setLabels((prev) => {
       const next = new Map(prev);
-      const trimmed = label.trim();
+      // plan-013 fix-pass — clamp to MAX_LABEL_LEN so a paste that exceeds
+      // the Move bound is silently trimmed at the editor layer; the on-chain
+      // assertion is never reached.
+      const trimmed = label.trim().slice(0, MAX_LABEL_LEN);
       if (trimmed) next.set(i, trimmed);
       else next.delete(i);
       return next;
@@ -332,6 +350,7 @@ function TaggingStep({
                     setCustomText('');
                   }
                 }}
+                maxLength={MAX_LABEL_LEN}
                 placeholder="Or custom label…"
                 style={{ ...inputStyle, width: '100%' }}
               />
@@ -346,12 +365,13 @@ function TaggingStep({
       </div>
       <div style={taggingActionRow}>
         <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
-          {labels.size} OF {partCount || '—'} LABELED
+          {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} LABELED`}
         </span>
         <button
           type="button"
           data-testid="skip-tagging"
           onClick={emit}
+          disabled={disabled || partCount === 0}
           style={buttonOutline}
         >
           SKIP REMAINING →
@@ -360,6 +380,7 @@ function TaggingStep({
           type="button"
           data-testid="continue-tagging"
           onClick={emit}
+          disabled={disabled || partCount === 0}
           style={buttonPrimary}
         >
           CONTINUE →
@@ -670,6 +691,7 @@ export function CreateModelPage() {
         {haveModel && sourceMode === 'tripo' && confirmed && !tagged && (
           <TaggingStep
             glbUrl={glbUrl}
+            disabled={genBusy}
             onContinue={(labels) => {
               setPartLabels(labels);
               setTagged(true);

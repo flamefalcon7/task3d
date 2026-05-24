@@ -43,9 +43,18 @@ function loadNetworkConfig(): NetworkConfig {
 export const NETWORK = loadNetworkConfig();
 
 // D-034 Tripo service-fee config (env-overridable). Treasury defaults to the
-// deployer; fee defaults to 0.1 SUI.
+// deployer; fee defaults to 0.4 SUI.
+//
+// plan-013 — MUST mirror frontend `TRIPO_FEE_MIST` in
+// `frontend/src/sui/modelTxBuilders.ts`. Bumped 0.1 → 0.4 SUI in lockstep
+// with the Tripo two-step flow (`text_to_model` → `mesh_segmentation`,
+// ~4× credit cost). Drift between FE and BE defaults is a real footgun: if
+// BE expects the new amount but a stale FE tab pays the old amount, the
+// user is charged on chain and rejected by the verifier as
+// `payment_insufficient_or_wrong_destination` — the fee is non-refundable.
+// Keep this default aligned with the FE constant at deploy time.
 export const TRIPO_FEE_TREASURY = process.env.TRIPO_FEE_TREASURY ?? NETWORK.deployerAddress;
-export const TRIPO_FEE_MIST = BigInt(process.env.TRIPO_FEE_MIST ?? '100000000');
+export const TRIPO_FEE_MIST = BigInt(process.env.TRIPO_FEE_MIST ?? '400000000');
 
 // Override with SUI_RPC_URL (comma-separated) in env; otherwise public testnet
 // fullnode + one fallback (mirrors frontend TESTNET_RPC_ENDPOINTS).

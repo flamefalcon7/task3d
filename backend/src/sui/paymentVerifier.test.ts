@@ -3,7 +3,9 @@ import { createPaymentVerifier, type VerifierClient } from './paymentVerifier.js
 
 const PAYER = '0x' + 'a'.repeat(64);
 const TREASURY = '0x' + 'b'.repeat(64);
-const FEE = 100_000_000n;
+// plan-013 — mirrors the bumped TRIPO_FEE_MIST default (0.1 → 0.4 SUI).
+// Fixture-only constant; covers the verifier's >= check, under-pay, over-pay.
+const FEE = 400_000_000n;
 const DIGEST = 'AuzWcL4fUbgLL3uvaqPfwpuzYU5p9EGa4Uqr1fVk2yab';
 
 function txBlock(opts: {

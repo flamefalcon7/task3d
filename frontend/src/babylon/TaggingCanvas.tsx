@@ -50,6 +50,12 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
   // calls the current `onPartSelect` instead of the closure captured at mount.
   const onPartSelectRef = useRef(onPartSelect);
   const onLoadedRef = useRef(onLoaded);
+  // plan-013 fix-pass — monotonically increasing token assigned per glbUrl
+  // effect run. The async load captures its token locally and bails before
+  // mutating any ref if a newer effect run has already started — prevents
+  // a slow first load from overwriting state populated by a faster second
+  // load (real on cache-hit churn or rapid base re-pick).
+  const loadTokenRef = useRef(0);
 
   useEffect(() => {
     onPartSelectRef.current = onPartSelect;
@@ -103,13 +109,19 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !glbUrl) return;
+    // Capture this effect run's token. Increment so any prior in-flight load
+    // sees its captured token != latestRef.current and bails before mutating
+    // shared refs. The per-effect `cancelled` flag only guards the cleanup
+    // of THIS effect run; it can't stop a slow first load from racing a
+    // fast second load to mutate state.
+    const token = ++loadTokenRef.current;
     let cancelled = false;
     (async () => {
       try {
         const container = await LoadAssetContainerAsync(glbUrl, scene, {
           pluginExtension: '.glb',
         });
-        if (cancelled) {
+        if (cancelled || token !== loadTokenRef.current) {
           container.dispose();
           return;
         }
@@ -142,6 +154,14 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
     if (selectedIndex == null) return;
     const mesh = meshesRef.current[selectedIndex];
     if (!mesh) return;
+    // plan-013 fix-pass — guard against the dep-tuple `[selectedIndex, glbUrl]`
+    // firing on a glbUrl change BEFORE the async load has repopulated
+    // `meshesRef`. Without this check we could call `addMesh` on a mesh whose
+    // backing Scene has been disposed by the load effect's cleanup chain
+    // (silent failure today; future Babylon may throw). `getScene` exists on
+    // every AbstractMesh; identity-compare to the current scene.
+    const scene = sceneRef.current;
+    if (!scene || (typeof mesh.getScene === 'function' && mesh.getScene() !== scene)) return;
     // HighlightLayer.addMesh's TS signature wants Mesh, but the picker works
     // on AbstractMesh at runtime — segmented GLB parts may surface as either.
     hl.addMesh(mesh as Mesh, Color3.FromHexString(tokens.color.accent));
