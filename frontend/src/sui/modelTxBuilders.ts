@@ -18,8 +18,16 @@ import { TESTNET } from './networkConfig';
 const CLOCK_OBJECT_ID = '0x6';
 const PKG = TESTNET.model3dPackageId;
 
-/** Default Tripo service-fee: 0.1 SUI (D-034). */
-export const TRIPO_FEE_MIST = 100_000_000n;
+/**
+ * Default Tripo service-fee: 0.4 SUI (D-034, re-derived plan-013).
+ *
+ * Previously 0.1 SUI when Tripo `text_to_model` was a single ~15-credit call.
+ * Plan-013's two-step flow chains `text_to_model` → `mesh_segmentation`
+ * (~60 credits total, 4× the cost), so the SUI fee is bumped 4× in lockstep
+ * to keep the per-generation margin intact. Reversible via this single
+ * constant if demo-day feedback warrants tuning.
+ */
+export const TRIPO_FEE_MIST = 400_000_000n;
 
 /** Treasury that receives the Tripo service-fee (D-034: deployer for demo). */
 export const TRIPO_FEE_TREASURY = TESTNET.deployerAddress;
@@ -55,6 +63,13 @@ export interface PublishArgs {
   lineageBlobId: string;
   /** Standalone Walrus blob id of the GLB (D-037) — resolved via /v1/blobs/<id>. */
   glbBlobId: string;
+  /**
+   * plan-013 — per-part semantic labels for a segmented-mesh base (Tripo
+   * `mesh_segmentation` output). One entry per material/node index in GLB
+   * order. Empty array is the legacy single-material sentinel (upload mode
+   * and pre-v8 bases); the Move bounds tolerate `length 0`.
+   */
+  partLabels: string[];
   isEncrypted: boolean;
   license: LicenseTermsInput;
 }
@@ -111,6 +126,7 @@ export function buildPublishPtb(args: PublishArgs): TxResult<{ licenseHandle: Tr
       tx.pure.vector('string', args.tags),
       tx.pure.string(args.lineageBlobId),
       tx.pure.string(args.glbBlobId),
+      tx.pure.vector('string', args.partLabels),
       tx.pure.bool(args.isEncrypted),
       licenseHandle,
       tx.object(CLOCK_OBJECT_ID),

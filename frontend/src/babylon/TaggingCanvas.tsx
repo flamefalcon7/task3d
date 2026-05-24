@@ -31,9 +31,15 @@ interface TaggingCanvasProps {
   glbUrl: string | null;
   selectedIndex: number | null;
   onPartSelect: (index: number) => void;
+  /**
+   * Called once per successful GLB load with the count of filtered meshes
+   * (parts) the canvas resolved. The parent uses this to size its label
+   * palette + drive the "N of M labeled" progress indicator (U6).
+   */
+  onLoaded?: (meshCount: number) => void;
 }
 
-export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect }: TaggingCanvasProps) {
+export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }: TaggingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -43,10 +49,15 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect }: TaggingCa
   // Latest-callback ref so the pointer observable (registered once on mount)
   // calls the current `onPartSelect` instead of the closure captured at mount.
   const onPartSelectRef = useRef(onPartSelect);
+  const onLoadedRef = useRef(onLoaded);
 
   useEffect(() => {
     onPartSelectRef.current = onPartSelect;
   }, [onPartSelect]);
+
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  }, [onLoaded]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -108,6 +119,7 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect }: TaggingCa
         meshesRef.current = container.meshes.filter(
           (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
         );
+        onLoadedRef.current?.(meshesRef.current.length);
 
         const camera = scene.activeCamera;
         if (camera instanceof ArcRotateCamera) {

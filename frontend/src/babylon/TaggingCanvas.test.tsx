@@ -171,6 +171,22 @@ describe('TaggingCanvas', () => {
     expect(onPartSelect).toHaveBeenCalledWith(1);
   });
 
+  it('fires onLoaded with the filtered mesh count once the GLB loads', async () => {
+    const onLoaded = vi.fn();
+    render(
+      <TaggingCanvas
+        glbUrl="blob:http://localhost/glb"
+        selectedIndex={null}
+        onPartSelect={() => {}}
+        onLoaded={onLoaded}
+      />,
+    );
+    await flushAsync();
+    // Fixture has 4 raw meshes (__root__ + 3 parts); filtered count = 3.
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenCalledWith(3);
+  });
+
   it('ignores non-POINTERPICK pointer events', async () => {
     const onPartSelect = vi.fn();
     render(<TaggingCanvas glbUrl="blob:http://localhost/glb" selectedIndex={null} onPartSelect={onPartSelect} />);

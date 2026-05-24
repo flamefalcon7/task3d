@@ -26,8 +26,10 @@ describe('buildPayForApiCallPtb', () => {
     expect(metadata.expectedEvents).toEqual([]);
   });
 
-  it('defaults to 0.1 SUI to the deployer treasury', () => {
-    expect(TRIPO_FEE_MIST).toBe(100_000_000n);
+  it('defaults to 0.4 SUI to the deployer treasury', () => {
+    // plan-013 bumped from 0.1 → 0.4 SUI in lockstep with the Tripo two-step
+    // flow (text_to_model → mesh_segmentation = ~4× credit cost).
+    expect(TRIPO_FEE_MIST).toBe(400_000_000n);
     expect(TRIPO_FEE_TREASURY).toBe(TESTNET.deployerAddress);
   });
 
@@ -45,6 +47,7 @@ describe('buildPublishPtb', () => {
     tags: ['weapon'],
     lineageBlobId: 'walrus_lineage_id',
     glbBlobId: 'walrus_glb_id',
+    partLabels: [],
     isEncrypted: false,
     license: {
       policy: 2,
@@ -80,6 +83,7 @@ describe('type discipline', () => {
       tags: [],
       lineageBlobId: 'l',
       glbBlobId: 'g',
+      partLabels: [],
       isEncrypted: false,
       license: {
         policy: 0,
@@ -126,6 +130,7 @@ describe('publish PTB reaches live RPC (fake blob → object-resolution error)',
       tags: [],
       lineageBlobId: 'l',
       glbBlobId: 'g',
+      partLabels: [],
       isEncrypted: false,
       license: { policy: 2, derivativeMintFee: 0n, derivativeRoyaltyBps: 0, commercialUse: false, requireAttribution: false },
     });
@@ -137,11 +142,6 @@ describe('publish PTB reaches live RPC (fake blob → object-resolution error)',
       err = e as Error;
     }
     expect(err).not.toBeNull();
-    // plan-013 U9: package republished as v8 (adds part_labels arg to publish).
-    // Until U6 threads partLabels through buildPublishPtb, the live RPC errors
-    // on argument count BEFORE blob resolution; either class confirms the PTB
-    // reaches live RPC (the actual contract of this smoke test). Tighten back
-    // to /does not exist/ when U6 lands.
-    expect(err?.message ?? '').toMatch(/does not exist|Incorrect number of arguments/);
+    expect(err?.message ?? '').toMatch(/does not exist/);
   });
 });

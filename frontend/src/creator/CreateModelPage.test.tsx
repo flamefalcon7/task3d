@@ -29,6 +29,58 @@ vi.mock('../babylon/PreviewCanvas', () => ({
   ),
 }));
 
+// plan-013 — capture buildPublishPtb args so we can assert partLabels reach
+// the PTB boundary in the right position. Pay-for-API is also mocked since
+// signAndExecute is mocked and we don't need a real Transaction.
+const buildPublishPtbMock = vi.hoisted(() => vi.fn());
+const buildPayForApiCallPtbMock = vi.hoisted(() => vi.fn());
+vi.mock('../sui/modelTxBuilders', async () => {
+  const actual = await vi.importActual<typeof import('../sui/modelTxBuilders')>('../sui/modelTxBuilders');
+  return {
+    ...actual,
+    buildPublishPtb: buildPublishPtbMock,
+    buildPayForApiCallPtb: buildPayForApiCallPtbMock,
+  };
+});
+
+// plan-013 — TaggingCanvas uses Babylon imperative APIs (no WebGL in jsdom).
+// Mock surfaces a `pick-part-N` button per part so tests can drive selection,
+// plus an `onLoaded(count)` trigger via the parts-count probe. Default part
+// count is 12 (matches plan-013 U6 happy-path scenario).
+const TAGGING_PART_COUNT_REF = { current: 12 };
+vi.mock('../babylon/TaggingCanvas', () => {
+  const React = require('react') as typeof import('react');
+  return {
+    TaggingCanvas: ({
+      onPartSelect,
+      onLoaded,
+    }: {
+      glbUrl: string | null;
+      selectedIndex: number | null;
+      onPartSelect: (i: number) => void;
+      onLoaded?: (n: number) => void;
+    }) => {
+      const count = TAGGING_PART_COUNT_REF.current;
+      React.useEffect(() => {
+        onLoaded?.(count);
+      }, [count, onLoaded]);
+      return (
+        <div data-testid="tagging-canvas-mock">
+          {Array.from({ length: count }, (_, i) => (
+            <button
+              key={i}
+              data-testid={`pick-part-${i}`}
+              onClick={() => onPartSelect(i)}
+            >
+              pick {i}
+            </button>
+          ))}
+        </div>
+      );
+    },
+  };
+});
+
 import { CreateModelPage } from './CreateModelPage';
 
 const ADDR = '0x' + '3'.repeat(64);
@@ -40,6 +92,21 @@ beforeEach(() => {
   isJwtExpiredMock.mockReturnValue(false);
   useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   signAndExecuteMock.mockReset();
+  uploadBlobMock.mockReset();
+  signTxMock.mockReset();
+  buildPublishPtbMock.mockReset();
+  buildPublishPtbMock.mockReturnValue({
+    tx: {},
+    handles: {},
+    metadata: { target: 'stub::publish', expectedEvents: [] },
+  });
+  buildPayForApiCallPtbMock.mockReset();
+  buildPayForApiCallPtbMock.mockReturnValue({
+    tx: {},
+    handles: {},
+    metadata: { target: 'stub::pay', expectedEvents: [] },
+  });
+  TAGGING_PART_COUNT_REF.current = 12;
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
   vi.stubGlobal('URL', Object.assign(URL, {
@@ -135,6 +202,10 @@ describe('CreateModelPage', () => {
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     fireEvent.click(screen.getByTestId('confirm-model'));
+    // plan-013 — Tripo path now gates the metadata form behind the tagging
+    // step; click Continue to advance with all-detail defaults.
+    await waitFor(() => expect(screen.getByTestId('continue-tagging')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('continue-tagging'));
 
     // Open (2) and Restricted (0) are offered; allow-list (1) is gone.
     const open = screen.getByTestId('policy-2') as HTMLInputElement;
@@ -149,5 +220,139 @@ describe('CreateModelPage', () => {
     fireEvent.click(restricted);
     expect(restricted.checked).toBe(true);
     expect(open.checked).toBe(false);
+  });
+
+  // ----- plan-013 U6 — TaggingStep + partLabels wiring ---------------------
+
+  async function generateAndConfirmTripoModel() {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('confirm-model'));
+    await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
+  }
+
+  async function driveMintAndCaptureArgs() {
+    uploadBlobMock.mockResolvedValue({
+      blobId: 'walrus_blob_id_xyz',
+      blobObjectId: '0x' + 'a'.repeat(64),
+    });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST456' });
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Tagged Model' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+    return buildPublishPtbMock.mock.calls[0]![0] as { partLabels: string[]; tags: string[] };
+  }
+
+  it('TaggingStep renders after confirming a Tripo model', async () => {
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    expect(screen.getByTestId('tagging-step')).toBeTruthy();
+    // The dedicated metadata form (not the prompt) must NOT be visible until Continue.
+    expect(screen.queryByTestId('metadata-form')).toBeNull();
+  });
+
+  it('Continue without labeling → partLabels is N entries all DEFAULT_LABEL (covers AE1, R6)', async () => {
+    TAGGING_PART_COUNT_REF.current = 12;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toHaveLength(12);
+    expect(args.partLabels.every((l) => l === 'detail')).toBe(true);
+  });
+
+  it('labeling 4 parts with the four presets → partLabels reflects positional choices, rest default', async () => {
+    TAGGING_PART_COUNT_REF.current = 12;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    const seq: Array<['primary' | 'secondary' | 'accent' | 'detail', number]> = [
+      ['primary', 0],
+      ['secondary', 1],
+      ['accent', 2],
+      ['detail', 3],
+    ];
+    for (const [preset, partIndex] of seq) {
+      fireEvent.click(screen.getByTestId(`pick-part-${partIndex}`));
+      fireEvent.click(screen.getByTestId(`preset-${preset}`));
+    }
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels.slice(0, 4)).toEqual(['primary', 'secondary', 'accent', 'detail']);
+    expect(args.partLabels.slice(4)).toEqual(Array(8).fill('detail'));
+  });
+
+  it('free-text custom label "fur" entered for part 3 → partLabels[3] === "fur"', async () => {
+    TAGGING_PART_COUNT_REF.current = 12;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('pick-part-3'));
+    fireEvent.change(screen.getByTestId('custom-label-input'), { target: { value: 'fur' } });
+    fireEvent.keyDown(screen.getByTestId('custom-label-input'), { key: 'Enter' });
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels[3]).toBe('fur');
+    expect(args.partLabels[0]).toBe('detail');
+  });
+
+  it('upload mode skips the tagging step entirely → partLabels = []', async () => {
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByLabelText('Upload my own .glb'));
+    const glbBytes = new Uint8Array(16);
+    glbBytes.set([0x67, 0x6c, 0x54, 0x46]); // 'glTF' magic
+    const file = new File([glbBytes as BlobPart], 'sword.glb', { type: 'model/gltf-binary' });
+    // jsdom's File polyfill omits `arrayBuffer`; stub it from the underlying bytes.
+    (file as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer = async () =>
+      glbBytes.buffer.slice(glbBytes.byteOffset, glbBytes.byteOffset + glbBytes.byteLength);
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('glb-file-input'), { target: { files: [file] } });
+    });
+    // Metadata form is visible immediately on upload — no tagging gate.
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    expect(screen.queryByTestId('tagging-step')).toBeNull();
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual([]);
+  });
+
+  it('regenerating after tagging resets partLabels and re-renders TaggingStep', async () => {
+    TAGGING_PART_COUNT_REF.current = 12;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('pick-part-0'));
+    fireEvent.click(screen.getByTestId('preset-primary'));
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Trigger a regenerate by calling generate again (button label is GENERATE
+    // AGAIN once we have a model). The same mocked fetch returns a fresh GLB
+    // payload, which routes through setGlbBytes → resets confirmed + tagged.
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a chest' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
+    expect(screen.queryByTestId('tagging-step')).toBeNull();
+    expect(screen.queryByTestId('metadata-form')).toBeNull();
+    // After reconfirming, TaggingStep returns with a clean labels map.
+    fireEvent.click(screen.getByTestId('confirm-model'));
+    await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 12/);
   });
 });

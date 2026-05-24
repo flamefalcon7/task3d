@@ -6,6 +6,7 @@ import {
   useSignTransaction,
 } from '@mysten/dapp-kit';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { TaggingCanvas } from '../babylon/TaggingCanvas';
 import { generate } from '../lib/api';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import { useSession, isJwtExpired } from '../auth/useSession';
@@ -50,6 +51,13 @@ const POLICIES = [
 ] as const;
 
 type PolicyValue = (typeof POLICIES)[number]['value'];
+
+// plan-013 — 4 dropdown presets per AE1/R6. Unlabeled parts default to
+// `DEFAULT_LABEL` at Continue time. `partLabels` is a positional array (one
+// entry per filtered mesh in GLB node order); the empty array is the legacy
+// single-material sentinel (upload mode or pre-v8 base).
+const LABEL_PRESETS = ['primary', 'secondary', 'accent', 'detail'] as const;
+const DEFAULT_LABEL = 'detail';
 
 function isValidGlb(bytes: Uint8Array): boolean {
   if (bytes.length < 12 || bytes.length > MAX_GLB_BYTES) return false;
@@ -191,6 +199,176 @@ const wireframeOverlay: CSSProperties = {
   pointerEvents: 'none',
 };
 
+// plan-013 — tagging step layout. Canvas + label panel side by side; falls back
+// to a stacked layout on narrow viewports via auto-fit.
+const taggingGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) 280px',
+  gap: 24,
+  marginTop: 24,
+};
+
+const taggingCanvasWell: CSSProperties = {
+  ...viewerWell,
+  aspectRatio: '16 / 10',
+  border: tokens.border.primary,
+};
+
+const taggingPanel: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+};
+
+const presetGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+};
+
+function presetCell(active: boolean): CSSProperties {
+  return {
+    ...buttonOutline,
+    background: active ? tokens.color.ink : tokens.color.paperPure,
+    color: active ? tokens.color.paper : tokens.color.ink,
+    padding: '8px 10px',
+    fontSize: tokens.size.sm,
+    cursor: 'pointer',
+  };
+}
+
+const taggingActionRow: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  marginTop: 16,
+  flexWrap: 'wrap',
+};
+
+// Local to CreateModelPage: bridges TaggingCanvas selection state and the
+// label dropdown / free-text input. Owns the partial-labels map; on Continue,
+// emits a positional `partLabels[]` of length = part count, defaulting any
+// unlabeled index to `DEFAULT_LABEL`. Skip remaining is a sibling shortcut for
+// the same default-and-emit action.
+function TaggingStep({
+  glbUrl,
+  onContinue,
+}: {
+  glbUrl: string | null;
+  onContinue: (partLabels: string[]) => void;
+}) {
+  const [partCount, setPartCount] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [labels, setLabels] = useState<Map<number, string>>(new Map());
+  const [customText, setCustomText] = useState('');
+
+  const setLabel = useCallback((i: number, label: string) => {
+    setLabels((prev) => {
+      const next = new Map(prev);
+      const trimmed = label.trim();
+      if (trimmed) next.set(i, trimmed);
+      else next.delete(i);
+      return next;
+    });
+  }, []);
+
+  const emit = useCallback(() => {
+    const out: string[] = [];
+    for (let i = 0; i < partCount; i++) {
+      out.push(labels.get(i) ?? DEFAULT_LABEL);
+    }
+    onContinue(out);
+  }, [labels, partCount, onContinue]);
+
+  const currentLabel = selectedIndex != null ? labels.get(selectedIndex) ?? '' : '';
+  const isPreset = (currentLabel as typeof LABEL_PRESETS[number]) && (LABEL_PRESETS as readonly string[]).includes(currentLabel);
+
+  return (
+    <div data-testid="tagging-step" style={{ marginTop: 24 }}>
+      <span style={sectionLabel}>TAG PARTS</span>
+      <div style={taggingGrid}>
+        <div style={taggingCanvasWell}>
+          <TaggingCanvas
+            glbUrl={glbUrl}
+            selectedIndex={selectedIndex}
+            onPartSelect={setSelectedIndex}
+            onLoaded={setPartCount}
+          />
+        </div>
+        <div style={taggingPanel}>
+          {selectedIndex == null ? (
+            <span style={{ ...monoLabel, color: tokens.color.hint }}>
+              CLICK A PART TO LABEL IT
+            </span>
+          ) : (
+            <>
+              <span style={{ ...monoLabel, color: tokens.color.ink }}>
+                PART {selectedIndex + 1} OF {partCount || '—'}
+              </span>
+              <div role="radiogroup" aria-label="label preset" style={presetGrid}>
+                {LABEL_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    role="radio"
+                    aria-checked={isPreset && currentLabel === preset}
+                    data-testid={`preset-${preset}`}
+                    onClick={() => {
+                      setLabel(selectedIndex, preset);
+                      setCustomText('');
+                    }}
+                    style={presetCell(isPreset && currentLabel === preset)}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <input
+                data-testid="custom-label-input"
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && customText.trim()) {
+                    setLabel(selectedIndex, customText);
+                    setCustomText('');
+                  }
+                }}
+                placeholder="Or custom label…"
+                style={{ ...inputStyle, width: '100%' }}
+              />
+              {currentLabel && (
+                <span style={{ ...monoLabel, color: tokens.color.muted }}>
+                  → {currentLabel}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <div style={taggingActionRow}>
+        <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
+          {labels.size} OF {partCount || '—'} LABELED
+        </span>
+        <button
+          type="button"
+          data-testid="skip-tagging"
+          onClick={emit}
+          style={buttonOutline}
+        >
+          SKIP REMAINING →
+        </button>
+        <button
+          type="button"
+          data-testid="continue-tagging"
+          onClick={emit}
+          style={buttonPrimary}
+        >
+          CONTINUE →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // SVG wireframe-cube placeholder used in the empty viewer well. Stroke + opacity
 // per docs/ux/design-tokens.md §6 viewer-well guidance.
 function WireframePlaceholder() {
@@ -223,6 +401,12 @@ export function CreateModelPage() {
   const [glb, setGlb] = useState<Uint8Array | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+
+  // plan-013 — per-part labels for segmented bases. `tagged` gates the metadata
+  // form so the user can't skip the tagging step on the Tripo path; upload
+  // mode bypasses it entirely (legacy single-material sentinel: partLabels = []).
+  const [partLabels, setPartLabels] = useState<string[]>([]);
+  const [tagged, setTagged] = useState(false);
 
   const [name, setName] = useState('');
   const [tagsStr, setTagsStr] = useState('');
@@ -259,6 +443,10 @@ export function CreateModelPage() {
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
     setConfirmed(false);
+    // plan-013 — regenerate/re-upload invalidates any tagging done against
+    // the previous GLB, since part counts and node order can both change.
+    setPartLabels([]);
+    setTagged(false);
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }));
     setGlbUrl(url);
   }, []);
@@ -336,6 +524,7 @@ export function CreateModelPage() {
         tags,
         lineageBlobId: glbBlob.blobId,
         glbBlobId: glbBlob.blobId,
+        partLabels,
         isEncrypted: false,
         license: {
           policy,
@@ -352,7 +541,7 @@ export function CreateModelPage() {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, royaltyBps, signAndExecute]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, royaltyBps, partLabels, signAndExecute]);
 
   if (!session) {
     return (
@@ -478,7 +667,17 @@ export function CreateModelPage() {
           </div>
         )}
 
-        {haveModel && (sourceMode === 'upload' || confirmed) && (
+        {haveModel && sourceMode === 'tripo' && confirmed && !tagged && (
+          <TaggingStep
+            glbUrl={glbUrl}
+            onContinue={(labels) => {
+              setPartLabels(labels);
+              setTagged(true);
+            }}
+          />
+        )}
+
+        {haveModel && (sourceMode === 'upload' || (confirmed && tagged)) && (
           <div data-testid="metadata-form" style={metadataGrid}>
             <label style={fullRow}>
               <span style={sectionLabel}>MODEL NAME</span>
