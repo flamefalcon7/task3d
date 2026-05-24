@@ -2139,6 +2139,301 @@ Full token reference: `docs/ux/design-tokens.md`. Per-screen polish backlog: `do
 
 ---
 
+## D-045: Two-step Tripo flow — `text_to_model` → `mesh_segmentation` chained server-side
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013 — mesh segmentation + per-part coloring)
+
+### Context
+Tripo's `text_to_model` returns a single-material GLB — usable for v1 mint but not for per-part coloring. Tripo also exposes a separate `mesh_segmentation` task that takes a `text_to_model` task id (`original_model_task_id`) and produces a segmented GLB with N materials (one per part), naming nodes `tripo_part_0..N`. The two tasks are independent API calls, each with its own polling/cost. We need every L1 publish to surface a segmented base so the L2 variant editor can do per-part coloring.
+
+Spike (`backend/scripts/spike-tripo-segmentation.ts`, deleted post-validation) confirmed: the chain works, takes ~2 min total (~35s text_to_model + ~90s mesh_segmentation), and consumes ~60 Tripo credits (~4× single-step cost).
+
+### Decision
+Backend `tripo` generator chains both calls server-side: `submitTask(prompt)` → `pollTask(taskId)` → `submitMeshSegmentation(taskId)` → `pollTask(segTaskId)` → `downloadGlb(url)`. Frontend sees no behavior change beyond longer latency.
+
+### Rationale
+- Single API surface for the frontend; no extra round-trips or progress states to invent.
+- Mesh segmentation is non-optional for v1 — every L1 base must be forkable as a segmented variant collection. Making the chain conditional would create a runtime path where some bases can't be forked.
+- Server-side chaining keeps both task ids private (no client-side state to lose if the user closes the tab between steps).
+
+### Alternatives Considered
+- **Make segmentation opt-in (single-step fast path for "I'm not planning to fork this")**: rejected — composable IP is the product narrative (D-031); the L1 / L2 economic loop only works if every base is segment-ready.
+- **Run segmentation lazily at fork time**: rejected — adds 90s latency to the L2 creator's first interaction, when they're least committed; better to absorb the cost at L1 mint where the publisher is already in a long-running flow.
+
+### Consequences
+- ✅ Every published Model3D carries per-part materials — variants can color each part.
+- ⚠️ L1 generate latency ~2 min (vs ~35s pre-D-045). UX must convey the longer wait honestly (`— GENERATING (Ns)` ticker).
+- ⚠️ Tripo cost per L1 mint ~4×. D-051 raises the SUI fee in lockstep.
+- 🔮 If Tripo's segmentation reliability turns out to be prompt-class-sensitive (cars OK, fantasy assets flaky), the chain may need a fallback to single-step + downstream warning. Not addressed in v1.
+
+### Related
+- spec.md section: §1 (composable creator economy)
+- Related decisions: D-023 (Tripo prompt-mode), D-051 (fee bump in lockstep), D-052 (republish ceremony)
+- Plan: `docs/plans/2026-05-23-013-feat-mesh-segmentation-per-part-coloring-plan.md` U3
+- Spike: spike-tripo-segmentation.ts (deleted post-validation, see commit `0ba975c`)
+
+---
+
+## D-046: TINT mode over FLAT for per-part variant coloring
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013)
+
+### Context
+For each part of a segmented base GLB, the variant editor needs to apply a creator-chosen color. Two viable rendering models: **FLAT** (replace baseColorTexture with a solid color, ignore the baked PBR detail) or **TINT** (preserve baseColorTexture, multiply by a chosen `baseColorFactor`). Tripo's segmentation output bakes PBR detail (subtle shading, surface variation) into each part's baseColorTexture — discarding it produces a "plasticine toy" look; preserving it under tint produces a usable but tint-luminance-bound look.
+
+Spike (`backend/scripts/spike-seg-color-modes.ts`, deleted) generated visual references for both modes on `spike-seg-turbo.glb`. TINT preserved enough PBR character to read as a designed material; FLAT looked uniformly cheap.
+
+### Decision
+Backend material-swap uses **TINT mode**: `target.setBaseColorFactor(partSpec.baseColorRgb)` runs unconditionally; the existing baked `baseColorTexture` is preserved unless the variant spec explicitly provides a new `textureId` (the curated overlay library).
+
+### Rationale
+- Preserves Tripo's baked PBR detail at zero implementation cost (one fewer `setBaseColorTexture` call).
+- TINT × baked texture gives non-uniform shading per part — readable as a designed material.
+- Curated textures (D-049 lineage shape carries `textureId`) can still replace the baked texture when the creator wants a specific surface treatment; TINT is the *default*, not the only mode.
+
+### Alternatives Considered
+- **FLAT only**: rejected — discarding the baked PBR texture loses the only visual quality differentiator the segmentation output has over a procedurally-generated mesh.
+- **Per-variant choice (TINT vs FLAT toggle)**: rejected as scope creep — adds a UI control with no clear win when TINT covers the design space, and complicates the lineage shape (`{ palette, mode, texture }`).
+
+### Consequences
+- ✅ Variants look like designed materials, not painted toys.
+- ✅ Material-swap is a single code path; no branching by mode.
+- ⚠️ Very dark baked textures + dark tint = muddy result. Mitigated in editor UX: the color picker exists at a layer above the baked texture, so creators get visual feedback.
+- 🔮 If a future asset class (cartoon-style models) wants the FLAT look, the swap pipeline can grow a mode flag with the existing positional `partColors` contract.
+
+### Related
+- spec.md section: §1 (composable creator economy)
+- Related decisions: D-045 (segmentation produces the baked PBR), D-049 (positional color array carries `textureId` overlay)
+- Plan: plan-013 U4
+- Spike artifacts: `frontend/public/dev-glbs/spike-seg-tint-*.glb` (visible at `/dev/compare`)
+
+---
+
+## D-047: Manual tagging at L1 publish over geometric / AI auto-labeling
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013)
+
+### Context
+Per-part coloring at L2 needs a *semantic* mapping from "this part" to "primary/secondary/accent/detail" (or a custom label). Tripo's `tripo_part_N` naming is *positional* (stable across runs) but not *semantic* (part 0 is "first node in GLB order", not "the body"). Three ways to derive semantic labels: (a) **manual** — L1 creator clicks each part in a Babylon canvas and labels it; (b) **geometric heuristics** — analyze part volume / position / bounding box to guess role (largest = primary, etc.); (c) **AI auto-labeling** — second LLM call after segmentation to suggest labels from the prompt + node names.
+
+### Decision
+Manual tagging at L1 publish. The L1 creator clicks parts in a new `TaggingCanvas` Babylon picker; the chosen labels are stored in `Model3D.part_labels: vector<String>` and emitted in `ModelPublished`.
+
+### Rationale
+- Manual is implementable in one unit (U5 TaggingCanvas + U6 TaggingStep); auto-labeling needs another LLM round-trip + prompt engineering + a fallback when the LLM is wrong.
+- The L1 creator is the only actor with ground truth — they wrote the prompt and know what each part is. Auto-labeling would have to guess.
+- Manual aligns with the brutalist editorial UX: explicit, opinionated, no magic.
+- "Skip remaining" (defaults unlabeled parts to `'detail'`) gives the impatient creator an escape hatch.
+
+### Alternatives Considered
+- **Geometric heuristics**: rejected — fragile across prompt classes (a sword's "primary" is the blade by volume; a chest's "primary" is the box, not the lid). No win over manual for the effort.
+- **AI auto-labeling (LLM router call)**: rejected — pulls back the LLM router seam D-023 removed. Adds latency + cost + a wrong-answer recovery flow.
+- **No labeling — just numeric indices in the L2 editor**: rejected — L2 creators don't know what "part 3" is without re-loading the base. The whole point of labels is human-readable variant authoring.
+
+### Consequences
+- ✅ Labels carry creator intent; L2 editor renders "PRIMARY / SECONDARY / ACCENT" columns instead of "PART 1 / PART 2 / PART 3".
+- ✅ No LLM dependency, no auto-labeling failure modes.
+- ⚠️ L1 publish flow gains a step (~15-30s of clicking for a 12-part car). "Skip remaining" defaults to `'detail'` to bound the floor.
+- 🔮 If a fully-automated L1 flow becomes a pitch requirement, an optional auto-label pass could populate the labels map as a *default* the creator edits.
+
+### Related
+- spec.md section: §1, §2 (Model3D struct)
+- Related decisions: D-023 (LLM router dropped), D-048 (label vocabulary)
+- Plan: plan-013 U5 (TaggingCanvas), U6 (TaggingStep wiring)
+
+---
+
+## D-048: Free-text labels with 4 dropdown presets (`primary`, `secondary`, `accent`, `detail`)
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013)
+
+### Context
+Once L1 manual tagging is the chosen path (D-047), the label *vocabulary* needs definition. Two ends of the spectrum: (a) strict enum of 4-5 fixed labels (compact, no free-text UI); (b) fully free-text (expressive, but every creator invents their own taxonomy and L2 collections become un-joinable across bases).
+
+### Decision
+Hybrid: 4 dropdown presets — `primary`, `secondary`, `accent`, `detail` — render as one-click buttons in TaggingStep, **plus** a free-text input (clamped to MAX_LABEL_LEN=32 to mirror Move's `MAX_TAG_LEN`). Presets cover the common case; free-text covers domain-specific bases (`fur`, `metal`, `glass`).
+
+### Rationale
+- 4 presets match the brutalist editorial design: short canonical vocabulary, one-click selection.
+- Free-text preserves creator agency for unusual asset classes without forcing them through a "request a new preset" flow.
+- 32-char bound = same per-element ceiling as `tags` (existing precedent in `MAX_TAG_LEN`). Avoids inventing a new constant.
+- Unlabeled parts default to `'detail'` (per AE1/R6) — the "remainder" semantic preset doubles as the safe fallback.
+
+### Alternatives Considered
+- **Strict 4-preset enum, no free-text**: rejected — closes the door on creators who want semantic labels their asset class needs (e.g., a creature's "fur" or "scales").
+- **Pure free-text, no presets**: rejected — every creator invents their own labels; L2 editor becomes unpredictable; cross-base sharing of palettes is impossible.
+- **Larger preset set (~10-15 labels covering common asset classes)**: rejected — premature taxonomy; we don't have enough creator data to know which 15. The free-text escape hatch covers the long tail.
+
+### Consequences
+- ✅ Compact UI: 4 buttons + 1 input + (text) "→ &lt;current label&gt;" preview.
+- ✅ L2 editor's column count is bounded (uniqueLabels typically 3-5 for preset users, up to ~MAX_PARTS for free-text users).
+- ⚠️ Long-tail free-text labels reduce the cross-base palette-sharing potential. Acceptable for v1.
+- 🔮 If creator data shows ~80% of bases use only the 4 presets, the free-text input could become an "advanced" disclosure.
+
+### Related
+- spec.md section: §2 (Model3D struct: `part_labels: vector<String>`)
+- Related decisions: D-047 (manual tagging), D-049 (positional array carries the resolved labels)
+- Plan: plan-013 U6
+- Move bound: `contracts/model3d/sources/model3d.move:114` MAX_TAG_LEN (shared with `tags`)
+
+---
+
+## D-049: Lineage canonical shape = positional per-part color array (`partColors[i]` ↔ `materials[i]`)
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013)
+
+### Context
+The L2 variant editor authors variants in *label space* (`palette: { primary: '#f00', accent: '#0f0' }`), but the backend material-swap pipeline operates in *index space* (loop `materials[i]`, apply `partColors[i]`). Bridging these requires choosing a canonical wire shape for `/api/collection/build` requests. Two options: (a) **label-keyed map** — backend resolves `palette[label]` per part using `Model3D.part_labels`; (b) **positional array** — frontend resolves labels to positions before posting, backend stays label-agnostic.
+
+### Decision
+Frontend resolves; canonical wire shape is **positional**: `partColors[i]` is the color for `materials[i]` in GLB order. Frontend uses `base.partLabels.map((label, i) => ({ baseColorRgb: hexToBaseColorRgb(row.palette[label]) }))` to bridge.
+
+### Rationale
+- Backend stays simple: no label registry, no label→index lookup, no schema for the palette map. Just `if (spec.partColors.length !== materials.length) throw PartCountMismatchError` and a positional for-loop.
+- Failure mode is loud: a length mismatch fires a typed 422 envelope (`{ error: 'part_count_mismatch', materialCount, partColorsCount }`). Hard to silently misroute a color to the wrong part.
+- Same shape works for legacy single-material bases: `partColors = [{...}]` (length 1).
+- `paramsJson` per variant stores the *human-readable* `{ palette, texture }` shape for round-trip on collection re-open — separates the wire shape from the lineage shape.
+
+### Alternatives Considered
+- **Label-keyed map** (`{ partColors: { primary: '#f00', accent: '#0f0' } }`): rejected — pushes the resolution into the backend, requires the backend to read `Model3D.part_labels` from Sui, and creates an undefined-label silent-skip failure mode.
+- **Hybrid (label + positional)**: rejected — two sources of truth invite drift.
+
+### Consequences
+- ✅ Backend swap pipeline is a clean N-material loop; tests cover length-mismatch directly.
+- ✅ Frontend's label→position resolution is a single 5-line function; readable in `runBuildVariants`.
+- ⚠️ Missing-palette-label fallback ('#cccccc' silent gray) is implemented in the resolver — accepted as the design (palette synced to labels at pick time; fallback only fires in pathological cases like a base republished mid-edit).
+- 🔮 If a label-keyed wire shape becomes desirable (e.g., for cross-collection palette sharing), it can be added as a sibling field; the positional contract stays as the swap pipeline's input.
+
+### Related
+- spec.md section: §2.8 (Move struct), §3 (backend swap)
+- Related decisions: D-047 (manual tagging produces labels), D-048 (label vocabulary)
+- Plan: plan-013 U2 (shared types), U4 (backend swap), U7 (frontend resolution)
+- Backend contract: `backend/src/lib/gltf-material-swap.ts` `PartCountMismatchError`
+
+---
+
+## D-050: Full-GLB-per-variant for v1 (defer override-form storage)
+
+**Status**: Accepted
+**Date**: 2026-05-23
+**Phase**: 4 (plan-013)
+
+### Context
+Each L2 variant is a fully-baked GLB stored in a Walrus quilt patch (D-035). For a 6 MB base × 16 variants = 96 MB per collection. An alternative — **override form** — would store one base GLB + 16 small JSON "override docs" (`{ partColors, textureId }`); the L2 viewer would download base + override and reconstruct the variant client-side via gltf-transform.
+
+### Decision
+v1 stores **full GLB per variant** in the quilt. No override form, no client-side material-swap.
+
+### Rationale
+- Override form requires shipping gltf-transform + meshopt extensions to the browser, plus client-side compute on every L2 view. The browser bundle grows + first-paint slows.
+- Full-GLB is what the existing D-035 quilt patching + D-038 launch flow already handle. No new storage path, no new viewer path.
+- Walrus storage cost at testnet is effectively free; at mainnet, 96 MB per collection is acceptable for the demo arc's 1-2 reference collections.
+- Mesh-segmentation makes per-variant GLBs *smaller* than they'd be without segmentation (TINT mode preserves baseColorTexture but per-part baseColorFactor adds ~80 bytes per material — negligible).
+
+### Alternatives Considered
+- **Override form (base GLB + per-variant JSON overrides, client-side swap)**: rejected for v1 — adds frontend complexity (gltf-transform in browser, async reconstruct per view) for a Walrus cost that doesn't bite until mainnet at scale. Flagged as the next plan if storage cost becomes a real constraint.
+- **Hybrid (full GLB for tier-1 collections, override form for tier-2)**: rejected — premature; no creator data on which collections are tier-1.
+
+### Consequences
+- ✅ Storage path is unchanged from D-035; the L2 viewer is unchanged from D-037.
+- ✅ Variant GLBs are self-contained — no runtime dependency on the base.
+- ⚠️ Walrus cost grows linearly with `variant_count × base_size`. 16 × 6 MB = 96 MB per collection.
+- 🔮 If storage cost becomes a constraint on mainnet, the override-form plan is the immediate next step. The shared types (D-049 positional array) are designed to carry the same per-part data in either shape.
+
+### Related
+- spec.md section: §3 (Walrus storage), §4 (Phase 4 deliverables)
+- Related decisions: D-035 (quilt patches), D-037 (standalone base GLB), D-038 (launch with tokens)
+- Plan: plan-013 U4 (backend swap), Risks & Dependencies section
+
+---
+
+## D-051: `TRIPO_FEE_MIST` raised from 0.1 SUI to 0.4 SUI (lockstep with D-045)
+
+**Status**: Accepted
+**Date**: 2026-05-24
+**Phase**: 4 (plan-013)
+
+### Context
+D-034 set `TRIPO_FEE_MIST = 100_000_000n` (0.1 SUI) calibrated for the ~15-credit single-step `text_to_model` call. D-045 introduced the two-step segmentation chain (`text_to_model` + `mesh_segmentation`) at ~60 credits total (~4× the original cost). The SUI fee that gates the API call must reflect the new operational cost or the per-generation margin collapses to zero or negative.
+
+### Decision
+Raise both frontend `TRIPO_FEE_MIST` (`frontend/src/sui/modelTxBuilders.ts`) and backend `TRIPO_FEE_MIST` default (`backend/src/sui/client.ts`) from `100_000_000n` (0.1 SUI) to `400_000_000n` (0.4 SUI). Drift between the two values is a real footgun — if backend expects 0.4 but a stale frontend tab pays 0.1, the user is charged on chain with no refund path (the verifier rejects as `payment_insufficient_or_wrong_destination`).
+
+### Rationale
+- 4× lockstep with the 4× credit cost is the simplest justifiable scaling.
+- Reversible via a single constant per side if demo-day feedback warrants tuning.
+- Mirroring the constants in both processes (rather than a single shared source) keeps the frontend independent of backend env config — the verifier remains the source of truth at runtime, but the fee shown to the user matches the verifier's expectation by default.
+
+### Alternatives Considered
+- **Sliding scale by prompt complexity**: rejected — premature, no pricing data, adds a UI display contract for "your prompt will cost approximately X SUI".
+- **Subsidize segmentation for v1 (keep 0.1 SUI)**: rejected — per-generation loss compounds with usage; not aligned with the "real product, not free demo" framing.
+- **Drop segmentation for prompts the creator doesn't intend to fork** (avoid the cost increase): rejected by D-045.
+
+### Consequences
+- ✅ Per-generation margin restored to the D-034 economics.
+- ⚠️ User-visible price 4× higher — `0.4 SUI` is the visible cost in the generate-button label. Mitigated by the UX framing ("Mesh segmentation enables L2 variant authoring — every base is fork-ready").
+- ⚠️ Stale-FE-tab vs new-BE deploy footgun. CLAUDE.md operational note: keep the FE bundle and BE env var in sync at deploy time. Hard-coded BE default to 0.4 SUI gives a safe fallback when ops forgets to set the env var.
+- 🔮 If demo-day feedback shows 0.4 SUI suppresses generation volume below useful levels, the constant flip is single-line on each side.
+
+### Related
+- spec.md section: §3.4 (SUI service fee)
+- Related decisions: D-034 (Approach A fee-gating), D-045 (two-step chain forcing the increase)
+- Plan: plan-013 U6
+- Review-pass finding: ADV-001 — covered by the F1 fix (BE default raised to 0.4)
+
+---
+
+## D-052: Move package republish ceremony for `part_labels` struct field (v8)
+
+**Status**: Accepted
+**Date**: 2026-05-24
+**Phase**: 4 (plan-013)
+
+### Context
+Plan-013 U1 adds `part_labels: vector<String>` to the existing `key`-able `Model3D` struct. Per Sui upgrade rules (`contracts/UPGRADE.md`), adding a field to a published struct mutates on-chain layout and is **not** a compatible upgrade — it requires a fresh package publish under a new `original-id`. The `publish` and `new_model` entry-fn signatures also gain a `part_labels` parameter (each independently breaking).
+
+This is the same pattern as v3→v4 (D-035 + D-036), v4→v5 (D-037), v5→v6 (D-038), v6→v7 (D-040). Each republish abandons the prior package's on-chain objects on testnet.
+
+### Decision
+Republish the `model3d` package as **v8** under a fresh `original-id`. Pin the new package id in `contracts/model3d/Published.toml`, `contracts/networks/testnet.json`, and `frontend/src/sui/networkConfig.ts`. Re-bootstrap a fresh `TransferPolicy<NftToken>` via `ensure_collection_policy` (royalty rule only, D-036 carry-forward). Prior v7 testnet objects are abandoned.
+
+### Rationale
+- Mechanically required: struct-field-add and entry-fn-signature change are both layout-breaking.
+- Consistent with the v3–v7 republish precedent — fresh `original-id` keeps a single package id (no published-at / original-id split that would force every PTB target to track both).
+- Testnet objects from prior demos carry no demo-recording value (Phase 5 demo bake happens against the latest package). Hackathon scope tolerates the abandonment.
+- Re-bootstrap of the TransferPolicy is one PTB (`ensure_collection_policy`) and ~0.05 SUI — cost is negligible.
+
+### Alternatives Considered
+- **`sui client upgrade` (compatible upgrade path)**: rejected — incompatible by Sui's rules; the upgrade would fail at validation.
+- **Defer struct extension until mainnet (use a sidecar object for v1 part_labels)**: rejected — adds a second on-chain entity to track per Model3D, doubles the indexer load, and complicates the `ModelPublished` event shape with no win on testnet.
+- **Versioning via a `Model3DV2` sibling struct + migration window**: rejected for hackathon scope — appropriate for mainnet but unnecessary when there's no on-chain state worth preserving.
+
+### Consequences
+- ✅ v8 published 2026-05-24 (testnet): package `0x9e673aa7…`, publisher `0xd966…`, TransferPolicy `0x308f…`. Move 64/64 tests green against the new struct shape.
+- ✅ `Model3DSummary.partLabels` is now a first-class field, parsed by the indexer from `ModelPublished.part_labels`.
+- ⚠️ All v7 testnet `Model3D` shared objects are abandoned. Any stale localStorage cache pointing at them would call v8 entry fns with v7 objectIds and surface raw Move aborts. Mitigated by F2 (cache key embeds the package id slice).
+- ⚠️ Documentation (`contracts/UPGRADE.md`, `contracts/networks/testnet.json` `_meta`, `docs/phase-progress.md`) must be updated each republish to keep the chronology readable. Test guards (`networkConfig.test.ts` parity) catch the runtime artifact set; docs are manual.
+- 🔮 Mainnet ceremony (D-009: 8/27 deadline) will use the latest v(N) shape at that time. Per-republish bootstrap cost is amortized across testnet rehearsals.
+
+### Related
+- spec.md section: §2.8 (Move struct shape)
+- Related decisions: D-009 (testnet for 6/21, mainnet by 8/27), D-035 / D-037 / D-038 / D-040 (prior breaking republishes)
+- Plan: plan-013 U1 + Operational Notes (UPGRADE.md ceremony)
+- Republish ceremony: `contracts/UPGRADE.md` (Phase 4 v3–v7 precedent)
+- Network artifacts: `contracts/networks/testnet.json` (v8 published 2026-05-24, digests `CsGKbndg…` publish + `4s2aAmRW…` bootstrap)
+
+---
+
 # Reserved Decision Numbers
 
-D-045 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-053 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
