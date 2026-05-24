@@ -331,6 +331,37 @@ describe('CreateModelPage', () => {
     expect(args.partLabels).toEqual([]);
   });
 
+  it('F8 — skip-tagging button is wired to the same emit handler as Continue (default unlabeled to detail)', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    // Label 2 of 5 parts, then click Skip — emit should still produce N=5
+    // entries with the labeled positions reflected and the rest defaulted.
+    fireEvent.click(screen.getByTestId('pick-part-1'));
+    fireEvent.click(screen.getByTestId('preset-accent'));
+    fireEvent.click(screen.getByTestId('pick-part-4'));
+    fireEvent.click(screen.getByTestId('preset-primary'));
+    fireEvent.click(screen.getByTestId('skip-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual(['detail', 'accent', 'detail', 'detail', 'primary']);
+  });
+
+  it('F8 — Continue is disabled while TaggingCanvas has not reported a part count yet', async () => {
+    // Use 0 as the canvas part count to simulate an in-flight load (the real
+    // component's onLoaded is gated on a successful LoadAssetContainerAsync;
+    // pre-load the parent's partCount is 0). The disabled gate prevents the
+    // silent-empty-partLabels publish flagged by races-L2.
+    TAGGING_PART_COUNT_REF.current = 0;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
+    const skipBtn = screen.getByTestId('skip-tagging') as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(true);
+    expect(skipBtn.disabled).toBe(true);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/LOADING PARTS/);
+  });
+
   it('regenerating after tagging resets partLabels and re-renders TaggingStep', async () => {
     TAGGING_PART_COUNT_REF.current = 12;
     render(<CreateModelPage />);

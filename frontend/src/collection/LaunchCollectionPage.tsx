@@ -314,7 +314,29 @@ export function LaunchCollectionPage() {
       throw new Error('Your session expired. Please sign in again, then retry.');
     }
     if (!res.ok) {
+      // plan-013 fix-pass F7 — surface a human-readable message when the
+      // backend reports per-variant length drift, instead of dumping the raw
+      // envelope text. Other 422/5xx classes fall through to the generic
+      // message so unknown errors stay visible verbatim for debugging.
       const txt = await res.text().catch(() => '');
+      try {
+        const body = JSON.parse(txt) as {
+          error?: string;
+          materialCount?: number;
+          partColorsCount?: number;
+        };
+        if (body.error === 'part_count_mismatch') {
+          throw new Error(
+            `Base mesh has ${body.materialCount} parts but the editor sent ${body.partColorsCount} colors. ` +
+              `Try picking a different base, or regenerate this one — Tripo's segmentation can drift across runs.`,
+          );
+        }
+      } catch (parseOrTyped) {
+        if (parseOrTyped instanceof Error && parseOrTyped.message.startsWith('Base mesh has')) {
+          throw parseOrTyped;
+        }
+        // JSON.parse failure (raw text body): fall through.
+      }
       throw new Error(`build: HTTP ${res.status} ${txt}`);
     }
     const body = (await res.json()) as CollectionBuildResponse;
