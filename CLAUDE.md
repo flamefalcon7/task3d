@@ -141,6 +141,35 @@ If context utilization approaches 60% mid-session, proactively suggest: "Let me 
 
 ---
 
+## 🖥 Frontend Verification Protocol
+
+Any commit that changes user-visible frontend behavior MUST be browser-verified before declaring done. "Frontend-touching" means modifying `frontend/src/**/*.tsx`, `frontend/src/**/*.ts` (excluding pure type/util/test files), or `shared/src/types.ts` consumed by a component. Per-commit judgement; trivial commits in a flow already verified this session can skip — but the default is to verify.
+
+### Verification loop
+
+1. After the change, ensure `pnpm --dir frontend dev` is running.
+2. Invoke `agent-browser` via the `ce-test-browser` skill at the relevant route.
+3. Drive the changed surface (click, fill, navigate).
+4. If a wallet popup blocks: announce `"PAUSED — sign in the wallet, then say go"` and wait for the user signal.
+5. Assert expected DOM state (testids, text, conditional renders).
+6. Pass → declare done + commit. Fail → diagnose, fix, repeat from step 3.
+
+The verification surface is the **full demo arc** — `/`, `/create`, `/launch`, `/market`, `/track`, `/model/:id`, `/collection/:id` — not L1 only.
+
+### Pre-commit checklist self-review
+
+Before declaring done, walk `docs/ux/frontend-checklist.md` items relevant to the change. Each category maps to a known bug pattern (cross-component state, async UX feedback, real-data drift, source-of-truth drift, effect deps). Items that don't apply are explicitly skipped (not silently ignored).
+
+### Wallet pause-and-resume
+
+For signed-tx flows (mint, list, buy, collection mint, kiosk purchase), `agent-browser` can't drive the wallet extension popup. Pause with `"PAUSED — sign the <X> in your wallet, then say go"`, wait for the user signal, resume the verification chain (assert tx digest visible, assert success state).
+
+### Default review-pass roster (frontend-touching plans)
+
+When dispatching a code-review pass on a plan modifying files matching the "frontend-touching" heuristic above, include `ce-julik-frontend-races-reviewer` alongside the existing default roster (`ce-correctness-reviewer`, `ce-testing-reviewer`, `ce-api-contract-reviewer`, `ce-adversarial-reviewer`). The 5-reviewer parallel pattern is the default for any frontend-touching plan.
+
+---
+
 ## 🗂 Project Structure
 
 ```
