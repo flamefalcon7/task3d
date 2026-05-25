@@ -1,5 +1,78 @@
 # Phase Progress
 
+## Last Updated: 2026-05-26 (plan-013 UAT walked end-to-end on testnet v8; 3 real bugs fixed mid-UAT; 8 polish-backlog items captured; plan-013 status: completed) — **Next = polish-backlog cleanup (with /track resize first) OR U15 demo recording prep OR mainnet deploy spike.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 26 of 38 · demo day (7/20–21): 55 · winners (8/27): 93
+
+### This session — plan-013 UAT closeout + 3 real-bug fixes + UX gap capture
+
+Walked plan-013's demo arc end-to-end in real Chrome with Slush wallet on testnet v8: `/create` (Tripo two-step + tagging + publish) → `/launch` (per-label palette VariantEditor + build + launch) → `/market` (list + buy + royalty hot-potato) → `/track` (drive). Hit and fixed three real-bug classes that prior unit-test + agent-browser + code-review layers all missed.
+
+**Real bugs surfaced during UAT (all fixed):**
+- `abe4478` **Indexer race** — dapp-kit `signAndExecute` resolves at fullnode execute, but the testnet read-replica RPC (which backend's `paymentVerifier` queries) hasn't indexed yet → 402 `payment_not_found` despite SUI correctly spent. Fix: `suiClient.waitForTransaction({ digest })` between sign and POST. Regression test asserts `signAndExecute → waitForTransaction → fetch` call order.
+- `44edc17` **Self-pay verifier reject** — Sui RPC `balanceChanges` is per-address NET; when sender == TRIPO_FEE_TREASURY (deployer pays themselves, hackathon default per D-034), the 0.4 SUI in/out cancels to ~-gas and the verifier 402s `payment_insufficient_or_wrong_destination`. Fix: short-circuit acceptance when sender == treasury (fraud model collapses — user can't defraud themselves).
+- `55f0724` **Tripo URL fallback regression** — `mesh_segmentation` task returns URL in `output.model`, but production `pollTask` only tried 4 field names. The deleted two-step spike (`0ba975c`) had the 5th fallback; refactor dropped it. Step 2 silently 500'd after ~180s with `TripoFormatError: Tripo task done but no model URL field found`. Fix: restore `output.model` + diagnostic console.error logging output keys when ALL fields fail.
+
+All three were inherited code (not in plan-013's diff), classic plan-014 checklist category-3 hits (real-data vs fixture drift — unit tests mocked the failure surfaces away). UAT was the only layer that could catch them.
+
+**D-053 + SignConfirmation component (plan-013 UX gap fix):**
+- `6989fad` ADR + `frontend/src/ux/SignConfirmation.tsx` + 6 unit tests + integration on `/create` Tripo fee trigger.
+- Drove by Slush popup rendering `splitCoins` u64 inputs as raw BCS hex (`0x4000…` form) in a collapsed details section instead of as a "Send 0.4 SUI to X" headline. Research confirmed our PTB is canonical, Slush UX limitation, no SDK fix exists; published Sui-ecosystem principle (Ethos engineering writeup) assigns this responsibility to the dApp layer.
+- Pattern: in-app pre-sign confirmation panel (summary + recipient + walletCaveat) before any wallet popup. Extends incrementally to other PTB sites (publish, build, list, buy) as touched.
+
+**Polish-backlog captures (`410d443`, `543c00c`, `199e208` — 8 items):**
+- §0 cross-cutting — PreviewCanvas / TaggingCanvas BG toggle (BLACK / PAPER / GRAY) for dark Tripo meshes vanishing into D-044 black wells.
+- §1 /create — L1 tagging step custom-label nudge + two-step Tripo timing UX (`~30S TYPICAL` → `~120S` etc).
+- §1 /create — Tripo task IDs surfaced in UI after success + Tripo model_version selector (Turbo / v2.5 / P1) promoted from POST to NICE (niche concepts like "shuriken" fail on Turbo).
+- §2 /launch — REGISTER FEE FOR GAME DEVS label needs explanation tooltip (it's D-013 `integration_fee_mist` for game integrators).
+- §2 /launch — Walrus upload silent during BUILD VARIANTS.
+- §2 /launch — VariantEditor column-to-mesh visual mapping (user confirmed design intent A correct + UX gap D — no visual link between abstract column header and the mesh parts it drives).
+- §4 /track — **Dynamic mesh resize on load** (demo-blocking — Tripo-bought cars appear as ants on the racetrack because Tripo native scale is non-deterministic vs. the procedural cars the track was sized for).
+
+**Plan-013 status: `active → completed` (this session).** All technical acceptance criteria met. Remaining items are polish, captured.
+
+### Live testnet state (v8 — proven end-to-end this session)
+- Package `0x9e673aa7…` · Publisher `0xd966383…` · TransferPolicy<NftToken> `0x308fc893…`.
+- First Model3D, NftCollection, and NftToken objects created on v8 during this UAT. List + buy on Sui Kiosk verified with the royalty-only hot-potato.
+- `/track` drives the bought car, just visually too small (resize fix item §4).
+
+### Open / deferred (carried forward)
+- 8 polish-backlog items above — prioritize `/track resize` (demo-blocking) → `/launch column-to-mesh mapping` (highest learning-curve fix) → others.
+- **U15 demo recording + pitch deck + README + honest disclosure + logo** — biggest remaining item for 6/21.
+- **Mainnet deploy** — 8/27 = 100% prize threshold.
+- **Network-mismatch guard** — still not built.
+- **`TestWalletAdapter` fixture** — plan-014 deferred; only revisit if overnight regression sweep becomes blocking.
+- Pre-existing: stale-listing → buy abort cascade (CR adv-003), full-test-suite StrictMode wrap, `/dev/compare` route hide.
+
+### Next concrete step
+Pick ONE next session:
+
+1. **Polish-backlog sweep** (~2-4 hr) — `/track` resize first (30 min, demo-blocking visual quality) → `/launch` column-to-mesh visual mapping (1-2 hr, highest UX leverage) → other items as time permits. Best path if you want demo recording to look right.
+2. **U15 demo recording prep** (~half day) — 4-actor screencap script, pitch deck (4 vibe mockups re-render to `pitch/`), README hero + honest disclosure. Best path if you want to lock in submission early.
+3. **Mainnet deploy spike** (~3-5 hr) — Walrus mainnet cost estimate, Move package republish to mainnet, `networkConfig.ts` switch, `.env` mainnet RPC. Best path if you want to front-load the 8/27 prize threshold.
+
+Recommend (1) before (2) — a few hours of polish lifts the demo recording quality more than the polish hours cost. (3) can run in parallel later.
+
+### Commits this session (on main, no remote)
+- `f432594` docs(phase-progress) — plan-013 UAT pending framing
+- `6989fad` feat(ux): D-053 SignConfirmation
+- `abe4478` fix(create): waitForTransaction
+- `44edc17` fix(verifier): self-pay accept
+- `55f0724` fix(tripo): restore output.model
+- `410d443` docs(ux): polish-backlog batch 1
+- `543c00c` docs(ux): polish-backlog batch 2
+- `199e208` docs(ux): polish-backlog Tripo notes
+- this commit: phase-progress + plan-013 status
+
+### Notes for next session
+- Tagging step UX was the user's biggest learning-curve complaint. L1 tagging UX (encourage custom labels) + L2 part-to-label visual mapping must ship as a pair, or the L2 confusion recurs (per polish-backlog §2 callout).
+- agent-browser pre-check (plan-014's tool) caught zero of this session's UAT bugs — all 3 were wallet-mediated. Reinforces plan-014 §Scope Boundaries call-out that wallet flows need either real-Chrome manual or TestWalletAdapter. agent-browser still useful for DOM render + empty-state checks.
+- The 3 bug fixes are all "inherited code" (not in plan-013's own diff). Code review focused on the diff doesn't audit unchanged paths. Worth a `docs/solutions/` write-up on these three patterns so future ce-learnings-researcher dispatches catch them: (1) Sui RPC propagation race + wait-for-indexing, (2) sender-equals-treasury balance-change netting, (3) Tripo URL field-name drift + diagnostic logging.
+- Plan-014 SignConfirmation pattern only on /create Tripo fee; extend to other PTB sites incrementally.
+
+---
+
 ## Last Updated: 2026-05-25 (plan-013 UAT started but NOT completed — sidetracked into a `useSession` bugfix + plan-014 frontend UAT enablement; branches consolidated to single main) — **Next = RESUME plan-013 UAT on testnet v8 demo arc (the original goal of this session).**
 
 ### Hackathon Tracker
