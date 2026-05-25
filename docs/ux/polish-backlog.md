@@ -81,6 +81,11 @@ These touch every screen. Do these first.
 - Tripo model-version selector (currently hardcoded to Turbo-v1.0).
 - Saved prompts / prompt history.
 
+### NICE — plan-013 UAT findings (2026-05-26)
+
+- **Two-step Tripo task IDs surfaced in UI after success.** User confusion during UAT: opened Tripo dashboard, saw the most-recent task with empty prompt, thought our app wasn't passing the prompt. The empty-prompt task is `mesh_segmentation` (step 2) which by API design doesn't accept a prompt — it references step 1's `original_model_task_id`. The `text_to_model` (step 1) task DOES carry the prompt, but it's one entry down in the dashboard. Fix: after generation succeeds, show a small mono line `— TRIPO STEP 1: <taskId1> · STEP 2: <taskId2>` so the user can map dashboard entries back to our flow.
+- **Tripo model_version selector — promote from POST to NICE.** Hardcoded `Turbo-v1.0-20250506` produces poor results for niche concepts (e.g., "shuriken" came back as something unrelated). Allow user to opt into v2.5 / P1 in the prompt UI with cost + time disclosure (Turbo ~15cr / ~15s, v2.5 ~30cr / ~25s, P1 ~50cr / ~40s). May affect TRIPO_FEE_MIST tiering (D-051 currently flat 0.4 SUI; would need per-version pricing OR keep flat and accept margin compression for higher-quality models).
+
 ### MUST — plan-013 tagging step (surfaced during UAT 2026-05-25)
 
 The TaggingStep (U5/U6) renders the segmented mesh + a label picker per
