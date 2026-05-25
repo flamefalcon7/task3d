@@ -16,6 +16,8 @@ import {
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
 import { frameCameraToMeshes } from './PreviewCanvas';
+import { BG_PALETTE, type BgKey, useBgCycle } from './bgPalette';
+import { BgTogglePill } from './BgTogglePill';
 import { tokens, viewerWell } from '../ux/tokens';
 
 // plan-013 U5 — click-to-select Babylon picker for L1 tagging UX. Sibling to
@@ -38,9 +40,20 @@ interface TaggingCanvasProps {
    * palette + drive the "N of M labeled" progress indicator (U6).
    */
   onLoaded?: (meshCount: number) => void;
+  /** Initial well background — defaults to D-044 black. */
+  defaultBg?: BgKey;
+  /** Render the BG cycle pill in the well's top-right. Default true. */
+  bgToggle?: boolean;
 }
 
-export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }: TaggingCanvasProps) {
+export function TaggingCanvas({
+  glbUrl,
+  selectedIndex,
+  onPartSelect,
+  onLoaded,
+  defaultBg = 'black',
+  bgToggle = true,
+}: TaggingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -63,6 +76,7 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
   // PreviewCanvas WireframePlaceholder pattern for symmetry. Resets to false
   // whenever `glbUrl` changes so the overlay reappears between loads.
   const [meshLoaded, setMeshLoaded] = useState(false);
+  const { entry: bgEntry, cycle: cycleBg } = useBgCycle(defaultBg);
 
   useEffect(() => {
     onPartSelectRef.current = onPartSelect;
@@ -76,7 +90,8 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
     const scene = new Scene(engine);
-    scene.clearColor.set(0, 0, 0, 1);
+    const [r0, g0, b0] = BG_PALETTE[defaultBg].rgb;
+    scene.clearColor.set(r0, g0, b0, 1);
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
     camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;
@@ -158,6 +173,14 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
     };
   }, [glbUrl]);
 
+  // Reactively update the scene clearColor when the user cycles BG.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const [r, g, b] = bgEntry.rgb;
+    scene.clearColor.set(r, g, b, 1);
+  }, [bgEntry]);
+
   useEffect(() => {
     const hl = highlightRef.current;
     if (!hl) return;
@@ -201,6 +224,13 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
           </svg>
           <span style={loadingLabel}>— LOADING MESH</span>
         </div>
+      )}
+      {bgToggle && (
+        <BgTogglePill
+          entry={bgEntry}
+          onCycle={cycleBg}
+          testId="tagging-bg-toggle-pill"
+        />
       )}
     </div>
   );

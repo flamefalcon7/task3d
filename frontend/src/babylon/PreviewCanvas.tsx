@@ -10,6 +10,8 @@ import {
   Vector3,
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
+import { BG_PALETTE, type BgKey, useBgCycle } from './bgPalette';
+import { BgTogglePill } from './BgTogglePill';
 
 // Frame the ArcRotateCamera so the loaded mesh fills the box regardless of its
 // authored scale — Tripo/uploaded GLBs range from sub-unit to tens of units, so
@@ -42,20 +44,30 @@ export function frameCameraToMeshes(camera: ArcRotateCamera, meshes: AbstractMes
   camera.wheelDeltaPercentage = 0.01;
 }
 
+interface PreviewCanvasProps {
+  glbUrl: string | null;
+  /** Initial well background — defaults to D-044 black. */
+  defaultBg?: BgKey;
+  /** Render the BG cycle pill in the well's top-right. Default true. */
+  bgToggle?: boolean;
+}
+
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). useEffect builds
 // Engine/Scene/Camera/Light once; a second effect swaps assets when glbUrl
 // changes. ResizeObserver keeps the canvas matched to its CSS box.
-export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
+export function PreviewCanvas({ glbUrl, defaultBg = 'black', bgToggle = true }: PreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const containerRef = useRef<AssetContainer | null>(null);
+  const { bg, entry, cycle } = useBgCycle(defaultBg);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
     const scene = new Scene(engine);
-    scene.clearColor.set(0, 0, 0, 1); // pure-black well per D-044
+    const [r, g, b] = BG_PALETTE[defaultBg].rgb;
+    scene.clearColor.set(r, g, b, 1); // initial well bg (plan-013 polish: cyclable via BgTogglePill)
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
     camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;
@@ -76,7 +88,18 @@ export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
       sceneRef.current = null;
       containerRef.current = null;
     };
+    // defaultBg is read once on mount; subsequent changes are driven by the
+    // useBgCycle hook via a separate effect (the scene must already exist).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reactively update the scene clearColor when the user cycles BG.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const [r, g, b] = entry.rgb;
+    scene.clearColor.set(r, g, b, 1);
+  }, [entry]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -114,5 +137,17 @@ export function PreviewCanvas({ glbUrl }: { glbUrl: string | null }) {
     };
   }, [glbUrl]);
 
-  return <canvas ref={canvasRef} data-testid="preview-canvas" style={{ width: '100%', height: '100%', display: 'block' }} />;
+  // Wrap the canvas so the absolute-positioned BG pill anchors to the well.
+  // `position: relative` is required; the rest mirrors the bare-canvas size.
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <canvas
+        ref={canvasRef}
+        data-testid="preview-canvas"
+        data-bg={bg}
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      />
+      {bgToggle && <BgTogglePill entry={entry} onCycle={cycle} />}
+    </div>
+  );
 }
