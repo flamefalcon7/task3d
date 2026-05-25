@@ -596,11 +596,19 @@ export function CreateModelPage() {
   const haveModel = glb !== null;
   const genBusy = genStatus === 'paying' || genStatus === 'generating';
 
+  // plan-013 / polish-backlog §1 — Tripo is a two-step API (text_to_model
+  // ≈ 15-30s, then mesh_segmentation ≈ 60-90s). The backend hides the
+  // split, but at 70+ seconds of a single "GENERATING" pill users start
+  // to believe it's stuck. Split the label on a 30s threshold — imprecise
+  // but enough to telegraph "two phases, you're still moving."
+  const TRIPO_STEP1_TYPICAL_SECONDS = 30;
   const generateLabel =
     genStatus === 'paying'
       ? `— APPROVING FEE (${genElapsed}s)`
       : genStatus === 'generating'
-        ? `— GENERATING (${genElapsed}s)`
+        ? genElapsed < TRIPO_STEP1_TYPICAL_SECONDS
+          ? `— STEP 1/2: GENERATING MESH (${genElapsed}s)`
+          : `— STEP 2/2: SEGMENTING PARTS (${genElapsed}s)`
         : haveModel
           ? `GENERATE AGAIN (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
           : `PAY ${Number(TRIPO_FEE_MIST) / 1e9} SUI & GENERATE`;
@@ -672,7 +680,7 @@ export function CreateModelPage() {
               />
               {genBusy && (
                 <div style={{ marginTop: 8 }}>
-                  <span style={statusPill}>— SUI FEE-GATED · ~30S TYPICAL</span>
+                  <span style={statusPill}>— SUI FEE-GATED · TWO-STEP, ~120S TYPICAL</span>
                 </div>
               )}
             </div>
