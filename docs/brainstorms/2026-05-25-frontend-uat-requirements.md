@@ -25,7 +25,7 @@ This brainstorm targets the smallest-form fix: give Claude a way to **drive the 
 
 - A1. **Claude (dev-time)**: drives `agent-browser` against `pnpm dev` after every frontend commit, verifying the changed UI surface before declaring done.
 - A2. **Human (pre-demo)**: runs ad-hoc browser smoke before demo-day recording. Click-through demo arc to confirm no regressions.
-- A3. **Wallet (out of scope)**: Sui wallet extension popups remain manual. Claude pauses at signing moments; human clicks.
+- A3. **Wallet (out of scope)**: Sui wallet extension popups cannot be driven by `agent-browser` in v1 — its isolated Chromium ships without the user's installed wallet extension, so "pause and ask the user to click" doesn't work for wallet flows (nothing to click in `agent-browser`'s window). Validation splits: agent-browser drives the pre-wallet UI (Connect / Sign In button visible + clickable); the user separately runs the wallet-signed step in their real Chrome and reports state back. **Discovered during plan-014 U4 install — see Dependencies / Assumptions below for the original misframing.**
 
 ---
 
@@ -56,7 +56,7 @@ This brainstorm targets the smallest-form fix: give Claude a way to **drive the 
 - **R2.** Hard rule in CLAUDE.md: any commit that changes user-visible frontend behavior MUST be browser-driven by Claude before declaring done. Wallet-blocking moments handle via "Claude pauses, user clicks".
 - **R3.** Write `docs/ux/frontend-checklist.md` codifying the 5 bug-pattern categories observed in plans 005–013 (see Key Decisions below). Each category includes "when this applies" + "what to check" + at least one observed-bug example.
 - **R4.** Add `ce-julik-frontend-races-reviewer` to the default review-pass roster for frontend-touching plans. CLAUDE.md call-out alongside the existing review-pass guidance.
-- **R5.** The `agent-browser` workflow handles the no-fixture wallet path explicitly: Claude announces "PAUSED — sign in the wallet, then say `go`" when a popup blocks; resumes on user signal.
+- **R5.** The `agent-browser` workflow handles two pause kinds: (a) **non-wallet OS-level prompts inside agent-browser's Chromium** (file picker, OAuth redirect tab) — Claude announces "PAUSED — <X>, then say `go`", the user clicks in agent-browser's window, Claude resumes; (b) **wallet-gated flows** — agent-browser cannot validate these in v1 because its Chromium has no wallet extension. Claude drives the pre-wallet portion, then either escalates to user-driven real-Chrome side-channel for the signed step or documents the post-wallet state as untested. The "PAUSED — sign in the wallet" handoff originally drafted here does NOT apply to wallet flows in v1.
 - **R6.** The checklist is enforced via Claude's pre-commit self-review (F2), not lint or CI. Failure mode is human-readable, not automated.
 - **R7.** Scope is the full demo arc (`/`, `/create`, `/launch`, `/market`, `/track`, `/model/:id`, `/collection/:id`), not L1-only. Without a fixture trade-off, the natural scope is "anywhere I touch frontend."
 
@@ -68,7 +68,7 @@ This brainstorm targets the smallest-form fix: give Claude a way to **drive the 
 - **AE2.** I refactor `useSession` to a shared store. I drive `agent-browser` through: sign-in → assert UI updates without reload → navigate to `/create` → assert metadata form is unlocked. Without the agent-browser step, the bug shipped in `69ef26a` (sign-in required refresh) reappears unnoticed.
 - **AE3.** Frontend code review pass on a multi-file UI change automatically dispatches `ce-julik-frontend-races-reviewer` alongside `ce-correctness-reviewer` / `ce-testing-reviewer` / `ce-api-contract-reviewer`. The 5-reviewer parallel pattern from plan-013 becomes the default for any frontend-touching plan.
 - **AE4.** I add a new `useEffect` with a ref. The checklist's "useRef + useEffect = setup-and-cleanup symmetric" item fires; I confirm the pattern is correct OR fix it. Without the checklist, the bug shipped in `react-strictmode-cleanup-only-effect-with-useref-2026-05-23.md` reappears.
-- **AE5.** A signed-tx flow (mint / launch) requires the user to click the wallet popup. Claude says "PAUSED — sign the publish PTB in your wallet, then say `go`". User signs, says `go`. Claude resumes the verification chain (assert tx digest visible, assert success state).
+- **AE5.** A signed-tx flow (mint / launch) is validated in two parts: (1) `agent-browser` drives the pre-wallet UI on the demo arc and asserts the Sign / Mint button is visible and clickable; (2) the user separately runs the wallet-signed step in their real Chrome (with Slush installed) and reports the post-sign state, which Claude then asserts against. The original "PAUSED — sign in your wallet" single-browser handoff is not feasible in v1 — agent-browser's Chromium has no wallet extension.
 
 ---
 
@@ -149,7 +149,7 @@ Any commit modifying files under `frontend/src/**/*.tsx`, `frontend/src/**/*.ts`
 
 - `agent-browser` CLI is installable via `/ce-setup`. The compound-engineering plugin already exposes the skill (`ce-test-browser`); no code we own is gating this.
 - `agent-browser` can drive the local Vite dev server without certificate / proxy / WASM issues. **Unverified assumption** until installed — first task in the plan is sanity-check.
-- The user is present during dev iteration (sufficient frequency to click wallet popups). True today; if the workflow shifts to autonomous overnight runs, the fixture moves back into scope.
+- ~~The user is present during dev iteration (sufficient frequency to click wallet popups). True today; if the workflow shifts to autonomous overnight runs, the fixture moves back into scope.~~ **Assumption that broke during plan-014 U4 install:** the wallet pause-and-resume protocol was drafted assuming `agent-browser` would drive the user's real browser (where Slush is installed). `agent-browser` actually uses its own isolated Chromium — the wallet extension isn't there. This narrows v1 wallet-flow validation to the pre-wallet UI surface only. The `TestWalletAdapter` fixture stays deferred per the cost/benefit framing, but the v1 scope is narrower than originally implied. AE2 (sign-in broadcast regression) and AE5 (signed-tx flow) both require either user-driven real-Chrome validation or the fixture.
 - `ce-julik-frontend-races-reviewer` is callable in parallel with the existing 4-reviewer set. Verified in plan-013's review pass.
 - The Babylon canvas (3D content correctness) remains an unsolved verification surface. Acceptable for v1.
 - 28 days to submission (2026-06-21). Any investment > half a day must be justified against demo-day risk; this plan is < half a day.

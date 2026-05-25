@@ -160,9 +160,14 @@ The verification surface is the **full demo arc** — `/`, `/create`, `/launch`,
 
 Before declaring done, walk `docs/ux/frontend-checklist.md` items relevant to the change. Each category maps to a known bug pattern (cross-component state, async UX feedback, real-data drift, source-of-truth drift, effect deps). Items that don't apply are explicitly skipped (not silently ignored).
 
-### Wallet pause-and-resume
+### Wallet pause-and-resume — and where it doesn't apply
 
-For signed-tx flows (mint, list, buy, collection mint, kiosk purchase), `agent-browser` can't drive the wallet extension popup. Pause with `"PAUSED — sign the <X> in your wallet, then say go"`, wait for the user signal, resume the verification chain (assert tx digest visible, assert success state).
+`agent-browser` uses an isolated Chromium **without** the user's installed Sui wallet extension. Wallet-gated flows cannot be driven end-to-end in v1. Validation splits in two:
+
+- **Pre-wallet portion** — `agent-browser` drives up to (and including) the "Connect Wallet" / "Sign In" button. Assert the button is visible, enabled, and clickable. This validates the gating UI, not the post-sign-in state.
+- **Post-wallet portion** — the user runs the wallet-signed step in their own real Chrome (with Slush installed) and reports back. Claude asserts against the reported state.
+
+The `"PAUSED — <X>, then say go"` handoff applies only to **non-wallet** pauses inside `agent-browser`'s Chromium (file picker dialog, OAuth tab, etc.) — there the user can actually click in agent-browser's window. For wallet flows there is nothing to click in that window, so the handoff doesn't work. End-to-end wallet automation is deferred to a `TestWalletAdapter` fixture (see `docs/brainstorms/2026-05-25-frontend-uat-requirements.md` §Scope Boundaries).
 
 ### Default review-pass roster (frontend-touching plans)
 
