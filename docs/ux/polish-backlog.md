@@ -77,6 +77,38 @@ These touch every screen. Do these first.
 - Tripo model-version selector (currently hardcoded to Turbo-v1.0).
 - Saved prompts / prompt history.
 
+### MUST — plan-013 tagging step (surfaced during UAT 2026-05-25)
+
+The TaggingStep (U5/U6) renders the segmented mesh + a label picker per
+part, but the operation model is unintuitive on first contact. User
+quote during UAT: "label 不為（我）我無法理解要怎麼操作". Needs:
+
+- **Inline instruction text** above the canvas explaining the loop:
+  `1. Click a part in the model. 2. Pick or type a label. 3. Repeat
+  for every part. Continue is enabled once all N parts are labeled.`
+- **Progress affordance** — `(0 of N labeled)` counter is in the DOM
+  but lost in the layout. Should be a prominent mono pill near the
+  Continue button, not buried.
+- **Selected-part feedback** — when a part is clicked, the highlight
+  works but the label dropdown's focus + the part's location in the
+  list aren't obviously connected. Consider:
+  - Auto-scrolling the label list to the selected part's row, OR
+  - A persistent "SELECTED: PART N" status above the dropdown
+- **First-use hint** — when no part is selected yet, the dropdown is
+  effectively disabled context. Show "Click a part to label it" as
+  placeholder text inside the dropdown affordance, not just empty.
+- **Step framing** — the user mentally needs to know they're between
+  Tripo generate and the metadata form. An eyebrow `— STEP 2/3:
+  TAG PARTS` (or similar 3-step indicator) sets expectations.
+
+Two-step Tripo timing UX (also surfaced same UAT):
+
+- **Status pill** still reads `~30S TYPICAL` from the pre-plan-013
+  single-step flow. Should be `~120S TWO-STEP TYPICAL`.
+- **Button label** during gen could split steps: `— STEP 1/2:
+  GENERATING MESH (35s)` then `— STEP 2/2: SEGMENTING PARTS (Xs)`.
+  Avoid the "is it stuck?" feeling at 70-180s of opaque GENERATING.
+
 ---
 
 ## 2. `/launch` — Creator forks into a collection with token variants
