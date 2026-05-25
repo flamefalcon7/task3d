@@ -57,6 +57,19 @@ export function createPaymentVerifier(opts: PaymentVerifierOptions): PaymentVeri
       );
       if (sender !== normalizeAddr(payer)) return { ok: false, reason: 'payment_sender_mismatch' };
 
+      // Hackathon scope: TRIPO_FEE_TREASURY defaults to the deployer's wallet
+      // (D-034). When the deployer themselves runs /create, sender == treasury
+      // and Sui's per-address NET balanceChanges nets the 0.4 SUI in/out to
+      // approximately -gas — the positive +0.4 entry never appears. The fraud
+      // model collapses: the payer would have to defraud themselves to bypass
+      // payment, which is impossible. Accept on identity, defer to the spent
+      // Set for replay guard. Production with a distinct treasury falls
+      // through to the balance-change check below as normal.
+      if (sender === treasury) {
+        spent.add(digest);
+        return { ok: true };
+      }
+
       const balanceChanges =
         (tx as {
           balanceChanges?: Array<{

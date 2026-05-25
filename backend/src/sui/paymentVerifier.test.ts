@@ -91,4 +91,39 @@ describe('paymentVerifier', () => {
     const v = verifier(vi.fn().mockResolvedValue(txBlock({ amount: (FEE * 2n).toString() })));
     expect(await v.verify(DIGEST, PAYER)).toEqual({ ok: true });
   });
+
+  it('accepts when sender == treasury (deployer pays themselves, D-034 demo)', async () => {
+    // Hackathon scope: TRIPO_FEE_TREASURY defaults to the deployer's wallet.
+    // When the deployer triggers /create, sender == treasury and Sui's
+    // per-address NET balanceChanges nets the 0.4 SUI in/out to ~-gas —
+    // the positive +0.4 entry never appears. Without this short-circuit
+    // verifier 402s with `payment_insufficient_or_wrong_destination`
+    // even though the SUI was correctly spent on chain.
+    const selfPayTx = {
+      effects: { status: { status: 'success' } },
+      transaction: { data: { sender: TREASURY } }, // sender == treasury
+      balanceChanges: [
+        {
+          owner: { AddressOwner: TREASURY },
+          coinType: '0x2::sui::SUI',
+          amount: '-1000000', // net = -gas only
+        },
+      ],
+    };
+    const v = verifier(vi.fn().mockResolvedValue(selfPayTx));
+    expect(await v.verify(DIGEST, TREASURY)).toEqual({ ok: true });
+  });
+
+  it('replay guard fires on self-pay path too', async () => {
+    const selfPayTx = {
+      effects: { status: { status: 'success' } },
+      transaction: { data: { sender: TREASURY } },
+      balanceChanges: [
+        { owner: { AddressOwner: TREASURY }, coinType: '0x2::sui::SUI', amount: '-1000000' },
+      ],
+    };
+    const v = verifier(vi.fn().mockResolvedValue(selfPayTx));
+    expect(await v.verify(DIGEST, TREASURY)).toEqual({ ok: true });
+    expect(await v.verify(DIGEST, TREASURY)).toEqual({ ok: false, reason: 'payment_replayed' });
+  });
 });
