@@ -441,6 +441,10 @@ export function CreateModelPage() {
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  // Plan-013 UAT polish: writeBlobFlow's silent phases (encoding + relay-
+  // upload) can run 5-10s with no signal. Tick an elapsed counter while
+  // the mint operation is active so the user has something to track.
+  const [mintElapsed, setMintElapsed] = useState(0);
 
   const { session, clearSession } = useSession();
   const account = useCurrentAccount();
@@ -464,6 +468,18 @@ export function CreateModelPage() {
     const id = setInterval(() => setGenElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
     return () => clearInterval(id);
   }, [genStatus]);
+
+  // Tick the elapsed-seconds counter while minting (covers the silent
+  // Walrus encode/relay-upload phases so the user has visible feedback).
+  useEffect(() => {
+    if (mintStatus !== 'uploading' && mintStatus !== 'signing') {
+      setMintElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => setMintElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [mintStatus]);
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
@@ -803,6 +819,15 @@ export function CreateModelPage() {
                 errorMessage={mintError ?? undefined}
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
+              {mintStatus === 'uploading' && (
+                <div style={{ marginTop: 8 }}>
+                  <span style={statusPill} data-testid="mint-upload-status-pill">
+                    {uploadStage === 'awaiting-register' || uploadStage === 'awaiting-certify'
+                      ? `— WAITING FOR WALLET (${mintElapsed}s)`
+                      : `— UPLOADING TO WALRUS (${mintElapsed}s)`}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
