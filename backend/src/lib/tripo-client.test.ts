@@ -145,6 +145,21 @@ describe('TripoClient', () => {
       expect(result.url).toBe('https://cdn/y.glb');
     });
 
+    it('falls back to output.model field — used by mesh_segmentation task', async () => {
+      // Plan-013 UAT regression guard: production code dropped this fallback
+      // during the spike→prod refactor and step 2 (mesh_segmentation) 500'd
+      // with "no model URL field found" until restored. The two-step Tripo
+      // spike (deleted in 0ba975c) had it.
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: { status: 'success', output: { model: 'https://cdn/seg.glb' } },
+        }),
+      );
+      const client = new TripoClient('key');
+      const result = await client.pollTask('t1', { sleep: noSleep });
+      expect(result.url).toBe('https://cdn/seg.glb');
+    });
+
     it('throws TripoFailedError on failed status', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { status: 'failed' } }));
       const client = new TripoClient('key');

@@ -193,12 +193,27 @@ export class TripoClient {
         const output = body?.data?.output ?? {};
         // Tripo's GLB URL field has shifted across API revisions; try the known
         // names in order of likelihood before declaring a format error.
+        // `output.model` is the field used by `mesh_segmentation` task (validated
+        // against the original two-step spike — production code dropped this
+        // fallback during refactor; surfaced when plan-013's first real UAT
+        // failed at step 2 with "no model URL field found").
         const url =
           (output.pbr_model as string | undefined) ||
           (output.glb_url as string | undefined) ||
           (output.model_url as string | undefined) ||
-          (output.output_url as string | undefined);
-        if (!url) throw new TripoFormatError('Tripo task done but no model URL field found');
+          (output.output_url as string | undefined) ||
+          (output.model as string | undefined);
+        if (!url) {
+          // Log the output shape so future Tripo API field-name drift surfaces
+          // immediately instead of being a black-box 500 to the user.
+          // eslint-disable-next-line no-console
+          console.error(
+            `[tripo] task ${taskId} done but no URL field matched; output keys=${Object.keys(
+              output,
+            ).join(',')}; output=${JSON.stringify(output).slice(0, 500)}`,
+          );
+          throw new TripoFormatError('Tripo task done but no model URL field found');
+        }
         return { url };
       }
       if (FAIL_STATUSES.has(status)) {
