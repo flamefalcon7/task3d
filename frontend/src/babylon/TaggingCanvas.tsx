@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   type AbstractMesh,
   ArcRotateCamera,
@@ -56,6 +57,12 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
   // a slow first load from overwriting state populated by a faster second
   // load (real on cache-hit churn or rapid base re-pick).
   const loadTokenRef = useRef(0);
+  // UX-G2 fix — local "mesh loaded" flag drives the wireframe-cube overlay.
+  // Until LoadAssetContainerAsync resolves, the canvas is a pure-black well
+  // with no visual indication that anything is happening; mirrors the
+  // PreviewCanvas WireframePlaceholder pattern for symmetry. Resets to false
+  // whenever `glbUrl` changes so the overlay reappears between loads.
+  const [meshLoaded, setMeshLoaded] = useState(false);
 
   useEffect(() => {
     onPartSelectRef.current = onPartSelect;
@@ -109,6 +116,9 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !glbUrl) return;
+    // UX-G2 — clear the loaded flag so the wireframe overlay reappears
+    // while a new glbUrl loads (e.g., parent swaps the base mesh).
+    setMeshLoaded(false);
     // Capture this effect run's token. Increment so any prior in-flight load
     // sees its captured token != latestRef.current and bails before mutating
     // shared refs. The per-effect `cancelled` flag only guards the cleanup
@@ -132,6 +142,7 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
           (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
         );
         onLoadedRef.current?.(meshesRef.current.length);
+        setMeshLoaded(true);
 
         const camera = scene.activeCamera;
         if (camera instanceof ArcRotateCamera) {
@@ -174,6 +185,42 @@ export function TaggingCanvas({ glbUrl, selectedIndex, onPartSelect, onLoaded }:
         data-testid="tagging-canvas"
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
+      {!meshLoaded && (
+        <div data-testid="tagging-canvas-loading" style={loadingOverlay} aria-hidden>
+          <svg width="80" height="80" viewBox="0 0 100 100">
+            <g
+              fill="none"
+              stroke="rgba(255,255,255,0.4)"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+            >
+              <path d="M 20 30 L 50 15 L 80 30 L 80 70 L 50 85 L 20 70 Z" />
+              <path d="M 20 30 L 50 45 L 80 30" />
+              <path d="M 50 45 L 50 85" />
+            </g>
+          </svg>
+          <span style={loadingLabel}>— LOADING MESH</span>
+        </div>
+      )}
     </div>
   );
 }
+
+const loadingOverlay: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  pointerEvents: 'none',
+};
+
+const loadingLabel: CSSProperties = {
+  fontFamily: tokens.font.mono,
+  fontSize: 10,
+  letterSpacing: '1.5px',
+  textTransform: 'uppercase',
+  color: 'rgba(255,255,255,0.5)',
+};

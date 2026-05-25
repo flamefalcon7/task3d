@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 
 // Track per-test instances of the mocked Babylon primitives so tests can
 // inspect calls and drive the pointer observable callback manually.
@@ -139,6 +139,23 @@ describe('TaggingCanvas', () => {
   it('renders a canvas element', () => {
     render(<TaggingCanvas glbUrl={null} selectedIndex={null} onPartSelect={() => {}} />);
     expect(screen.getByTestId('tagging-canvas').tagName).toBe('CANVAS');
+  });
+
+  it('UX-G2 — renders loading overlay until a GLB has loaded; clears after', async () => {
+    const { rerender } = render(
+      <TaggingCanvas glbUrl={null} selectedIndex={null} onPartSelect={() => {}} />,
+    );
+    // No glbUrl → overlay stays up (nothing to load).
+    expect(screen.getByTestId('tagging-canvas-loading')).toBeTruthy();
+    // Provide a glbUrl → overlay clears once the async load resolves +
+    // React commits the setMeshLoaded(true) re-render.
+    rerender(
+      <TaggingCanvas glbUrl="blob:http://localhost/abc" selectedIndex={null} onPartSelect={() => {}} />,
+    );
+    expect(screen.getByTestId('tagging-canvas-loading')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.queryByTestId('tagging-canvas-loading')).toBeNull(),
+    );
   });
 
   it('calls LoadAssetContainerAsync with pluginExtension when glbUrl is provided', async () => {

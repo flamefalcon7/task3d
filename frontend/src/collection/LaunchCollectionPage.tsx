@@ -60,6 +60,7 @@ const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
 
 type Phase =
   | 'picking'
+  | 'downloading-base'
   | 'editing-variants'
   | 'building-variants'
   | 'uploading'
@@ -254,7 +255,11 @@ export function LaunchCollectionPage() {
     // for legacy bases). Switching between bases of different label shapes
     // is rare during a launch session but supported via this reset.
     setEditorState(newVariantEditorState(deriveUniqueLabels(model.partLabels)));
-    setPhase('building-variants'); // reuse spinner state while the GLB downloads
+    // UX-G1 fix — distinct phase so the launch button label reads
+    // "DOWNLOADING BASE MESH…" instead of the misleading "BUILDING 1 VARIANTS"
+    // (we haven't built anything yet; we're just fetching the base GLB from
+    // the Walrus aggregator before the editor opens).
+    setPhase('downloading-base');
     try {
       const res = await fetch(`${WALRUS_AGGREGATOR}/v1/blobs/${model.glbBlobId}`);
       if (!res.ok) throw new Error(`Walrus aggregator ${res.status} for the base GLB`);
@@ -413,9 +418,13 @@ export function LaunchCollectionPage() {
   }
 
   const busy =
-    phase === 'building-variants' || phase === 'uploading' || phase === 'signing';
+    phase === 'downloading-base' ||
+    phase === 'building-variants' ||
+    phase === 'uploading' ||
+    phase === 'signing';
 
   const launchLabel = (() => {
+    if (phase === 'downloading-base') return '— DOWNLOADING BASE MESH…';
     if (phase === 'building-variants') return `— BUILDING ${editorState.variants.length} VARIANTS`;
     if (phase === 'uploading') {
       if (uploadStage === 'awaiting-register') return 'Step 1 of 3 — approve Walrus register…';
@@ -426,6 +435,14 @@ export function LaunchCollectionPage() {
     if (phase === 'success') return 'LAUNCHED';
     return `LAUNCH COLLECTION (${editorState.variants.length} TOKENS) →`;
   })();
+
+  // UX-G3 fix — PREVIEW button reflects its own action while a build is in
+  // flight (otherwise it just goes disabled with stale text). Other phases
+  // keep the static label so the button reads as the intended action.
+  const previewLabel =
+    phase === 'building-variants'
+      ? `— BUILDING ${editorState.variants.length} VARIANTS…`
+      : 'PREVIEW VARIANTS';
 
   return (
     <div data-testid="launch-page" style={pagePaper}>
@@ -530,7 +547,7 @@ export function LaunchCollectionPage() {
                 data-testid="preview-button"
                 style={buttonOutline}
               >
-                PREVIEW VARIANTS
+                {previewLabel}
               </button>
               <button
                 type="button"
