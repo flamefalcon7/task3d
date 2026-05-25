@@ -71,6 +71,22 @@ function writeStoredSession(session: Session | null) {
   }
 }
 
+// Cross-component sync. Previously each `useSession()` call kept its own
+// `useState`, so a `setSession` inside SignInButton updated only that
+// component's state — CreateModelPage / LaunchCollectionPage / TopNav each
+// held a stale snapshot and only reflected the new session after a page
+// reload re-read localStorage on mount. Fix: broadcast every write via a
+// CustomEvent on `window`; every `useSession()` instance listens and
+// mirrors the change into its local state. Same source of truth without
+// hoisting module-level state (which broke test isolation by initializing
+// once at import time).
+const SESSION_EVENT = 'overflow2026:session-changed';
+
+function broadcastSession(next: Session | null) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(SESSION_EVENT, { detail: next }));
+}
+
 export interface UseSession {
   session: Session | null;
   /** Sign a fresh challenge, exchange for JWT, store. Returns the session. */
@@ -94,12 +110,25 @@ export function useSession(): UseSession {
     typeof localStorage === 'undefined' ? null : readStoredSession(),
   );
 
+  // Mirror cross-component writes into this instance's state so every page
+  // that calls useSession() updates immediately, not just on next refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e: Event) => {
+      const next = (e as CustomEvent<Session | null>).detail;
+      setSession(next);
+    };
+    window.addEventListener(SESSION_EVENT, handler);
+    return () => window.removeEventListener(SESSION_EVENT, handler);
+  }, []);
+
   // If the connected wallet address changes (user switches account), wipe
   // the cached session — its JWT is bound to a different address.
   useEffect(() => {
     if (session && account && session.address !== account.address) {
       setSession(null);
       writeStoredSession(null);
+      broadcastSession(null);
     }
   }, [account, session]);
 
@@ -130,12 +159,14 @@ export function useSession(): UseSession {
     const next: Session = { address, jwt };
     setSession(next);
     writeStoredSession(next);
+    broadcastSession(next);
     return next;
   }, [account, signPersonalMessage]);
 
   const clearSession = useCallback(() => {
     setSession(null);
     writeStoredSession(null);
+    broadcastSession(null);
   }, []);
 
   const disconnect = useCallback(() => {

@@ -139,6 +139,26 @@ describe('useSession', () => {
     expect(localStorage.getItem('overflow2026.session')).toBeNull();
   });
 
+  it('cross-component sync — signIn in one hook instance updates a sibling instance', async () => {
+    mockChallengeThenVerify('nonce-broadcast', 'jwt-broadcast');
+    mockSignPersonalMessage.mockResolvedValue({ signature: 'AHN0dWI=' });
+
+    const a = renderHook(() => useSession());
+    const b = renderHook(() => useSession());
+    expect(a.result.current.session).toBeNull();
+    expect(b.result.current.session).toBeNull();
+
+    await act(async () => {
+      await a.result.current.signIn();
+    });
+
+    // Without the SESSION_EVENT broadcast, instance B's local state would
+    // remain null until a page refresh re-read localStorage on mount. The
+    // broadcast forces every live instance to mirror the new value.
+    expect(a.result.current.session?.jwt).toBe('jwt-broadcast');
+    expect(b.result.current.session?.jwt).toBe('jwt-broadcast');
+  });
+
   it('drops an expired stored token on read (gates to sign-in)', () => {
     localStorage.setItem(
       'overflow2026.session',
