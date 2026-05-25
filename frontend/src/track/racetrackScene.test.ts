@@ -24,11 +24,26 @@ const M = vi.hoisted(() => {
     clone() {
       return new Vec3Mock(this.x, this.y, this.z);
     }
+    subtract(o: { x: number; y: number; z: number }) {
+      return new Vec3Mock(this.x - o.x, this.y - o.y, this.z - o.z);
+    }
     static Forward() {
       return new Vec3Mock(0, 0, 1);
     }
     static Up() {
       return new Vec3Mock(0, 1, 0);
+    }
+    static Minimize(
+      a: { x: number; y: number; z: number },
+      b: { x: number; y: number; z: number },
+    ) {
+      return new Vec3Mock(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z));
+    }
+    static Maximize(
+      a: { x: number; y: number; z: number },
+      b: { x: number; y: number; z: number },
+    ) {
+      return new Vec3Mock(Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z));
     }
   }
   return {
@@ -347,12 +362,22 @@ vi.mock('@babylonjs/core', () => {
     // Simulate the typical Tripo/Babylon shape: __root__ TransformNode-ish
     // mesh at index 0 with 0 vertices, real geometry at index 1. KTD-2 says
     // we must pick the vertex-bearing one.
+    // Plan-013 UAT: helper reads computeWorldMatrix + getBoundingInfo to
+    // derive a uniform scale. Return a 2m-cube BB on the geometry mesh so
+    // the helper computes scale = TARGET_CAR_LENGTH / 2 = 1.4 in the test.
     const geometryMesh = {
       position: new M.Vec3Mock(),
       absolutePosition: new M.Vec3Mock(),
       rotate: vi.fn(),
       getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
       getTotalVertices: vi.fn(() => 1024),
+      computeWorldMatrix: vi.fn(),
+      getBoundingInfo: vi.fn(() => ({
+        boundingBox: {
+          minimumWorld: new M.Vec3Mock(-1, -1, -1),
+          maximumWorld: new M.Vec3Mock(1, 1, 1),
+        },
+      })),
       parent: null as unknown,
     };
     const meshes = [
@@ -362,6 +387,13 @@ vi.mock('@babylonjs/core', () => {
         rotate: vi.fn(),
         getDirection: vi.fn(() => new M.Vec3Mock(0, 0, 1)),
         getTotalVertices: vi.fn(() => 0),
+        computeWorldMatrix: vi.fn(),
+        getBoundingInfo: vi.fn(() => ({
+          boundingBox: {
+            minimumWorld: new M.Vec3Mock(),
+            maximumWorld: new M.Vec3Mock(),
+          },
+        })),
         parent: null as unknown,
       },
       geometryMesh,
@@ -609,6 +641,24 @@ describe('createRacetrackScene', () => {
   });
 
   // ─── U1: car physics fix (KTD-1, KTD-2) ───
+
+  it('plan-013 UAT — applies a uniform scale derived from the GLB bounding box (no longer hardcoded)', async () => {
+    // Mock GLB returns a 2m cube for the geometry mesh. TARGET_CAR_LENGTH
+    // is 2.8m → expected uniform scale is 1.4. The pre-fix code hardcoded
+    // 1.728; this guards against regressing back to a fixed constant that
+    // makes Tripo cars ant-sized on the track.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    const geometryMesh = M.state.lastCarContainer!.meshes[1]! as unknown as {
+      scaling: { x: number; y: number; z: number };
+    };
+    expect(geometryMesh.scaling.x).toBeCloseTo(1.4, 6);
+    expect(geometryMesh.scaling.y).toBeCloseTo(1.4, 6);
+    expect(geometryMesh.scaling.z).toBeCloseTo(1.4, 6);
+  });
 
   it('U1/KTD-2 — picks the vertex-bearing mesh for physics, not __root__', async () => {
     await createRacetrackScene({

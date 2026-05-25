@@ -62,6 +62,7 @@ import {
 import { createFoliage } from './foliage';
 import { createSkidMarks, type SkidMarks } from './skidMarks';
 import { createTireSmoke, type TireSmoke } from './tireSmoke';
+import { computeUniformScale } from '../babylon/normalizeMeshScale';
 
 const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
@@ -230,6 +231,13 @@ const CHASE_ALPHA_LERP = 0.04;
 // Currently -90° — Tripo outputs face -X locally; rotate CW so -X aligns
 // with the pivot's +Z drive direction.
 const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
+// Plan-013 UAT polish: Tripo GLBs return arbitrary native scale
+// (0.2m → 20m range observed). Normalize to a fixed in-world length so
+// every car looks proportional to the track regardless of source. 2.8m ≈
+// wheelbase of a real road car (polish-backlog §4). Replaces the prior
+// hardcoded scale of 1.728 that worked only for plan-005/006 procedural
+// cars and made bought Tripo cars look like ants or skyscrapers.
+const TARGET_CAR_LENGTH = 2.8;
 // Plan-006 U2 — DefaultRenderingPipeline tunables. Ships first within
 // Batch 1 so subsequent visual units (SkyMaterial, kerb colors, emissive
 // stripe) land against the post-processed pipeline rather than raw WebGL.
@@ -619,11 +627,16 @@ export async function createRacetrackScene(
   // FORWARD_IMPULSE pushes). Without this, the car drives backwards
   // visually — Tripo + most vehicle GLBs face -Z in their local frame.
   carGeometry.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
-  // Visual + physics scale-up. Applied BEFORE PhysicsAggregate so the BOX
-  // collider is computed from the scaled bounding box. Skid mark constants
-  // in skidMarks.ts are intentionally NOT scaled — adjust there separately
-  // if their proportion to the car needs tuning.
-  carGeometry.scaling = new Vector3(1.728, 1.728, 1.728);
+  // Plan-013 UAT: compute a per-load uniform scale from the union bounding
+  // box so every loaded GLB ends up ~TARGET_CAR_LENGTH long, regardless of
+  // Tripo's non-deterministic native scale. Read BB across all geometry
+  // meshes (after yaw rotation, before scaling) and apply the resulting
+  // scalar. Applied BEFORE PhysicsAggregate so the BOX collider is sized
+  // from the scaled bounding box. Skid mark constants in skidMarks.ts are
+  // intentionally NOT scaled — adjust there separately if their proportion
+  // to the car needs tuning.
+  const carScale = computeUniformScale(carContainer.meshes, TARGET_CAR_LENGTH);
+  carGeometry.scaling = new Vector3(carScale, carScale, carScale);
   // U2: spawn on the start/finish line, facing the curve tangent so the
   // first W keypress drives along the track instead of sideways.
   carPivot.position = new Vector3(startSample.x, 1, startSample.z);
