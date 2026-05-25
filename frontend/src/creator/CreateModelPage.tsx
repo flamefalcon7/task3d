@@ -4,6 +4,7 @@ import {
   useCurrentAccount,
   useSignAndExecuteTransaction,
   useSignTransaction,
+  useSuiClient,
 } from '@mysten/dapp-kit';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
@@ -445,6 +446,7 @@ export function CreateModelPage() {
   const account = useCurrentAccount();
   const { uploadBlob, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const suiClient = useSuiClient();
   const signer = useDappKitSigner(account?.address ?? null);
 
   useEffect(() => {
@@ -490,6 +492,14 @@ export function CreateModelPage() {
       setGenStatus('paying');
       const { tx } = buildPayForApiCallPtb();
       const payResult = await signAndExecute({ transaction: tx });
+      // Wait for the testnet read-replica RPC to index the tx before posting
+      // to backend. dapp-kit's signAndExecute returns once the fullnode has
+      // executed the tx, but the read endpoint the backend's paymentVerifier
+      // queries (getTransactionBlock) may still 404 for a few seconds. Skip
+      // this step and backend returns `payment_not_found` even though the
+      // SUI was correctly spent — the user gets charged and rejected.
+      // Polls every 2s up to 60s; throws on timeout.
+      await suiClient.waitForTransaction({ digest: payResult.digest });
       setGenStatus('generating');
       const result = await generate(
         { shape: 'tripo', prompt },
@@ -510,7 +520,7 @@ export function CreateModelPage() {
       }
       setGenStatus('error');
     }
-  }, [session, prompt, signAndExecute, setGlbBytes, clearSession]);
+  }, [session, prompt, signAndExecute, suiClient, setGlbBytes, clearSession]);
 
   const onUpload = useCallback(
     async (file: File) => {

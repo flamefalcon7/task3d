@@ -4,10 +4,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 const useCurrentAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
 const signTxMock = vi.fn();
+const waitForTransactionMock = vi.fn(async () => ({})); // resolve immediately by default
 vi.mock('@mysten/dapp-kit', () => ({
   useCurrentAccount: () => useCurrentAccountMock(),
   useSignTransaction: () => ({ mutateAsync: signTxMock }),
   useSignAndExecuteTransaction: () => ({ mutateAsync: signAndExecuteMock }),
+  useSuiClient: () => ({ waitForTransaction: waitForTransactionMock }),
 }));
 
 const useSessionMock = vi.fn();
@@ -158,7 +160,21 @@ describe('CreateModelPage', () => {
     await waitFor(() => expect(screen.getByTestId('preview-canvas-mock')).toBeTruthy());
     // The pay tx was signed, and /api/generate was called with the digest.
     expect(signAndExecuteMock).toHaveBeenCalledTimes(1);
+    // Regression guard: the indexer race fix. waitForTransaction must run
+    // AFTER signAndExecute and BEFORE the /api/generate POST, otherwise the
+    // backend paymentVerifier 402s with `payment_not_found` even though the
+    // SUI was spent on chain. Surfaced during plan-013 UAT — backend queries
+    // the testnet read-replica before propagation finishes.
+    expect(waitForTransactionMock).toHaveBeenCalledTimes(1);
+    expect(waitForTransactionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ digest: 'PAYDIGEST123' }),
+    );
+    const signOrder = signAndExecuteMock.mock.invocationCallOrder[0]!;
+    const waitOrder = waitForTransactionMock.mock.invocationCallOrder[0]!;
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const fetchOrder = fetchMock.mock.invocationCallOrder[0]!;
+    expect(signOrder).toBeLessThan(waitOrder);
+    expect(waitOrder).toBeLessThan(fetchOrder);
     const firstCall = fetchMock.mock.calls[0]!;
     const body = JSON.parse((firstCall[1] as RequestInit).body as string);
     expect(body).toMatchObject({ prompt: 'a sword', paymentDigest: 'PAYDIGEST123' });
