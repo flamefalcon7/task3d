@@ -129,6 +129,17 @@ const mainStyle: CSSProperties = {
 
 const headerStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 32 };
 const sectionLabel: CSSProperties = { ...monoLabel, display: 'block', marginBottom: 12 };
+// Body-text hint below an input — small body type, hint color to recede.
+// Used for fields whose label alone doesn't convey intent (e.g. integration
+// fee, where "REGISTER FEE FOR GAME DEVS" was opaque per polish-backlog §2).
+const fieldHint: CSSProperties = {
+  display: 'block',
+  marginTop: 6,
+  fontFamily: tokens.font.body,
+  fontSize: tokens.size.xs,
+  lineHeight: 1.5,
+  color: tokens.color.hint,
+};
 const sectionH2: CSSProperties = {
   fontFamily: tokens.font.display,
   fontStyle: 'italic',
@@ -513,7 +524,7 @@ export function LaunchCollectionPage() {
                 />
               </label>
               <label>
-                <span style={sectionLabel}>REGISTER FEE FOR GAME DEVS (SUI)</span>
+                <span style={sectionLabel}>INTEGRATION FEE (SUI)</span>
                 <input
                   data-testid="register-fee-input"
                   value={registerFeeSui}
@@ -521,6 +532,11 @@ export function LaunchCollectionPage() {
                   disabled={busy}
                   style={{ ...inputStyle, width: '100%' }}
                 />
+                <span style={fieldHint} data-testid="register-fee-hint">
+                  Game devs pay this when they call register_integration() to
+                  enable this collection in their app. Set 0 to allow any
+                  integrator for free.
+                </span>
               </label>
             </div>
 
