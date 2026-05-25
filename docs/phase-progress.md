@@ -1,5 +1,82 @@
 # Phase Progress
 
+## Last Updated: 2026-05-25 (plan-013 UAT started but NOT completed — sidetracked into a `useSession` bugfix + plan-014 frontend UAT enablement; branches consolidated to single main) — **Next = RESUME plan-013 UAT on testnet v8 demo arc (the original goal of this session).**
+
+### Hackathon Tracker
+- Days to submission (6/21): 27 of 38 · demo day (7/20–21): 56 · winners (8/27): 94
+
+### This session — original goal vs what actually got built
+
+**Original session goal:** UAT (驗收) of plan-013's deliverables on testnet — walk the full demo arc (`/` → `/create` with real Tripo + segmentation tagging → `/launch` with real forge variants → `/market` list + buy → `/track` drive) on the v8 republished package and confirm the mesh-seg per-part coloring story works end-to-end.
+
+**What actually happened:**
+1. Started UAT. Browser-tested `/` → `/create`.
+2. **Bug #1**: `challenge failed: 502` — backend wasn't running. Started backend on port 3001 (NOT 8787). Vite proxy targets `localhost:3001`.
+3. **Bug #2**: "I have to refresh page after signed in then it show the UI". Diagnosed `useSession` as per-component `useState` — sibling components stayed stale. Fixed via CustomEvent broadcast pattern (`69ef26a`). Solution-doc captured.
+4. **Sidetracked into meta-improvement.** User asked "frontend 怎麼避免這類 bug" → ce-brainstorm → plan-014 frontend UAT checklist + `agent-browser` install + `CLAUDE.md` §🖥 Frontend Verification Protocol.
+5. **plan-014 U4 validation drive** drove agent-browser through pre-wallet UI on all 5 routes — confirms gating chrome works. But this is NOT the plan-013 UAT — it's plan-014's own acceptance test.
+6. Branch consolidation: phase-4 + plan-014 merged to main, 4 tags, single-branch state.
+
+**The plan-013 UAT itself was never completed.** Steps 2-4 of the original demo arc — real Tripo mint with tagging, forge variant mint, market list/buy, track drive — are still UNTESTED on testnet v8.
+
+### What's actually shipped (since last entry 2026-05-24)
+
+**plan-013 (mesh segmentation + per-part coloring) — code complete:**
+- U5 `TaggingCanvas.tsx` (Babylon picker, StrictMode-safe).
+- U9 v8 testnet republish (`part_labels` is breaking — fresh package). Package `0x9e673aa7…` · Publisher `0xd966383…` · TransferPolicy<NftToken> `0x308fc893…`. v7 objects abandoned.
+- U6 `/create` tagging step + `buildPublishPtb` extended. TRIPO_FEE_MIST 0.1 → 0.4 SUI.
+- U7 `/launch` VariantEditor → `palette: Record<label, hex>` with dynamic columns per uniqueLabel.
+- Review pass F1-F8 fixes, ADRs D-045..D-052, UX G1/G2/G3 polish, `useSession` broadcast fix.
+
+**plan-014 (frontend UAT enablement) — fully shipped:**
+- `docs/brainstorms/2026-05-25-frontend-uat-requirements.md` (167 lines).
+- `docs/plans/2026-05-25-014-feat-frontend-uat-checklist-plan.md` (4 units).
+- U1 `agent-browser 0.27.0` installed globally + Chrome 149 binary + skill registered.
+- U2 `docs/ux/frontend-checklist.md` — 5 bug-pattern categories with verified commit-hash examples.
+- U3 `CLAUDE.md` §🖥 Frontend Verification Protocol section.
+- U4 partial — pre-wallet drive on all 5 routes ✅; AE2 (sign-in broadcast regression) deferred to manual real-Chrome (agent-browser's isolated Chromium has no Slush extension).
+- Brainstorm + CLAUDE.md amended to acknowledge wallet-handoff doesn't work in v1 (only file-picker / OAuth-tab pauses do).
+
+**Branch consolidation (207 commits → linear main):**
+- phase-4 (204) fast-forwarded into main.
+- plan-014 (3) rebased cleanly onto new main, fast-forwarded in.
+- `feat/racetrack-scene-polish` was subset of phase-4 → tagged + deleted.
+- `main` is now the single branch.
+- Tags: `phase-3-complete` (9a9a91e) · `phase-4-complete` (69ef26a) · `plan-014-complete` (6c53fc6) · `plan-014-pre-rebase` (af14244, safety net — delete after a week).
+
+### Live testnet state (v8 — the version to UAT against)
+- Package `0x9e673aa7…` · Publisher `0xd966383…` · TransferPolicy<NftToken> `0x308fc893…` (+cap `0x46ed256d…`).
+- Bootstrap digest `4s2aAmRW…`. No seed Model3D objects yet — UAT will create them.
+
+### Next concrete step — RESUME plan-013 UAT
+
+Walk the full demo arc on testnet v8 in your real Chrome (with Slush wallet), in this order:
+
+1. **`/` landing** — confirm `/market` index renders (will be empty on v8 — no seed objects yet).
+2. **`/create` L1 publish** — sign in → enter Tripo prompt → segmentation completes → TAGGING STEP (the new U5/U6 thing — verify clicking parts highlights, label dropdown + custom-text works, 0/N → N/N progress) → metadata form → SUI fee = 0.4 SUI → publish PTB → Model3D object created with `partLabels` on chain.
+3. **`/launch` L2 forge collection** — pick the Model3D you just published → VariantEditor renders **per-label columns** (this is U7 — the new shape) → set palette per row → preview tiles update → 4-variant collection mint.
+4. **`/market`** — list one variant for sale → switch to a second wallet (or use a friend's address) → buy with royalty hot-potato.
+5. **`/track`** — drive the bought variant; lap-time HUD, kiosk attribution, no regressions vs plan-012 polish.
+
+Bugs found → split into separate fix commits (not on plan-014 branch — that's done). UAT pass → flip plan-013 status to `completed`, then U15 demo recording / pitch / README.
+
+### Open / deferred (carried forward)
+- **U15 demo recording + pitch deck + README + honest disclosure + logo** — biggest remaining item for 6/21.
+- **Mainnet deploy** — 8/27 = 100% prize threshold.
+- **Network-mismatch guard** — still not built.
+- **`TestWalletAdapter` fixture** — plan-014 deferred; only revisit if overnight regression sweep becomes blocking.
+- **Local backup strategy** — Time Machine + external-drive bare repo + daily tar (advised this session, not yet implemented per user preference for local-only).
+- Pre-existing: stale-listing → buy abort cascade (CR adv-003), full-test-suite StrictMode wrap, `/dev/compare` route hide.
+
+### Notes for next session
+- The 502 fix wasn't a code change — backend wasn't running. Make sure `pnpm --dir backend dev` is up before UAT begins. Backend on port 3001, Vite proxy targets it.
+- `useSession` is now broadcast-synced — sibling components should refresh without page reload. Cross-component sign-in test in `useSession.test.tsx` guards regression.
+- v8 has NO seed Model3D objects — UAT must create from scratch. First Tripo mint will be the first object on v8.
+- plan-014 §Wallet pause-and-resume clarified: agent-browser CAN'T validate wallet flows in v1 (its Chromium has no Slush extension). UAT remains a real-Chrome activity. The frontend-checklist + agent-browser kit help with FUTURE bug prevention, not THIS UAT.
+- `docs/spec.md` last verified 2026-05-14; plan-012 / 013 / 014 may have introduced spec drift. Worth a 10-min scan before mainnet deploy.
+
+---
+
 ## Last Updated: 2026-05-24 (after midnight — plan-013 U1-U4 + review pass shipped) — **Next = U5 TaggingCanvas (Babylon click-to-select picker).**
 
 ### Hackathon Tracker
