@@ -45,6 +45,10 @@ These touch every screen. Do these first.
 - Theme prefers-color-scheme awareness. Brutalist is intentionally one-mode; don't try to build a dark variant.
 - Animations (page transitions, route-change fades). Brutalist is instant.
 
+### MUST — plan-013 UAT findings (2026-05-25/26)
+
+- **PreviewCanvas / TaggingCanvas background toggle.** D-044 sets viewer wells to pure black for editorial contrast, but **black 3D models become invisible**. Surfaced during UAT — Tripo can produce dark / black PBR mesh. Add a small mono-pill toggle in the well's corner: `BG: BLACK | PAPER | GRAY`. Three states, click to cycle. Affects every PreviewCanvas / TaggingCanvas mount (`/create`, `/launch` base picker + preview, `/market` listing cards, `/model/:id`, `/collection/:id`). Implementation: a `bgColor` prop on the Canvas component + a small co-located toggle component; default stays black per D-044.
+
 ---
 
 ## 1. `/create` — Creator publishes Model3D
@@ -134,6 +138,16 @@ Two-step Tripo timing UX (also surfaced same UAT):
 - Variant batch ops (duplicate, reorder).
 - Variant preview rendering all 3 at once in a strip (good for visual sanity-check pre-launch).
 
+### MUST — plan-013 UAT findings (2026-05-25/26)
+
+- **`REGISTER FEE FOR GAME DEVS (SUI)` field needs explanation.** Surfaced during UAT — user could not tell what this field does. It's `NftCollection.integration_fee_mist` (D-013 four-actor design): game integrators pay this to register their app via `register_integration()`. Demo can set 0. Fix: replace label with `INTEGRATION FEE — game integrators pay this to register their app with your collection. Set 0 to let anyone integrate free.` Or pull the explanation into a `<details>` tooltip below the input.
+- **Walrus upload silent.** During `/launch` BUILD VARIANTS, ~5-10s per GLB upload to Walrus has no visible state. Need mono status pill `— UPLOADING VARIANT N OF M (Xs)` while `useWalrusUpload.stage === 'uploading'`. Same gap exists on `/create` for the publish Walrus upload — see §1 MUST plan-013 cross-cutting.
+- **VariantEditor columns are abstract labels (PRIMARY / SECONDARY / DETAIL).** Plan-013 design intent A: columns = unique L1 labels (correct, no change needed). Plan-013 design gap D: there is no visual link between L2 column header and which mesh parts they map to. Without that link the column names read as "fixed categories I can only adjust". Fix:
+  - Render a small annotated PreviewCanvas on the L2 page that **highlights all parts** belonging to the currently-hovered or currently-focused VariantEditor column. Hovering `DETAIL` header → all DETAIL parts pulse with accent border / fill.
+  - Reverse interaction: clicking a part in that preview scrolls the matching VariantEditor cell into view.
+  - Add a one-line subhead under the column row: `— COLUMNS REFLECT THE LABELS YOU SET WHEN PUBLISHING THIS BASE MODEL.`
+- **Pair the L2 fix above with the L1 tagging step nudge** (§1 MUST plan-013) — the root cause of D is that users click presets without realizing custom labels are encouraged. Both fixes ship together or the L2 confusion recurs.
+
 ---
 
 ## 3. `/market` — Seller lists, buyer purchases
@@ -195,6 +209,10 @@ Two-step Tripo timing UX (also surfaced same UAT):
 
 - Track variants (multiple maps).
 - Multiplayer (way out of scope, but it's a natural next-step demo).
+
+### MUST — plan-013 UAT findings (2026-05-26)
+
+- **Dynamic mesh resize on load.** Tripo-generated GLBs have non-deterministic native scale — a "small red sports car" prompt may come back as a 0.2m mesh or a 20m mesh. The racetrack scene was sized around plan-005/006 procedural cars (~2-3m). Result: bought Tripo cars look like ants on the track. **Fix: in the track scene's mesh-loading path (likely `frontend/src/track/useCar.ts` or wherever `LoadAssetContainerAsync` runs for the player car), compute the loaded mesh's bounding box and apply a uniform scale so the longest axis matches a target (e.g., 2.8m / wheelbase reference).** Same fix likely needed for non-player obstacles if they exist. Implementation reference: `frontend/src/babylon/PreviewCanvas.tsx`'s `frameCameraToMeshes` already computes a bounding box — extract that into a shared `normalizeMeshScale(mesh, targetSize)` helper and apply it in `useCar` after `addAllToScene()`. Without this, the L3 demo segment looks broken.
 
 ---
 
