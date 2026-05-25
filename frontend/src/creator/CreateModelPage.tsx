@@ -16,7 +16,9 @@ import {
   buildPayForApiCallPtb,
   buildPublishPtb,
   TRIPO_FEE_MIST,
+  TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
+import { SignConfirmation } from '../ux/SignConfirmation';
 import {
   buttonOutline,
   buttonPrimary,
@@ -635,16 +637,34 @@ export function CreateModelPage() {
               rows={3}
               style={promptArea}
             />
-            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                data-testid="generate-button"
-                onClick={onGenerate}
+            <div style={{ marginTop: 12 }}>
+              {/* D-053 — pre-sign confirmation panel before Slush popup. */}
+              <SignConfirmation
+                testIdPrefix="generate-button"
+                buttonLabel={generateLabel}
                 disabled={genBusy || !prompt.trim()}
-                style={buttonPrimary}
-              >
-                {generateLabel}
-              </button>
-              {genBusy && <span style={statusPill}>— SUI FEE-GATED · ~30S TYPICAL</span>}
+                summary={[
+                  {
+                    label: 'Tripo generation fee',
+                    amount: `${Number(TRIPO_FEE_MIST) / 1e9} SUI`,
+                  },
+                  {
+                    label: 'Estimated gas',
+                    amount: '~ 0.001 SUI',
+                    muted: true,
+                  },
+                ]}
+                recipient={{
+                  address: TRIPO_FEE_TREASURY,
+                  note: 'TRIPO_FEE_TREASURY (deployer)',
+                }}
+                onConfirm={onGenerate}
+              />
+              {genBusy && (
+                <div style={{ marginTop: 8 }}>
+                  <span style={statusPill}>— SUI FEE-GATED · ~30S TYPICAL</span>
+                </div>
+              )}
             </div>
           </div>
         ) : (

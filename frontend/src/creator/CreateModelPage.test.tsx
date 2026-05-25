@@ -127,7 +127,7 @@ describe('CreateModelPage', () => {
   it('shows the Tripo prompt input by default when signed in', () => {
     render(<CreateModelPage />);
     expect(screen.getByTestId('prompt-input')).toBeTruthy();
-    expect(screen.getByTestId('generate-button')).toBeTruthy();
+    expect(screen.getByTestId('generate-button-trigger')).toBeTruthy();
   });
 
   it('switches to the GLB upload input', () => {
@@ -150,8 +150,9 @@ describe('CreateModelPage', () => {
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('generate-button'));
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
     });
 
     await waitFor(() => expect(screen.getByTestId('preview-canvas-mock')).toBeTruthy());
@@ -172,8 +173,9 @@ describe('CreateModelPage', () => {
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('generate-button'));
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
     });
 
     // Critical: no SUI charged, no backend call — bailed before payment.
@@ -197,8 +199,9 @@ describe('CreateModelPage', () => {
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('generate-button'));
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     fireEvent.click(screen.getByTestId('confirm-model'));
@@ -236,8 +239,9 @@ describe('CreateModelPage', () => {
       ),
     );
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('generate-button'));
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     fireEvent.click(screen.getByTestId('confirm-model'));
@@ -375,8 +379,9 @@ describe('CreateModelPage', () => {
     // AGAIN once we have a model). The same mocked fetch returns a fresh GLB
     // payload, which routes through setGlbBytes → resets confirmed + tagged.
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a chest' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('generate-button'));
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     expect(screen.queryByTestId('tagging-step')).toBeNull();

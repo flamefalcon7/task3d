@@ -2434,6 +2434,61 @@ Republish the `model3d` package as **v8** under a fresh `original-id`. Pin the n
 
 ---
 
+## D-053: Pre-sign confirmation in-app before any wallet popup
+
+**Status**: Accepted
+**Date**: 2026-05-25
+**Phase**: 4 (plan-013 follow-up, surfaced during UAT)
+
+### Context
+Plan-013 U6 raised the Tripo SUI fee from 0.1 → 0.4 SUI (D-051) and routed it through the canonical PTB pattern (`splitCoins(gas, [amount])` → `transferObjects([coin], treasury)`). When the user ran UAT and hit the Slush wallet popup, the 0.4 SUI amount was rendered only inside a collapsed "Transaction details" section as a raw BCS hex value (`0x4000…` form), not as a clear "Send 0.4 SUI to 0xd9663…" headline. The user could not visually confirm what they were about to sign.
+
+Research (web-researcher pass 2026-05-25) confirmed three things across Sui official docs, MystenLabs ts-sdk docs, Ethos wallet engineering writeup, @mysten/slush-wallet 1.0.5 changelog, and open-source dApp counterexamples (Cetus / Suilend etc.):
+
+1. Our PTB shape is **canonical** — every Sui doc and open-source dApp uses the identical `splitCoins(gas) + transferObjects` pattern; no alternative builder call produces a different display.
+2. Slush popup's headline summary is generated from **dry-run effects**, not PTB command structure. `splitCoins(gas, …)` immediately followed by `transferObjects` is inconsistently classified — Slush sometimes treats the split coin as gas-adjacent rather than user-initiated transfer, so the "Send X SUI to Y" headline doesn't fire and the buried hex inputs become the only on-popup signal.
+3. Slush 1.0.5 changelog ships zero fixes addressing this; no SDK-level workaround exists. The Ethos wallet team's published engineering principle assigns this UX responsibility to the dApp layer ("contextually relevant details" live in app UI; wallet popup is raw signing).
+
+### Decision
+Every UI surface that triggers a wallet sign popup (PTB execution OR personal-message signature) **must** first render an in-app pre-sign confirmation panel that lists:
+
+- A summary line per amount (label + value, e.g., `Tripo generation: 0.4 SUI`)
+- The destination address with a human-readable note when one applies (e.g., `0xd966… (TRIPO_FEE_TREASURY / deployer)`)
+- An optional `walletCaveat` note explaining that the wallet popup may render the amount as raw hex (Slush limitation)
+- Explicit `Confirm` / `Cancel` actions; the wallet popup is opened only on `Confirm`
+
+The wallet popup becomes a **secondary** confirmation layer, not the primary one. Our app owns the legibility contract.
+
+Implemented as a reusable `frontend/src/ux/SignConfirmation.tsx` component. Initial integration: `/create` Tripo fee button (the call site that surfaced the gap). Pattern extends to the other PTB triggers (`/create` publish, `/launch` build + launch, `/market` list + buy) one by one as those flows are exercised in UAT or polish work.
+
+### Rationale
+- Removes single-point-of-failure dependence on Slush's classification heuristic — even if Slush's headline never fires, the user has already seen amount + recipient before the popup opens.
+- Aligns with the published Sui-ecosystem wallet UX principle (Ethos engineering writeup) — wallets render raw signing surfaces, dApps render contextual confirmation.
+- Cheap on engineering cost (~45 min for component + ADR + tests + one integration) vs. potential UAT-time surprises that erode user trust in the demo.
+- Symmetric across PTB shapes — a single reusable component covers any future signing flow without per-call-site custom UI.
+
+### Alternatives Considered
+- **Wait for Mysten to ship a Slush fix**: rejected — Slush 1.0.5 has zero changelog entries on this; no roadmap signal; submission is 27 days out.
+- **Change our PTB shape to coax Slush into a clean display**: rejected — research found no alternative builder call across Sui SDK / docs / open-source dApps that produces a different display. The pattern is canonical, the limitation is downstream.
+- **Modal dialog instead of inline confirmation panel**: rejected — breaks the brutalist editorial inline flow on `/create`. Inline panel reads as a natural next step, modal feels like a system interrupt.
+- **Toast-style "you signed X SUI" post-hoc notification**: rejected — confirms after the fact; doesn't give the user a cancel option once the popup is open.
+
+### Consequences
+- ✅ User can confirm operation amount + recipient before any wallet popup. Eliminates the "is this 0.4 SUI or 17 SUI?" mental-arithmetic problem on Slush hex display.
+- ✅ Plan-014 frontend checklist gains an implicit 6th category (wallet pre-sign confirmation) — future PTB triggers default to using `SignConfirmation`.
+- ⚠️ One extra click between intent and signing. Surfaces friction the user can see; acceptable trade for legibility.
+- ⚠️ Each PTB call site has to be wired manually (no auto-wrap). Initial integration is `/create` Tripo fee; the rest are intentionally deferred to incremental rollout as they're touched, not a sweep.
+- 🔮 The pattern extends naturally to mainnet (D-009 8/27 deadline) — mainnet amounts are real money, so the in-app confirmation matters even more there.
+
+### Related
+- spec.md section: TBD (will land when L1 publish flow is documented end-to-end in Phase 5 doc cleanup)
+- Related decisions: D-034 (Tripo SUI fee gate — the PTB this first integrates with), D-051 (4× fee bump to 0.4 SUI — the magnitude that surfaced the UX gap), plan-014 §Scope Boundaries (agent-browser can't validate wallet popups → user becomes first tester → this gap got discovered)
+- Plan: plan-013 follow-up commit (not a separate plan-015 — scoped as the UX fix plan-013 should have included for the 4× fee bump)
+- Research source: web-researcher pass 2026-05-25 — Ethos wallet engineering principle, Sui docs (building-ptb, wallet-standard), MystenLabs ts-sdk docs, @mysten/slush-wallet 1.0.5 changelog
+- Code surface: `frontend/src/ux/SignConfirmation.tsx` (new), `frontend/src/creator/CreateModelPage.tsx` (integration site)
+
+---
+
 # Reserved Decision Numbers
 
-D-053 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-054 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
