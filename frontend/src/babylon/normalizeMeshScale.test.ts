@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Vector3 } from '@babylonjs/core';
 import { computeUniformScale } from './normalizeMeshScale';
 
@@ -15,6 +15,14 @@ function fakeMesh(min: Vector3, max: Vector3, vertices = 100) {
 }
 
 describe('computeUniformScale', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
   it('scales a 1m mesh up to the target', () => {
     // unit cube centered at origin → extents = (1,1,1) → longest = 1
     const m = fakeMesh(new Vector3(-0.5, -0.5, -0.5), new Vector3(0.5, 0.5, 0.5));
@@ -57,5 +65,37 @@ describe('computeUniformScale', () => {
   it('returns 1 for a degenerate (zero-extent) mesh', () => {
     const m = fakeMesh(new Vector3(2, 2, 2), new Vector3(2, 2, 2));
     expect(computeUniformScale([m], 4)).toBe(1);
+  });
+
+  // Adversarial reviewer regression: a 1mm Tripo mesh produced scale=2800
+  // pre-clamp, feeding Havok an exploding BOX collider. Clamp returns 1
+  // (native size) and logs a warning so debugging is possible.
+  it('returns 1 (with warn) when computed scale exceeds MAX_SCALE', () => {
+    const m = fakeMesh(new Vector3(-0.0005, 0, 0), new Vector3(0.0005, 0, 0)); // 1mm
+    expect(computeUniformScale([m], 2.8)).toBe(1); // raw would be 2800
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
+  it('returns 1 (with warn) when computed scale is below MIN_SCALE', () => {
+    // 1km mesh → target/longest = 0.0028, below the 0.01 floor
+    const m = fakeMesh(new Vector3(-500, 0, 0), new Vector3(500, 0, 0));
+    expect(computeUniformScale([m], 2.8)).toBe(1);
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
+  it('returns 1 (with warn) when extents are non-finite (NaN/Infinity)', () => {
+    const m = fakeMesh(
+      new Vector3(Number.NEGATIVE_INFINITY, 0, 0),
+      new Vector3(Number.POSITIVE_INFINITY, 0, 0),
+    );
+    expect(computeUniformScale([m], 2.8)).toBe(1);
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT warn when the computed scale falls within safe bounds', () => {
+    // 2m mesh → scale 1.4 (within [0.01, 100])
+    const m = fakeMesh(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
+    expect(computeUniformScale([m], 2.8)).toBeCloseTo(1.4, 6);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
