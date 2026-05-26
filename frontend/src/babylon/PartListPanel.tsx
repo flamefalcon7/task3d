@@ -47,10 +47,12 @@ export function PartListPanel({
 
   // Scroll the selected row into view whenever selectedIndex changes from
   // outside the panel (e.g., a canvas POINTERPICK). `block: 'nearest'`
-  // avoids janky full-jumps when the row is already visible.
+  // avoids janky full-jumps when the row is already visible. Optional-chain
+  // the method call itself because jsdom doesn't ship scrollIntoView; all
+  // production browsers do.
   useEffect(() => {
     if (selectedIndex == null) return;
-    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
+    activeRowRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedIndex]);
 
   if (parts.length === 0) {

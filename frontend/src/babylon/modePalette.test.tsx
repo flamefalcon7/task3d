@@ -4,6 +4,7 @@ import {
   MODE_PALETTE,
   MODE_SEQUENCE,
   partsColor,
+  partsColorHex,
   PARTS_PALETTE_HUE_COUNT,
   useModeCycle,
 } from './modePalette';
@@ -78,5 +79,26 @@ describe('partsColor', () => {
     for (const v of c) {
       expect(Number.isFinite(v)).toBe(true);
     }
+  });
+});
+
+describe('partsColorHex', () => {
+  it('returns "#RRGGBB" hex strings (lowercase, 7 chars)', () => {
+    for (let i = 0; i < 24; i++) {
+      const hex = partsColorHex(i);
+      expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
+
+  it('matches the RGB tuple from partsColor at the same index', () => {
+    const [r, g, b] = partsColor(0);
+    const hex = partsColorHex(0);
+    expect(hex.slice(1, 3)).toBe(Math.round(r * 255).toString(16).padStart(2, '0'));
+    expect(hex.slice(3, 5)).toBe(Math.round(g * 255).toString(16).padStart(2, '0'));
+    expect(hex.slice(5, 7)).toBe(Math.round(b * 255).toString(16).padStart(2, '0'));
+  });
+
+  it('is deterministic and wraps past the 12-hue count', () => {
+    expect(partsColorHex(3)).toBe(partsColorHex(PARTS_PALETTE_HUE_COUNT + 3));
   });
 });

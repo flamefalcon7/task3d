@@ -6,6 +6,9 @@ import {
   useSignTransaction,
   useSuiClient,
 } from '@mysten/dapp-kit';
+import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
+import { partsColorHex, useModeCycle } from '../babylon/modePalette';
+import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
 import { generate } from '../lib/api';
@@ -71,6 +74,21 @@ type PolicyValue = (typeof POLICIES)[number]['value'];
 // via maxLength so the on-chain assertion can never fire on a label that
 // survived the editor.
 const MAX_LABEL_LEN = 32;
+
+const taggingRightRail: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+};
+
+const labelEditorBlock: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  padding: 12,
+  background: tokens.color.paperPure,
+  border: tokens.border.primary,
+};
 
 function isValidGlb(bytes: Uint8Array): boolean {
   if (bytes.length < 12 || bytes.length > MAX_GLB_BYTES) return false;
@@ -212,11 +230,13 @@ const wireframeOverlay: CSSProperties = {
   pointerEvents: 'none',
 };
 
-// plan-013 — tagging step layout. Canvas + label panel side by side; falls back
-// to a stacked layout on narrow viewports via auto-fit.
+// plan-015 U5 — tagging step layout. Canvas (left, ~16:10 well with mode +
+// BG pills) and a right rail (MeshInfoPanel + PartListPanel + label input).
+// Right column widened from plan-013's 280px to 320px so the info panel and
+// part list breathe; on narrow viewports the page-level overflow handles it.
 const taggingGrid: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) 280px',
+  gridTemplateColumns: 'minmax(0, 1fr) 320px',
   gap: 24,
   marginTop: 24,
 };
@@ -262,18 +282,27 @@ const taggingActionRow: CSSProperties = {
   flexWrap: 'wrap',
 };
 
-// plan-015 U1 — framing B. Bridges TaggingCanvas selection state and a
-// freeform per-part label input. Owns the partial-labels map; on Continue,
-// emits a positional `partLabels[]` of length = part count. Continue is
-// gated on every part having ≥1 character — there is no SKIP escape hatch
-// and no default-on-empty fallback, because the whole step exists to make
-// the creator name each customization axis themselves (R1, R2).
+// plan-015 U5 — Framing B + shared canvas/panel infrastructure. Bridges
+// TaggingCanvas selection state and a freeform per-part label input. Owns
+// the partial-labels map; on Continue, emits a positional `partLabels[]` of
+// length = part count. Continue is gated on every part having ≥1 character
+// — there is no SKIP escape hatch and no default-on-empty fallback, because
+// the whole step exists to make the creator name each customization axis
+// themselves (R1, R2).
+//
+// Layout (U5): TaggingCanvas left (PARTS mode default, mode + BG pills),
+// right rail with MeshInfoPanel / PartListPanel / single label input. The
+// PartListPanel rows carry partsColorHex(i) swatches so the row identity
+// matches the canvas's PARTS-mode rainbow at any mode.
 function TaggingStep({
   glbUrl,
+  glbSizeBytes,
   onContinue,
   disabled,
 }: {
   glbUrl: string | null;
+  /** GLB bytelength surfaced in the MeshInfoPanel SIZE row. */
+  glbSizeBytes: number;
   onContinue: (partLabels: string[]) => void;
   /**
    * plan-013 fix-pass — parent passes `genBusy` while regenerate is in
@@ -288,9 +317,11 @@ function TaggingStep({
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [labels, setLabels] = useState<Map<number, string>>(new Map());
+  const { mode, cycle: cycleMode } = useModeCycle('parts');
 
   // Refocus the label input whenever the user picks a different part in the
-  // canvas (F1.5 — "row scrolls into view + focus moves to the label input").
+  // canvas or the PartListPanel (F1.5 — "row scrolls into view + focus
+  // moves to the label input").
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (selectedIndex != null) {
@@ -328,6 +359,19 @@ function TaggingStep({
     onContinue(out);
   }, [labels, partCount, onContinue, allLabeled]);
 
+  // PartListPanel items — derived from labels Map + partsColorHex. The
+  // swatch rainbow is stable per index regardless of current mode so the
+  // row identity stays consistent if the user cycles modes mid-tagging.
+  const partListItems: PartListItem[] = useMemo(
+    () =>
+      Array.from({ length: partCount }, (_, i) => ({
+        index: i,
+        label: labels.get(i),
+        colorHex: partsColorHex(i),
+      })),
+    [partCount, labels],
+  );
+
   const currentLabel = selectedIndex != null ? labels.get(selectedIndex) ?? '' : '';
 
   return (
@@ -350,32 +394,53 @@ function TaggingStep({
             selectedIndex={selectedIndex}
             onPartSelect={setSelectedIndex}
             onLoaded={setPartCount}
+            mode={mode}
+            onModeCycle={cycleMode}
+            modeToggle
           />
         </div>
-        <div style={taggingPanel}>
-          {selectedIndex == null ? (
-            <span style={{ ...monoLabel, color: tokens.color.hint }}>
-              CLICK A PART TO NAME IT
-            </span>
-          ) : (
-            <>
-              <span style={{ ...monoLabel, color: tokens.color.ink }}>
-                PART {selectedIndex + 1} OF {partCount || '—'}
+        <div style={taggingRightRail}>
+          <MeshInfoPanel
+            // L1 segmented bases from Tripo carry one material per part
+            // (D-052 substrate), so materialCount mirrors segmentCount in
+            // this context. Walrus blob id is unknown pre-publish.
+            segmentCount={partCount}
+            fileSizeBytes={glbSizeBytes}
+            materialCount={partCount}
+            testIdSuffix="tagging"
+          />
+          <PartListPanel
+            parts={partListItems}
+            selectedIndex={selectedIndex}
+            onSelect={setSelectedIndex}
+            testIdSuffix="tagging"
+            maxHeight={180}
+          />
+          <div data-testid="label-editor" style={labelEditorBlock}>
+            {selectedIndex == null ? (
+              <span style={{ ...monoLabel, color: tokens.color.hint }}>
+                ← CLICK A PART TO NAME IT
               </span>
-              <input
-                ref={inputRef}
-                data-testid="part-label-input"
-                value={currentLabel}
-                onChange={(e) => setLabel(selectedIndex, e.target.value)}
-                maxLength={MAX_LABEL_LEN}
-                placeholder="e.g. chassis, wheels, spoiler"
-                style={{ ...inputStyle, width: '100%' }}
-              />
-              <span style={charCounter}>
-                {currentLabel.length}/{MAX_LABEL_LEN}
-              </span>
-            </>
-          )}
+            ) : (
+              <>
+                <span style={{ ...monoLabel, color: tokens.color.ink }}>
+                  EDITING PART {selectedIndex + 1} OF {partCount || '—'}
+                </span>
+                <input
+                  ref={inputRef}
+                  data-testid="part-label-input"
+                  value={currentLabel}
+                  onChange={(e) => setLabel(selectedIndex, e.target.value)}
+                  maxLength={MAX_LABEL_LEN}
+                  placeholder="e.g. chassis, wheels, spoiler"
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+                <span style={charCounter}>
+                  {currentLabel.length}/{MAX_LABEL_LEN}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
       <div style={taggingActionRow}>
@@ -732,6 +797,7 @@ export function CreateModelPage() {
         {haveModel && sourceMode === 'tripo' && confirmed && !tagged && (
           <TaggingStep
             glbUrl={glbUrl}
+            glbSizeBytes={glb?.byteLength ?? 0}
             disabled={genBusy}
             onContinue={(labels) => {
               setPartLabels(labels);

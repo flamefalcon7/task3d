@@ -53,6 +53,22 @@ export function partsColor(index: number): Rgb01 {
   return hslToRgb(hueDeg / 360, PARTS_SAT, PARTS_LIGHT);
 }
 
+// Hex-string variant of partsColor — convenience for PartListPanel swatches
+// and any other DOM consumer that needs CSS color literals rather than
+// Babylon's RGB 0..1 tuples.
+export function partsColorHex(index: number): string {
+  const [r, g, b] = partsColor(index);
+  return rgbToHex(r, g, b);
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (v: number) =>
+    Math.round(Math.min(1, Math.max(0, v)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 // Standard HSL → sRGB. Inline rather than pull in `chroma.js` or similar
 // — sub-ms cost, zero new dep. Returns RGB in 0..1 (Babylon Color3 native).
 function hslToRgb(h: number, s: number, l: number): Rgb01 {

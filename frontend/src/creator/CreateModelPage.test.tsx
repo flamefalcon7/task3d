@@ -45,10 +45,12 @@ vi.mock('../sui/modelTxBuilders', async () => {
   };
 });
 
-// plan-013 — TaggingCanvas uses Babylon imperative APIs (no WebGL in jsdom).
-// Mock surfaces a `pick-part-N` button per part so tests can drive selection,
-// plus an `onLoaded(count)` trigger via the parts-count probe. Default part
-// count is 12 (matches plan-013 U6 happy-path scenario).
+// plan-013 / plan-015 U5 — TaggingCanvas uses Babylon imperative APIs (no
+// WebGL in jsdom). Mock surfaces:
+//   • `pick-part-N` buttons per part — drives onPartSelect
+//   • `onLoaded(count)` fires via the parts-count probe
+//   • `tagging-mode-toggle-pill` stub when modeToggle + onModeCycle —
+//     drives the parent-owned mode cycle from the integration tests
 const TAGGING_PART_COUNT_REF = { current: 12 };
 vi.mock('../babylon/TaggingCanvas', () => {
   const React = require('react') as typeof import('react');
@@ -56,18 +58,33 @@ vi.mock('../babylon/TaggingCanvas', () => {
     TaggingCanvas: ({
       onPartSelect,
       onLoaded,
+      mode,
+      onModeCycle,
+      modeToggle,
     }: {
       glbUrl: string | null;
       selectedIndex: number | null;
       onPartSelect: (i: number) => void;
       onLoaded?: (n: number) => void;
+      mode?: string;
+      onModeCycle?: () => void;
+      modeToggle?: boolean;
     }) => {
       const count = TAGGING_PART_COUNT_REF.current;
       React.useEffect(() => {
         onLoaded?.(count);
       }, [count, onLoaded]);
       return (
-        <div data-testid="tagging-canvas-mock">
+        <div data-testid="tagging-canvas-mock" data-mode={mode}>
+          {modeToggle && onModeCycle && (
+            <button
+              type="button"
+              data-testid="tagging-mode-toggle-pill"
+              onClick={onModeCycle}
+            >
+              MODE: {(mode ?? 'pbr').toUpperCase()}
+            </button>
+          )}
           {Array.from({ length: count }, (_, i) => (
             <button
               key={i}
@@ -408,6 +425,86 @@ describe('CreateModelPage', () => {
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/LOADING PARTS/);
     // Framing B has no skip escape hatch.
     expect(screen.queryByTestId('skip-tagging')).toBeNull();
+  });
+
+  // ----- plan-015 U5 — shared canvas/panel integration --------------------
+
+  it('U5: tagging step mounts MeshInfoPanel + PartListPanel + label-editor', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    expect(screen.getByTestId('mesh-info-panel-tagging')).toBeTruthy();
+    expect(screen.getByTestId('part-list-panel-tagging')).toBeTruthy();
+    expect(screen.getByTestId('label-editor')).toBeTruthy();
+    expect(screen.getByTestId('mesh-info-segments-tagging').textContent).toMatch(/SEGMENTS.*5/);
+  });
+
+  it('U5: PartListPanel renders one row per filtered mesh', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    for (let i = 0; i < 5; i++) {
+      expect(screen.getByTestId(`part-list-row-${i}-tagging`)).toBeTruthy();
+    }
+  });
+
+  it('U5: clicking a PartListPanel row updates selection and reveals the label input', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    // Before any selection — editor shows the "click to name" prompt and no input.
+    expect(screen.getByTestId('label-editor').textContent).toMatch(/CLICK A PART TO NAME IT/);
+    expect(screen.queryByTestId('part-label-input')).toBeNull();
+    // Click row 2 → input appears, EDITING PART 3 OF 5 banner rendered.
+    fireEvent.click(screen.getByTestId('part-list-row-2-tagging'));
+    expect(screen.getByTestId('label-editor').textContent).toMatch(/EDITING PART 3 OF 5/);
+    expect(screen.getByTestId('part-label-input')).toBeTruthy();
+  });
+
+  it('U5: typed label flows back into the matching PartListPanel row', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('part-list-row-1-tagging'));
+    fireEvent.change(screen.getByTestId('part-label-input'), { target: { value: 'wheels' } });
+    expect(screen.getByTestId('part-list-row-1-tagging').textContent).toMatch(/wheels/);
+  });
+
+  it('U5: default canvas mode on the tagging step is PARTS (D-055 / F1.3)', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    expect(screen.getByTestId('tagging-canvas-mock').getAttribute('data-mode')).toBe('parts');
+    expect(screen.getByTestId('tagging-mode-toggle-pill').textContent).toBe('MODE: PARTS');
+  });
+
+  it('U5: mode-toggle pill cycles PARTS → SOLO → WIREFRAME → PBR → PARTS', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    const pill = screen.getByTestId('tagging-mode-toggle-pill');
+    expect(pill.textContent).toBe('MODE: PARTS');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: SOLO');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: WIREFRAME');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: PBR');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: PARTS');
+  });
+
+  it('U5: clicking a part in the canvas also drives PartListPanel selection', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('pick-part-3'));
+    // PartListPanel row 3 should be active (aria-pressed=true).
+    expect(
+      screen.getByTestId('part-list-row-3-tagging').getAttribute('aria-pressed'),
+    ).toBe('true');
+    // And the editor shows the EDITING banner for part 4 of 5.
+    expect(screen.getByTestId('label-editor').textContent).toMatch(/EDITING PART 4 OF 5/);
   });
 
   it('regenerating after tagging resets partLabels and re-renders TaggingStep', async () => {
