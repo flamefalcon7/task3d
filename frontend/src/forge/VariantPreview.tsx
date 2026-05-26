@@ -12,6 +12,7 @@
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo } from 'react';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import type { CanvasMode } from '../babylon/modePalette';
 import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
@@ -32,6 +33,14 @@ export interface VariantPreviewProps {
   variantGlbs?: Uint8Array[];
   selectedIndex: number;
   onSelect: (i: number) => void;
+  // plan-015 U6 — canvas-prop pass-through. Defaults preserve existing
+  // call sites (no mode pill, no picking, no auto-rotate).
+  mode?: CanvasMode;
+  onModeCycle?: () => void;
+  modeToggle?: boolean;
+  highlightedParts?: readonly number[];
+  onPartClick?: (index: number) => void;
+  autoRotate?: boolean;
 }
 
 const wellSized: CSSProperties = {
@@ -70,6 +79,12 @@ export function VariantPreview({
   variantGlbs,
   selectedIndex,
   onSelect,
+  mode,
+  onModeCycle,
+  modeToggle,
+  highlightedParts,
+  onPartClick,
+  autoRotate,
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
   // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
@@ -90,7 +105,15 @@ export function VariantPreview({
     <div data-testid="variant-preview">
       <div style={wellSized} data-testid="variant-preview-canvas">
         {selectedGlbUrl ? (
-          <PreviewCanvas glbUrl={selectedGlbUrl} />
+          <PreviewCanvas
+            glbUrl={selectedGlbUrl}
+            mode={mode}
+            onModeCycle={onModeCycle}
+            modeToggle={modeToggle}
+            highlightedParts={highlightedParts}
+            onPartClick={onPartClick}
+            autoRotate={autoRotate}
+          />
         ) : (
           <div style={placeholderText} data-testid="variant-preview-placeholder">
             {variantGlbs

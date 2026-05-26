@@ -29,8 +29,46 @@ vi.mock('../sui/collectionTxBuilders', () => ({
   buildLaunchCollectionWithTokensPtb: (...args: unknown[]) => buildLaunchMock(...args),
 }));
 
+// plan-015 U6 — PreviewCanvas mock surfaces mode pill + onPartClick stub
+// so integration tests can verify the page-level wiring without spinning up
+// Babylon. The picker-thumb mounts (no mode toggle) silently ignore the
+// extra props they receive via existing call sites.
 vi.mock('../babylon/PreviewCanvas', () => ({
-  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => <div data-testid="preview-canvas-mock">{glbUrl}</div>,
+  PreviewCanvas: ({
+    glbUrl,
+    mode,
+    onModeCycle,
+    modeToggle,
+    onPartClick,
+  }: {
+    glbUrl: string | null;
+    mode?: string;
+    onModeCycle?: () => void;
+    modeToggle?: boolean;
+    onPartClick?: (i: number) => void;
+  }) => (
+    <div data-testid="preview-canvas-mock" data-mode={mode}>
+      {glbUrl}
+      {modeToggle && onModeCycle && (
+        <button
+          type="button"
+          data-testid="preview-mode-toggle-pill"
+          onClick={onModeCycle}
+        >
+          MODE: {(mode ?? 'pbr').toUpperCase()}
+        </button>
+      )}
+      {onPartClick && (
+        <button
+          type="button"
+          data-testid="preview-pick-part-1"
+          onClick={() => onPartClick(1)}
+        >
+          pick part 1
+        </button>
+      )}
+    </div>
+  ),
 }));
 
 import { LaunchCollectionPage } from './LaunchCollectionPage';
@@ -363,6 +401,169 @@ describe('LaunchCollectionPage', () => {
     // Legacy fallback: partLabels=[] → length-1 partColors (the single-material
     // sentinel for pre-v8 / upload-mode bases).
     expect(body.variants[0].partColors).toHaveLength(1);
+  });
+
+  // ----- plan-015 U6 — axes strip + side rail + mode pill ----------------
+
+  async function pickBaseWithLabels(
+    partLabels: string[],
+    overrides: Partial<Model3DSummary> = {},
+  ) {
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xaxes', glbBlobId: 'glb-axes', partLabels, ...overrides })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xaxes'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+  }
+
+  it('U6: customization-axes strip renders the picked base partLabels in mono uppercase (R6, AE3)', async () => {
+    await pickBaseWithLabels(['chassis', 'wheels', 'spoiler', 'windshield', 'headlights']);
+    const strip = screen.getByTestId('customization-axes-strip');
+    expect(strip).toBeTruthy();
+    expect(strip.textContent).toMatch(/CUSTOMIZATION AXES/);
+    expect(strip.textContent).toMatch(/CHASSIS/);
+    expect(strip.textContent).toMatch(/WHEELS/);
+    expect(strip.textContent).toMatch(/SPOILER/);
+    expect(strip.textContent).toMatch(/WINDSHIELD/);
+    expect(strip.textContent).toMatch(/HEADLIGHTS/);
+  });
+
+  it('U6: customization-axes strip hidden for legacy base (partLabels=[])', async () => {
+    await pickBaseWithLabels([]);
+    expect(screen.queryByTestId('customization-axes-strip')).toBeNull();
+  });
+
+  it('U6: MeshInfoPanel + PartListPanel mount after a base is picked', async () => {
+    await pickBaseWithLabels(['chassis', 'wheels', 'spoiler']);
+    expect(screen.getByTestId('mesh-info-panel-launch')).toBeTruthy();
+    expect(screen.getByTestId('mesh-info-segments-launch').textContent).toMatch(/SEGMENTS.*3/);
+    // Walrus blob id surfaces as the BLOB pill (truncated id with title attr).
+    expect(screen.getByTestId('mesh-info-blob-launch')).toBeTruthy();
+    expect(screen.getByTestId('part-list-panel-launch')).toBeTruthy();
+    for (let i = 0; i < 3; i++) {
+      expect(screen.getByTestId(`part-list-row-${i}-launch`)).toBeTruthy();
+    }
+  });
+
+  it('U6: clicking a PartListPanel row marks the row active (selectedPartIndex)', async () => {
+    await pickBaseWithLabels(['chassis', 'wheels', 'spoiler']);
+    fireEvent.click(screen.getByTestId('part-list-row-1-launch'));
+    expect(
+      screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      screen.getByTestId('part-list-row-0-launch').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('U6: canvas-side pick (onPartClick) also drives PartListPanel selection — after PREVIEW builds variant GLBs', async () => {
+    // The main preview canvas only mounts (with onPartClick) once a variant
+    // GLB is built — drive a single PREVIEW pass first.
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xprev', glbBlobId: 'glb-prev', partLabels: ['a', 'b', 'c'] })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xprev'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('preview-pick-part-1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('preview-pick-part-1'));
+    // PartListPanel row 1 now active.
+    expect(
+      screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('U6: mode pill cycles PBR → PARTS → SOLO → WIREFRAME → PBR on the main preview', async () => {
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xmode', glbBlobId: 'glb-mode', partLabels: ['a', 'b'] })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xmode'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('preview-mode-toggle-pill')).toBeTruthy());
+
+    const pill = screen.getByTestId('preview-mode-toggle-pill');
+    expect(pill.textContent).toBe('MODE: PBR');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: PARTS');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: SOLO');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: WIREFRAME');
+    fireEvent.click(pill);
+    expect(pill.textContent).toBe('MODE: PBR');
+  });
+
+  it('U6: switching bases resets selectedPartIndex (regression guard)', async () => {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xa', glbBlobId: 'glb-a', partLabels: ['x', 'y'] }),
+        summary({ objectId: '0xb', glbBlobId: 'glb-b', partLabels: ['m', 'n'] }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xa'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    // Select row 1 on base A.
+    fireEvent.click(screen.getByTestId('part-list-row-1-launch'));
+    expect(
+      screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
+    ).toBe('true');
+    // Switch to base B; the previously-active row 1 should NOT carry over.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xb'));
+    });
+    await waitFor(() => expect(screen.getByTestId('part-list-row-1-launch')).toBeTruthy());
+    expect(
+      screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
+    ).toBe('false');
   });
 
   it('on an expired session (build 401) clears the session and shows a re-sign-in message', async () => {

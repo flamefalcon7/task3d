@@ -41,6 +41,9 @@ import {
 } from '../forge/VariantEditor';
 import { VariantPreview } from '../forge/VariantPreview';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
+import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
+import { partsColorHex, useModeCycle } from '../babylon/modePalette';
+import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
 import {
@@ -205,6 +208,56 @@ const formGrid: CSSProperties = {
   marginBottom: 24,
 };
 
+// plan-015 U6 — customization-axes strip (R6, AE3). Mono uppercase list of
+// the picked base's part_labels — the visible affordance "these are the
+// axes A1 named for you to customize". Lead element of the authoring
+// section so the forker reads the authored intent before touching colors.
+const axesStrip: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 8,
+  padding: '10px 14px',
+  marginBottom: 16,
+  background: tokens.color.paperPure,
+  border: tokens.border.primary,
+};
+
+const axesStripLeader: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  fontSize: 11,
+  letterSpacing: '1.5px',
+};
+
+const axesStripLabel: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  fontSize: 11,
+  letterSpacing: '1.5px',
+};
+
+const axesStripDot: CSSProperties = {
+  color: tokens.color.hint,
+  margin: '0 4px',
+};
+
+// plan-015 U6 — 2-col preview layout. Left: VariantPreview (canvas + tiles).
+// Right: MeshInfoPanel + PartListPanel side rail. Width tuned so the rail
+// matches the canvas well's height visually on common viewports.
+const previewLayout: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) 280px',
+  gap: 24,
+  marginTop: 24,
+};
+
+const previewSideRail: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+};
+
 const launchHelper: CSSProperties = {
   ...monoLabel,
   color: tokens.color.hint,
@@ -267,6 +320,15 @@ export function LaunchCollectionPage() {
   const [variantGlbs, setVariantGlbs] = useState<Uint8Array[] | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
 
+  // plan-015 U6 — preview canvas mode (controlled at page level so U7 can
+  // flip mode externally on VariantEditor column hover). Default PBR
+  // because /launch renders the swapped variants — the buyer's eye should
+  // land on the colors A2 chose, not on the rainbow segment palette.
+  const { mode: previewMode, cycle: cyclePreviewMode } = useModeCycle('pbr');
+  // Selected part — driven from canvas POINTERPICK or PartListPanel row
+  // click; surfaces as the SOLO highlight when previewMode === 'solo'.
+  const [selectedPartIndex, setSelectedPartIndex] = useState<number | null>(null);
+
   // Only models published with a standalone GLB (D-037) are forkable — older
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
   const forkable = useMemo(() => models.filter((m) => m.glbBlobId !== ''), [models]);
@@ -281,6 +343,10 @@ export function LaunchCollectionPage() {
     setErrorMsg(null);
     setBase(model);
     setVariantGlbs(null);
+    // plan-015 U6 — reset preview-side selection state when switching
+    // bases. Otherwise a stale selectedPartIndex would point at a part
+    // that may not exist in the new base.
+    setSelectedPartIndex(null);
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -475,6 +541,24 @@ export function LaunchCollectionPage() {
       ? `— BUILDING ${editorState.variants.length} VARIANTS…`
       : 'PREVIEW VARIANTS';
 
+  // plan-015 U6 — PartListPanel items derived from base.partLabels. The
+  // PARTS-rainbow swatch is stable per index so the row identity matches
+  // the canvas's PARTS-mode coloring whenever the user toggles modes.
+  const partListItems: PartListItem[] = useMemo(
+    () =>
+      (base?.partLabels ?? []).map((label, i) => ({
+        index: i,
+        label,
+        colorHex: partsColorHex(i),
+      })),
+    [base?.partLabels],
+  );
+
+  // SOLO highlight set — only meaningful when the user is in SOLO mode AND
+  // has a selected part. In other modes the canvas treats this as empty.
+  const highlightedParts =
+    previewMode === 'solo' && selectedPartIndex !== null ? [selectedPartIndex] : [];
+
   return (
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
@@ -526,6 +610,23 @@ export function LaunchCollectionPage() {
         {base && (
           <section data-testid="authoring" style={{ marginBottom: 32 }}>
             <h2 style={sectionH2}>2. Author variants.</h2>
+            {/* plan-015 U6 / R6 / AE3 — customization-axes strip. Names the
+                axes A1 published so A2 can see them BEFORE touching colors.
+                Hidden for legacy bases (partLabels = []) — the strip would
+                read as an empty list. */}
+            {base.partLabels.length > 0 && (
+              <div data-testid="customization-axes-strip" style={axesStrip}>
+                <span style={axesStripLeader}>— CUSTOMIZATION AXES:</span>
+                {base.partLabels.map((label, i) => (
+                  <span key={i} style={axesStripLabel}>
+                    {label.toUpperCase()}
+                    {i < base.partLabels.length - 1 && (
+                      <span style={axesStripDot}>·</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
             <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px', marginBottom: 16 }}>
               Forking <strong>{base.name}</strong> — you pay{' '}
               <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> to its creator, and inherit a{' '}
@@ -566,13 +667,44 @@ export function LaunchCollectionPage() {
               partLabels={base?.partLabels ?? []}
               disabled={busy}
             />
-            <div style={{ marginTop: 24 }}>
+            {/* plan-015 U6 — preview area refactored to 2-col: VariantPreview
+                (left, with mode + BG pills + auto-rotate) plus a side rail
+                with MeshInfoPanel + PartListPanel. selectedPartIndex flows
+                bidirectionally via onPartClick + PartListPanel onSelect. */}
+            <div style={previewLayout}>
               <VariantPreview
                 variants={editorState.variants}
                 variantGlbs={variantGlbs ?? undefined}
                 selectedIndex={selectedPreview}
                 onSelect={setSelectedPreview}
+                mode={previewMode}
+                onModeCycle={cyclePreviewMode}
+                modeToggle
+                highlightedParts={highlightedParts}
+                onPartClick={setSelectedPartIndex}
+                autoRotate
               />
+              <div style={previewSideRail}>
+                <MeshInfoPanel
+                  // Post-publish state: base.partLabels.length is the segment
+                  // count (one material per segment per D-052 substrate);
+                  // base.glbBlobId surfaces as the BLOB pill. Byte size is
+                  // unknown post-publish (the on-chain Model3DSummary doesn't
+                  // carry it); pass 0 to hide the SIZE row.
+                  segmentCount={base.partLabels.length}
+                  fileSizeBytes={baseGlb?.byteLength ?? 0}
+                  materialCount={base.partLabels.length}
+                  walrusBlobId={base.glbBlobId || undefined}
+                  testIdSuffix="launch"
+                />
+                <PartListPanel
+                  parts={partListItems}
+                  selectedIndex={selectedPartIndex}
+                  onSelect={setSelectedPartIndex}
+                  testIdSuffix="launch"
+                  maxHeight={240}
+                />
+              </div>
             </div>
 
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
