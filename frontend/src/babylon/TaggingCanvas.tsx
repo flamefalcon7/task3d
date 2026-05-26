@@ -16,7 +16,7 @@ import {
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
 import { frameCameraToMeshes } from './PreviewCanvas';
-import { BG_PALETTE, type BgKey, useBgCycle } from './bgPalette';
+import { type BgKey, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
 import { tokens, viewerWell } from '../ux/tokens';
 
@@ -90,8 +90,7 @@ export function TaggingCanvas({
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
     const scene = new Scene(engine);
-    const [r0, g0, b0] = BG_PALETTE[defaultBg].rgb;
-    scene.clearColor.set(r0, g0, b0, 1);
+    // scene.clearColor is owned end-to-end by the bg-cycle effect below.
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
     camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;

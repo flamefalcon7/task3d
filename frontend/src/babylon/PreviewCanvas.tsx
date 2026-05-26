@@ -10,7 +10,7 @@ import {
   Vector3,
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
-import { BG_PALETTE, type BgKey, useBgCycle } from './bgPalette';
+import { type BgKey, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
 
 // Frame the ArcRotateCamera so the loaded mesh fills the box regardless of its
@@ -46,16 +46,34 @@ export function frameCameraToMeshes(camera: ArcRotateCamera, meshes: AbstractMes
 
 interface PreviewCanvasProps {
   glbUrl: string | null;
-  /** Initial well background — defaults to D-044 black. */
+  /**
+   * Initial well background. Read ONLY on first render — subsequent prop
+   * changes are ignored (the BG state is owned by the internal useBgCycle
+   * hook once mounted). Defaults to D-044 black.
+   */
   defaultBg?: BgKey;
   /** Render the BG cycle pill in the well's top-right. Default true. */
   bgToggle?: boolean;
+  /**
+   * Suffix appended to the BG-toggle pill's test id so multiple mounts on
+   * one page (e.g. /market listings) don't collide on the default
+   * `bg-toggle-pill` testid.
+   */
+  testIdSuffix?: string;
 }
 
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). useEffect builds
-// Engine/Scene/Camera/Light once; a second effect swaps assets when glbUrl
-// changes. ResizeObserver keeps the canvas matched to its CSS box.
-export function PreviewCanvas({ glbUrl, defaultBg = 'black', bgToggle = true }: PreviewCanvasProps) {
+// Engine/Scene/Camera/Light once; a separate effect swaps assets when glbUrl
+// changes. The bg-cycle effect (deps [entry]) owns scene.clearColor end-to-
+// end — the mount effect deliberately does NOT set clearColor any more (it
+// fires synchronously alongside the bg-cycle effect on first render anyway,
+// so the prior double-write was dead code per julik+correctness review).
+export function PreviewCanvas({
+  glbUrl,
+  defaultBg = 'black',
+  bgToggle = true,
+  testIdSuffix,
+}: PreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -66,8 +84,6 @@ export function PreviewCanvas({ glbUrl, defaultBg = 'black', bgToggle = true }: 
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
     const scene = new Scene(engine);
-    const [r, g, b] = BG_PALETTE[defaultBg].rgb;
-    scene.clearColor.set(r, g, b, 1); // initial well bg (plan-013 polish: cyclable via BgTogglePill)
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
     camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;
@@ -88,12 +104,11 @@ export function PreviewCanvas({ glbUrl, defaultBg = 'black', bgToggle = true }: 
       sceneRef.current = null;
       containerRef.current = null;
     };
-    // defaultBg is read once on mount; subsequent changes are driven by the
-    // useBgCycle hook via a separate effect (the scene must already exist).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reactively update the scene clearColor when the user cycles BG.
+  // Sole owner of scene.clearColor. Fires once on mount alongside the
+  // Engine/Scene init effect (same commit phase), and again every time
+  // useBgCycle updates `entry`.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -147,7 +162,13 @@ export function PreviewCanvas({ glbUrl, defaultBg = 'black', bgToggle = true }: 
         data-bg={bg}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
-      {bgToggle && <BgTogglePill entry={entry} onCycle={cycle} />}
+      {bgToggle && (
+        <BgTogglePill
+          entry={entry}
+          onCycle={cycle}
+          testId={testIdSuffix ? `bg-toggle-pill-${testIdSuffix}` : 'bg-toggle-pill'}
+        />
+      )}
     </div>
   );
 }
