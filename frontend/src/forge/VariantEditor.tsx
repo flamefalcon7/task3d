@@ -10,6 +10,7 @@
 import type { CSSProperties } from 'react';
 import { useCallback } from 'react';
 import { TEXTURE_LIBRARY, type TextureId } from '@overflow2026/shared';
+import { HelpIcon } from '../ux/HelpIcon';
 import { buttonOutline, input as inputStyle, monoLabel, tokens } from '../ux/tokens';
 
 export const MIN_VARIANTS = 1;
@@ -54,6 +55,12 @@ export interface VariantEditorProps {
    * legacy bases).
    */
   partLabels?: string[];
+  /**
+   * plan-015 U7 — fires when the user hovers / leaves a column header.
+   * Parent uses this to flip the canvas into SOLO mode with matching part
+   * indices highlighted (AE4 win). `null` on mouseleave.
+   */
+  onColumnHover?: (label: string | null) => void;
   disabled?: boolean;
 }
 
@@ -165,10 +172,48 @@ const rowIndex: CSSProperties = {
   color: tokens.color.muted,
 };
 
-export function VariantEditor({ state, onChange, partLabels, disabled }: VariantEditorProps) {
+// plan-015 U7 — heading + help-icon row above the palette table (R12 L2).
+const columnAreaHeader: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  marginBottom: 8,
+};
+
+const columnAreaTitle: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  letterSpacing: '1.5px',
+};
+
+// plan-015 U7 — subhead below column headers (R7 / AE3 "the win"). Mono
+// uppercase, muted, lives inside the thead as a colspan row so it scrolls
+// with the table if the user widens the variant count to scrollable depth.
+const subheadCell: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  textAlign: 'left',
+  padding: '6px 10px',
+  background: tokens.color.paperPure,
+  borderBottom: tokens.border.primary,
+  letterSpacing: '1.5px',
+  fontWeight: tokens.weight.regular,
+};
+
+export function VariantEditor({
+  state,
+  onChange,
+  partLabels,
+  onColumnHover,
+  disabled,
+}: VariantEditorProps) {
   const canAdd = state.variants.length < MAX_VARIANTS;
   const canRemove = state.variants.length > MIN_VARIANTS;
   const uniqueLabels = deriveUniqueLabels(partLabels ?? []);
+  // plan-015 U7 — column count for the subhead colspan (index + N labels +
+  // texture + optional price column).
+  const totalColumnCount =
+    1 + uniqueLabels.length + 1 + (state.perVariantPricing ? 1 : 0);
 
   const updateRow = useCallback(
     (i: number, patch: Partial<VariantRow>) => {
@@ -298,17 +343,40 @@ export function VariantEditor({ state, onChange, partLabels, disabled }: Variant
         </label>
       </div>
 
+      <div style={columnAreaHeader}>
+        <span style={columnAreaTitle}>PALETTE COLUMNS</span>
+        <HelpIcon
+          testId="variant-editor-help"
+          title="Why these columns?"
+          body="Each column is a customization axis the base's creator named. Pick a color for each axis to define this variant's identity."
+        />
+      </div>
       <table style={table}>
         <thead>
           <tr>
             <th style={thStyle}>#</th>
             {uniqueLabels.map((label) => (
-              <th key={label} style={thStyle} data-testid={`palette-col-${label}`}>
+              <th
+                key={label}
+                style={thStyle}
+                data-testid={`palette-col-${label}`}
+                onMouseEnter={onColumnHover ? () => onColumnHover(label) : undefined}
+                onMouseLeave={onColumnHover ? () => onColumnHover(null) : undefined}
+              >
                 {label.toUpperCase()}
               </th>
             ))}
             <th style={thStyle}>TEXTURE</th>
             {state.perVariantPricing && <th style={thStyle}>PRICE (MIST)</th>}
+          </tr>
+          {/* plan-015 U7 / R7 / AE3 — subhead row reinforces authorship of
+              the column labels. Colspan covers every column so the line
+              spans the full table width regardless of pricing mode. */}
+          <tr data-testid="variant-editor-subhead">
+            <th colSpan={totalColumnCount} style={subheadCell}>
+              — COLUMNS REFLECT THE LABELS THIS BASE'S CREATOR SET WHEN
+              PUBLISHING.
+            </th>
           </tr>
         </thead>
         <tbody>

@@ -158,4 +158,93 @@ describe('applyCanvasMode', () => {
     expect(() => applyCanvasMode([], 'parts')).not.toThrow();
     expect(() => applyCanvasMode([], 'solo', [0, 1])).not.toThrow();
   });
+
+  // -- plan-015 U7 — partColors live-recolor overlay -----------------------
+
+  it('partColors apply user-defined hex per mesh in PBR mode', () => {
+    const meshes = [
+      makeMesh({ albedoColor: { r: 1, g: 1, b: 1 } }),
+      makeMesh({ albedoColor: { r: 1, g: 1, b: 1 } }),
+    ];
+    applyCanvasMode(meshes, 'pbr', [], ['#ff0000', '#00ff00']);
+    expect(meshes[0].material.albedoColor.r).toBeCloseTo(1);
+    expect(meshes[0].material.albedoColor.g).toBeCloseTo(0);
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(0);
+    expect(meshes[1].material.albedoColor.r).toBeCloseTo(0);
+    expect(meshes[1].material.albedoColor.g).toBeCloseTo(1);
+    expect(meshes[1].material.albedoColor.b).toBeCloseTo(0);
+  });
+
+  it('partColors persist across mode transitions PBR → SOLO → WIREFRAME → PBR', () => {
+    const meshes = [
+      makeMesh({ alpha: 1, albedoColor: { r: 1, g: 1, b: 1 } }),
+      makeMesh({ alpha: 1, albedoColor: { r: 1, g: 1, b: 1 } }),
+    ];
+    const partColors = ['#0000ff', '#ffff00'];
+    applyCanvasMode(meshes, 'pbr', [], partColors);
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(1);
+    applyCanvasMode(meshes, 'solo', [0], partColors);
+    // Mesh 0 highlighted (alpha untouched), partColors still applied.
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(1);
+    expect(meshes[0].material.alpha).toBeCloseTo(1);
+    expect(meshes[1].material.alpha).toBeCloseTo(0.2);
+    expect(meshes[1].material.albedoColor.r).toBeCloseTo(1); // yellow
+    expect(meshes[1].material.albedoColor.g).toBeCloseTo(1);
+    applyCanvasMode(meshes, 'wireframe', [], partColors);
+    expect(meshes[0].material.wireframe).toBe(true);
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(1);
+    applyCanvasMode(meshes, 'pbr', [], partColors);
+    // Back to PBR — partColors still applied; wireframe + alpha cleared.
+    expect(meshes[0].material.wireframe).toBe(false);
+    expect(meshes[0].material.alpha).toBeCloseTo(1);
+    expect(meshes[1].material.alpha).toBeCloseTo(1);
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(1);
+  });
+
+  it('PARTS mode overrides partColors with the diagnostic rainbow', () => {
+    const meshes = [
+      makeMesh({ albedoColor: { r: 1, g: 1, b: 1 } }),
+      makeMesh({ albedoColor: { r: 1, g: 1, b: 1 } }),
+    ];
+    applyCanvasMode(meshes, 'parts', [], ['#ff00ff', '#ff00ff']);
+    const [r0, g0, b0] = partsColor(0);
+    expect(meshes[0].material.albedoColor.r).toBeCloseTo(r0);
+    expect(meshes[0].material.albedoColor.g).toBeCloseTo(g0);
+    expect(meshes[0].material.albedoColor.b).toBeCloseTo(b0);
+  });
+
+  it('partColors → undefined restores the original baseline', () => {
+    const mesh = makeMesh({ albedoColor: { r: 0.8, g: 0.2, b: 0.1 } });
+    applyCanvasMode([mesh], 'pbr', [], ['#000000']);
+    // Mesh painted black via partColors.
+    expect(mesh.material.albedoColor.r).toBeCloseTo(0);
+    // Drop partColors — restore should bring back the original orange.
+    applyCanvasMode([mesh], 'pbr');
+    expect(mesh.material.albedoColor.r).toBeCloseTo(0.8);
+    expect(mesh.material.albedoColor.g).toBeCloseTo(0.2);
+    expect(mesh.material.albedoColor.b).toBeCloseTo(0.1);
+  });
+
+  it('partColors with missing entries (sparse array) leaves the snapshot baseline in place', () => {
+    const meshes = [
+      makeMesh({ albedoColor: { r: 0.5, g: 0.5, b: 0.5 } }),
+      makeMesh({ albedoColor: { r: 0.5, g: 0.5, b: 0.5 } }),
+    ];
+    // Only index 0 has a color; index 1 should stay at the snapshot baseline.
+    applyCanvasMode(meshes, 'pbr', [], ['#ff0000']);
+    expect(meshes[0].material.albedoColor.r).toBeCloseTo(1);
+    expect(meshes[1].material.albedoColor.r).toBeCloseTo(0.5);
+  });
+
+  it('partColors with a malformed hex string skips that mesh without throwing', () => {
+    const meshes = [
+      makeMesh({ albedoColor: { r: 0.4, g: 0.4, b: 0.4 } }),
+      makeMesh({ albedoColor: { r: 0.4, g: 0.4, b: 0.4 } }),
+    ];
+    expect(() =>
+      applyCanvasMode(meshes, 'pbr', [], ['not-a-color', '#00ff00']),
+    ).not.toThrow();
+    expect(meshes[0].material.albedoColor.r).toBeCloseTo(0.4);
+    expect(meshes[1].material.albedoColor.g).toBeCloseTo(1);
+  });
 });

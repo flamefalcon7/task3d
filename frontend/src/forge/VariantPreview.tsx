@@ -41,6 +41,19 @@ export interface VariantPreviewProps {
   highlightedParts?: readonly number[];
   onPartClick?: (index: number) => void;
   autoRotate?: boolean;
+  /**
+   * plan-015 U7 / R9 — live-recolor channel. The active variant's resolved
+   * per-part hex colors. PreviewCanvas applies these as a material overlay,
+   * so a color picked in VariantEditor updates the preview within frame
+   * without a backend rebuild.
+   */
+  partColors?: readonly string[];
+  /**
+   * plan-015 U7 / R9 — fallback mesh URL shown when no swapped variant GLB
+   * exists yet. Lets the live-recolor overlay paint on top of the base mesh
+   * before the user has ever clicked PREVIEW.
+   */
+  baseGlbUrl?: string | null;
 }
 
 const wellSized: CSSProperties = {
@@ -85,6 +98,8 @@ export function VariantPreview({
   highlightedParts,
   onPartClick,
   autoRotate,
+  partColors,
+  baseGlbUrl,
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
   // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
@@ -101,24 +116,29 @@ export function VariantPreview({
     return () => URL.revokeObjectURL(selectedGlbUrl);
   }, [selectedGlbUrl]);
 
+  // plan-015 U7 / R9 — live-recolor fallback. When no swapped variant GLB
+  // exists yet, show the base mesh so partColors can paint live before the
+  // user clicks PREVIEW. selectedGlbUrl (the swapped GLB) wins when present
+  // — it carries any baked textures the swap pipeline produced.
+  const displayGlbUrl = selectedGlbUrl ?? baseGlbUrl ?? null;
+
   return (
     <div data-testid="variant-preview">
       <div style={wellSized} data-testid="variant-preview-canvas">
-        {selectedGlbUrl ? (
+        {displayGlbUrl ? (
           <PreviewCanvas
-            glbUrl={selectedGlbUrl}
+            glbUrl={displayGlbUrl}
             mode={mode}
             onModeCycle={onModeCycle}
             modeToggle={modeToggle}
             highlightedParts={highlightedParts}
             onPartClick={onPartClick}
             autoRotate={autoRotate}
+            partColors={partColors}
           />
         ) : (
           <div style={placeholderText} data-testid="variant-preview-placeholder">
-            {variantGlbs
-              ? '— SELECT A VARIANT TO PREVIEW'
-              : '— CLICK PREVIEW TO BUILD VARIANTS'}
+            — LOADING BASE MESH…
           </div>
         )}
       </div>

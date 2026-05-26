@@ -112,6 +112,14 @@ interface PreviewCanvasProps {
    * in explicitly per the R10 per-mount table.
    */
   autoRotate?: boolean;
+  /**
+   * plan-015 U7 / R9 — per-part user-defined colors (hex). When provided,
+   * applied as an overlay on top of the snapshot baseline for PBR / SOLO
+   * / WIREFRAME modes (PARTS mode's diagnostic rainbow still wins). This
+   * is the channel for VariantEditor live-recolor — pick a color, the
+   * preview updates within frame with no backend round-trip.
+   */
+  partColors?: readonly string[];
 }
 
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). useEffect builds
@@ -131,6 +139,7 @@ export function PreviewCanvas({
   highlightedParts = [],
   onPartClick,
   autoRotate = false,
+  partColors,
 }: PreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -256,15 +265,17 @@ export function PreviewCanvas({
     };
   }, [glbUrl]);
 
-  // plan-015 U2 — mode effect. Applies the mode-specific material overlay
-  // via applyCanvasMode (snapshot/restore semantics) and updates the
-  // HighlightLayer membership for SOLO mode. Re-fires on (mode,
-  // highlightedParts) change AND after each new GLB load via loadEpoch.
+  // plan-015 U2 / U7 — mode effect. Applies the mode-specific material
+  // overlay via applyCanvasMode (snapshot/restore semantics) and updates
+  // the HighlightLayer membership for SOLO mode. Re-fires on (mode,
+  // highlightedParts, partColors) change AND after each new GLB load via
+  // loadEpoch — partColors changes are how VariantEditor live-recolor
+  // reaches the canvas (R9).
   useEffect(() => {
     const hl = highlightLayerRef.current;
     if (!hl) return;
     const meshes = meshesRef.current;
-    applyCanvasMode(meshes, mode, highlightedParts);
+    applyCanvasMode(meshes, mode, highlightedParts, partColors);
     hl.removeAllMeshes();
     if (mode === 'solo') {
       const accent = Color3.FromHexString(ACCENT_COLOR_HEX);
@@ -275,7 +286,7 @@ export function PreviewCanvas({
         if (mesh) hl.addMesh(mesh as Mesh, accent);
       }
     }
-  }, [mode, highlightedParts, loadEpoch]);
+  }, [mode, highlightedParts, loadEpoch, partColors]);
 
   // plan-015 U2 / R10 — idle auto-rotate. Tracks the latest pointer time
   // in a closure-scoped variable; the per-frame observer advances

@@ -29,10 +29,10 @@ vi.mock('../sui/collectionTxBuilders', () => ({
   buildLaunchCollectionWithTokensPtb: (...args: unknown[]) => buildLaunchMock(...args),
 }));
 
-// plan-015 U6 — PreviewCanvas mock surfaces mode pill + onPartClick stub
-// so integration tests can verify the page-level wiring without spinning up
-// Babylon. The picker-thumb mounts (no mode toggle) silently ignore the
-// extra props they receive via existing call sites.
+// plan-015 U6/U7 — PreviewCanvas mock surfaces mode pill + onPartClick +
+// partColors + highlightedParts so integration tests can verify the
+// page-level wiring without spinning up Babylon. data-* attributes carry
+// the props out as serialized strings the tests can grep with regex.
 vi.mock('../babylon/PreviewCanvas', () => ({
   PreviewCanvas: ({
     glbUrl,
@@ -40,14 +40,23 @@ vi.mock('../babylon/PreviewCanvas', () => ({
     onModeCycle,
     modeToggle,
     onPartClick,
+    highlightedParts,
+    partColors,
   }: {
     glbUrl: string | null;
     mode?: string;
     onModeCycle?: () => void;
     modeToggle?: boolean;
     onPartClick?: (i: number) => void;
+    highlightedParts?: readonly number[];
+    partColors?: readonly string[];
   }) => (
-    <div data-testid="preview-canvas-mock" data-mode={mode}>
+    <div
+      data-testid="preview-canvas-mock"
+      data-mode={mode}
+      data-highlighted={highlightedParts ? highlightedParts.join(',') : ''}
+      data-part-colors={partColors ? partColors.join(',') : ''}
+    >
       {glbUrl}
       {modeToggle && onModeCycle && (
         <button
@@ -564,6 +573,75 @@ describe('LaunchCollectionPage', () => {
     expect(
       screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
     ).toBe('false');
+  });
+
+  // ----- plan-015 U7 — column-hover SOLO + live recolor ------------------
+
+  // The page renders MANY PreviewCanvas mounts (1 per base-picker thumb +
+  // 1 main preview). Only the main preview gets the mode-toggle pill, so
+  // its presence distinguishes the two.
+  function mainPreviewCanvas(): HTMLElement {
+    const matches = screen.getAllByTestId('preview-canvas-mock').filter((el) =>
+      el.querySelector('[data-testid="preview-mode-toggle-pill"]'),
+    );
+    if (matches.length === 0) {
+      throw new Error('no main preview canvas (mode-toggle pill missing)');
+    }
+    if (matches.length > 1) {
+      throw new Error(`expected one main preview canvas, got ${matches.length}`);
+    }
+    return matches[0]!;
+  }
+
+  it('U7: hovering a VariantEditor column flips main preview to SOLO with matching part indices (R8, AE4)', async () => {
+    await pickBaseWithLabels(['chassis', 'wheels', 'chassis', 'spoiler']);
+    // Pre-hover: preview defaults to PBR with no highlights.
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('pbr');
+    expect(mainPreviewCanvas().getAttribute('data-highlighted')).toBe('');
+    // Hover the 'chassis' column header — should flip mode to SOLO and
+    // highlight parts [0, 2] (the two indices in partLabels matching 'chassis').
+    fireEvent.mouseEnter(screen.getByTestId('palette-col-chassis'));
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('solo');
+    expect(mainPreviewCanvas().getAttribute('data-highlighted')).toBe('0,2');
+    // Mouseout — mode and highlight return to baseline.
+    fireEvent.mouseLeave(screen.getByTestId('palette-col-chassis'));
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('pbr');
+    expect(mainPreviewCanvas().getAttribute('data-highlighted')).toBe('');
+  });
+
+  it('U7: hover overlay does not override user-picked mode after mouseout', async () => {
+    await pickBaseWithLabels(['a', 'b']);
+    // User cycles PBR → PARTS via the pill.
+    fireEvent.click(screen.getByTestId('preview-mode-toggle-pill'));
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('parts');
+    // Hover a column — flips to SOLO temporarily.
+    fireEvent.mouseEnter(screen.getByTestId('palette-col-a'));
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('solo');
+    // Mouseout — restores PARTS, not PBR.
+    fireEvent.mouseLeave(screen.getByTestId('palette-col-a'));
+    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('parts');
+  });
+
+  it('U7: live recolor — VariantEditor color pick updates partColors prop on the preview canvas (R9)', async () => {
+    await pickBaseWithLabels(['primary', 'accent']);
+    // Default palette seeds every label to #cc3333.
+    expect(mainPreviewCanvas().getAttribute('data-part-colors')).toBe('#cc3333,#cc3333');
+    // Pick a red for the 'primary' column on variant 0.
+    fireEvent.change(screen.getByTestId('variant-color-0-primary'), {
+      target: { value: '#ff0000' },
+    });
+    expect(mainPreviewCanvas().getAttribute('data-part-colors')).toBe('#ff0000,#cc3333');
+  });
+
+  it('U7: live recolor falls back to the base mesh URL when no swapped variant GLB exists yet (R9)', async () => {
+    await pickBaseWithLabels(['a', 'b']);
+    // Without clicking PREVIEW, the main preview canvas still renders with
+    // glbUrl set — the base mesh blob URL acts as the live-recolor surface.
+    const main = mainPreviewCanvas();
+    expect(main.textContent).toMatch(/blob:/);
+    // The "select a variant" / "click PREVIEW" placeholders should NOT
+    // surface — the new fallback bypasses them.
+    expect(screen.queryByTestId('variant-preview-placeholder')).toBeNull();
   });
 
   it('on an expired session (build 401) clears the session and shows a re-sign-in message', async () => {

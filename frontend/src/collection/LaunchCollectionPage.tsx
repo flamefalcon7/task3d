@@ -16,7 +16,7 @@
 // Model3DSummary, NOT a user input, so the nft creator can't underpay and abort.
 
 import type { CSSProperties } from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useCurrentAccount,
@@ -42,7 +42,7 @@ import {
 import { VariantPreview } from '../forge/VariantPreview';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
-import { partsColorHex, useModeCycle } from '../babylon/modePalette';
+import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
@@ -121,6 +121,23 @@ function mistToSui(mist: string): string {
   const n = Number(mist);
   if (!Number.isFinite(n)) return '0';
   return (n / 1e9).toString();
+}
+
+// plan-015 U7 / R9 — resolve a variant's label→hex palette into a positional
+// hex[] aligned with `partLabels`. Same algorithm as runBuildVariants's
+// inline resolver but returns hex strings (for the live-recolor canvas
+// overlay) rather than [r,g,b,1] tuples (for the backend build endpoint).
+// Legacy bases (`partLabels=[]`) collapse to a length-1 array via the
+// LEGACY_LABEL → first-value fallback chain.
+function resolvePartColorsHex(
+  palette: Record<string, string>,
+  partLabels: readonly string[],
+): readonly string[] {
+  if (partLabels.length === 0) {
+    const hex = palette.primary ?? Object.values(palette)[0] ?? '#cccccc';
+    return [hex];
+  }
+  return partLabels.map((label) => palette[label] ?? '#cccccc');
 }
 
 // Page-local styles.
@@ -328,6 +345,11 @@ export function LaunchCollectionPage() {
   // Selected part — driven from canvas POINTERPICK or PartListPanel row
   // click; surfaces as the SOLO highlight when previewMode === 'solo'.
   const [selectedPartIndex, setSelectedPartIndex] = useState<number | null>(null);
+  // plan-015 U7 — VariantEditor column hover label. Non-null means the user
+  // is hovering a column; the effective mode flips to SOLO with all part
+  // indices matching that label highlighted (R8, AE4 win). On mouseout the
+  // state returns to null and the effective mode falls back to previewMode.
+  const [hoveredColumnLabel, setHoveredColumnLabel] = useState<string | null>(null);
 
   // Only models published with a standalone GLB (D-037) are forkable — older
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
@@ -559,6 +581,54 @@ export function LaunchCollectionPage() {
   const highlightedParts =
     previewMode === 'solo' && selectedPartIndex !== null ? [selectedPartIndex] : [];
 
+  // plan-015 U7 — VariantEditor column-hover SOLO wiring. When a column is
+  // hovered, force SOLO mode and highlight EVERY part index whose label
+  // matches the hovered column. base.partLabels is positional (length =
+  // mesh count), so the reduce produces the canonical indices the canvas
+  // expects.
+  const hoverHighlightedParts = useMemo(() => {
+    if (!hoveredColumnLabel || !base) return [];
+    return base.partLabels
+      .map((l, i) => (l === hoveredColumnLabel ? i : -1))
+      .filter((i): i is number => i >= 0);
+  }, [hoveredColumnLabel, base]);
+
+  // Effective mode + highlight set — hover overlay wins while active, else
+  // fall back to the user-picked mode. This is the "stash + restore"
+  // pattern flattened into a derivation: no useEffect, no stashed state.
+  const effectiveMode: CanvasMode = hoveredColumnLabel ? 'solo' : previewMode;
+  const effectiveHighlightedParts: readonly number[] = hoveredColumnLabel
+    ? hoverHighlightedParts
+    : highlightedParts;
+
+  // plan-015 U7 / R9 — live-recolor channel. Resolve the active variant's
+  // label→hex palette into the positional partColors[] the canvas paints
+  // on top of the snapshot baseline. Same resolution as runBuildVariants
+  // (legacy bases collapse to a length-1 array via the LEGACY_LABEL
+  // fallback). Memoized on the inputs so the canvas effect only re-fires
+  // when colors actually change.
+  const partColors = useMemo(() => {
+    if (!base) return undefined;
+    const active = editorState.variants[selectedPreview];
+    if (!active) return undefined;
+    return resolvePartColorsHex(active.palette, base.partLabels);
+  }, [base, editorState.variants, selectedPreview]);
+
+  // plan-015 U7 / R9 — base-mesh blob URL surfaced to VariantPreview as a
+  // fallback render target. Without this, the canvas shows a placeholder
+  // until the user clicks PREVIEW; with this, partColors paint live on the
+  // base mesh from the moment the authoring section opens.
+  const baseGlbUrl = useMemo(() => {
+    if (!baseGlb) return null;
+    return URL.createObjectURL(
+      new Blob([baseGlb as BlobPart], { type: 'model/gltf-binary' }),
+    );
+  }, [baseGlb]);
+  useEffect(() => {
+    if (!baseGlbUrl) return;
+    return () => URL.revokeObjectURL(baseGlbUrl);
+  }, [baseGlbUrl]);
+
   return (
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
@@ -665,24 +735,28 @@ export function LaunchCollectionPage() {
               state={editorState}
               onChange={setEditorState}
               partLabels={base?.partLabels ?? []}
+              onColumnHover={setHoveredColumnLabel}
               disabled={busy}
             />
-            {/* plan-015 U6 — preview area refactored to 2-col: VariantPreview
-                (left, with mode + BG pills + auto-rotate) plus a side rail
-                with MeshInfoPanel + PartListPanel. selectedPartIndex flows
-                bidirectionally via onPartClick + PartListPanel onSelect. */}
+            {/* plan-015 U6/U7 — preview area: VariantPreview (left, mode +
+                BG pills + auto-rotate + live recolor via partColors) plus
+                side rail with MeshInfoPanel + PartListPanel.
+                effectiveMode/effectiveHighlightedParts overlay U7 hover
+                state on top of the user-picked mode. */}
             <div style={previewLayout}>
               <VariantPreview
                 variants={editorState.variants}
                 variantGlbs={variantGlbs ?? undefined}
                 selectedIndex={selectedPreview}
                 onSelect={setSelectedPreview}
-                mode={previewMode}
+                mode={effectiveMode}
                 onModeCycle={cyclePreviewMode}
                 modeToggle
-                highlightedParts={highlightedParts}
+                highlightedParts={effectiveHighlightedParts}
                 onPartClick={setSelectedPartIndex}
                 autoRotate
+                partColors={partColors}
+                baseGlbUrl={baseGlbUrl}
               />
               <div style={previewSideRail}>
                 <MeshInfoPanel

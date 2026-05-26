@@ -2,7 +2,7 @@
 // KTD-5 (texture dropdown sourced from shared TEXTURE_LIBRARY), and D-005
 // (per-variant pricing toggle).
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import {
   act,
@@ -248,5 +248,55 @@ describe('VariantEditor', () => {
     expect(g).toBeCloseTo(128 / 255, 5);
     expect(b).toBeCloseTo(64 / 255, 5);
     expect(a).toBe(1);
+  });
+
+  // -- plan-015 U7 — subhead, HelpIcon, onColumnHover wiring ---------------
+
+  it('U7: subhead row reinforces column-label authorship under the palette columns (R7, AE3)', () => {
+    render(<Harness partLabels={['chassis', 'wheels', 'spoiler']} />);
+    const subhead = screen.getByTestId('variant-editor-subhead');
+    expect(subhead).toBeTruthy();
+    expect(subhead.textContent).toMatch(
+      /COLUMNS REFLECT THE LABELS THIS BASE'S CREATOR SET WHEN PUBLISHING/,
+    );
+  });
+
+  it('U7: HelpIcon renders next to the PALETTE COLUMNS heading (R12)', () => {
+    render(<Harness partLabels={['chassis']} />);
+    expect(screen.getByTestId('variant-editor-help')).toBeTruthy();
+    fireEvent.mouseEnter(screen.getByTestId('variant-editor-help'));
+    expect(screen.getByTestId('variant-editor-help-popover').textContent).toMatch(
+      /customization axis/,
+    );
+  });
+
+  it('U7: hovering a column header fires onColumnHover(label); leaving fires onColumnHover(null) (R8, AE4)', () => {
+    const hover = vi.fn();
+    function HarnessWithHover() {
+      const [state, setState] = useState<VariantEditorState>(
+        newVariantEditorState(['chassis', 'wheels']),
+      );
+      return (
+        <VariantEditor
+          state={state}
+          onChange={setState}
+          partLabels={['chassis', 'wheels']}
+          onColumnHover={hover}
+        />
+      );
+    }
+    render(<HarnessWithHover />);
+    fireEvent.mouseEnter(screen.getByTestId('palette-col-chassis'));
+    expect(hover).toHaveBeenCalledWith('chassis');
+    fireEvent.mouseLeave(screen.getByTestId('palette-col-chassis'));
+    expect(hover).toHaveBeenCalledWith(null);
+    fireEvent.mouseEnter(screen.getByTestId('palette-col-wheels'));
+    expect(hover).toHaveBeenLastCalledWith('wheels');
+  });
+
+  it('U7: omitting onColumnHover leaves the column header inert (no listeners attached)', () => {
+    render(<Harness partLabels={['chassis']} />);
+    // No throws when hovering without a handler — sanity check the optional prop.
+    expect(() => fireEvent.mouseEnter(screen.getByTestId('palette-col-chassis'))).not.toThrow();
   });
 });
