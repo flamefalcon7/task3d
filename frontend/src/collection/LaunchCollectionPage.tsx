@@ -34,12 +34,22 @@ import { useModelIndex } from '../browse/useModelIndex';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import {
   VariantEditor,
+  MAX_VARIANTS,
+  newVariantRow,
   newVariantEditorState,
   deriveUniqueLabels,
   hexToBaseColorRgb,
   type VariantEditorState,
+  type VariantRow,
 } from '../forge/VariantEditor';
 import { VariantPreview } from '../forge/VariantPreview';
+import { RandomGenControls } from '../forge/RandomGenControls';
+import { VariantStrip } from '../forge/VariantStrip';
+import {
+  generateVariantColors,
+  type HarmonicScheme,
+  hexToHsl,
+} from '../forge/harmonics';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
@@ -350,6 +360,15 @@ export function LaunchCollectionPage() {
   // indices matching that label highlighted (R8, AE4 win). On mouseout the
   // state returns to null and the effective mode falls back to previewMode.
   const [hoveredColumnLabel, setHoveredColumnLabel] = useState<string | null>(null);
+  // plan-015 U8 — Random Gen state (R11). Seed + scheme + N + locked set.
+  // Locks survive re-rolls so user-tuned variants persist across multiple
+  // RANDOM GEN clicks. Default seed = saturated red, default scheme =
+  // analogous (the tightest, friendliest coherence pattern).
+  const [randomSeedHex, setRandomSeedHex] = useState('#cc3333');
+  const [randomScheme, setRandomScheme] = useState<HarmonicScheme>('analogous');
+  const [lockedIndices, setLockedIndices] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
 
   // Only models published with a standalone GLB (D-037) are forkable — older
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
@@ -369,6 +388,9 @@ export function LaunchCollectionPage() {
     // bases. Otherwise a stale selectedPartIndex would point at a part
     // that may not exist in the new base.
     setSelectedPartIndex(null);
+    // plan-015 U8 — clear locks when switching bases; preserving them
+    // would carry forward lock indices into a different variant array.
+    setLockedIndices(new Set());
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -629,6 +651,81 @@ export function LaunchCollectionPage() {
     return () => URL.revokeObjectURL(baseGlbUrl);
   }, [baseGlbUrl]);
 
+  // plan-015 U8 — variant count for RandomGen mirrors VariantEditor's
+  // current row count. Changing it via the RandomGen stepper updates the
+  // editor state in-place (adds default-palette rows or truncates).
+  const variantCount = editorState.variants.length;
+  const onChangeVariantCount = useCallback(
+    (next: number) => {
+      const target = Math.max(1, Math.min(MAX_VARIANTS, next));
+      if (target === editorState.variants.length) return;
+      const uniqueLabels = deriveUniqueLabels(base?.partLabels ?? []);
+      if (target < editorState.variants.length) {
+        setEditorState({
+          ...editorState,
+          variants: editorState.variants.slice(0, target),
+        });
+        // Drop locks that fell past the new length so they don't ghost.
+        if ([...lockedIndices].some((i) => i >= target)) {
+          setLockedIndices(new Set([...lockedIndices].filter((i) => i < target)));
+        }
+      } else {
+        const extras: VariantRow[] = [];
+        for (let i = editorState.variants.length; i < target; i++) {
+          extras.push(
+            newVariantRow({
+              uniqueLabels,
+              seed: { priceMist: editorState.globalPriceMist },
+            }),
+          );
+        }
+        setEditorState({
+          ...editorState,
+          variants: [...editorState.variants, ...extras],
+        });
+      }
+    },
+    [editorState, base?.partLabels, lockedIndices],
+  );
+
+  // plan-015 U8 — RANDOM GEN distributor. Generates N variants × K colors
+  // via harmonic math, then distributes each variant's K colors across the
+  // base's unique labels. Locked variants keep their existing palette
+  // (R11: "User can re-roll repeatedly without losing manual edits to
+  // locked variants").
+  const onRandomGenerate = useCallback(() => {
+    if (!base) return;
+    const uniqueLabels = deriveUniqueLabels(base.partLabels);
+    const K = uniqueLabels.length;
+    const N = editorState.variants.length;
+    const generated = generateVariantColors(
+      hexToHsl(randomSeedHex),
+      randomScheme,
+      K,
+      N,
+    );
+    const nextVariants = editorState.variants.map((row, i) => {
+      if (lockedIndices.has(i)) return row;
+      const colors = generated[i];
+      if (!colors) return row;
+      const palette: Record<string, string> = {};
+      uniqueLabels.forEach((label, k) => {
+        palette[label] = colors[k] ?? '#cccccc';
+      });
+      return { ...row, palette };
+    });
+    setEditorState({ ...editorState, variants: nextVariants });
+  }, [base, editorState, randomSeedHex, randomScheme, lockedIndices]);
+
+  const onToggleLock = useCallback((index: number) => {
+    setLockedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
   return (
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
@@ -780,6 +877,32 @@ export function LaunchCollectionPage() {
                 />
               </div>
             </div>
+            {/* plan-015 U8 / R13 — VariantStrip below the main preview area.
+                Active variant gets accent border; locked variants survive
+                re-rolls. Lock badge click toggles state without firing
+                selection (stopPropagation in VariantStrip). */}
+            <VariantStrip
+              variants={editorState.variants}
+              selectedIndex={selectedPreview}
+              onSelect={setSelectedPreview}
+              lockedIndices={lockedIndices}
+              onToggleLock={onToggleLock}
+              disabled={busy}
+            />
+            {/* plan-015 U8 / R11 / D-056 / AE5 — Random Gen. Harmonic-from-
+                seed palette generator. Per-variant locks let the user keep
+                manual edits while re-rolling sibling variants. */}
+            <RandomGenControls
+              N={variantCount}
+              onChangeN={onChangeVariantCount}
+              seedHex={randomSeedHex}
+              onChangeSeed={setRandomSeedHex}
+              scheme={randomScheme}
+              onChangeScheme={setRandomScheme}
+              lockedCount={lockedIndices.size}
+              onGenerate={onRandomGenerate}
+              disabled={busy}
+            />
 
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button

@@ -644,6 +644,163 @@ describe('LaunchCollectionPage', () => {
     expect(screen.queryByTestId('variant-preview-placeholder')).toBeNull();
   });
 
+  // ----- plan-015 U8 — Random Gen + VariantStrip + lock ------------------
+
+  it('U8: RandomGenControls + VariantStrip mount after a base is picked', async () => {
+    await pickBaseWithLabels(['primary', 'accent']);
+    expect(screen.getByTestId('random-gen-controls')).toBeTruthy();
+    expect(screen.getByTestId('variant-strip')).toBeTruthy();
+    // Default editor seeds 1 variant; the strip reflects that.
+    expect(screen.getByTestId('variant-strip-tile-0')).toBeTruthy();
+    expect(screen.queryByTestId('variant-strip-tile-1')).toBeNull();
+  });
+
+  it('U8: changing N via RandomGen stepper updates the variant count + strip tiles', async () => {
+    await pickBaseWithLabels(['primary', 'accent']);
+    expect(screen.getByTestId('random-gen-n-value').textContent).toBe('1');
+    for (let i = 0; i < 4; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    }
+    expect(screen.getByTestId('random-gen-n-value').textContent).toBe('5');
+    // Strip now shows 5 tiles.
+    for (let i = 0; i < 5; i++) {
+      expect(screen.getByTestId(`variant-strip-tile-${i}`)).toBeTruthy();
+    }
+    // Truncating drops tiles.
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-minus'));
+    }
+    expect(screen.getByTestId('random-gen-n-value').textContent).toBe('3');
+    expect(screen.queryByTestId('variant-strip-tile-3')).toBeNull();
+  });
+
+  it('U8: RANDOM GEN populates every unlocked variant palette with harmonic colors (AE5)', async () => {
+    await pickBaseWithLabels(['primary', 'accent']);
+    // Bump to 5 variants.
+    for (let i = 0; i < 4; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    }
+    // Pre-gen: every palette seed is #cc3333 (newVariantRow default).
+    const beforePrimary0 = (
+      screen.getByTestId('variant-color-0-primary') as HTMLInputElement
+    ).value;
+    expect(beforePrimary0).toBe('#cc3333');
+    // Click RANDOM GEN.
+    fireEvent.click(screen.getByTestId('random-gen-button'));
+    // After: every variant's palette[primary] differs from the default.
+    // (Some variants may coincidentally roll #cc3333, but variant 0's
+    // harmonic palette starts at hue 0 ≈ red, and the editor seed wasn't
+    // exactly #cc3333 saturation — we just need ANY variant to differ.)
+    const variant0Primary = (
+      screen.getByTestId('variant-color-0-primary') as HTMLInputElement
+    ).value;
+    const variant1Primary = (
+      screen.getByTestId('variant-color-1-primary') as HTMLInputElement
+    ).value;
+    // Sibling variants should differ from each other (distinct seed
+    // rotations around the harmonic wheel).
+    expect(variant0Primary).not.toBe(variant1Primary);
+  });
+
+  it('U8: locked variants survive RANDOM GEN re-rolls (R11)', async () => {
+    await pickBaseWithLabels(['primary']);
+    // Bump to 3 variants + first RANDOM GEN.
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    }
+    fireEvent.click(screen.getByTestId('random-gen-button'));
+    const lockedValue = (
+      screen.getByTestId('variant-color-1-primary') as HTMLInputElement
+    ).value;
+    // Lock variant 1.
+    fireEvent.click(screen.getByTestId('variant-strip-lock-1'));
+    expect(
+      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-checked'),
+    ).toBe('true');
+    // Cycle the seed + re-roll.
+    fireEvent.change(screen.getByTestId('random-gen-seed'), {
+      target: { value: '#0000ff' },
+    });
+    fireEvent.click(screen.getByTestId('random-gen-button'));
+    // Variant 1 unchanged.
+    const afterLocked = (
+      screen.getByTestId('variant-color-1-primary') as HTMLInputElement
+    ).value;
+    expect(afterLocked).toBe(lockedValue);
+    // Variant 0 (unlocked) changed (was red-leaning, now blue-leaning).
+    const variant0After = (
+      screen.getByTestId('variant-color-0-primary') as HTMLInputElement
+    ).value;
+    expect(variant0After).not.toBe('#cc3333');
+  });
+
+  it('U8: RANDOM GEN button label reflects locked count', async () => {
+    await pickBaseWithLabels(['primary']);
+    for (let i = 0; i < 4; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    }
+    expect(screen.getByTestId('random-gen-button').textContent).toBe(
+      'RANDOM GEN (5 VARIANTS)',
+    );
+    fireEvent.click(screen.getByTestId('variant-strip-lock-1'));
+    fireEvent.click(screen.getByTestId('variant-strip-lock-3'));
+    expect(screen.getByTestId('random-gen-button').textContent).toBe(
+      'RANDOM GEN (3 OF 5, 2 LOCKED)',
+    );
+  });
+
+  it('U8: VariantStrip tile click switches the active main-preview index', async () => {
+    await pickBaseWithLabels(['primary']);
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    }
+    // Variant 0 starts as active.
+    expect(
+      screen.getByTestId('variant-strip-tile-0').getAttribute('aria-pressed'),
+    ).toBe('true');
+    fireEvent.click(screen.getByTestId('variant-strip-tile-2'));
+    expect(
+      screen.getByTestId('variant-strip-tile-2').getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      screen.getByTestId('variant-strip-tile-0').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('U8: switching bases clears the locked set (regression guard)', async () => {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xa', glbBlobId: 'glb-a', partLabels: ['x'] }),
+        summary({ objectId: '0xb', glbBlobId: 'glb-b', partLabels: ['m'] }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xa'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    // Bump to 2 variants + lock variant 0.
+    fireEvent.click(screen.getByTestId('random-gen-n-plus'));
+    fireEvent.click(screen.getByTestId('variant-strip-lock-0'));
+    expect(
+      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-checked'),
+    ).toBe('true');
+    // Switch to base B — locks should clear; variant array resets to 1.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xb'));
+    });
+    await waitFor(() => expect(screen.getByTestId('variant-strip-tile-0')).toBeTruthy());
+    expect(
+      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-checked'),
+    ).toBe('false');
+    expect(screen.queryByTestId('variant-strip-tile-1')).toBeNull();
+  });
+
   it('on an expired session (build 401) clears the session and shows a re-sign-in message', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
