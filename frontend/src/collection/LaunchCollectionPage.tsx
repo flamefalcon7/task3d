@@ -16,7 +16,7 @@
 // Model3DSummary, NOT a user input, so the nft creator can't underpay and abort.
 
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useCurrentAccount,
@@ -55,6 +55,7 @@ import {
   tokens,
   viewerWell,
 } from '../ux/tokens';
+import { useElapsedSeconds } from '../ux/useElapsedSeconds';
 
 const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
 
@@ -256,11 +257,6 @@ export function LaunchCollectionPage() {
   const { models, loading: modelsLoading } = useModelIndex();
 
   const [phase, setPhase] = useState<Phase>('picking');
-  // Plan-013 UAT polish: writeFilesFlow has two non-popup phases (encoding
-  // + relay-upload) that can run 5-15s with no visible feedback. Tick an
-  // elapsed counter while the upload sub-flow is active so the user has
-  // something proving the page hasn't hung.
-  const [uploadElapsed, setUploadElapsed] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [base, setBase] = useState<Model3DSummary | null>(null);
   const [baseGlb, setBaseGlb] = useState<Uint8Array | null>(null);
@@ -275,21 +271,11 @@ export function LaunchCollectionPage() {
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
   const forkable = useMemo(() => models.filter((m) => m.glbBlobId !== ''), [models]);
 
-  // Tick a 1Hz elapsed counter the entire time the Walrus upload phase is
-  // active (including the silent encoding + relay-upload sub-stages).
-  // Resets to 0 the moment phase leaves 'uploading'.
-  useEffect(() => {
-    if (phase !== 'uploading') {
-      setUploadElapsed(0);
-      return;
-    }
-    const start = Date.now();
-    const id = setInterval(
-      () => setUploadElapsed(Math.floor((Date.now() - start) / 1000)),
-      1000,
-    );
-    return () => clearInterval(id);
-  }, [phase]);
+  // Plan-013 UAT polish: writeFilesFlow has two non-popup phases (encoding
+  // + relay-upload) that can run 5-15s with no visible feedback. Shared
+  // hook so the counter survives status transitions within the active
+  // window and so the same logic doesn't drift across pages.
+  const uploadElapsed = useElapsedSeconds(phase === 'uploading');
 
   const onPickBase = useCallback(async (model: Model3DSummary) => {
     setErrorMsg(null);

@@ -20,6 +20,7 @@ import {
   TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
 import { SignConfirmation } from '../ux/SignConfirmation';
+import { useElapsedSeconds } from '../ux/useElapsedSeconds';
 import {
   buttonOutline,
   buttonPrimary,
@@ -420,7 +421,6 @@ export function CreateModelPage() {
   const [prompt, setPrompt] = useState('');
   const [genStatus, setGenStatus] = useState<GenStatus>('idle');
   const [genError, setGenError] = useState<string | null>(null);
-  const [genElapsed, setGenElapsed] = useState(0);
 
   const [glb, setGlb] = useState<Uint8Array | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
@@ -441,10 +441,6 @@ export function CreateModelPage() {
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
-  // Plan-013 UAT polish: writeBlobFlow's silent phases (encoding + relay-
-  // upload) can run 5-10s with no signal. Tick an elapsed counter while
-  // the mint operation is active so the user has something to track.
-  const [mintElapsed, setMintElapsed] = useState(0);
 
   const { session, clearSession } = useSession();
   const account = useCurrentAccount();
@@ -458,28 +454,17 @@ export function CreateModelPage() {
     return () => URL.revokeObjectURL(glbUrl);
   }, [glbUrl]);
 
-  // Tick the elapsed-seconds counter while generating (— GENERATING (Ns)).
-  useEffect(() => {
-    if (genStatus !== 'paying' && genStatus !== 'generating') {
-      setGenElapsed(0);
-      return;
-    }
-    const start = Date.now();
-    const id = setInterval(() => setGenElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, [genStatus]);
-
-  // Tick the elapsed-seconds counter while minting (covers the silent
-  // Walrus encode/relay-upload phases so the user has visible feedback).
-  useEffect(() => {
-    if (mintStatus !== 'uploading' && mintStatus !== 'signing') {
-      setMintElapsed(0);
-      return;
-    }
-    const start = Date.now();
-    const id = setInterval(() => setMintElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, [mintStatus]);
+  // Elapsed-seconds counters that survive status transitions WITHIN the
+  // active window. Pre-fix code keyed on the status string, which snapped
+  // the counter back to 0 at paying→generating and uploading→signing —
+  // exactly when the user is staring at the wallet popup waiting for
+  // reassurance that something's still happening. 3-reviewer consensus.
+  const genElapsed = useElapsedSeconds(
+    genStatus === 'paying' || genStatus === 'generating',
+  );
+  const mintElapsed = useElapsedSeconds(
+    mintStatus === 'uploading' || mintStatus === 'signing',
+  );
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
