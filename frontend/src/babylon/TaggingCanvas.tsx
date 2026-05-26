@@ -16,9 +16,18 @@ import {
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
 import { frameCameraToMeshes } from './PreviewCanvas';
+import { applyCanvasMode } from './applyCanvasMode';
 import { type BgKey, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
+import { type CanvasMode, MODE_PALETTE } from './modePalette';
+import { ModeTogglePill } from './ModeTogglePill';
 import { tokens, viewerWell } from '../ux/tokens';
+
+// plan-015 U2 — idle auto-rotate gate (R10). Mirrors PreviewCanvas. The
+// L1 tagging step opts in via U5 so creators see the mesh from multiple
+// angles while naming parts.
+const AUTO_ROTATE_IDLE_MS = 3000;
+const AUTO_ROTATE_RAD_PER_SEC = 0.2;
 
 // plan-013 U5 — click-to-select Babylon picker for L1 tagging UX. Sibling to
 // PreviewCanvas: same imperative Engine/Scene/Camera/Light lifecycle plus a
@@ -44,6 +53,27 @@ interface TaggingCanvasProps {
   defaultBg?: BgKey;
   /** Render the BG cycle pill in the well's top-right. Default true. */
   bgToggle?: boolean;
+  /**
+   * plan-015 U2 — canvas render mode (controlled by parent). Default 'pbr'
+   * preserves existing call sites. The L1 tagging step (U5) passes 'parts'
+   * so creators see segments in rainbow color from the moment the tagging
+   * screen renders.
+   */
+  mode?: CanvasMode;
+  /** Pill click handler. Required when `modeToggle=true`. */
+  onModeCycle?: () => void;
+  /** Show the mode-toggle pill in the well's top-left. Default false. */
+  modeToggle?: boolean;
+  /**
+   * plan-015 U2 — additional SOLO-highlight indices. Combined with the
+   * built-in `selectedIndex` glow when mode === 'solo'. Default empty.
+   */
+  highlightedParts?: readonly number[];
+  /**
+   * plan-015 U2 / R10 — idle auto-rotate. Default false; L1 tagging step
+   * opts in.
+   */
+  autoRotate?: boolean;
 }
 
 export function TaggingCanvas({
@@ -53,6 +83,11 @@ export function TaggingCanvas({
   onLoaded,
   defaultBg = 'black',
   bgToggle = true,
+  mode = 'pbr',
+  onModeCycle,
+  modeToggle = false,
+  highlightedParts = [],
+  autoRotate = false,
 }: TaggingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -180,25 +215,70 @@ export function TaggingCanvas({
     scene.clearColor.set(r, g, b, 1);
   }, [bgEntry]);
 
+  // plan-015 U2 — combined mode-and-selection effect. Owns BOTH (a) the
+  // applyCanvasMode material overlay and (b) HighlightLayer membership.
+  // HighlightLayer is a single shared resource, so the click-to-tag
+  // `selectedIndex` glow and the SOLO-mode `highlightedParts` halo must
+  // be coordinated in one effect — running as two independent effects
+  // would fight via competing removeAllMeshes()/addMesh() pairs.
+  //
+  // Re-fires when mode / highlightedParts / selectedIndex / meshLoaded
+  // change. `meshLoaded` transitions false→true on every successful
+  // load, which is the signal that meshesRef.current is fresh.
   useEffect(() => {
     const hl = highlightRef.current;
     if (!hl) return;
+    const meshes = meshesRef.current;
+    applyCanvasMode(meshes, mode, highlightedParts);
     hl.removeAllMeshes();
-    if (selectedIndex == null) return;
-    const mesh = meshesRef.current[selectedIndex];
-    if (!mesh) return;
-    // plan-013 fix-pass — guard against the dep-tuple `[selectedIndex, glbUrl]`
-    // firing on a glbUrl change BEFORE the async load has repopulated
-    // `meshesRef`. Without this check we could call `addMesh` on a mesh whose
-    // backing Scene has been disposed by the load effect's cleanup chain
-    // (silent failure today; future Babylon may throw). `getScene` exists on
-    // every AbstractMesh; identity-compare to the current scene.
+
+    const accent = Color3.FromHexString(tokens.color.accent);
     const scene = sceneRef.current;
-    if (!scene || (typeof mesh.getScene === 'function' && mesh.getScene() !== scene)) return;
-    // HighlightLayer.addMesh's TS signature wants Mesh, but the picker works
-    // on AbstractMesh at runtime — segmented GLB parts may surface as either.
-    hl.addMesh(mesh as Mesh, Color3.FromHexString(tokens.color.accent));
-  }, [selectedIndex, glbUrl]);
+    const safeAdd = (i: number) => {
+      const m = meshes[i];
+      if (!m) return;
+      // plan-013 fix-pass — guard against a stale glbUrl→meshes race where
+      // the deps fire BEFORE the async load has repopulated meshesRef.
+      // getScene check ensures the mesh's backing Scene matches the live one.
+      if (!scene || (typeof m.getScene === 'function' && m.getScene() !== scene)) return;
+      hl.addMesh(m as Mesh, accent);
+    };
+
+    if (mode === 'solo') {
+      for (const i of highlightedParts) safeAdd(i);
+    }
+    // Click-to-tag selectedIndex glow is orthogonal to mode — always apply.
+    if (selectedIndex != null) safeAdd(selectedIndex);
+  }, [mode, highlightedParts, selectedIndex, meshLoaded]);
+
+  // plan-015 U2 / R10 — idle auto-rotate. Mirrors PreviewCanvas exactly.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!autoRotate || !scene) return;
+
+    let lastPointerMs = Date.now();
+    let lastTickMs = Date.now();
+
+    const pointerObs = scene.onPointerObservable.add(() => {
+      lastPointerMs = Date.now();
+    });
+    const renderObs = scene.onBeforeRenderObservable.add(() => {
+      const now = Date.now();
+      const deltaSec = (now - lastTickMs) / 1000;
+      lastTickMs = now;
+      if (now - lastPointerMs > AUTO_ROTATE_IDLE_MS) {
+        const cam = scene.activeCamera;
+        if (cam instanceof ArcRotateCamera) {
+          cam.alpha += AUTO_ROTATE_RAD_PER_SEC * deltaSec;
+        }
+      }
+    });
+
+    return () => {
+      scene.onPointerObservable.remove(pointerObs);
+      scene.onBeforeRenderObservable.remove(renderObs);
+    };
+  }, [autoRotate]);
 
   return (
     <div style={{ ...viewerWell, width: '100%', height: '100%' }}>
@@ -223,6 +303,13 @@ export function TaggingCanvas({
           </svg>
           <span style={loadingLabel}>— LOADING MESH</span>
         </div>
+      )}
+      {modeToggle && onModeCycle && (
+        <ModeTogglePill
+          entry={MODE_PALETTE[mode]}
+          onCycle={onModeCycle}
+          testId="tagging-mode-toggle-pill"
+        />
       )}
       {bgToggle && (
         <BgTogglePill

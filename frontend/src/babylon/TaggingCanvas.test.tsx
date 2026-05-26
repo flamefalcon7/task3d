@@ -262,6 +262,72 @@ describe('TaggingCanvas', () => {
     expect(state.hlDispose).toHaveBeenCalled();
   });
 
+  // -- plan-015 U2 — mode-toggle pill -------------------------------------
+
+  it('omits the mode-toggle pill by default', () => {
+    render(<TaggingCanvas glbUrl={null} selectedIndex={null} onPartSelect={() => {}} />);
+    expect(screen.queryByTestId('tagging-mode-toggle-pill')).toBeNull();
+  });
+
+  it('renders the mode-toggle pill when modeToggle + onModeCycle are provided', () => {
+    render(
+      <TaggingCanvas
+        glbUrl={null}
+        selectedIndex={null}
+        onPartSelect={() => {}}
+        mode="parts"
+        onModeCycle={() => {}}
+        modeToggle
+      />,
+    );
+    expect(screen.getByTestId('tagging-mode-toggle-pill').textContent).toBe('MODE: PARTS');
+  });
+
+  it('does NOT render the mode-toggle pill when modeToggle=true but onModeCycle is missing', () => {
+    render(
+      <TaggingCanvas
+        glbUrl={null}
+        selectedIndex={null}
+        onPartSelect={() => {}}
+        mode="parts"
+        modeToggle
+      />,
+    );
+    expect(screen.queryByTestId('tagging-mode-toggle-pill')).toBeNull();
+  });
+
+  it('mode="solo" with highlightedParts adds matching meshes to HighlightLayer alongside selectedIndex', async () => {
+    const { rerender } = render(
+      <TaggingCanvas
+        glbUrl="blob:http://localhost/glb"
+        selectedIndex={null}
+        onPartSelect={() => {}}
+      />,
+    );
+    await flushAsync();
+    state.hlAddMesh.mockClear();
+    state.hlRemoveAll.mockClear();
+
+    rerender(
+      <TaggingCanvas
+        glbUrl="blob:http://localhost/glb"
+        selectedIndex={2}
+        onPartSelect={() => {}}
+        mode="solo"
+        highlightedParts={[0]}
+      />,
+    );
+    await flushAsync();
+
+    expect(state.hlRemoveAll).toHaveBeenCalled();
+    // Two HL additions: highlightedParts[0]=0 (mesh idx 1: tripo_part_0)
+    // AND selectedIndex=2 (mesh idx 3: tripo_part_2).
+    expect(state.hlAddMesh).toHaveBeenCalledTimes(2);
+    const addedMeshes = state.hlAddMesh.mock.calls.map((c) => c[0]);
+    expect(addedMeshes).toContain(state.meshes[1]);
+    expect(addedMeshes).toContain(state.meshes[3]);
+  });
+
   it('survives StrictMode double-mount: pointer callback still fires after the cycle', async () => {
     const onPartSelect = vi.fn();
     render(
