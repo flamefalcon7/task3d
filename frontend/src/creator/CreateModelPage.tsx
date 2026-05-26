@@ -804,15 +804,19 @@ export function CreateModelPage() {
                 errorMessage={mintError ?? undefined}
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
-              {mintStatus === 'uploading' && (
-                <div style={{ marginTop: 8 }}>
-                  <span style={statusPill} data-testid="mint-upload-status-pill">
-                    {uploadStage === 'awaiting-register' || uploadStage === 'awaiting-certify'
-                      ? `— WAITING FOR WALLET (${mintElapsed}s)`
-                      : `— UPLOADING TO WALRUS (${mintElapsed}s)`}
-                  </span>
-                </div>
-              )}
+              {/* Pill scopes to the SILENT Walrus phases only (encoding +
+                  relay-upload). The wallet-popup stages (awaiting-register /
+                  awaiting-certify) already get a dedicated MintButton
+                  label — duplicating "UPLOADING TO WALRUS" both as button
+                  text and pill was flagged by the correctness reviewer. */}
+              {mintStatus === 'uploading' &&
+                (uploadStage === 'encoding' || uploadStage === 'relay-upload') && (
+                  <div style={{ marginTop: 8 }}>
+                    <span style={statusPill} data-testid="mint-upload-status-pill">
+                      — UPLOADING TO WALRUS ({mintElapsed}s)
+                    </span>
+                  </div>
+                )}
             </div>
           </div>
         )}

@@ -596,15 +596,19 @@ export function LaunchCollectionPage() {
               </button>
             </div>
             <p style={launchHelper}>SIGNS 3× · PAYS GAS · MINTS L2</p>
-            {phase === 'uploading' && (
-              <div>
-                <span style={uploadStatusPill} data-testid="upload-status-pill">
-                  {uploadStage === 'awaiting-register' || uploadStage === 'awaiting-certify'
-                    ? `— WAITING FOR WALLET (${uploadElapsed}s)`
-                    : `— UPLOADING ${editorState.variants.length} VARIANTS TO WALRUS · QUILTED (${uploadElapsed}s)`}
-                </span>
-              </div>
-            )}
+            {/* Pill scopes to the SILENT Walrus phases only (encoding +
+                relay-upload). The wallet-popup stages already get a
+                dedicated launch-button label — duplicating "UPLOADING ...
+                TO WALRUS" both as button text and pill was flagged by
+                the correctness reviewer. */}
+            {phase === 'uploading' &&
+              (uploadStage === 'encoding' || uploadStage === 'relay-upload') && (
+                <div>
+                  <span style={uploadStatusPill} data-testid="upload-status-pill">
+                    — UPLOADING {editorState.variants.length} VARIANTS TO WALRUS · QUILTED ({uploadElapsed}s)
+                  </span>
+                </div>
+              )}
           </section>
         )}
 
