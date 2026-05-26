@@ -158,7 +158,8 @@ Two-step Tripo timing UX (also surfaced same UAT):
 ### POST
 
 - Variant batch ops (duplicate, reorder).
-- Variant preview rendering all 3 at once in a strip (good for visual sanity-check pre-launch).
+- Variant preview rendering all 3 at once in a strip (good for visual sanity-check pre-launch). → **superseded** by plan-015 R13 variant strip thumbnails.
+- **Texture customization per part (v1.1, D-057 deferred).** Color-only ships in plan-015. v1.1 roadmap: internal preset library first (4-6 textures — carbon fiber, brushed metal, matte plastic, glossy paint), user-upload later, AI-texture last. ~3-5 days of work; punted from 6/21 submission to preserve demo recording / mainnet time.
 
 ### MUST — plan-013 UAT findings (2026-05-25/26)
 

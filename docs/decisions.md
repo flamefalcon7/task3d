@@ -2489,6 +2489,188 @@ Implemented as a reusable `frontend/src/ux/SignConfirmation.tsx` component. Init
 
 ---
 
+## D-054: Remove preset labels from L1 tagging step (framing B)
+
+**Status**: Accepted
+**Date**: 2026-05-26
+**Phase**: 4 (plan-013 UAT follow-up; refactor scoped for plan-015)
+
+### Context
+Plan-013 shipped the L1 tagging step with a 3-option preset dropdown (`primary` / `secondary` / `detail`) plus optional free-text. UAT on testnet v8 (2026-05-26) exposed that creators take the path of least resistance and use the presets — the step looks like "pick a standard category" rather than "design what gets customized." Downstream consequence: L2 VariantEditor columns inherit the abstract preset strings, and the entire derivative-IP narrative collapses to "pick three colors."
+
+Requirements doc `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` reframes the step as **"Name what buyers can customize"** (framing B). The preset dropdown is the single biggest force pulling creators away from that framing — keeping it would defeat the rewrite.
+
+### Decision
+L1 tagging step's preset dropdown is **removed**. Label input becomes freeform text only, with model-aware placeholder hints (e.g. `"e.g. chassis, wheels, spoiler"`). Validation: min 1 character, max 32 characters, no blocked-label list. Continue gate requires every part to have at least 1 character.
+
+### Rationale
+- Three independent reviewers + the UAT user's verbatim feedback converged on "preset → abstract L2 columns" as the coherence-gap root cause.
+- The proposed visual tools (4-mode preview canvas, part list panel, L2 column-hover mapping) only pay off if labels are authored, not picked from a defaults list.
+- "Force the user to think" is a legitimate tradeoff when the thinking is the product (this is an authorship tool, not a form).
+- Min-1-char + max-32 + no blocklist is the lightest-touch validation that still gates empty-state from publishing.
+
+### Alternatives Considered
+- **Keep preset but reframe as "fallback for boring models"**: rejected — 99% of users would still take the fallback, framing B has too weak a pull against a single-click escape hatch.
+- **Replace presets with AI-generated label suggestions per mesh**: rejected for v1 — costs another external dep (LLM or curated heuristic), quality risk, latency cost. Reasonable for v1.1+ but not 6/21 submission.
+- **Block known-useless labels (`part1`, `xyz`) via deny-list**: rejected — impossible to enumerate meaningfully; trust the user (they have to look at it on `/launch` too).
+
+### Consequences
+- ✅ L2 VariantEditor columns now reflect creator-authored intent (e.g. `CHASSIS / WHEELS / SPOILER` instead of `PRIMARY / SECONDARY / DETAIL`). AE3 in the requirements doc becomes achievable.
+- ✅ Demo recording legibility lifts: the L1 tagging step becomes a 30-second moment of authorial work that the camera can show, not a generic taxonomy click.
+- ⚠️ Tagging time per part increases (typing 5-10 chars vs clicking a preset). Mitigated by placeholder hints; ~30-90s added per publish.
+- ⚠️ "What should I call this part?" is now a real creator question. The `?` hint icon at the step heading carries some of the load; the rest is design trust.
+- 🔮 Pairs with D-055 (PARTS preview mode shows the parts visually, making naming easier).
+
+### Related
+- Origin doc: `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` (R1, R2, AE1, AE2)
+- Related decisions: D-052 (plan-013 contract substrate, unchanged), D-055 (4-mode canvas pairs with this), D-044 (brutalist style this UI must use)
+- Polish-backlog supersedes: `docs/ux/polish-backlog.md` §1 "tagging step UX" → captured here in requirements form
+- Plan: plan-015 (this refactor)
+
+---
+
+## D-055: Preview canvas 4-mode standard (PBR / PARTS / SOLO / WIREFRAME)
+
+**Status**: Accepted
+**Date**: 2026-05-26
+**Phase**: 4 (plan-013 UAT follow-up; infrastructure for plan-015)
+
+### Context
+Plan-013 UAT also surfaced that the L2 VariantEditor's columns have no visible link to the mesh they drive — forkers see `WHEELS` as a column header but can't tell which geometry that controls. Polish-backlog §2 proposed hover-highlight + scroll-into-view as a fix. Separately, framing B (D-054) needs a way to *show* creators that their mesh has parts before they name them.
+
+Both gaps are versions of the same shape: the canvas needs render modes beyond textured PBR. Today `PreviewCanvas` and `TaggingCanvas` only render PBR; `TaggingCanvas` adds a HighlightLayer for the currently-selected part but that's a per-component capability, not a standard.
+
+### Decision
+`PreviewCanvas` and `TaggingCanvas` accept a `mode` prop that cycles through 4 modes — `PBR | PARTS | SOLO | WIREFRAME` — exposed via a small mono-pill toggle in the canvas well's top-left corner (sibling of the BG-toggle at top-right, added in commit `8ff1d4a`).
+
+- **PBR**: existing textured render (default for most mounts)
+- **PARTS**: deterministic palette (12 hues, cycled if N>12) assigns each segment a unique color
+- **SOLO**: driven by external `highlightedParts: number[]` prop — listed parts vibrant, others dimmed to ~20% opacity
+- **WIREFRAME**: Babylon's native `material.wireframe = true`
+
+Default mode is context-aware per `R4` in the requirements doc:
+- L1 tagging step → `PARTS` (visual proof of segments before naming)
+- All other mounts → `PBR`
+
+Toggle pill label format: `MODE: <VALUE>` (matches existing BG pill's `BG: <VALUE>`).
+
+### Rationale
+- One standard across both canvases — same mental model for L1 tagging, L2 variant editing, `/market` listings, detail pages.
+- PARTS mode is the visual realization of framing B — it's the first thing a creator sees on the tagging step, and it answers "what are you about to name?" before the question is asked.
+- SOLO mode driven by external prop (not internal selection state) lets L2 use the same component to highlight column-hover targets without re-implementing the highlight logic.
+- WIREFRAME is cheap (~30min on top of the mode infrastructure) and visually striking on a black well, contributing to the brutalist editorial aesthetic for demo recording.
+
+### Alternatives Considered
+- **Ship only 3 modes (skip WIREFRAME)**: rejected — once mode-switching infrastructure exists, wireframe is a free 30-minute add with positive demo value.
+- **Keep TaggingCanvas's internal selection-driven highlight, expose a different component for column-hover SOLO**: rejected — duplicates the HighlightLayer pattern across two components. External-prop-driven SOLO unifies both call patterns.
+- **Modes as separate page sections (mini-canvases) instead of a single switching canvas**: rejected — 4 canvases would compete for vertical space and increase GPU cost; switching is conceptually cleaner.
+
+### Consequences
+- ✅ L2 column-to-mesh-part mapping (AE4 in requirements doc) becomes implementable without per-component custom highlight code.
+- ✅ Mode pill is a single small UI element; visual cost is low. Mirror placement (top-left vs top-right BG) reads as one coordinated control system.
+- ✅ Editorial recording gain — PARTS-mode rainbow + WIREFRAME both give the camera something visually distinctive beyond the textured render.
+- ⚠️ Mode state lives in component-local `useState` (per-instance), so multi-instance pages (e.g. variant strip thumbnails) each have independent state. Acceptable — global mode state would surprise users.
+- 🔮 Future modes can land additively (`NORMALS`, `UV`, `AO` for debugging) without breaking the API.
+
+### Related
+- Origin doc: `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` (R4, R5, R7, R8)
+- Related decisions: D-044 (brutalist style — mode pill must use design tokens), D-054 (framing B pairs with PARTS mode), commit `8ff1d4a` (the BG-toggle pattern this mirrors)
+- Code surface: `frontend/src/babylon/PreviewCanvas.tsx`, `frontend/src/babylon/TaggingCanvas.tsx`, new `frontend/src/babylon/modePalette.ts` + `ModeTogglePill.tsx` (analogues of existing `bgPalette.ts` + `BgTogglePill.tsx`)
+- Plan: plan-015 (this refactor)
+
+---
+
+## D-056: Random Gen uses harmonic-from-seed palette derivation
+
+**Status**: Accepted
+**Date**: 2026-05-26
+**Phase**: 4 (plan-013 UAT follow-up; new feature for plan-015)
+
+### Context
+Plan-013 shipped per-label palette-based variant authoring; UAT user feedback was that authoring N variants 1-by-1 is tedious — "build a random btn to gen color and texture, user just need to decide how much variant to gen." A naive Random Gen ("pick N random RGBs per label per variant") produces visually incoherent noise: a variant might have a magenta chassis and a teal spoiler. Each variant individually fails to read as "a designed thing"; the collection as a whole fails to read as "a series."
+
+Two coherence-preserving alternatives:
+1. **Creator-defined palette** — creator picks 4-6 colors first, then random gen samples from that set
+2. **Harmonic-from-seed** — creator picks one seed color + a harmonic scheme (analogous / complementary / triadic / tetradic); random gen derives a palette from the scheme
+
+### Decision
+Random Gen uses **harmonic-from-seed**. Inputs: variant count N (1–20), single seed color (HSL picker), harmonic scheme (4 options exposed as 4 preview swatches the user picks from). Random Gen produces N variants where each variant's K labels receive K colors drawn from harmonic rotations around the scheme, guaranteeing within-variant coherence and between-variant distinctness.
+
+Variant locking: each variant strip thumbnail has a small `[L]` toggle (top-right corner). Locked variants survive re-rolls; unlocked variants are regenerated when Random Gen is re-invoked. Button label reflects state: `RANDOM GEN (N VARIANTS)` when none locked, `RANDOM GEN (M OF N, K LOCKED)` when K locked.
+
+### Rationale
+- Harmonic-from-seed gives "designed-looking" output without forcing the creator to pre-curate a palette (one extra UI step they'd skip).
+- 4 preview swatches as scheme picker is a visual decision (creator sees what each scheme produces under their seed) — beats a dropdown of abstract scheme names.
+- Per-variant lock makes Random Gen iterative: creator can lock a variant they like, re-roll the rest, accumulate keepers. Lower friction than a one-shot generate.
+- Color theory is small (~50 lines for the 4 schemes); no external dep needed.
+
+### Alternatives Considered
+- **Pure random RGB**: rejected — visually incoherent ("rainbow vomit"); variants don't read as a series.
+- **Creator-defined palette**: rejected — extra setup step before Random Gen; creators in a hurry skip both.
+- **AI-generated palette suggestions** (e.g. "match this model's mood"): rejected for v1 — same dep + cost reasons as D-054 alternative.
+- **No lock — just re-roll all**: rejected — destroys the keeper a creator just liked; iteration becomes adversarial.
+
+### Consequences
+- ✅ AE5 in the requirements doc (creator generates 10 variants via random gen, locks variant 3, re-rolls rest, launches) becomes achievable in v1.
+- ✅ Random Gen is a clear "tedium remover" beat in the demo recording — one click → 10 visually different variants. Strong "compositional creator economy" visual.
+- ⚠️ Color theory math is correct only for sRGB perceptual color (not perfect across all displays); acceptable since variants are author-defined intent, not reference matches.
+- ⚠️ N=20 cap exists in the Move contract (`MAX_VARIANTS_PER_COLLECTION = 20`); UI honors that. Future cap raises would automatically apply.
+- 🔮 Texture customization (D-057-deferred) would naturally extend Random Gen — "random texture from a curated set" — but not in v1.
+
+### Related
+- Origin doc: `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` (R11, AE5)
+- Related decisions: D-026 (per-label palette resolution — the substrate this random gen feeds into), D-052 (plan-013 contract, MAX_VARIANTS = 20)
+- Code surface: new `frontend/src/forge/randomGen.ts` (harmonic math + variant generation), `frontend/src/forge/VariantEditor.tsx` (UI integration)
+- Plan: plan-015 (this refactor)
+
+---
+
+## D-057: Texture customization deferred to v1.1 (color-only for v1)
+
+**Status**: Accepted
+**Date**: 2026-05-26
+**Phase**: 4 (plan-013 UAT follow-up; scope boundary for plan-015)
+
+### Context
+The L1/L2 tagging UX refactor requirements scoping discussion (2026-05-26 PM session) considered whether L2 variant authoring should support per-part **texture** customization in addition to per-part color. UAT user explicitly asked for both: "a palette system which allow user the customize color or texture for each segment part."
+
+Texture customization is a substantive new feature surface:
+- Source: where do textures come from? (user upload? internal library? AI generation?)
+- Pipeline: `@gltf-transform/core` supports `baseColorTexture` swap, but binary patching is heavier than `baseColorFactor`.
+- Preview: rendering swapped textures live requires re-baking the GLB → flicker risk.
+- Storage: textures themselves need Walrus blob storage if user-uploaded.
+
+Effort estimate for v1 texture: ~3-5 days (library + UI + backend material swap + preview re-bake).
+
+### Decision
+Texture customization is **deferred to v1.1**. The L1/L2 refactor in plan-015 ships **color-only** customization (status quo from plan-013, unchanged). Texture is recorded in `docs/ux/polish-backlog.md` as a v1.1 candidate.
+
+### Rationale
+- 36 days to 6/21 submission as of decision; 3-5 days for texture is 8-14% of remaining time, displacing demo recording / polish / mainnet spike.
+- Demo recording quality with color-only is already strong (10 rainbow car variants reads cleanly on video). Texture would add fidelity but not demo storytelling.
+- Texture quality risk: poorly-mapped textures on segmented Tripo meshes can look worse than no texture (UV seams, scale mismatch). Color is safer for v1 demo.
+- AI / user-upload texture surface dramatically increases the moderation + storage surface. Not the hackathon submission's strongest framing.
+
+### Alternatives Considered
+- **Ship texture v1 with 4-6 internal presets (carbon fiber, brushed metal, matte plastic, glossy paint)**: rejected — still 2-3 days for backend material-swap + preview + UI, and the curated-set framing doesn't match the "freeform creator" pitch.
+- **Ship texture v1 with user-upload**: rejected — storage + moderation surface too big for 6/21 timeline.
+- **Random Gen texture as separate v1 feature** (D-056 extension): rejected — same dep cost as full texture.
+
+### Consequences
+- ✅ Plan-015 stays scoped to ship within 1-2 weeks of `/ce-plan`; submission timeline preserved.
+- ✅ Demo recording uses color-only customization; the variant strip in `/launch` reads cleanly without texture-fidelity concerns.
+- ⚠️ The UAT user's stated desire ("color or texture") is partially deferred — UI copy should not promise texture (avoid creating expectation gap).
+- ⚠️ Future texture feature needs to fit into the existing 4-mode preview canvas (D-055) + per-label palette resolution (D-026). Architecture is texture-ready, just not feature-shipped.
+- 🔮 v1.1 texture roadmap: internal preset library first (4-6 textures), user-upload later, AI-texture last. Polish-backlog updated with this ordering.
+
+### Related
+- Origin doc: `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` Scope Boundaries section
+- Related decisions: D-026 (per-label palette resolution — texture would extend), D-050 (full-GLB-per-variant — texture variants would still fit), D-006 (GLB-only — texture lives inside GLB material)
+- Polish-backlog entry: `docs/ux/polish-backlog.md` — add a v1.1 texture line under §2 /launch palette
+- Plan: plan-015 ships without it; polish-backlog tracks for v1.1
+
+---
+
 # Reserved Decision Numbers
 
-D-054 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-058 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
