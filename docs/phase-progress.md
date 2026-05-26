@@ -1,5 +1,78 @@
 # Phase Progress
 
+## Last Updated: 2026-05-26 / Late Night (polish-backlog sweep #1/#4/#5/#6/#7 shipped + 5-reviewer parallel review run + 4 reviewer-driven follow-up fixes) — **Next = browser-verify the sweep in real Chrome + decide on 4 deferred UX-judgment items (see below), then either continue polish (§2/§3 spec refactor) OR pivot to U15 demo recording prep.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 26 of 38 · demo day (7/20–21): 55 · winners (8/27): 93
+
+### This session (overnight) — polish sweep + parallel review + cleanup
+
+**Polish-backlog sweep (5 items, separate commits):**
+- `6a9d30a` **#1 /track mesh dynamic resize** — new `frontend/src/babylon/normalizeMeshScale.ts` (helper + 7 tests) + `racetrackScene.ts` wires `TARGET_CAR_LENGTH = 2.8` BB-derived scale. Replaces the hardcoded 1.728 that made Tripo cars look like ants.
+- `321dd89` **#4 /create two-step Tripo pill** — split label at 30s threshold: STEP 1/2 GENERATING MESH → STEP 2/2 SEGMENTING PARTS. Bottom pill `~30S TYPICAL` → `~120S TWO-STEP TYPICAL`.
+- `ee2f6e2` **#7 /launch integration fee label** — `REGISTER FEE FOR GAME DEVS` → `INTEGRATION FEE (SUI)` + inline `fieldHint` style explaining `register_integration()` semantics.
+- `b9309d0` **#5 Walrus elapsed pill (initial)** — `/create` and `/launch` get an elapsed-time pill below the action button during `uploading` phase, covering the silent encoding + relay-upload Walrus stages.
+- `8ff1d4a` **#6 PreviewCanvas / TaggingCanvas BG toggle** — new `bgPalette.ts` + `useBgCycle` hook + `BgTogglePill` component. Three-state cycle (BLACK / PAPER / GRAY) anchored top-right of every well (8 PreviewCanvas mount sites + 1 TaggingCanvas mount).
+
+**5-reviewer parallel code review** (first dispatch stalled on watchdog; retry succeeded). Findings consolidated to 4 SHOULD-FIX (real bugs) + several NIT (verified safe / cosmetic) + 4 user-judgment UX items (deferred):
+
+**Reviewer-driven fixes shipped:**
+- `b80aab9` **Timer-reset bug** — 3-reviewer consensus (adversarial / julik-frontend-races / correctness all caught independently). Pre-fix elapsed timers re-keyed on status string, so paying→generating and uploading→signing transitions snapped the counter back to 0 right before wallet popups. Fix: shared `useElapsedSeconds(active)` hook in `frontend/src/ux/` with `start` anchored in a ref + 5 tests covering the regression. Both `/create` and `/launch` now consume the hook.
+- `5553667` **`computeUniformScale` safety clamp** — adversarial reviewer. Pre-fix `target / longest` had no bounds → a sub-mm Tripo mesh produced scale=2800 → Havok BOX collider NaN / wafer. Clamp to `[0.01, 100]`; outside range fall back to 1 (native size, mesh renders visibly wrong instead of breaking physics). Console.warn on clamp + 4 new tests.
+- `9a68ab1` **Walrus pill narrowed to silent stages** — correctness reviewer conf 100. Pill duplicated MintButton's internal label during wallet-popup stages (both said "UPLOADING TO WALRUS"). Narrowed pill render predicate to `uploadStage === 'encoding' || 'relay-upload'` — the actually-silent phases. MintButton handles awaiting-register/awaiting-certify popups.
+- `df9732d` **PreviewCanvas cleanup** — julik-frontend-races + correctness + api-contract. (a) dropped the mount-effect `scene.clearColor.set` (dead code — bg-cycle effect already owns clearColor end-to-end). (b) new optional `testIdSuffix` prop on PreviewCanvas so multi-mount pages (`/market` grid) can disambiguate `data-testid="bg-toggle-pill"`. (c) JSDoc clarifying `defaultBg` is one-shot (mount-time only).
+
+**Tests:** frontend 409/409 (up from 389), typecheck green. No backend or Move changes this session.
+
+**Risk-management discipline:** First reviewer dispatch returned 2 stalls (watchdog). Rather than do solo review (own-work blindness), re-dispatched and got clean reports. Multi-reviewer convergence on the timer-reset bug (3/5 caught it independently) validates that the pattern was worth running.
+
+### Deferred for user decision (4 reviewer findings that involve UX judgment, not code correctness)
+
+1. **`bgToggle = true` default on thumbnails** — api-contract reviewer flags that an 8px-inset BG pill on /market list cards (~150px) and CollectionCard visually dominates. Polish-backlog originally said "every mount." Tradeoff: thumbnail UX vs. discoverability. Action options: opt-out at thumbnail mount sites, OR narrow default to `false` + opt-in at full-page mounts, OR keep current behavior.
+2. **BG state lost on parent remount** (adversarial conf 70) — if `/create` regenerates and remounts PreviewCanvas, user's chosen BG resets to black. Could persist via sessionStorage or lift state up. Today probably acceptable since regenerate is rare; flag if a tester hits it.
+3. **STEP 1/2 → STEP 2/2 threshold misleads when real step 1 >30s** (adversarial conf 80) — wall-clock predicate over backend phase. Options: rename to "PHASE 1/2 (approx)" / drive label from backend SSE / leave as-is (the bottom pill says `~120S TWO-STEP TYPICAL` so user is anchored). Recommend rename to "(approx)" if you want to ship that today.
+4. **`defaultBg` prop rename to `initialBg`** (correctness + adversarial NIT) — name implies reactivity but the value is one-shot. Today: documented in JSDoc. Rename is a breaking change for any future caller; deferred.
+
+### Polish-backlog items still pending (post-sweep)
+
+Updated `docs/ux/polish-backlog.md` — marked #1, #4, #5, #6, #7 as completed. **Remaining MUST items (per user's plan):**
+- §1 **Tagging step UX** (#3 in the discussed-then-deferred set) — PM-first refactor with §2.
+- §2 **`/launch` column-to-mesh visual mapping** (#2) — pair with §1 tagging step. User's instruction: "discuss as PM, refactor spec first, then implement."
+- Plus all the foundational §0 / §1–§5 brutalist editorial polish that wasn't UAT-driven (header treatment, source-mode toggle, MintButton primary style, /market reframe, hero section on /, etc.).
+
+### Next concrete step
+
+Pick ONE next session:
+
+1. **Browser-verify the sweep + ship the 4 deferred items** (~1-2 hr) — open `pnpm dev`, visit each touched route, confirm STEP 1/2 pill / Walrus pill / BG toggle / integration fee hint / `/track` car size all read as intended. Then make calls on the 4 deferred items above.
+2. **§2 + §3 PM-first refactor** (~2-3 hr) — the tagging step + L2 column-mapping spec work the user deferred. Outcome: requirements doc for plan-015 or direct spec.md update.
+3. **U15 demo recording prep** (~half day) — script, pitch deck, README hero, honest disclosure.
+4. **Mainnet deploy spike** (~3-5 hr) — 8/27 prize threshold.
+
+Recommend (1) then (2): browser-verify catches anything reviewers missed (esp. clearColor reactivity, which only ce-test-browser can confirm), then PM session sets up the next implementation slot.
+
+### Commits this overnight session (on main, no remote)
+- `6a9d30a` fix(track): dynamic uniform-scale (#1)
+- `321dd89` feat(create): two-step Tripo pill (#4)
+- `ee2f6e2` feat(launch): integration fee label (#7)
+- `b9309d0` feat(walrus): elapsed-time pill (#5)
+- `8ff1d4a` feat(babylon): BG toggle (#6)
+- `b80aab9` fix(ux): elapsed timer survives transitions (reviewer-driven)
+- `5553667` fix(babylon): clamp computeUniformScale (reviewer-driven)
+- `9a68ab1` fix(walrus): pill narrowed to silent stages (reviewer-driven)
+- `df9732d` refactor(babylon): single-owner clearColor + testId thread (reviewer-driven)
+
+Pre-sweep anchor tag: `pre-polish-sweep-2026-05-26` at `cd2c8b7` (for diff replay).
+
+### Notes for next session
+- **Browser verification not yet done** for this sweep — agent-browser stalled twice; reviewers caught code-level issues but only a real browser confirms the BG cycle's clearColor reactivity, the STEP 1/2 label transition timing, and the Walrus pill visibility during actual Tripo runs.
+- **Multi-reviewer pattern proved value here** — 3 reviewers independently caught the timer reset, which a single reviewer might have missed and a self-review almost certainly would have. The diff was ~447 lines, well above the 50-line adversarial threshold.
+- **`useElapsedSeconds` hook is reusable** — any future status-bar timer (Sui tx confirmation, Walrus relay polling, etc.) can consume it instead of hand-rolling.
+- **`normalizeMeshScale` clamp** assumes target-divided-by-extent semantics; if a future caller wants a different scale axis (e.g. height-only for tall props), the helper signature needs `axis` param. Not built today.
+- **`docs/solutions/` writeup deferred** — the timer-state-machine pattern + the bounding-box-derived-scale clamp pattern are both worth capturing for future plans. Out of scope tonight.
+
+---
+
 ## Last Updated: 2026-05-26 (plan-013 UAT walked end-to-end on testnet v8; 3 real bugs fixed mid-UAT; 8 polish-backlog items captured; plan-013 status: completed) — **Next = polish-backlog cleanup (with /track resize first) OR U15 demo recording prep OR mainnet deploy spike.**
 
 ### Hackathon Tracker

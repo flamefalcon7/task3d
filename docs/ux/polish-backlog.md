@@ -1,8 +1,25 @@
 # UX Polish Backlog — Brutalist Editorial Application
 
 **Status**: Active (target = 6/21 submission demo recording)
-**Last updated**: 2026-05-23
+**Last updated**: 2026-05-26 (overnight polish sweep — items #1, #4, #5, #6, #7 from the discussed set are now SHIPPED — see commits `6a9d30a..df9732d` and `docs/phase-progress.md` top entry)
 **Source**: D-044, `docs/ux/design-tokens.md`
+
+## Sweep status (2026-05-26 overnight)
+
+| Discussed # | Item | Status |
+|---|---|---|
+| 1 | /track mesh dynamic resize on load | ✅ `6a9d30a` + clamp `5553667` |
+| 2 | /launch column-to-mesh visual mapping | ⏸ PM-first deferred |
+| 3 | /create tagging step UX | ⏸ PM-first deferred (pair with #2) |
+| 4 | /create two-step Tripo timing pill | ✅ `321dd89` |
+| 5 | Walrus upload status pill | ✅ `b9309d0` + narrowed scope `9a68ab1` |
+| 6 | PreviewCanvas BG toggle | ✅ `8ff1d4a` + cleanup `df9732d` |
+| 7 | /launch integration fee field explanation | ✅ `ee2f6e2` |
+| 8 | Tripo task IDs surface | ⏸ not picked |
+| 9–12 | Foundation §0 + /market + / + /create headers | ⏸ not picked (bulk of remaining MUST work) |
+
+Reviewer-driven follow-up shipped:
+- `b80aab9` shared `useElapsedSeconds` hook fixes timer-reset across status transitions (was a 3-reviewer-consensus bug in `b9309d0`).
 
 This is the concrete to-do list for applying the locked Brutalist editorial visual system to the live frontend. Items are grouped by screen and prioritized in three tiers.
 
