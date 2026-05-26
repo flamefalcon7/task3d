@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useCurrentAccount,
   useSignAndExecuteTransaction,
@@ -19,6 +19,7 @@ import {
   TRIPO_FEE_MIST,
   TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
+import { HelpIcon } from '../ux/HelpIcon';
 import { SignConfirmation } from '../ux/SignConfirmation';
 import { useElapsedSeconds } from '../ux/useElapsedSeconds';
 import {
@@ -56,16 +57,19 @@ const POLICIES = [
 
 type PolicyValue = (typeof POLICIES)[number]['value'];
 
-// plan-013 — 4 dropdown presets per AE1/R6. Unlabeled parts default to
-// `DEFAULT_LABEL` at Continue time. `partLabels` is a positional array (one
-// entry per filtered mesh in GLB node order); the empty array is the legacy
-// single-material sentinel (upload mode or pre-v8 base).
-const LABEL_PRESETS = ['primary', 'secondary', 'accent', 'detail'] as const;
-const DEFAULT_LABEL = 'detail';
-// plan-013 — mirrors Move's MAX_TAG_LEN bound on part_labels. A user-typed
-// label longer than this triggers EPartLabelTooLong on publish — AFTER the
-// Walrus upload and SUI gas have been charged. Cap at the input layer so
-// the on-chain assertion can never fire on a label that survived the editor.
+// plan-015 U1 — preset labels removed (D-054). Framing B reframes this step
+// as "name what buyers can customize", which only works if the creator is
+// forced through naming each part by hand. Continue gates on every part
+// having ≥1 character (no default-on-empty escape hatch).
+// `partLabels` is a positional array (one entry per filtered mesh in GLB
+// node order); the empty array is the legacy single-material sentinel
+// (upload mode or pre-v8 base).
+//
+// MAX_LABEL_LEN mirrors Move's MAX_TAG_LEN bound on part_labels. A user-typed
+// label longer than this would trigger EPartLabelTooLong on publish — AFTER
+// the Walrus upload and SUI gas have been charged. Cap at the input layer
+// via maxLength so the on-chain assertion can never fire on a label that
+// survived the editor.
 const MAX_LABEL_LEN = 32;
 
 function isValidGlb(bytes: Uint8Array): boolean {
@@ -229,22 +233,27 @@ const taggingPanel: CSSProperties = {
   gap: 12,
 };
 
-const presetGrid: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: 8,
+const taggingHeaderRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  marginBottom: 4,
 };
 
-function presetCell(active: boolean): CSSProperties {
-  return {
-    ...buttonOutline,
-    background: active ? tokens.color.ink : tokens.color.paperPure,
-    color: active ? tokens.color.paper : tokens.color.ink,
-    padding: '8px 10px',
-    fontSize: tokens.size.sm,
-    cursor: 'pointer',
-  };
-}
+const taggingSubhead: CSSProperties = {
+  fontFamily: tokens.font.body,
+  fontSize: tokens.size.sm,
+  color: tokens.color.hint,
+  marginTop: 4,
+  marginBottom: 16,
+  lineHeight: 1.4,
+};
+
+const charCounter: CSSProperties = {
+  fontFamily: tokens.font.mono,
+  fontSize: tokens.size.xs,
+  letterSpacing: '1px',
+  color: tokens.color.hint,
+};
 
 const taggingActionRow: CSSProperties = {
   display: 'flex',
@@ -253,11 +262,12 @@ const taggingActionRow: CSSProperties = {
   flexWrap: 'wrap',
 };
 
-// Local to CreateModelPage: bridges TaggingCanvas selection state and the
-// label dropdown / free-text input. Owns the partial-labels map; on Continue,
-// emits a positional `partLabels[]` of length = part count, defaulting any
-// unlabeled index to `DEFAULT_LABEL`. Skip remaining is a sibling shortcut for
-// the same default-and-emit action.
+// plan-015 U1 — framing B. Bridges TaggingCanvas selection state and a
+// freeform per-part label input. Owns the partial-labels map; on Continue,
+// emits a positional `partLabels[]` of length = part count. Continue is
+// gated on every part having ≥1 character — there is no SKIP escape hatch
+// and no default-on-empty fallback, because the whole step exists to make
+// the creator name each customization axis themselves (R1, R2).
 function TaggingStep({
   glbUrl,
   onContinue,
@@ -278,35 +288,61 @@ function TaggingStep({
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [labels, setLabels] = useState<Map<number, string>>(new Map());
-  const [customText, setCustomText] = useState('');
+
+  // Refocus the label input whenever the user picks a different part in the
+  // canvas (F1.5 — "row scrolls into view + focus moves to the label input").
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectedIndex != null) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [selectedIndex]);
 
   const setLabel = useCallback((i: number, label: string) => {
     setLabels((prev) => {
       const next = new Map(prev);
-      // plan-013 fix-pass — clamp to MAX_LABEL_LEN so a paste that exceeds
-      // the Move bound is silently trimmed at the editor layer; the on-chain
-      // assertion is never reached.
-      const trimmed = label.trim().slice(0, MAX_LABEL_LEN);
-      if (trimmed) next.set(i, trimmed);
+      // U1 — slice to MAX_LABEL_LEN so a paste that exceeds the Move bound
+      // is silently capped at the editor layer; the on-chain assertion is
+      // never reached. No `.trim()` per plan-015 deferred-to-impl: origin
+      // says "trust the user" and explicitly permits `a` / `1` as single
+      // characters. Whitespace-only labels technically pass the gate; defer
+      // a trim policy to v1.1 if abuse surfaces.
+      const clamped = label.slice(0, MAX_LABEL_LEN);
+      if (clamped.length > 0) next.set(i, clamped);
       else next.delete(i);
       return next;
     });
   }, []);
 
+  const allLabeled = partCount > 0 && labels.size === partCount;
+
   const emit = useCallback(() => {
+    if (!allLabeled) return;
     const out: string[] = [];
     for (let i = 0; i < partCount; i++) {
-      out.push(labels.get(i) ?? DEFAULT_LABEL);
+      // Safe-! after the allLabeled gate: every index 0..partCount-1 is in
+      // the map (labels.size === partCount and we set keys by index).
+      out.push(labels.get(i)!);
     }
     onContinue(out);
-  }, [labels, partCount, onContinue]);
+  }, [labels, partCount, onContinue, allLabeled]);
 
   const currentLabel = selectedIndex != null ? labels.get(selectedIndex) ?? '' : '';
-  const isPreset = (currentLabel as typeof LABEL_PRESETS[number]) && (LABEL_PRESETS as readonly string[]).includes(currentLabel);
 
   return (
     <div data-testid="tagging-step" style={{ marginTop: 24 }}>
-      <span style={sectionLabel}>TAG PARTS</span>
+      <div style={taggingHeaderRow}>
+        <span style={eyebrow}>— STEP 2/3: NAME WHAT BUYERS CAN CUSTOMIZE</span>
+        <HelpIcon
+          testId="tagging-help"
+          title="Why naming matters"
+          body="Each name becomes a customization axis for forks of this model. e.g. CHASSIS, WHEELS, SPOILER."
+        />
+      </div>
+      <p style={taggingSubhead}>
+        Each part you name becomes a customization axis for forks of this model.
+      </p>
       <div style={taggingGrid}>
         <div style={taggingCanvasWell}>
           <TaggingCanvas
@@ -319,72 +355,38 @@ function TaggingStep({
         <div style={taggingPanel}>
           {selectedIndex == null ? (
             <span style={{ ...monoLabel, color: tokens.color.hint }}>
-              CLICK A PART TO LABEL IT
+              CLICK A PART TO NAME IT
             </span>
           ) : (
             <>
               <span style={{ ...monoLabel, color: tokens.color.ink }}>
                 PART {selectedIndex + 1} OF {partCount || '—'}
               </span>
-              <div role="radiogroup" aria-label="label preset" style={presetGrid}>
-                {LABEL_PRESETS.map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    role="radio"
-                    aria-checked={isPreset && currentLabel === preset}
-                    data-testid={`preset-${preset}`}
-                    onClick={() => {
-                      setLabel(selectedIndex, preset);
-                      setCustomText('');
-                    }}
-                    style={presetCell(isPreset && currentLabel === preset)}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
               <input
-                data-testid="custom-label-input"
-                value={customText}
-                onChange={(e) => setCustomText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && customText.trim()) {
-                    setLabel(selectedIndex, customText);
-                    setCustomText('');
-                  }
-                }}
+                ref={inputRef}
+                data-testid="part-label-input"
+                value={currentLabel}
+                onChange={(e) => setLabel(selectedIndex, e.target.value)}
                 maxLength={MAX_LABEL_LEN}
-                placeholder="Or custom label…"
+                placeholder="e.g. chassis, wheels, spoiler"
                 style={{ ...inputStyle, width: '100%' }}
               />
-              {currentLabel && (
-                <span style={{ ...monoLabel, color: tokens.color.muted }}>
-                  → {currentLabel}
-                </span>
-              )}
+              <span style={charCounter}>
+                {currentLabel.length}/{MAX_LABEL_LEN}
+              </span>
             </>
           )}
         </div>
       </div>
       <div style={taggingActionRow}>
         <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
-          {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} LABELED`}
+          {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} NAMED`}
         </span>
-        <button
-          type="button"
-          data-testid="skip-tagging"
-          onClick={emit}
-          disabled={disabled || partCount === 0}
-          style={buttonOutline}
-        >
-          SKIP REMAINING →
-        </button>
         <button
           type="button"
           data-testid="continue-tagging"
           onClick={emit}
-          disabled={disabled || partCount === 0}
+          disabled={disabled || !allLabeled}
           style={buttonPrimary}
         >
           CONTINUE →

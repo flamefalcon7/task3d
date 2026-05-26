@@ -221,9 +221,10 @@ describe('CreateModelPage', () => {
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     fireEvent.click(screen.getByTestId('confirm-model'));
-    // plan-013 — Tripo path now gates the metadata form behind the tagging
-    // step; click Continue to advance with all-detail defaults.
+    // plan-015 U1 — framing B removed the preset escape hatch and the SKIP
+    // button; advancing past tagging now requires every part to be named.
     await waitFor(() => expect(screen.getByTestId('continue-tagging')).toBeTruthy());
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
     fireEvent.click(screen.getByTestId('continue-tagging'));
 
     // Open (2) and Restricted (0) are offered; allow-list (1) is gone.
@@ -241,7 +242,7 @@ describe('CreateModelPage', () => {
     expect(open.checked).toBe(false);
   });
 
-  // ----- plan-013 U6 — TaggingStep + partLabels wiring ---------------------
+  // ----- plan-015 U1 — Framing-B TaggingStep + partLabels wiring ----------
 
   async function generateAndConfirmTripoModel() {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
@@ -264,6 +265,20 @@ describe('CreateModelPage', () => {
     await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
   }
 
+  // plan-015 U1 — types `axis-<i>` into each part's label input by walking
+  // the canvas mock's pick-part-N buttons. The selected part's input is the
+  // single `part-label-input` element rendered next to the canvas. Used by
+  // tests that need to advance past the now-gated tagging step.
+  async function labelAllParts(count: number, labels?: readonly string[]) {
+    for (let i = 0; i < count; i++) {
+      fireEvent.click(screen.getByTestId(`pick-part-${i}`));
+      const value = labels?.[i] ?? `axis-${i}`;
+      fireEvent.change(screen.getByTestId('part-label-input'), {
+        target: { value },
+      });
+    }
+  }
+
   async function driveMintAndCaptureArgs() {
     uploadBlobMock.mockResolvedValue({
       blobId: 'walrus_blob_id_xyz',
@@ -278,58 +293,87 @@ describe('CreateModelPage', () => {
     return buildPublishPtbMock.mock.calls[0]![0] as { partLabels: string[]; tags: string[] };
   }
 
-  it('TaggingStep renders after confirming a Tripo model', async () => {
+  it('TaggingStep renders after confirming a Tripo model (R1 framing-B copy + help icon)', async () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
-    expect(screen.getByTestId('tagging-step')).toBeTruthy();
-    // The dedicated metadata form (not the prompt) must NOT be visible until Continue.
+    const step = screen.getByTestId('tagging-step');
+    expect(step).toBeTruthy();
+    expect(step.textContent).toMatch(/STEP 2\/3: NAME WHAT BUYERS CAN CUSTOMIZE/);
+    expect(step.textContent).toMatch(
+      /Each part you name becomes a customization axis/,
+    );
+    // R12 — help icon next to step heading.
+    expect(screen.getByTestId('tagging-help')).toBeTruthy();
+    // Framing B removed the preset escape hatch and the SKIP button.
+    expect(screen.queryByTestId('preset-primary')).toBeNull();
+    expect(screen.queryByTestId('preset-detail')).toBeNull();
+    expect(screen.queryByTestId('skip-tagging')).toBeNull();
+    // The dedicated metadata form must NOT be visible until Continue.
     expect(screen.queryByTestId('metadata-form')).toBeNull();
   });
 
-  it('Continue without labeling → partLabels is N entries all DEFAULT_LABEL (covers AE1, R6)', async () => {
-    TAGGING_PART_COUNT_REF.current = 12;
+  it('AE2: Continue stays disabled until every part has ≥1 character', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
-    fireEvent.click(screen.getByTestId('continue-tagging'));
-    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
-    const args = await driveMintAndCaptureArgs();
-    expect(args.partLabels).toHaveLength(12);
-    expect(args.partLabels.every((l) => l === 'detail')).toBe(true);
+    const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(true);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
+    // Label 4 of 5 — still disabled.
+    await labelAllParts(4);
+    expect(continueBtn.disabled).toBe(true);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/4 OF 5 NAMED/);
+    // Label the last one — enables.
+    fireEvent.click(screen.getByTestId('pick-part-4'));
+    fireEvent.change(screen.getByTestId('part-label-input'), { target: { value: 'tail' } });
+    expect(continueBtn.disabled).toBe(false);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/5 OF 5 NAMED/);
   });
 
-  it('labeling 4 parts with the four presets → partLabels reflects positional choices, rest default', async () => {
-    TAGGING_PART_COUNT_REF.current = 12;
+  it('AE1: 5-part freeform tagging emits typed labels in part-index order', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
-    const seq: Array<['primary' | 'secondary' | 'accent' | 'detail', number]> = [
-      ['primary', 0],
-      ['secondary', 1],
-      ['accent', 2],
-      ['detail', 3],
-    ];
-    for (const [preset, partIndex] of seq) {
-      fireEvent.click(screen.getByTestId(`pick-part-${partIndex}`));
-      fireEvent.click(screen.getByTestId(`preset-${preset}`));
-    }
+    await labelAllParts(5, ['chassis', 'wheels', 'spoiler', 'windshield', 'headlights']);
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
     const args = await driveMintAndCaptureArgs();
-    expect(args.partLabels.slice(0, 4)).toEqual(['primary', 'secondary', 'accent', 'detail']);
-    expect(args.partLabels.slice(4)).toEqual(Array(8).fill('detail'));
+    expect(args.partLabels).toEqual([
+      'chassis',
+      'wheels',
+      'spoiler',
+      'windshield',
+      'headlights',
+    ]);
   });
 
-  it('free-text custom label "fur" entered for part 3 → partLabels[3] === "fur"', async () => {
-    TAGGING_PART_COUNT_REF.current = 12;
+  it('AE2: single-character labels (a, 1) pass the gate — trust the user', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
-    fireEvent.click(screen.getByTestId('pick-part-3'));
-    fireEvent.change(screen.getByTestId('custom-label-input'), { target: { value: 'fur' } });
-    fireEvent.keyDown(screen.getByTestId('custom-label-input'), { key: 'Enter' });
+    await labelAllParts(3, ['a', '1', 'x']);
+    const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(false);
+    fireEvent.click(continueBtn);
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual(['a', '1', 'x']);
+  });
+
+  it('AE2: label input enforces maxLength=32 (Move MAX_TAG_LEN parity)', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    fireEvent.click(screen.getByTestId('pick-part-0'));
+    const input = screen.getByTestId('part-label-input') as HTMLInputElement;
+    expect(input.maxLength).toBe(32);
+    // Set a value at the cap and verify the stored label round-trips.
+    const at32 = 'a'.repeat(32);
+    fireEvent.change(input, { target: { value: at32 } });
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
     const args = await driveMintAndCaptureArgs();
-    expect(args.partLabels[3]).toBe('fur');
-    expect(args.partLabels[0]).toBe('detail');
+    expect(args.partLabels[0]).toHaveLength(32);
   });
 
   it('upload mode skips the tagging step entirely → partLabels = []', async () => {
@@ -351,23 +395,7 @@ describe('CreateModelPage', () => {
     expect(args.partLabels).toEqual([]);
   });
 
-  it('F8 — skip-tagging button is wired to the same emit handler as Continue (default unlabeled to detail)', async () => {
-    TAGGING_PART_COUNT_REF.current = 5;
-    render(<CreateModelPage />);
-    await generateAndConfirmTripoModel();
-    // Label 2 of 5 parts, then click Skip — emit should still produce N=5
-    // entries with the labeled positions reflected and the rest defaulted.
-    fireEvent.click(screen.getByTestId('pick-part-1'));
-    fireEvent.click(screen.getByTestId('preset-accent'));
-    fireEvent.click(screen.getByTestId('pick-part-4'));
-    fireEvent.click(screen.getByTestId('preset-primary'));
-    fireEvent.click(screen.getByTestId('skip-tagging'));
-    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
-    const args = await driveMintAndCaptureArgs();
-    expect(args.partLabels).toEqual(['detail', 'accent', 'detail', 'detail', 'primary']);
-  });
-
-  it('F8 — Continue is disabled while TaggingCanvas has not reported a part count yet', async () => {
+  it('Continue is disabled while TaggingCanvas has not reported a part count yet', async () => {
     // Use 0 as the canvas part count to simulate an in-flight load (the real
     // component's onLoaded is gated on a successful LoadAssetContainerAsync;
     // pre-load the parent's partCount is 0). The disabled gate prevents the
@@ -376,18 +404,17 @@ describe('CreateModelPage', () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
     const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
-    const skipBtn = screen.getByTestId('skip-tagging') as HTMLButtonElement;
     expect(continueBtn.disabled).toBe(true);
-    expect(skipBtn.disabled).toBe(true);
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/LOADING PARTS/);
+    // Framing B has no skip escape hatch.
+    expect(screen.queryByTestId('skip-tagging')).toBeNull();
   });
 
   it('regenerating after tagging resets partLabels and re-renders TaggingStep', async () => {
-    TAGGING_PART_COUNT_REF.current = 12;
+    TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
-    fireEvent.click(screen.getByTestId('pick-part-0'));
-    fireEvent.click(screen.getByTestId('preset-primary'));
+    await labelAllParts(5);
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
@@ -405,6 +432,6 @@ describe('CreateModelPage', () => {
     // After reconfirming, TaggingStep returns with a clean labels map.
     fireEvent.click(screen.getByTestId('confirm-model'));
     await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
-    expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 12/);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
   });
 });
