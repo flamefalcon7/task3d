@@ -32,6 +32,11 @@ vi.mock('@mysten/dapp-kit', () => ({
   useWallets: () => mockWallets,
   useCurrentAccount: () => mockAccount,
   useSignPersonalMessage: () => ({ mutateAsync: mockSignPersonalMessage }),
+  // plan-016 U3: useSession now imports useAppSigner, which transitively
+  // calls useSignTransaction on the prod path. Mock as a no-op so SignInButton
+  // render doesn't crash; this file doesn't exercise the transaction-signing
+  // path (covered in LaunchCollectionPage.test.tsx).
+  useSignTransaction: () => ({ mutateAsync: vi.fn() }),
   useDisconnectWallet: () => ({ mutate: mockDisconnect }),
 }));
 

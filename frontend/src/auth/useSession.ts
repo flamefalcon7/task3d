@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  useCurrentAccount,
-  useDisconnectWallet,
-  useSignPersonalMessage,
-} from '@mysten/dapp-kit';
+import { useDisconnectWallet } from '@mysten/dapp-kit';
+import { useAppAccount } from '../wallet/useAppAccount';
+import { useAppSigner } from '../wallet/useAppSigner';
 
 const STORAGE_KEY = 'overflow2026.session';
 
@@ -102,8 +100,13 @@ export interface UseSession {
 }
 
 export function useSession(): UseSession {
-  const account = useCurrentAccount();
-  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+  // plan-016 U3 — these route through wrapper hooks so /signin works the
+  // same in test mode (VITE_TEST_WALLET=1) and production. Backend's
+  // verifyPersonalMessageSignature is signature-scheme-agnostic; a
+  // test-wallet-signed challenge verifies identically to a Slush-signed
+  // one (both Ed25519, same address).
+  const account = useAppAccount();
+  const { signer } = useAppSigner();
   const { mutate: disconnectWallet } = useDisconnectWallet();
 
   const [session, setSession] = useState<Session | null>(() =>
@@ -133,7 +136,7 @@ export function useSession(): UseSession {
   }, [account, session]);
 
   const signIn = useCallback(async (): Promise<Session> => {
-    if (!account) {
+    if (!account || !signer) {
       throw new Error('Connect a wallet before signing in');
     }
     const address = account.address;
@@ -146,7 +149,7 @@ export function useSession(): UseSession {
     const { nonce } = (await challengeRes.json()) as ChallengeResponse;
 
     const message = new TextEncoder().encode(challengeMessage(nonce));
-    const { signature } = await signPersonalMessage({ message });
+    const { signature } = await signer.signPersonalMessage(message);
 
     const verifyRes = await fetch('/api/auth/verify', {
       method: 'POST',
@@ -161,7 +164,7 @@ export function useSession(): UseSession {
     writeStoredSession(next);
     broadcastSession(next);
     return next;
-  }, [account, signPersonalMessage]);
+  }, [account, signer]);
 
   const clearSession = useCallback(() => {
     setSession(null);

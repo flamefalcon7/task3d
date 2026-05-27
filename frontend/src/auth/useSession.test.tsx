@@ -18,10 +18,33 @@ const mockSignPersonalMessage = vi.fn();
 const mockDisconnect = vi.fn();
 let mockAccount: { address: string } | null = { address: ADDRESS };
 
+// plan-016 U3 — useSession now routes through the wrapper hooks. Mock
+// those directly so existing test cases keep their semantics. dapp-kit's
+// useDisconnectWallet remains a direct import and is mocked alongside.
 vi.mock('@mysten/dapp-kit', () => ({
-  useCurrentAccount: () => mockAccount,
-  useSignPersonalMessage: () => ({ mutateAsync: mockSignPersonalMessage }),
   useDisconnectWallet: () => ({ mutate: mockDisconnect }),
+}));
+
+vi.mock('../wallet/useAppAccount', () => ({
+  useAppAccount: () => mockAccount,
+}));
+
+vi.mock('../wallet/useAppSigner', () => ({
+  useAppSigner: () =>
+    mockAccount
+      ? {
+          signer: {
+            toSuiAddress: () => mockAccount?.address ?? '',
+            signPersonalMessage: async (bytes: Uint8Array) => {
+              const result = await mockSignPersonalMessage({ message: bytes });
+              return { bytes: '', signature: result.signature };
+            },
+            signTransaction: vi.fn(),
+            signAndExecuteTransaction: vi.fn(),
+          },
+          loadError: null,
+        }
+      : { signer: null, loadError: null },
 }));
 
 const fetchMock = vi.fn();
