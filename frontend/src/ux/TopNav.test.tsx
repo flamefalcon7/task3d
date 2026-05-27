@@ -16,11 +16,22 @@ vi.mock('../auth/useSession', () => ({
   }),
 }));
 
+// plan-016 U5 — TEST_WALLET_ENABLED is captured at module-load from
+// import.meta.env.VITE_TEST_WALLET; mocking the constant lets us flip
+// the indicator on/off per test without env stubbing + module reset.
+let testWalletEnabled = false;
+vi.mock('../wallet/testWalletEnabled', () => ({
+  get TEST_WALLET_ENABLED() {
+    return testWalletEnabled;
+  },
+}));
+
 // eslint-disable-next-line import/first
 import { NavGuard, TopNav } from './TopNav';
 
 beforeEach(() => {
   mockAddress = null;
+  testWalletEnabled = false;
 });
 
 afterEach(() => cleanup());
@@ -68,6 +79,23 @@ describe('TopNav', () => {
     const pill = screen.getByTestId('wallet-pill').textContent ?? '';
     // Truncation: 0xXXXX…YYYY (6 chars + ellipsis + 4 chars)
     expect(pill).toMatch(/^0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
+  });
+
+  it('prepends "TEST " to the wallet pill when test mode is active (plan-016 R6)', () => {
+    mockAddress = `0xc731848b${'a'.repeat(50)}48BA`;
+    testWalletEnabled = true;
+    renderAt('/');
+    const pill = screen.getByTestId('wallet-pill');
+    expect(pill.getAttribute('data-test-wallet')).toBe('true');
+    // Shape: "TEST 0xXXXX…YYYY"
+    expect(pill.textContent ?? '').toMatch(/^TEST 0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
+  });
+
+  it('still shows NO WALLET (no TEST prefix) when test mode is on but address is null', () => {
+    mockAddress = null;
+    testWalletEnabled = true;
+    renderAt('/');
+    expect(screen.getByTestId('wallet-pill').textContent).toBe('NO WALLET');
   });
 });
 

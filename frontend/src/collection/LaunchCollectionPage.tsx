@@ -307,14 +307,39 @@ const explorerLink: CSSProperties = {
   marginLeft: 8,
 };
 
+// plan-016 U5 / R5 / AE2 — banner copy is the MissingTestWalletKeyError
+// message verbatim ("TEST_WALLET enabled but VITE_TEST_WALLET_KEY is
+// missing — set it in .env.local"); invalid-key case shows the wrapped
+// SDK rejection. LAUNCH stays disabled via the existing signer-null
+// check, so the banner is purely informational.
+function TestWalletBanner({ error }: { error: Error | null }) {
+  if (!error) return null;
+  return (
+    <div
+      role="alert"
+      data-testid="test-wallet-banner"
+      style={{
+        margin: '12px 0',
+        padding: '10px 12px',
+        border: `1.5px solid ${tokens.color.accent}`,
+        color: tokens.color.accent,
+        fontFamily: tokens.font.mono,
+        fontSize: 12,
+        letterSpacing: '0.5px',
+      }}
+    >
+      {error.message}
+    </div>
+  );
+}
+
 export function LaunchCollectionPage() {
   const { session, clearSession } = useSession();
   const account = useAppAccount();
-  // plan-016 U4 — `signer` exposes the unified Signer interface
-  // (toSuiAddress / signAndExecuteTransaction / signPersonalMessage /
-  // signTransaction). useAppSigner also returns a `loadError` for the
-  // R5 / AE2 banner — wired in U5.
-  const { signer } = useAppSigner();
+  // plan-016 U4/U5 — `signer` exposes the unified Signer interface;
+  // `signerLoadError` is non-null only when VITE_TEST_WALLET=1 but the
+  // key fails to load (missing or invalid). U5 banner uses its message.
+  const { signer, loadError: signerLoadError } = useAppSigner();
   const { uploadFiles, stage: uploadStage } = useWalrusUpload();
   const suiClient = useSuiClient();
   const { models, loading: modelsLoading } = useModelIndex();
@@ -558,6 +583,7 @@ export function LaunchCollectionPage() {
     return (
       <div data-testid="launch-page" style={pagePaper}>
         <main style={mainStyle}>
+          <TestWalletBanner error={signerLoadError} />
           <div style={headerStack}>
             <span style={eyebrow}>— L2 / MINT</span>
             <h1 style={displayHeadline}>Launch a collection.</h1>
@@ -811,6 +837,7 @@ export function LaunchCollectionPage() {
   return (
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
+        <TestWalletBanner error={signerLoadError} />
         <div style={headerStack}>
           <span style={eyebrow}>— L2 / MINT</span>
           <h1 style={displayHeadline}>Launch a collection.</h1>

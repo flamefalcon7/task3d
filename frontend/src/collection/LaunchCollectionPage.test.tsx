@@ -24,8 +24,16 @@ vi.mock('@mysten/dapp-kit', () => ({
 vi.mock('../wallet/useAppAccount', () => ({
   useAppAccount: () => useAppAccountMock(),
 }));
+// plan-016 U5 — loadError is mutable per-test so the missing-key banner
+// path can be exercised without env stubbing. When set, useAppSigner
+// returns a null signer (matching the real wrapper hook's behavior
+// when test mode is on but the key fails to load).
+let mockSignerLoadError: Error | null = null;
 vi.mock('../wallet/useAppSigner', () => ({
   useAppSigner: () => {
+    if (mockSignerLoadError) {
+      return { signer: null, loadError: mockSignerLoadError };
+    }
     const account = useAppAccountMock();
     if (!account) return { signer: null, loadError: null };
     return {
@@ -144,6 +152,7 @@ function renderPage() {
 
 beforeEach(() => {
   useAppAccountMock.mockReturnValue({ address: ADDR });
+  mockSignerLoadError = null;
   clearSessionMock.mockReset();
   useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   useModelIndexMock.mockReturnValue({ models: [summary()], loading: false, error: null, refetch: vi.fn() });
@@ -873,5 +882,38 @@ describe('LaunchCollectionPage', () => {
 
     await waitFor(() => expect(clearSessionMock).toHaveBeenCalledOnce());
     expect(screen.getByTestId('launch-error').textContent).toMatch(/session expired/i);
+  });
+
+  // plan-016 U5 / R5 / AE2 — test-wallet missing-key banner. Renders the
+  // wrapper hook's loadError message verbatim above the page content;
+  // LAUNCH stays disabled via the existing signer-null check.
+  it('renders the missing-key banner with verbatim AE2 copy on the sign-in scaffold', () => {
+    useSessionMock.mockReturnValue({ session: null });
+    useAppAccountMock.mockReturnValue(null);
+    mockSignerLoadError = new Error(
+      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local',
+    );
+    renderPage();
+    const banner = screen.getByTestId('test-wallet-banner');
+    expect(banner.textContent).toBe(
+      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local',
+    );
+    expect(banner.getAttribute('role')).toBe('alert');
+  });
+
+  it('renders the banner on the signed-in scaffold when signer failed to load (invalid key path)', () => {
+    mockSignerLoadError = new Error('VITE_TEST_WALLET_KEY is invalid: bad bech32');
+    // Signed-in beforeEach default applies; the page renders the
+    // base-picker branch above which the banner appears.
+    renderPage();
+    expect(screen.getByTestId('test-wallet-banner').textContent).toMatch(
+      /VITE_TEST_WALLET_KEY is invalid/,
+    );
+  });
+
+  it('no banner when loadError is null (production / valid test-wallet path)', () => {
+    mockSignerLoadError = null;
+    renderPage();
+    expect(screen.queryByTestId('test-wallet-banner')).toBeNull();
   });
 });

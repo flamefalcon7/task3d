@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useSession } from '../auth/useSession';
+import { TEST_WALLET_ENABLED } from '../wallet/testWalletEnabled';
 import { navBar, tokens } from './tokens';
 
 const NAV_ITEMS: ReadonlyArray<{ label: string; path: string }> = [
@@ -103,8 +104,18 @@ export function TopNav() {
       </div>
 
       <div style={rightCluster}>
-        <span style={walletPill} data-testid="wallet-pill">
-          {address ? truncateAddress(address) : 'NO WALLET'}
+        <span
+          style={
+            TEST_WALLET_ENABLED && address
+              ? { ...walletPill, color: tokens.color.accent }
+              : walletPill
+          }
+          data-testid="wallet-pill"
+          data-test-wallet={TEST_WALLET_ENABLED ? 'true' : 'false'}
+        >
+          {address
+            ? `${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)}`
+            : 'NO WALLET'}
         </span>
         <span style={networkBadge} data-testid="network-badge">
           TESTNET
