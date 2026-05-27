@@ -3,13 +3,41 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 
-const useCurrentAccountMock = vi.fn();
+// plan-016 U4 — LaunchCollectionPage now reads account + signer via the
+// wrapper hooks (frontend/src/wallet/*). We mock those directly so the
+// existing test cases keep their semantics; the wrapper hooks have their
+// own unit tests (useAppAccount.test.tsx, useAppSigner.test.tsx) that
+// cover the prod-vs-test mode branching. useSuiClient remains a direct
+// dapp-kit import for the unified signAndExecuteTransaction shape.
+const useAppAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
 const signTxMock = vi.fn();
+const signPersonalMessageMock = vi.fn();
+const suiClientMock = {
+  core: {
+    executeTransaction: vi.fn().mockResolvedValue({ digest: '0xexec-digest' }),
+  },
+};
 vi.mock('@mysten/dapp-kit', () => ({
-  useCurrentAccount: () => useCurrentAccountMock(),
-  useSignTransaction: () => ({ mutateAsync: signTxMock }),
-  useSignAndExecuteTransaction: () => ({ mutateAsync: signAndExecuteMock }),
+  useSuiClient: () => suiClientMock,
+}));
+vi.mock('../wallet/useAppAccount', () => ({
+  useAppAccount: () => useAppAccountMock(),
+}));
+vi.mock('../wallet/useAppSigner', () => ({
+  useAppSigner: () => {
+    const account = useAppAccountMock();
+    if (!account) return { signer: null, loadError: null };
+    return {
+      signer: {
+        toSuiAddress: () => account.address,
+        signTransaction: signTxMock,
+        signAndExecuteTransaction: signAndExecuteMock,
+        signPersonalMessage: signPersonalMessageMock,
+      },
+      loadError: null,
+    };
+  },
 }));
 
 const useSessionMock = vi.fn();
@@ -115,7 +143,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
-  useCurrentAccountMock.mockReturnValue({ address: ADDR });
+  useAppAccountMock.mockReturnValue({ address: ADDR });
   clearSessionMock.mockReset();
   useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   useModelIndexMock.mockReturnValue({ models: [summary()], loading: false, error: null, refetch: vi.fn() });

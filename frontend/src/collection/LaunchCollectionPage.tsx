@@ -18,11 +18,9 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  useCurrentAccount,
-  useSignAndExecuteTransaction,
-  useSignTransaction,
-} from '@mysten/dapp-kit';
+import { useSuiClient } from '@mysten/dapp-kit';
+import { useAppAccount } from '../wallet/useAppAccount';
+import { useAppSigner } from '../wallet/useAppSigner';
 import type {
   CollectionBuildRequest,
   CollectionBuildResponse,
@@ -83,31 +81,11 @@ type Phase =
   | 'success'
   | 'error';
 
-// dapp-kit → @mysten/walrus Signer bridge (same shape as CreateModelPage).
-function useDappKitSigner(address: string | null) {
-  const { mutateAsync: signTx } = useSignTransaction();
-  return useMemo(() => {
-    if (!address) return null;
-    return {
-      toSuiAddress: () => address,
-      signTransaction: async (tx: unknown) => signTx({ transaction: tx as never }),
-      signAndExecuteTransaction: async ({
-        transaction,
-        client,
-      }: {
-        transaction: unknown;
-        client: { core: { executeTransaction: (input: unknown) => Promise<unknown> } };
-      }) => {
-        const { bytes, signature } = await signTx({ transaction: transaction as never });
-        return client.core.executeTransaction({
-          transaction: bytes,
-          signatures: [signature],
-          include: { transaction: true, effects: true },
-        });
-      },
-    } as never;
-  }, [address, signTx]);
-}
+// plan-016 U4 — dapp-kit → walrus Signer bridge moved to
+// frontend/src/wallet/useAppSigner.ts. That hook returns the same shape
+// this page used to build locally, plus signPersonalMessage (for
+// useSession) and a test-mode branch that returns the keypair directly
+// when VITE_TEST_WALLET=1.
 
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = '';
@@ -331,10 +309,14 @@ const explorerLink: CSSProperties = {
 
 export function LaunchCollectionPage() {
   const { session, clearSession } = useSession();
-  const account = useCurrentAccount();
-  const signer = useDappKitSigner(account?.address ?? null);
+  const account = useAppAccount();
+  // plan-016 U4 — `signer` exposes the unified Signer interface
+  // (toSuiAddress / signAndExecuteTransaction / signPersonalMessage /
+  // signTransaction). useAppSigner also returns a `loadError` for the
+  // R5 / AE2 banner — wired in U5.
+  const { signer } = useAppSigner();
   const { uploadFiles, stage: uploadStage } = useWalrusUpload();
-  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const suiClient = useSuiClient();
   const { models, loading: modelsLoading } = useModelIndex();
 
   const [phase, setPhase] = useState<Phase>('picking');
@@ -555,14 +537,22 @@ export function LaunchCollectionPage() {
         tokenNames,
         tokenPatchIds,
       });
-      const res = await signAndExecute({ transaction: tx });
+      // plan-016 U4 — use the unified Signer.signAndExecuteTransaction
+      // shape ({transaction, client}). In prod mode useAppSigner wraps
+      // dapp-kit's useSignTransaction + client.core.executeTransaction
+      // (same flow as the previous in-file useDappKitSigner). In test
+      // mode the keypair signs locally with no wallet popup.
+      const res = await signer.signAndExecuteTransaction({
+        transaction: tx,
+        client: suiClient as unknown,
+      });
       setTxDigest(res.digest);
       setPhase('success');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setPhase('error');
     }
-  }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, signAndExecute]);
+  }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
   if (!session) {
     return (
