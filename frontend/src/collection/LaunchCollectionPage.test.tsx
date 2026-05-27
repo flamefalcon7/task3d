@@ -565,7 +565,8 @@ describe('LaunchCollectionPage', () => {
     expect(
       screen.getByTestId('part-list-row-1-launch').getAttribute('aria-pressed'),
     ).toBe('true');
-    // Switch to base B; the previously-active row 1 should NOT carry over.
+    // Picker auto-collapsed after pick; expand to switch to base B.
+    fireEvent.click(screen.getByTestId('base-picker-change'));
     await act(async () => {
       fireEvent.click(screen.getByTestId('base-option-0xb'));
     });
@@ -811,7 +812,9 @@ describe('LaunchCollectionPage', () => {
     expect(
       screen.getByTestId('variant-strip-lock-0').getAttribute('aria-pressed'),
     ).toBe('true');
-    // Switch to base B — locks should clear; variant array resets to 1.
+    // Picker auto-collapsed after pick; expand to switch to base B —
+    // locks should clear; variant array resets to 1.
+    fireEvent.click(screen.getByTestId('base-picker-change'));
     await act(async () => {
       fireEvent.click(screen.getByTestId('base-option-0xb'));
     });

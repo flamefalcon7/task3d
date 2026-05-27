@@ -347,6 +347,16 @@ export function LaunchCollectionPage() {
   const [selectedPreview, setSelectedPreview] = useState(0);
   const [variantGlbs, setVariantGlbs] = useState<Uint8Array[] | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  // GPU-memory mitigation: each base-picker thumbnail mounts a full Babylon
+  // engine + scene + per-mesh textures (~300 MB GPU on a textured Tripo
+  // model). With N candidates + 1 main VariantPreview + 1 editor preview,
+  // /launch can reach 900+ MB GPU on a single tab, which Chrome's GPU
+  // process kills under multi-tab pressure (mid-fetch renderer crash —
+  // see useWalrusUpload.ts diagnostic trail). Once a base is picked, the
+  // grid is no longer needed; collapse to a one-line summary + CHANGE
+  // button. The thumbnails unmount → PreviewCanvas cleanup effect calls
+  // engine.dispose() → GPU textures freed.
+  const [basePickerExpanded, setBasePickerExpanded] = useState(true);
 
   // plan-015 U6 — preview canvas mode (controlled at page level so U7 can
   // flip mode externally on VariantEditor column hover). Default PBR
@@ -385,6 +395,11 @@ export function LaunchCollectionPage() {
     setErrorMsg(null);
     setBase(model);
     setVariantGlbs(null);
+    // Collapse the base-picker grid so its PreviewCanvas thumbnails
+    // unmount (each ≈ 300 MB GPU on a textured Tripo model — see
+    // diagnostic in useWalrusUpload.ts). User can click CHANGE to
+    // re-expand if they want a different base.
+    setBasePickerExpanded(false);
     // plan-015 U6 — reset preview-side selection state when switching
     // bases. Otherwise a stale selectedPartIndex would point at a part
     // that may not exist in the new base.
@@ -823,37 +838,76 @@ export function LaunchCollectionPage() {
               <Link to="/create" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>/create</Link> first.
             </p>
           )}
-          <div style={basePickerGrid}>
-            {forkable.map((m) => {
-              const picked = base?.objectId === m.objectId;
-              return (
-                <button
-                  key={m.objectId}
-                  type="button"
-                  onClick={() => void onPickBase(m)}
-                  disabled={busy}
-                  data-testid={`base-option-${m.objectId}`}
-                  aria-pressed={picked}
-                  style={baseOptionStyle(picked)}
-                >
-                  <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
-                    {/* bgToggle={false}: a base-option <button> wraps this
-                        PreviewCanvas; PreviewCanvas's default BgTogglePill is
-                        itself a <button>, producing a hydration-error nested
-                        <button>-in-<button> (caught in dev console). The pill
-                        also reads as visual noise on a ~150 px thumbnail. */}
-                    <PreviewCanvas glbUrl={glbUrlForSummary(m)} bgToggle={false} />
-                  </div>
-                  <div style={baseOptionBody}>
-                    <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
-                    <span style={baseOptionMeta}>
-                      fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          {/* Collapsed summary once a base is picked — keeps the grid's
+              N PreviewCanvas mounts (each ≈ 300 MB GPU) from competing
+              with the main VariantPreview through the rest of the L2
+              flow. CHANGE re-expands. */}
+          {base && !basePickerExpanded ? (
+            <div
+              data-testid="base-picker-collapsed"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                padding: '12px 16px',
+                border: tokens.border.primary,
+                background: tokens.color.paperPure,
+              }}
+            >
+              <span style={baseOptionName}>{base.name || '(unnamed)'}</span>
+              <span style={{ ...baseOptionMeta, flex: 1 }}>
+                fork fee: {mistToSui(base.derivativeMintFee)} SUI · royalty: {(base.derivativeRoyaltyBps / 100).toFixed(2)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setBasePickerExpanded(true)}
+                disabled={busy}
+                data-testid="base-picker-change"
+                style={{
+                  ...monoLabel,
+                  background: 'transparent',
+                  border: tokens.border.primary,
+                  padding: '4px 10px',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy ? 0.5 : 1,
+                }}
+              >
+                CHANGE
+              </button>
+            </div>
+          ) : (
+            <div style={basePickerGrid}>
+              {forkable.map((m) => {
+                const picked = base?.objectId === m.objectId;
+                return (
+                  <button
+                    key={m.objectId}
+                    type="button"
+                    onClick={() => void onPickBase(m)}
+                    disabled={busy}
+                    data-testid={`base-option-${m.objectId}`}
+                    aria-pressed={picked}
+                    style={baseOptionStyle(picked)}
+                  >
+                    <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
+                      {/* bgToggle={false}: a base-option <button> wraps this
+                          PreviewCanvas; PreviewCanvas's default BgTogglePill is
+                          itself a <button>, producing a hydration-error nested
+                          <button>-in-<button> (caught in dev console). The pill
+                          also reads as visual noise on a ~150 px thumbnail. */}
+                      <PreviewCanvas glbUrl={glbUrlForSummary(m)} bgToggle={false} />
+                    </div>
+                    <div style={baseOptionBody}>
+                      <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                      <span style={baseOptionMeta}>
+                        fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {base && (
