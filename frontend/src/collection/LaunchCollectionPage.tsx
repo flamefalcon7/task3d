@@ -837,7 +837,12 @@ export function LaunchCollectionPage() {
                   style={baseOptionStyle(picked)}
                 >
                   <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
-                    <PreviewCanvas glbUrl={glbUrlForSummary(m)} />
+                    {/* bgToggle={false}: a base-option <button> wraps this
+                        PreviewCanvas; PreviewCanvas's default BgTogglePill is
+                        itself a <button>, producing a hydration-error nested
+                        <button>-in-<button> (caught in dev console). The pill
+                        also reads as visual noise on a ~150 px thumbnail. */}
+                    <PreviewCanvas glbUrl={glbUrlForSummary(m)} bgToggle={false} />
                   </div>
                   <div style={baseOptionBody}>
                     <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
