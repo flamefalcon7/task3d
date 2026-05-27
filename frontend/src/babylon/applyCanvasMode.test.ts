@@ -247,4 +247,27 @@ describe('applyCanvasMode', () => {
     expect(meshes[0].material.albedoColor.r).toBeCloseTo(0.4);
     expect(meshes[1].material.albedoColor.g).toBeCloseTo(1);
   });
+
+  // plan-015 F13 — snapshot immutability. The baseline is captured ONCE on
+  // first encounter; subsequent applyCanvasMode calls must restore from
+  // that frozen snapshot even if the mesh material has been mutated
+  // out-of-band in between calls. A bug where the snapshot is re-captured
+  // on every call would let foreign mutations leak in as the new baseline.
+  it('snapshot is captured once and never re-captured between mode transitions', () => {
+    const original = { r: 0.8, g: 0.2, b: 0.1 };
+    const mesh = makeMesh({ albedoColor: { ...original } });
+    // 1. First call — snapshot is captured here, then PARTS tint applied.
+    applyCanvasMode([mesh], 'parts');
+    // 2. Mutate the material out-of-band with a sentinel blue. If the
+    //    snapshot were re-captured on the next call, this blue would
+    //    become the "new baseline".
+    mesh.material.albedoColor.copyFrom({ r: 0, g: 0, b: 1 });
+    expect(mesh.material.albedoColor.b).toBeCloseTo(1);
+    // 3. Switch to PBR — restore step must pull from the ORIGINAL
+    //    snapshot, not the sentinel blue we wrote in step 2.
+    applyCanvasMode([mesh], 'pbr');
+    expect(mesh.material.albedoColor.r).toBeCloseTo(original.r);
+    expect(mesh.material.albedoColor.g).toBeCloseTo(original.g);
+    expect(mesh.material.albedoColor.b).toBeCloseTo(original.b);
+  });
 });

@@ -61,7 +61,7 @@ describe('partsColor', () => {
     expect(partsColor(5)).toEqual(partsColor(5));
   });
 
-  it('wraps past the 12-hue count (index N and N + 12 produce identical colors)', () => {
+  it('wraps past the 16-hue count (index N and N + HUE_COUNT produce identical colors)', () => {
     expect(partsColor(0)).toEqual(partsColor(PARTS_PALETTE_HUE_COUNT));
     expect(partsColor(3)).toEqual(partsColor(PARTS_PALETTE_HUE_COUNT + 3));
   });
@@ -98,7 +98,7 @@ describe('partsColorHex', () => {
     expect(hex.slice(5, 7)).toBe(Math.round(b * 255).toString(16).padStart(2, '0'));
   });
 
-  it('is deterministic and wraps past the 12-hue count', () => {
+  it('is deterministic and wraps past the 16-hue count', () => {
     expect(partsColorHex(3)).toBe(partsColorHex(PARTS_PALETTE_HUE_COUNT + 3));
   });
 });

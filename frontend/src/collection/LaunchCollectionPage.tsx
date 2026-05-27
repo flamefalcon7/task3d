@@ -16,7 +16,7 @@
 // Model3DSummary, NOT a user input, so the nft creator can't underpay and abort.
 
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useCurrentAccount,
@@ -34,6 +34,7 @@ import { useModelIndex } from '../browse/useModelIndex';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import {
   VariantEditor,
+  LEGACY_LABEL,
   MAX_VARIANTS,
   newVariantRow,
   newVariantEditorState,
@@ -144,7 +145,7 @@ function resolvePartColorsHex(
   partLabels: readonly string[],
 ): readonly string[] {
   if (partLabels.length === 0) {
-    const hex = palette.primary ?? Object.values(palette)[0] ?? '#cccccc';
+    const hex = palette[LEGACY_LABEL] ?? Object.values(palette)[0] ?? '#cccccc';
     return [hex];
   }
   return partLabels.map((label) => palette[label] ?? '#cccccc');
@@ -388,6 +389,13 @@ export function LaunchCollectionPage() {
     // bases. Otherwise a stale selectedPartIndex would point at a part
     // that may not exist in the new base.
     setSelectedPartIndex(null);
+    // plan-015 F5 — reset selected preview index. After switching bases the
+    // new editor seeds with 1 row, so any stale selectedPreview > 0 would
+    // point at a non-existent tile until VariantStrip is regenerated.
+    setSelectedPreview(0);
+    // plan-015 F6 — clear any active column-hover label so the new base
+    // doesn't open in SOLO mode with a stale label from the previous base.
+    setHoveredColumnLabel(null);
     // plan-015 U8 — clear locks when switching bases; preserving them
     // would carry forward lock indices into a different variant array.
     setLockedIndices(new Set());
@@ -426,7 +434,7 @@ export function LaunchCollectionPage() {
     const partLabels = base.partLabels;
     const resolvePartColors = (palette: Record<string, string>) => {
       if (partLabels.length === 0) {
-        const hex = palette.primary ?? Object.values(palette)[0] ?? '#cccccc';
+        const hex = palette[LEGACY_LABEL] ?? Object.values(palette)[0] ?? '#cccccc';
         return [{ baseColorRgb: hexToBaseColorRgb(hex), textureId: undefined }];
       }
       return partLabels.map((label) => ({
@@ -600,8 +608,48 @@ export function LaunchCollectionPage() {
 
   // SOLO highlight set — only meaningful when the user is in SOLO mode AND
   // has a selected part. In other modes the canvas treats this as empty.
-  const highlightedParts =
-    previewMode === 'solo' && selectedPartIndex !== null ? [selectedPartIndex] : [];
+  // plan-015 F8 — memoized so the array identity is stable across renders
+  // when (previewMode, selectedPartIndex) don't change. The canvas mode
+  // effect depends on this array; an unstable identity would re-fire it on
+  // every parent render.
+  const highlightedParts = useMemo<readonly number[]>(
+    () =>
+      previewMode === 'solo' && selectedPartIndex !== null
+        ? [selectedPartIndex]
+        : [],
+    [previewMode, selectedPartIndex],
+  );
+
+  // plan-015 F10 — 50ms debounce on the hover-null transition. When the
+  // user drags between adjacent column headers, the brief mouseleave →
+  // mouseenter gap would flicker the canvas back to PBR for one frame.
+  // Debouncing the null branch (only) absorbs the gap; entering a column
+  // is still immediate so the SOLO highlight feels responsive.
+  const hoverNullTimeoutRef = useRef<number | null>(null);
+  const handleColumnHover = useCallback((label: string | null) => {
+    if (hoverNullTimeoutRef.current !== null) {
+      clearTimeout(hoverNullTimeoutRef.current);
+      hoverNullTimeoutRef.current = null;
+    }
+    if (label === null) {
+      hoverNullTimeoutRef.current = window.setTimeout(() => {
+        setHoveredColumnLabel(null);
+        hoverNullTimeoutRef.current = null;
+      }, 50);
+    } else {
+      setHoveredColumnLabel(label);
+    }
+  }, []);
+  // Cleanup any pending null-debounce when this page unmounts so we don't
+  // call setState on an unmounted component (React 19 warns otherwise).
+  useEffect(() => {
+    return () => {
+      if (hoverNullTimeoutRef.current !== null) {
+        clearTimeout(hoverNullTimeoutRef.current);
+        hoverNullTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // plan-015 U7 — VariantEditor column-hover SOLO wiring. When a column is
   // hovered, force SOLO mode and highlight EVERY part index whose label
@@ -618,8 +666,14 @@ export function LaunchCollectionPage() {
   // Effective mode + highlight set — hover overlay wins while active, else
   // fall back to the user-picked mode. This is the "stash + restore"
   // pattern flattened into a derivation: no useEffect, no stashed state.
-  const effectiveMode: CanvasMode = hoveredColumnLabel ? 'solo' : previewMode;
-  const effectiveHighlightedParts: readonly number[] = hoveredColumnLabel
+  // plan-015 F4 — only flip to SOLO when hover yields at least one matching
+  // index. Otherwise a legacy base (`partLabels=[]`) or a stale
+  // hoveredColumnLabel that no longer matches any part would blank the
+  // canvas (SOLO with empty highlights dims every mesh).
+  const hoverActive =
+    hoveredColumnLabel !== null && hoverHighlightedParts.length > 0;
+  const effectiveMode: CanvasMode = hoverActive ? 'solo' : previewMode;
+  const effectiveHighlightedParts: readonly number[] = hoverActive
     ? hoverHighlightedParts
     : highlightedParts;
 
@@ -640,21 +694,44 @@ export function LaunchCollectionPage() {
   // fallback render target. Without this, the canvas shows a placeholder
   // until the user clicks PREVIEW; with this, partColors paint live on the
   // base mesh from the moment the authoring section opens.
-  const baseGlbUrl = useMemo(() => {
-    if (!baseGlb) return null;
-    return URL.createObjectURL(
+  // plan-015 F1 — URL creation co-located with revocation inside one
+  // effect. The pre-fix useMemo/useEffect split could leak a URL under
+  // React 19 StrictMode's mount→unmount→mount double-invoke (the useMemo
+  // ran twice but the cleanup only chased the second value).
+  const [baseGlbUrl, setBaseGlbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!baseGlb) {
+      setBaseGlbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(
       new Blob([baseGlb as BlobPart], { type: 'model/gltf-binary' }),
     );
+    setBaseGlbUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+      setBaseGlbUrl(null);
+    };
   }, [baseGlb]);
-  useEffect(() => {
-    if (!baseGlbUrl) return;
-    return () => URL.revokeObjectURL(baseGlbUrl);
-  }, [baseGlbUrl]);
 
   // plan-015 U8 — variant count for RandomGen mirrors VariantEditor's
   // current row count. Changing it via the RandomGen stepper updates the
   // editor state in-place (adds default-palette rows or truncates).
   const variantCount = editorState.variants.length;
+  // plan-015 F16 — dynamic minN so the stepper N− button disables before
+  // it would drop a locked variant. Pre-fix, hitting N− while variant N-1
+  // was locked truncated past the lock — the lock state was preserved but
+  // the variant row it referenced was gone, leaving a phantom locked
+  // index. Now N− is gated at `maxLockedIndex + 1` (and at 1 for the
+  // empty-lock case via Math.max).
+  const minRandomN = useMemo(() => {
+    if (lockedIndices.size === 0) return 1;
+    let maxLocked = -1;
+    for (const i of lockedIndices) {
+      if (i > maxLocked) maxLocked = i;
+    }
+    return Math.max(1, maxLocked + 1);
+  }, [lockedIndices]);
   const onChangeVariantCount = useCallback(
     (next: number) => {
       const target = Math.max(1, Math.min(MAX_VARIANTS, next));
@@ -832,7 +909,7 @@ export function LaunchCollectionPage() {
               state={editorState}
               onChange={setEditorState}
               partLabels={base?.partLabels ?? []}
-              onColumnHover={setHoveredColumnLabel}
+              onColumnHover={handleColumnHover}
               disabled={busy}
             />
             {/* plan-015 U6/U7 — preview area: VariantPreview (left, mode +
@@ -894,6 +971,7 @@ export function LaunchCollectionPage() {
                 manual edits while re-rolling sibling variants. */}
             <RandomGenControls
               N={variantCount}
+              minN={minRandomN}
               onChangeN={onChangeVariantCount}
               seedHex={randomSeedHex}
               onChangeSeed={setRandomSeedHex}

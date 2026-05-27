@@ -516,6 +516,18 @@ export function CreateModelPage() {
   const suiClient = useSuiClient();
   const signer = useDappKitSigner(account?.address ?? null);
 
+  // plan-015 F1 — URL lifecycle is split across this effect (revoke on
+  // glbUrl change/unmount) and setGlbBytes below (createObjectURL when new
+  // bytes arrive). The pair is correct because:
+  //   - setGlbBytes is the only producer of new glbUrl values, and it
+  //     replaces (not appends) the state — so the effect's cleanup runs on
+  //     the previous URL before the new one is committed.
+  //   - The effect itself doesn't create the URL, so it can't leak under
+  //     React 19 StrictMode's double-invoke (the prior LaunchCollectionPage
+  //     useMemo+useEffect split was vulnerable; this one is not).
+  // No refactor — the split is intentional because setGlbBytes carries
+  // additional state mutations (setConfirmed, setPartLabels, setTagged) that
+  // shouldn't live in a URL-only effect.
   useEffect(() => {
     if (!glbUrl) return;
     return () => URL.revokeObjectURL(glbUrl);

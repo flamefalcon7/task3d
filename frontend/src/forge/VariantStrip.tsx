@@ -46,41 +46,40 @@ export function VariantStrip({
       {variants.map((v, i) => {
         const active = i === selectedIndex;
         const locked = lockedIndices.has(i);
+        // plan-015 F7 — restructured from `<button><span role="checkbox">`
+        // (nested-interactive a11y violation) to a positioned wrapper
+        // containing two sibling `<button>` elements: the tile selector
+        // covers the full well, and the lock badge floats absolutely on
+        // top. The lock button is a real `<button>` so native keyboard
+        // activation (Enter/Space) works without a custom keydown handler.
         return (
-          <button
-            key={i}
-            type="button"
-            data-testid={`variant-strip-tile-${i}`}
-            onClick={() => onSelect(i)}
-            disabled={disabled}
-            aria-pressed={active}
-            style={wellStyle(active, locked, tileColorFor(v))}
-          >
-            <span
+          <div key={i} style={wellWrapperStyle(active, locked)}>
+            <button
+              type="button"
+              data-testid={`variant-strip-tile-${i}`}
+              onClick={() => onSelect(i)}
+              disabled={disabled}
+              aria-pressed={active}
+              style={tileButtonStyle(tileColorFor(v))}
+            >
+              <span style={indexLabelStyle}>
+                {String(i + 1).padStart(3, '0')}/{String(total).padStart(3, '0')}
+              </span>
+            </button>
+            <button
+              type="button"
               data-testid={`variant-strip-lock-${i}`}
-              role="checkbox"
-              aria-checked={locked}
+              aria-pressed={locked}
               aria-label={`Lock variant ${i + 1}`}
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation(); // don't fire onSelect
+              onClick={() => {
                 if (!disabled) onToggleLock(i);
               }}
-              onKeyDown={(e) => {
-                if ((e.key === 'Enter' || e.key === ' ') && !disabled) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onToggleLock(i);
-                }
-              }}
+              disabled={disabled}
               style={lockBadgeStyle(locked)}
             >
               L
-            </span>
-            <span style={indexLabelStyle}>
-              {String(i + 1).padStart(3, '0')}/{String(total).padStart(3, '0')}
-            </span>
-          </button>
+            </button>
+          </div>
         );
       })}
     </div>
@@ -97,12 +96,15 @@ const stripStyle: CSSProperties = {
   marginTop: 12,
 };
 
-function wellStyle(active: boolean, locked: boolean, colorHex: string): CSSProperties {
+// plan-015 F7 — the outer wrapper carries the active/locked border + size
+// so the inner tile-select button can be a clean rectangle without
+// competing for the same border edge as the absolutely-positioned lock
+// badge above.
+function wellWrapperStyle(active: boolean, locked: boolean): CSSProperties {
   return {
     ...viewerWell,
     width: 60,
     height: 80,
-    background: colorHex,
     border: active
       ? `2px solid ${tokens.color.accent}`
       : locked
@@ -110,6 +112,18 @@ function wellStyle(active: boolean, locked: boolean, colorHex: string): CSSPrope
         : tokens.border.primary,
     position: 'relative',
     flexShrink: 0,
+    padding: 0,
+  };
+}
+
+// plan-015 F7 — tile-select button fills the wrapper. No border (carried
+// by the wrapper), padding 0 so the index label hugs the bottom-left.
+function tileButtonStyle(colorHex: string): CSSProperties {
+  return {
+    position: 'absolute',
+    inset: 0,
+    background: colorHex,
+    border: 'none',
     padding: 0,
     cursor: 'pointer',
   };

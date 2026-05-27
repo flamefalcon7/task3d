@@ -151,6 +151,12 @@ export function PreviewCanvas({
   const meshesRef = useRef<AbstractMesh[]>([]);
   const highlightLayerRef = useRef<HighlightLayer | null>(null);
   const onPartClickRef = useRef(onPartClick);
+  // plan-015 F9 — monotonically increasing token assigned per glbUrl
+  // effect run. Mirrors TaggingCanvas. The async load captures its token
+  // locally and bails before mutating any ref if a newer effect run has
+  // already started — prevents a slow first load from overwriting state
+  // populated by a faster second load (real on rapid base re-pick).
+  const loadTokenRef = useRef(0);
   const { bg, entry, cycle } = useBgCycle(defaultBg);
   // Bumped after each successful GLB load so the mode effect re-applies
   // mode against the new meshes ref. The setState is gated by the
@@ -224,6 +230,12 @@ export function PreviewCanvas({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !glbUrl) return;
+    // plan-015 F9 — capture this effect run's token. Increment so any prior
+    // in-flight load sees its captured token != latestRef.current and bails
+    // before mutating shared refs. The per-effect `cancelled` flag only
+    // guards the cleanup of THIS effect run; it can't stop a slow first
+    // load from racing a fast second load to mutate state.
+    const token = ++loadTokenRef.current;
     let cancelled = false;
     (async () => {
       try {
@@ -235,7 +247,7 @@ export function PreviewCanvas({
         const container = await LoadAssetContainerAsync(glbUrl, scene, {
           pluginExtension: '.glb',
         });
-        if (cancelled) {
+        if (cancelled || token !== loadTokenRef.current) {
           container.dispose();
           return;
         }
@@ -279,12 +291,25 @@ export function PreviewCanvas({
     hl.removeAllMeshes();
     if (mode === 'solo') {
       const accent = Color3.FromHexString(ACCENT_COLOR_HEX);
-      for (const i of highlightedParts) {
-        const mesh = meshes[i];
+      // plan-015 F19 — guard against a stale glbUrl→meshes race where
+      // the effect deps fire BEFORE the async load has repopulated
+      // meshesRef. getScene() check ensures the mesh's backing Scene
+      // matches the live one (mirrors TaggingCanvas:237-244).
+      const scene = sceneRef.current;
+      const safeAdd = (i: number) => {
+        const m = meshes[i];
+        if (!m) return;
+        if (
+          !scene ||
+          (typeof m.getScene === 'function' && m.getScene() !== scene)
+        ) {
+          return;
+        }
         // HighlightLayer.addMesh's TS signature wants Mesh; AbstractMesh
         // works at runtime — matches the cast TaggingCanvas already does.
-        if (mesh) hl.addMesh(mesh as Mesh, accent);
-      }
+        hl.addMesh(m as Mesh, accent);
+      };
+      for (const i of highlightedParts) safeAdd(i);
     }
   }, [mode, highlightedParts, loadEpoch, partColors]);
 

@@ -603,10 +603,29 @@ describe('LaunchCollectionPage', () => {
     fireEvent.mouseEnter(screen.getByTestId('palette-col-chassis'));
     expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('solo');
     expect(mainPreviewCanvas().getAttribute('data-highlighted')).toBe('0,2');
-    // Mouseout — mode and highlight return to baseline.
+    // Mouseout — mode and highlight return to baseline after the 50ms
+    // hover-null debounce (plan-015 F10).
     fireEvent.mouseLeave(screen.getByTestId('palette-col-chassis'));
-    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('pbr');
+    await waitFor(() =>
+      expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('pbr'),
+    );
     expect(mainPreviewCanvas().getAttribute('data-highlighted')).toBe('');
+  });
+
+  it('F12: column-hover chain delivers (mode=solo, highlightedParts=matching) to the canvas mock — sibling of PreviewCanvas applyCanvasMode test', async () => {
+    // This is the page-level half of the F12 bridge: the canvas mock
+    // exposes mode + highlightedParts as data-* attributes so we can
+    // assert the chain reaches the prop boundary. The behavioral half —
+    // proving those props reach mesh.material.albedoColor — lives in
+    // PreviewCanvas.test.tsx (F2). Together they verify the full
+    // VariantEditor hover → page state → PreviewCanvas → applyCanvasMode
+    // → mesh material chain.
+    await pickBaseWithLabels(['a', 'b', 'a', 'c', 'a']);
+    fireEvent.mouseEnter(screen.getByTestId('palette-col-a'));
+    const main = mainPreviewCanvas();
+    expect(main.getAttribute('data-mode')).toBe('solo');
+    // partLabels=['a','b','a','c','a'] → hovering 'a' yields [0,2,4].
+    expect(main.getAttribute('data-highlighted')).toBe('0,2,4');
   });
 
   it('U7: hover overlay does not override user-picked mode after mouseout', async () => {
@@ -617,9 +636,11 @@ describe('LaunchCollectionPage', () => {
     // Hover a column — flips to SOLO temporarily.
     fireEvent.mouseEnter(screen.getByTestId('palette-col-a'));
     expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('solo');
-    // Mouseout — restores PARTS, not PBR.
+    // Mouseout — restores PARTS (not PBR) after the 50ms F10 debounce.
     fireEvent.mouseLeave(screen.getByTestId('palette-col-a'));
-    expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('parts');
+    await waitFor(() =>
+      expect(mainPreviewCanvas().getAttribute('data-mode')).toBe('parts'),
+    );
   });
 
   it('U7: live recolor — VariantEditor color pick updates partColors prop on the preview canvas (R9)', async () => {
@@ -715,7 +736,7 @@ describe('LaunchCollectionPage', () => {
     // Lock variant 1.
     fireEvent.click(screen.getByTestId('variant-strip-lock-1'));
     expect(
-      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-pressed'),
     ).toBe('true');
     // Cycle the seed + re-roll.
     fireEvent.change(screen.getByTestId('random-gen-seed'), {
@@ -788,7 +809,7 @@ describe('LaunchCollectionPage', () => {
     fireEvent.click(screen.getByTestId('random-gen-n-plus'));
     fireEvent.click(screen.getByTestId('variant-strip-lock-0'));
     expect(
-      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-pressed'),
     ).toBe('true');
     // Switch to base B — locks should clear; variant array resets to 1.
     await act(async () => {
@@ -796,7 +817,7 @@ describe('LaunchCollectionPage', () => {
     });
     await waitFor(() => expect(screen.getByTestId('variant-strip-tile-0')).toBeTruthy());
     expect(
-      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-0').getAttribute('aria-pressed'),
     ).toBe('false');
     expect(screen.queryByTestId('variant-strip-tile-1')).toBeNull();
   });

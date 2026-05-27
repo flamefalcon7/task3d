@@ -449,6 +449,55 @@ describe('PreviewCanvas', () => {
     vi.useRealTimers();
   });
 
+  // -- plan-015 F2 / F3 — partColors integration + __root__ guard ----------
+
+  it('F2: partColors prop flows through to applyCanvasMode → mesh.material.albedoColor', async () => {
+    render(
+      <PreviewCanvas
+        glbUrl="blob:http://localhost/glb"
+        mode="pbr"
+        partColors={['#ff0000', '#00ff00', '#0000ff']}
+      />,
+    );
+    // meshesRef is filtered to skip __root__, so filtered[0] = state.meshes[1],
+    // filtered[1] = state.meshes[2], filtered[2] = state.meshes[3].
+    // applyCanvasMode (called inside the mode effect) maps partColors[i]
+    // onto filtered[i].material.albedoColor via copyFrom. The effect fires
+    // AFTER the async load resolves and loadEpoch bumps; waitFor handles
+    // the multi-tick wait for that chain to settle.
+    await waitFor(() =>
+      expect(state.meshes[1].material.albedoColor!.r).toBeCloseTo(1),
+    );
+    expect(state.meshes[1].material.albedoColor!.g).toBeCloseTo(0);
+    expect(state.meshes[2].material.albedoColor!.g).toBeCloseTo(1);
+    expect(state.meshes[2].material.albedoColor!.r).toBeCloseTo(0);
+    expect(state.meshes[3].material.albedoColor!.b).toBeCloseTo(1);
+    // __root__ (state.meshes[0], 0 verts) was filtered out — its color is
+    // untouched by the partColors overlay.
+    expect(state.meshes[0].material.albedoColor!.r).toBeCloseTo(0.5);
+  });
+
+  it('F3: picking __root__ (0 verts, filtered out) does NOT fire onPartClick', async () => {
+    const babylon = await import('@babylonjs/core');
+    const onPartClick = vi.fn();
+    render(
+      <PreviewCanvas
+        glbUrl="blob:http://localhost/glb"
+        onPartClick={onPartClick}
+      />,
+    );
+    await flushAsync();
+    expect(state.pointerCbs.length).toBeGreaterThanOrEqual(1);
+    // state.meshes[0] is the __root__ mesh with 0 verts — filtered out of
+    // meshesRef. Clicking it should resolve to indexOf === -1, so the
+    // handler must not fire.
+    state.pointerCbs[0]!({
+      type: babylon.PointerEventTypes.POINTERPICK,
+      pickInfo: { pickedMesh: state.meshes[0] },
+    });
+    expect(onPartClick).not.toHaveBeenCalled();
+  });
+
   // -- plan-015 U2 — disposal -----------------------------------------------
 
   it('disposes Engine, Scene, and HighlightLayer on unmount', async () => {

@@ -54,6 +54,20 @@ describe('VariantStrip', () => {
     }
   });
 
+  it('F7: lock button is a real <button> sibling, not nested inside the tile button', () => {
+    render(<StatefulHarness initial={makeVariants(3)} />);
+    for (let i = 0; i < 3; i++) {
+      const tile = screen.getByTestId(`variant-strip-tile-${i}`);
+      const lock = screen.getByTestId(`variant-strip-lock-${i}`);
+      expect(tile.tagName).toBe('BUTTON');
+      expect(lock.tagName).toBe('BUTTON');
+      // The two interactive elements must be siblings — not nested — to
+      // satisfy the no-nested-interactive a11y rule.
+      expect(tile.contains(lock)).toBe(false);
+      expect(lock.contains(tile)).toBe(false);
+    }
+  });
+
   it('clicking a tile fires onSelect with that index', () => {
     const onSelect = vi.fn();
     render(
@@ -74,7 +88,10 @@ describe('VariantStrip', () => {
     render(<StatefulHarness initial={makeVariants(4)} initialSelected={2} />);
     const active = screen.getByTestId('variant-strip-tile-2');
     expect(active.getAttribute('aria-pressed')).toBe('true');
-    expect(active.getAttribute('style')).toMatch(
+    // plan-015 F7 — the active accent border lives on the outer wrapper
+    // (the tile button itself is borderless under the new structure).
+    const wrapper = active.parentElement!;
+    expect(wrapper.getAttribute('style')).toMatch(
       /border:\s*2px solid (rgb\(255,\s*69,\s*0\)|#FF4500)/i,
     );
     expect(
@@ -103,19 +120,22 @@ describe('VariantStrip', () => {
       );
     }
     render(<Harness />);
+    // plan-015 F7 — lock is now a real <button>; lock state is reflected
+    // via aria-pressed (matching native button toggle semantics).
     expect(
-      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-pressed'),
     ).toBe('false');
     fireEvent.click(screen.getByTestId('variant-strip-lock-1'));
     expect(
-      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-pressed'),
     ).toBe('true');
-    // onSelect should NOT have fired — lock badge stops propagation.
+    // onSelect MUST NOT fire — the lock button is a sibling, not nested
+    // inside the tile button, so its click never bubbles to onSelect.
     expect(onSelect).not.toHaveBeenCalled();
     // Re-click toggles off.
     fireEvent.click(screen.getByTestId('variant-strip-lock-1'));
     expect(
-      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-checked'),
+      screen.getByTestId('variant-strip-lock-1').getAttribute('aria-pressed'),
     ).toBe('false');
   });
 
@@ -129,8 +149,8 @@ describe('VariantStrip', () => {
         onToggleLock={() => {}}
       />,
     );
-    const locked = screen.getByTestId('variant-strip-tile-1');
-    // Locked tile border = ink (rgb(0, 0, 0)).
+    // plan-015 F7 — the locked ink border lives on the wrapper now.
+    const locked = screen.getByTestId('variant-strip-tile-1').parentElement!;
     expect(locked.getAttribute('style')).toMatch(
       /border:\s*2px solid (rgb\(0,\s*0,\s*0\)|#000000)/i,
     );
@@ -155,6 +175,8 @@ describe('VariantStrip', () => {
         onToggleLock={() => {}}
       />,
     );
+    // plan-015 F7 — the per-variant color now lives on the inner tile
+    // button (the wrapper carries border/size only).
     expect(screen.getByTestId('variant-strip-tile-0').getAttribute('style')).toMatch(
       /background:\s*(rgb\(255,\s*0,\s*0\)|#ff0000)/i,
     );
@@ -184,10 +206,14 @@ describe('VariantStrip', () => {
     }
     render(<Harness />);
     const badge = screen.getByTestId('variant-strip-lock-0');
-    fireEvent.keyDown(badge, { key: 'Enter' });
-    expect(badge.getAttribute('aria-checked')).toBe('true');
-    fireEvent.keyDown(badge, { key: ' ' });
-    expect(badge.getAttribute('aria-checked')).toBe('false');
+    // plan-015 F7 — the lock badge is a real <button>; native button
+    // semantics translate Enter / Space keydown into a synthetic click.
+    // jsdom doesn't simulate that automatically, so we fire `click` here
+    // (which is what the browser does on Enter / Space activation).
+    fireEvent.click(badge);
+    expect(badge.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(badge);
+    expect(badge.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('disabled flag prevents both lock toggle and tile selection', () => {

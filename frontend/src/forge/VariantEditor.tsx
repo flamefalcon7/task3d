@@ -360,8 +360,16 @@ export function VariantEditor({
                 key={label}
                 style={thStyle}
                 data-testid={`palette-col-${label}`}
-                onMouseEnter={onColumnHover ? () => onColumnHover(label) : undefined}
-                onMouseLeave={onColumnHover ? () => onColumnHover(null) : undefined}
+                onMouseEnter={
+                  !disabled && onColumnHover
+                    ? () => onColumnHover(label)
+                    : undefined
+                }
+                onMouseLeave={
+                  !disabled && onColumnHover
+                    ? () => onColumnHover(null)
+                    : undefined
+                }
               >
                 {label.toUpperCase()}
               </th>

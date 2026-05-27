@@ -10,7 +10,7 @@
 // labels, 1.5px ink borders on tiles with accent on the active variant.
 
 import type { CSSProperties } from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import type { CanvasMode } from '../babylon/modePalette';
 import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
@@ -103,23 +103,38 @@ export function VariantPreview({
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
   // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
-  const selectedGlbUrl = useMemo(() => {
+  // plan-015 F1 — URL creation co-located with revocation inside one effect.
+  // The pre-fix useMemo/useEffect split could leak a URL under React 19
+  // StrictMode's mount→unmount→mount double-invoke (the useMemo ran twice
+  // but the cleanup only chased the second value).
+  const [selectedGlbUrl, setSelectedGlbUrl] = useState<string | null>(null);
+  useEffect(() => {
     const bytes = variantGlbs?.[selectedIndex];
-    if (!bytes) return null;
-    return URL.createObjectURL(
+    if (!bytes) {
+      setSelectedGlbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(
       new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }),
     );
+    setSelectedGlbUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+      setSelectedGlbUrl(null);
+    };
   }, [variantGlbs, selectedIndex]);
-
-  useEffect(() => {
-    if (!selectedGlbUrl) return;
-    return () => URL.revokeObjectURL(selectedGlbUrl);
-  }, [selectedGlbUrl]);
 
   // plan-015 U7 / R9 — live-recolor fallback. When no swapped variant GLB
   // exists yet, show the base mesh so partColors can paint live before the
   // user clicks PREVIEW. selectedGlbUrl (the swapped GLB) wins when present
   // — it carries any baked textures the swap pipeline produced.
+  // NOTE (plan-015 F11): the "LOADING BASE MESH…" placeholder below is only
+  // reachable when BOTH selectedGlbUrl AND baseGlbUrl are null. In the
+  // normal /launch flow, baseGlbUrl is provided by LaunchCollectionPage as
+  // soon as onPickBase finishes downloading the base — so that placeholder
+  // is effectively unreachable post-base-pick. It remains as defensive
+  // fallback for non-/launch consumers (e.g. preview-only mounts that don't
+  // pass baseGlbUrl).
   const displayGlbUrl = selectedGlbUrl ?? baseGlbUrl ?? null;
 
   return (

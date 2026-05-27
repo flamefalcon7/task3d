@@ -34,10 +34,12 @@ export const MODE_PALETTE: Record<CanvasMode, ModePaletteEntry> = {
   wireframe: { label: 'MODE: WIREFRAME', mode: 'wireframe' },
 };
 
-// 12-hue deterministic rainbow. Same index → same color across loads, so a
+// 16-hue deterministic rainbow. Same index → same color across loads, so a
 // re-mount of the same segmented GLB produces the same colored part-list
-// swatches (PartListPanel relies on this).
-export const PARTS_PALETTE_HUE_COUNT = 12;
+// swatches (PartListPanel relies on this). plan-015 F18 — bumped from 12
+// to 16 so the rainbow doesn't wrap inside the Move-contract MAX_VARIANTS
+// (16) and adjacent parts in larger bases stay color-distinct.
+export const PARTS_PALETTE_HUE_COUNT = 16;
 const PARTS_SAT = 0.7;
 const PARTS_LIGHT = 0.5;
 
