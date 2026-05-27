@@ -1,5 +1,110 @@
 # Phase Progress
 
+## Last Updated: 2026-05-27 / Early AM (plan-015 L1/L2 tagging UX refactor — 8 implementation units shipped + 6-agent code review run + 18 reviewer-driven fixes applied) — **Next = browser-verify the demo arc in real Chrome (Slush-gated portions are user-driven only) + capture 5 learnings entries + decide on 8 suppressed findings + 4 prior-session deferred UX-judgment items.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 25 of 38 · demo day (7/20–21): 54 · winners (8/27): 92
+
+### This session — plan-015 brainstorm → plan → ce-work → ce-code-review (end-to-end compound-engineering arc)
+
+The largest single feature push since plan-013. Started yesterday afternoon's PM-first discussion (framing A/B/C tradeoff for tagging UX coherence gap), produced the requirements doc + 4 ADRs that same evening, then this overnight session ran the full implementation + review pass.
+
+**Origin + planning (committed pre-implementation):**
+- `296e103` brainstorm: `docs/brainstorms/2026-05-26-l1l2-tagging-ux-requirements.md` — framing B (`NAME WHAT BUYERS CAN CUSTOMIZE`) wins; 13 R-IDs + 4 actors + 3 flows + 7 acceptance examples + 7 OQs resolved inline.
+- `4fbced6` decisions: D-054 (preset labels removed) / D-055 (4-mode canvas standard) / D-056 (random gen harmonic-from-seed) / D-057 (texture customization deferred to v1.1).
+- `96bd770` plan: `docs/plans/2026-05-26-015-feat-l1l2-tagging-ux-refactor-plan.md` — 8 implementation units (4 parallel-safe foundation + 4 layered integration), 13/13 R coverage, status `active`.
+
+**Implementation — 8 units, serial inline, commit-per-unit:**
+- `a6bfaa7` **U1** framing B copy — `LABEL_PRESETS` dropdown removed, freeform input with `maxLength=32`, Continue gates on every part named (no skip escape hatch), new shared `HelpIcon` component. Tests: 18 added (4 HelpIcon + 14 CreateModelPage rewrite covering AE1/AE2). Covers R1, R2, R12-L1, AE1, AE2.
+- `aba309d` **U2** canvas mode infrastructure (D-055) — new `modePalette.ts` (4-mode + 12-hue PARTS palette), `ModeTogglePill.tsx` (top-left mirror of BG pill), `applyCanvasMode.ts` (snapshot/restore/overlay algorithm via `Symbol.for()`-keyed mesh property). PreviewCanvas + TaggingCanvas extended with mode/highlightedParts/onPartClick/autoRotate props. Defaults preserve every existing call site. Tests: 47 added across 5 test files. Covers R4, R10.
+- `d1a9de9` **U3** `MeshInfoPanel` — segment count + size (B/KB/MB) + material count + Walrus blob pill. 12 tests. Covers R3.
+- `b9fd9ae` **U4** `PartListPanel` — vertical scrollable list with two-way canvas wiring, click → onSelect, scrollIntoView on selectedIndex change. 9 tests. Covers R5.
+- `edad92e` **U5** /create tagging step integration — wires U1-U4 into CreateModelPage: PARTS-mode default, MeshInfoPanel + PartListPanel side rail, partsColorHex swatches mirror canvas palette. 10 tests (7 integration + 3 modePalette additions). Covers F1, AE1, AE3-origin.
+- `6a4af12` **U6** /launch scaffold — customization-axes strip below picker, 2-col preview layout, page-level `useModeCycle('pbr')` for hover-driven mode flips, `selectedPartIndex` bidirectional. VariantPreview extended for pass-through props. 7 tests. Covers R6, R10-mount, AE3-recognition.
+- `e351109` **U7** VariantEditor coherence + live recolor — subhead row, `onColumnHover` prop, hover→SOLO effective-mode derivation (stash-and-restore flattened to a pure derivation, no useEffect). R9 live recolor: applyCanvasMode gains `partColors` arg + PreviewCanvas `partColors` prop + VariantPreview `baseGlbUrl` fallback. Snapshot semantics changed (durable across mode transitions; no longer cleared on PBR). 14 tests. Covers R7, R8, R9, R12-L2, AE4.
+- `8112440` **U8** Random Gen + harmonic palette + variant strip + lock (AE5 demo moment) — new `harmonics.ts` (pure HSL math, no deps; analogous/complementary/triadic/tetradic with seed rotation), `RandomGenControls.tsx` (N stepper, seed picker, 4 scheme swatches with live previews, state-aware button label), `VariantStrip.tsx` (60×80 wells with [L] lock badges). Locks survive re-rolls; base switch clears locks. 50 tests (25 harmonics + 9 RGC + 9 VariantStrip + 7 integration). Covers R11, R13, AE5.
+
+**Code review run (interactive multi-agent):**
+- Run id `20260527-001939-4202b781` (artifact at `/tmp/compound-engineering/ce-code-review/20260527-001939-4202b781/`).
+- Reviewers (per CLAUDE.md frontend-touching 5-reviewer default + learnings researcher): ce-correctness (Opus), ce-testing (Sonnet), ce-api-contract (Sonnet), ce-adversarial (Opus), ce-julik-frontend-races (Sonnet), ce-learnings-researcher (Sonnet).
+- Raw findings: 34. After dedup + cross-reviewer promotion + anchor-75 gate: 19 actionable. Suppressed below anchor 75: 8 (see "Suppressed findings" below).
+- Walk-through (per-finding interactive): 18 Apply + 1 Acknowledge + 0 Defer (no tracker — local-only checkout) + 0 Skip.
+
+**Review-fixer commit:**
+- `9bb95fb` **fix(ux): plan-015 review pass** — 18 fixes in one fixer pass, single commit. Highlights: baseGlbUrl URL.createObjectURL co-located with revokeObjectURL inside useEffect at 3 sites (P1, 3-reviewer concur); PreviewCanvas gains `loadTokenRef` parity with TaggingCanvas; onPickBase reset chain extended with `setSelectedPreview(0)` + `setHoveredColumnLabel(null)`; SOLO + empty highlightedParts no longer blanks canvas; `highlightedParts` wrapped in `useMemo`; VariantStrip restructured from nested-interactive `<button><span role=checkbox>` to sibling buttons (a11y); 50ms debounce on column-hover null transition; `LEGACY_LABEL` imported in both resolvers; `PARTS_PALETTE_HUE_COUNT` raised 12→16 to match Move `MAX_PARTS=16`; PreviewCanvas mode effect gains `getScene()` guard. Plus 10 new tests (partColors flow, __root__ skip, snapshot-immutability, AE4 bridge, TaggingCanvas mode + auto-rotate parity).
+
+**Tests:** frontend 564/564 passing (up from 409 pre-plan-015). 54 test files. tsc clean. No backend / Move / shared-types changes.
+
+### Suppressed findings (anchor < 75, kept in run artifact for later triage)
+Eight findings below the confidence gate, recorded for potential follow-up:
+1. **MAX_VARIANTS=16 vs origin "1-20"** (correctness conf 50) — plan-015 R11 specified N range 1-20 but Move contract caps at 16. Implementation matches contract; plan doc has a typo or aspirational mismatch.
+2. **TaggingStep gate uses size-equality not key-presence** (correctness conf 50) — defense-in-depth gap, not a current bug.
+3. **partColors length-1 fallback for legacy bases** (correctness conf 50) — backend material swap behavior for legacy bases not fully validated.
+4. **Latent state-mutation during upload** (adversarial conf 50) — WYSIWYG divergence risk only manifests if a future feature lets variant.palette change while phase='uploading'.
+5. **meshesRef + onPartClick race window** (adversarial conf 50) — addAllToScene happens before meshesRef update; sub-frame click can miss. Closed largely by loadTokenRef port in fix-pass.
+6. **PartListPanel scrollIntoView prototype stub leaks between tests** (julik conf 72) — test hygiene only.
+7. **VariantStrip style-attr regex brittle if styles move to CSS modules** (testing conf 70) — works today, breaks under hypothetical CSS-module refactor.
+8. **U8 AE5 test uses unequal-assertion vs explicit harmonic verification** (testing conf 68) — weaker but still passes; tightening would catch rotation-offset regressions.
+
+### Residual risks (carried forward, NOT addressed in fix-pass)
+- Babylon mock returns plain object for `Color3.FromHexString` — production-vs-mock divergence; needs real-browser smoke test before demo recording.
+- Whitespace-only labels pass `length > 0` gate (documented deferral per plan-015 OQ-2).
+- VariantStrip uses CSS-color thumbnails not live canvases (D-003 WebGL context cap) — N=16 can't compare per-segment colors visually from the strip.
+- 20+ base-picker PreviewCanvas mounts on /launch may exceed WebGL context cap (pre-existing; pre-plan-015).
+- `LoadAssetContainerAsync` uncancellable fetch in onPickBase — rapid sequential picks can leave multiple fetches in flight (julik RR-003).
+
+### Deferred for capture (post-fix-pass, not done this session)
+
+**5 learnings entries the ce-learnings-researcher identified as worth writing to `docs/solutions/`:**
+1. HighlightLayer single-effect coordination ("two effects fighting over `removeAllMeshes`/`addMesh` pairs" — combined with selectedIndex glow in TaggingCanvas, with SOLO highlights in PreviewCanvas).
+2. `LoadAssetContainerAsync` cancellation via `cancelled` boolean closure + `loadTokenRef` token-ref pattern (now consistent across PreviewCanvas + TaggingCanvas).
+3. `URL.createObjectURL` + `revokeObjectURL` lifecycle in React effects (the post-fix LaunchCollectionPage:678 / VariantPreview:106 pattern IS the canonical example).
+4. Babylon material snapshot/restore via `Symbol.for()` key on AbstractMesh — survives container swap, immutable across mode transitions.
+5. Nested-interactive a11y violation refactor pattern (VariantStrip [L] badge → sibling buttons in absolute-positioned container).
+
+### Prior-session deferred UX-judgment items (still open from 2026-05-26 sweep)
+Carried forward unchanged from the polish-sweep entry below:
+1. `bgToggle = true` default on thumbnails (api-contract — visual dominance on small cards).
+2. BG state lost on parent remount (adversarial conf 70).
+3. STEP 1/2 → STEP 2/2 wall-clock predicate misleads when real step 1 >30s (adversarial conf 80).
+4. `defaultBg` prop rename to `initialBg` (correctness + adversarial NIT — breaking change deferred).
+
+### Next concrete step (priorities for the next session)
+
+1. **Browser-verify via `agent-browser` (pre-wallet portions)** — CLAUDE.md "Frontend Verification Protocol" mandates this for every commit changing user-visible frontend behavior. 9 commits in this session (8 unit + 1 fix-pass) all deferred. Drive `/` → `/create` (up to Tripo SUI fee popup), `/launch` (up to PREVIEW VARIANTS), `/market`, `/track`, the walk-through hover/SOLO interaction, RandomGen swatch picker, VariantStrip lock toggle. Assert UI states; flag visual issues. Recommended to do in a fresh session — `agent-browser` works best with clean context.
+2. **Manual real-Chrome + Slush wallet testing** (user-driven only — `agent-browser` can't drive wallet popups) — Tripo SUI fee popup → /create mint sign → /launch 3-popup sequence (writeFilesFlow register + certify + buildLaunchCollectionWithTokensPtb). The wallet-popup pause-and-resume affordance applies only to the sign/cert handoffs; agent-browser sees up to the popup, you confirm in real Chrome.
+3. **Capture 5 learnings entries to `docs/solutions/`** — see "Deferred for capture" above. Each ~10-30 lines. Compound the institutional knowledge before context drifts.
+4. **Decide on 8 suppressed findings + 4 prior-session deferred items** — triage; most are user-judgment UX choices not code correctness.
+5. **U15 demo recording prep** — script, pitch deck, README hero. The plan-015 work substantially improves the demo arc (AE3 + AE4 + AE5 are the "the win" moments per origin doc).
+
+Recommended sequence: (1) before (3) so any browser-surfaced issues feed into the learnings; (5) after to leverage the polished demo arc.
+
+### Commits this session (on main, no remote — direct-to-trunk per user security constraint)
+- `296e103` docs(brainstorm): L1/L2 tagging UX refactor requirements
+- `4fbced6` docs(decisions): D-054 .. D-057 for L1/L2 tagging UX refactor
+- `96bd770` docs(plan): plan-015 — L1/L2 tagging UX refactor
+- `a6bfaa7` feat(ux): plan-015 U1 — framing B, remove preset labels, HelpIcon
+- `aba309d` feat(babylon): plan-015 U2 — canvas mode infra + auto-rotate
+- `d1a9de9` feat(ux): plan-015 U3 — MeshInfoPanel
+- `b9fd9ae` feat(ux): plan-015 U4 — PartListPanel
+- `edad92e` feat(ux): plan-015 U5 — /create tagging step integration
+- `6a4af12` feat(ux): plan-015 U6 — /launch scaffold (axes strip, side rail, mode pill)
+- `e351109` feat(ux): plan-015 U7 — VariantEditor coherence + live recolor
+- `8112440` feat(ux): plan-015 U8 — Random Gen + harmonic palette + VariantStrip + lock
+- `9bb95fb` fix(ux): plan-015 review pass — 18 fixes from 5-reviewer code review
+
+12 commits. Plan-015 status: status: `active` (plan body unchanged per ce-work protocol); execution is complete and review-hardened. Flip to `status: completed` only after browser-verify confirms the demo arc.
+
+### Notes for next session
+- **Plan-015 is implementation-complete, review-hardened, but NOT browser-verified.** This is the gap to close before any further plan-015 follow-up or demo recording. Reviewer mocks cannot exercise real Babylon (Color3 instanceof checks, HighlightLayer in actual scene, blob URL lifetime under real LoadAssetContainerAsync, WebGL context cap on /launch base picker).
+- **Walk-through pattern proved high-value** — 19 findings → 18 applied → 1 acknowledged with concrete fixer dispatch in one batch. The Symbol-keyed snapshot pattern survived a non-trivial semantic change (U7 swapped PBR-clears for durable-snapshot) and the tests held.
+- **Three-reviewer concurrence on baseGlbUrl race was the highest-signal finding** — julik P1 + adversarial P2 + correctness P3, three independent paths into the same useMemo + revoke split anti-pattern at 3 call sites. Cross-reviewer agreement validated; same pattern in future would be auto-promoted to P1.
+- **Fixer subagent in worktree-isolated mode would have been cleaner** for the 18-fix pass, but we're on main with no worktree — single fixer against shared tree worked because all 18 had concrete suggested_fix and the test suite caught any incidental regressions. For larger fix sets, consider `ce-worktree` first.
+- **MAX_VARIANTS contradiction (suppressed)** — origin says 1-20, Move contract is 16, code matches contract. Either plan-015 doc is wrong or origin was aspirational. Reconcile during U15 demo doc pass.
+- **Context utilization was high (~75% peak)** but acceptable. The 6-reviewer parallel dispatch + walk-through + fixer-subagent + commits + report all fit in one session. The cache-miss zone (>300s) was crossed during walk-through; minor cost.
+
+---
+
 ## Last Updated: 2026-05-26 / Late Night (polish-backlog sweep #1/#4/#5/#6/#7 shipped + 5-reviewer parallel review run + 4 reviewer-driven follow-up fixes) — **Next = browser-verify the sweep in real Chrome + decide on 4 deferred UX-judgment items (see below), then either continue polish (§2/§3 spec refactor) OR pivot to U15 demo recording prep.**
 
 ### Hackathon Tracker
