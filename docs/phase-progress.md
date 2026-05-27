@@ -1,6 +1,37 @@
 # Phase Progress
 
-## Last Updated: 2026-05-27 / Early AM (plan-015 L1/L2 tagging UX refactor — 8 implementation units shipped + 6-agent code review run + 18 reviewer-driven fixes applied) — **Next = browser-verify the demo arc in real Chrome (Slush-gated portions are user-driven only) + capture 5 learnings entries + decide on 8 suppressed findings + 4 prior-session deferred UX-judgment items.**
+## Last Updated: 2026-05-27 / PM (plan-016 test-wallet-adapter — S1 of 2 sessions complete: brainstorm + plan + U0–U3 landed on `feat/test-wallet-adapter`) — **Next = S2 (U4–U7): LaunchCollectionPage refactor + wallet pill + AE4 grep + ADRs D-058/059/060/061.**
+
+### Hackathon Tracker
+- Days to submission (6/21): 25 of 38 · demo day (7/20–21): 54 · winners (8/27): 92
+
+### Plan-016 test-wallet-adapter — S1 complete (this session)
+
+Bypasses Slush for `/launch` after an 11-commit debug session (branch `debug/walrus-upload-crash`) failed to clear the user's environmental Chrome crash on writeFilesFlow encode. Adapter signs locally with an Ed25519 keypair loaded from `frontend/.env.local` (same key as Slush — address-matched so LicenseTerms checks on the user's own bases pass). Demo unblock; secondary win = agent-browser CI integration.
+
+**Origin + plan (commit `a499850`):**
+- Brainstorm `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` — 10 R-IDs + 2 actors + 2 flows + 5 AEs + 4 candidate ADRs + 6 OQs.
+- Plan `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` — 6 implementation units, status `active`.
+- 2 plan-time call-outs surfaced during code-grounding: (a) R9 signing site is `useSession.ts` not `SignInButton.tsx`; (b) /launch has 3 dapp-kit hook call sites not 2.
+
+**Implementation S1 — 3 units shipped, serial inline, commit-per-unit:**
+- `7baa96c` **U1** — `frontend/src/test-wallet/` subtree. `Ed25519Keypair.fromSecretKey(bech32)` is the whole adapter (the keypair instance already satisfies the Signer interface dapp-kit hooks produce). Module-level `import.meta.env.PROD` throw + two named errors (`MissingTestWalletKeyError`, `InvalidTestWalletKeyError`). 7 vitest cases. Resolves OQ-2 (bech32 accepted directly).
+- `6ee2937` **U2** — `frontend/src/wallet/{testWalletEnabled, useAppAccount, useAppSigner}`. Wrapper hooks branch on `TEST_WALLET_ENABLED` (Vite compile-time literal from `import.meta.env.VITE_TEST_WALLET === '1'`). Unified Signer shape: `toSuiAddress / signAndExecuteTransaction / signPersonalMessage / signTransaction`. 10 vitest cases (prod pass-through, null-account propagation, hook delegation, test-mode keypair return, `{signer:null, loadError}` for missing key).
+- `e82a5eb` **U3** — `useSession.signIn` signs JWT challenge via `useAppSigner().signPersonalMessage(bytes)` instead of dapp-kit's `useSignPersonalMessage`. Backend untouched (`verifyPersonalMessageSignature` is signature-scheme-agnostic). SignInButton.tsx unchanged. `SignInButton.test.tsx` mock gains `useSignTransaction` no-op for the wrapper-hook transitive import.
+
+**Tests:** 564 → 581 (17 new). All green. tsc clean.
+
+**S2 remaining (next session):**
+- U4 — refactor LaunchCollectionPage.tsx: remove in-file `useDappKitSigner` helper (lines 87-110); replace 3 hook call sites (useCurrentAccount→useAppAccount, useSignTransaction+useSignAndExecuteTransaction→useAppSigner); refactor line 558 PTB sign to `signer.signAndExecuteTransaction({transaction: tx, client: suiClient})`.
+- U5 — TopNav wallet-pill prepends `TEST ` in test mode; LaunchCollectionPage shows missing-key error banner per AE2 verbatim copy.
+- U6 — `frontend/.env.example` documents `VITE_TEST_WALLET` + `VITE_TEST_WALLET_KEY`; ESLint `no-restricted-imports` blocks `test-wallet/*` from non-wallet files; AE4 grep on `vite build` output for `TestWalletAdapter|suiprivkey|VITE_TEST_WALLET_KEY|loadKeypair` (expect zero).
+- U7 — write ADRs D-058/059/060/061 in `docs/decisions.md`; update phase-progress.md with submission-readiness state.
+
+**Open implementation-time questions (carried into S2):**
+- OQ-5: Slush co-existence when test mode active — verify whether dapp-kit's WalletProvider still auto-connects in the background. Plan: if noisy but harmless, document; if breaking, unmount WalletProvider in test mode.
+- OQ-6: Stale Slush-signed JWT survival when toggling test mode mid-session — expected to "just work" because both signers use the same private key (same Ed25519 sig, same address). Verify by toggling flag + refreshing.
+
+### --- Prior session (plan-015) below this line, kept verbatim ---
 
 ### Hackathon Tracker
 - Days to submission (6/21): 25 of 38 · demo day (7/20–21): 54 · winners (8/27): 92
