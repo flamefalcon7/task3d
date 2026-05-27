@@ -247,6 +247,72 @@ describe('LaunchCollectionPage', () => {
     await waitFor(() => expect(screen.getByTestId('launch-success')).toBeTruthy());
   });
 
+  // plan-016 hotfix — client.core.executeTransaction returns the Sui SDK
+  // TransactionResult discriminated union { $kind: 'Transaction', Transaction:
+  // { digest, ... } } rather than the dapp-kit mutation shape { digest }. The
+  // unified Signer call path (signer.signAndExecuteTransaction) goes through
+  // client.core.executeTransaction, so onLaunch must unwrap res.Transaction.
+  // digest, not res.digest. Verified end-to-end via agent-browser smoke
+  // 2026-05-27 (test wallet, digest CndwZBuDApr…ac7); this test locks the fix.
+  it('launch unwraps res.Transaction.digest when the signer returns the Sui SDK shape', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-b'], blobObjects: [{ blobId: 'quilt-b', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
+    // Real Sui SDK shape — discriminated union with the digest nested
+    signAndExecuteMock.mockResolvedValue({
+      $kind: 'Transaction',
+      Transaction: { digest: 'SUI_SDK_SHAPE_DIGEST' },
+    });
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('launch-success')).toBeTruthy());
+    const link = screen.getByTestId('launch-success').querySelector('a');
+    expect(link?.getAttribute('href')).toContain('SUI_SDK_SHAPE_DIGEST');
+  });
+
+  it('launch surfaces an error when the signer returns FailedTransaction', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-b'], blobObjects: [{ blobId: 'quilt-b', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
+    signAndExecuteMock.mockResolvedValue({
+      $kind: 'FailedTransaction',
+      FailedTransaction: { digest: '0xfail', status: { error: 'insufficient_gas' } },
+    });
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('launch-error')).toBeTruthy());
+    expect(screen.getByTestId('launch-error').textContent).toMatch(/insufficient_gas|Launch tx failed/);
+  });
+
   // ----- plan-013 U7 — palette → partColors resolution (AE2, AE4) ----------
 
   // fix-pass F8: the previously-here "default palette resolution" test was

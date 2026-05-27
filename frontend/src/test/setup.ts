@@ -1,5 +1,16 @@
 import { vi } from 'vitest';
 
+// plan-016 — vitest reads frontend/.env.local just like dev `vite`, so when a
+// dev has `VITE_TEST_WALLET=1` set for browser smoke, the wrapper hooks (see
+// frontend/src/wallet/testWalletEnabled.ts) would also flip to true during
+// `pnpm test`. That breaks tests that pre-date the wrapper hooks and assume
+// useCurrentAccount-returns-null semantics from `@mysten/dapp-kit` mocks
+// (SignInButton, useSession, etc). Force the constant to '' here so tests
+// always run in production-path mode unless a specific test stubs the env
+// itself via vi.stubEnv.
+vi.stubEnv('VITE_TEST_WALLET', '');
+vi.stubEnv('VITE_TEST_WALLET_KEY', '');
+
 // @mysten/walrus-wasm ships a .wasm binary loaded via Vite's `?url` import.
 // jsdom can't compile WebAssembly and Vitest doesn't run the Vite asset
 // pipeline for these imports, so stub it to a fake URL string. Walrus SDK

@@ -567,35 +567,36 @@ export function LaunchCollectionPage() {
       // dapp-kit's useSignTransaction + client.core.executeTransaction
       // (same flow as the previous in-file useDappKitSigner). In test
       // mode the keypair signs locally with no wallet popup.
-      const res = await signer.signAndExecuteTransaction({
+      //
+      // The underlying client.core.executeTransaction returns a
+      // discriminated-union TransactionResult: either
+      //   {Transaction: {digest, ...}} on success
+      //   {FailedTransaction: {digest, status: {error}}} on failure
+      // (NOT the dapp-kit mutation shape {digest} the pre-U4 code consumed).
+      const res = (await signer.signAndExecuteTransaction({
         transaction: tx,
         client: suiClient as unknown,
-      });
-      setTxDigest(res.digest);
+      })) as {
+        Transaction?: { digest: string };
+        FailedTransaction?: { digest: string; status?: { error?: string } };
+        digest?: string;
+      };
+      if (res.FailedTransaction) {
+        throw new Error(
+          `Launch tx failed (${res.FailedTransaction.digest}): ${res.FailedTransaction.status?.error ?? 'unknown'}`,
+        );
+      }
+      // Prefer the discriminated-union path; fall back to flat `.digest` for
+      // any future signer impl that pre-unwraps.
+      const digest = res.Transaction?.digest ?? res.digest;
+      if (!digest) throw new Error('Launch tx returned no digest');
+      setTxDigest(digest);
       setPhase('success');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setPhase('error');
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
-
-  if (!session) {
-    return (
-      <div data-testid="launch-page" style={pagePaper}>
-        <main style={mainStyle}>
-          <TestWalletBanner error={signerLoadError} />
-          <div style={headerStack}>
-            <span style={eyebrow}>— L2 / MINT</span>
-            <h1 style={displayHeadline}>Launch a collection.</h1>
-            <p style={{ ...monoLabel, color: tokens.color.muted, letterSpacing: '0.5px', textTransform: 'none' }}>
-              Sign in to fork a base model into a collection.
-            </p>
-          </div>
-          <SignInButton />
-        </main>
-      </div>
-    );
-  }
 
   const busy =
     phase === 'downloading-base' ||
@@ -833,6 +834,32 @@ export function LaunchCollectionPage() {
       return next;
     });
   }, []);
+
+  // plan-016 hotfix — the previous early-return for `!session` sat AFTER 11
+  // hooks (useState/useMemo/useCallback/useEffect at lines 630-810 above)
+  // and BEFORE the main return below. That violated React's rules-of-hooks
+  // because the post-signin render path called 11 more hooks than the
+  // pre-signin path. Slush masked it via OAuth-redirect-then-reload (first
+  // render is always post-signin); plan-016's in-page test wallet signin
+  // exposes the transition. Fix: keep all hooks at the top of the function
+  // and pick the render branch here, after every hook has run.
+  if (!session) {
+    return (
+      <div data-testid="launch-page" style={pagePaper}>
+        <main style={mainStyle}>
+          <TestWalletBanner error={signerLoadError} />
+          <div style={headerStack}>
+            <span style={eyebrow}>— L2 / MINT</span>
+            <h1 style={displayHeadline}>Launch a collection.</h1>
+            <p style={{ ...monoLabel, color: tokens.color.muted, letterSpacing: '0.5px', textTransform: 'none' }}>
+              Sign in to fork a base model into a collection.
+            </p>
+          </div>
+          <SignInButton />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div data-testid="launch-page" style={pagePaper}>
