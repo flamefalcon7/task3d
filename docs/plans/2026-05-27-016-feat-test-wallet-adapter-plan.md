@@ -1,7 +1,7 @@
 ---
 name: feat-test-wallet-adapter
 description: Bypass Slush for /launch by implementing the Sui Signer interface directly with Ed25519Keypair, gated by VITE_TEST_WALLET build env, so the demo can record without the user's crashing Chrome state.
-status: active
+status: completed
 created: 2026-05-27
 origin: docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md
 phase: Phase 4 follow-up (Plan-016)

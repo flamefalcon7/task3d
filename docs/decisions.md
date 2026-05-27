@@ -2671,6 +2671,147 @@ Texture customization is **deferred to v1.1**. The L1/L2 refactor in plan-015 sh
 
 ---
 
+## D-058: TestWallet adapter uses `Ed25519Keypair` directly, not a mocked dapp-kit hook or shadow context
+
+**Status**: Accepted
+**Date**: 2026-05-27
+**Phase**: Phase 4 follow-up (plan-016)
+
+### Context
+The user's Chrome (Slush unlocked + active session + many sibling tabs) consistently crashes the renderer at `flow.encode() → systemState()` on `/launch` 8-variant upload. After 11 in-Chrome workaround commits failed to clear it (branch `debug/walrus-upload-crash`), the demo path needs to bypass Slush entirely. We need a Signer the rest of the dapp can consume the same way it consumes dapp-kit's hook outputs.
+
+### Decision
+Implement the test-wallet bypass as `Ed25519Keypair.fromSecretKey(bech32)` loaded from `VITE_TEST_WALLET_KEY` in `frontend/.env.local`. No wrapper class. The keypair instance IS the Signer — `@mysten/sui@2.16.2`'s `Ed25519Keypair` already extends the SDK's `Signer` abstract class with all four methods the dapp consumes (`toSuiAddress` / `signTransaction` / `signAndExecuteTransaction` / `signPersonalMessage`).
+
+### Rationale
+- Smallest surface — no fake `SuiWallet` registration, no `WalletProvider` shadow, no custom `Signer` class.
+- The keypair's `signAndExecuteTransaction({transaction, client})` matches the exact shape Walrus `writeFilesFlow` calls on the signer.
+- Backend `verifyPersonalMessageSignature` is signature-scheme-agnostic, so a test-wallet-signed challenge verifies identically to a Slush-signed one (both Ed25519, same address — see D-059 operating assumption).
+
+### Alternatives Considered
+- **Mock a dapp-kit hook** — would require monkey-patching `useSignTransaction` / `useSignPersonalMessage` per call site. Brittle and visible at multiple boundaries.
+- **Shadow `WalletProvider` context** — dapp-kit's context internals aren't publicly exported. Reverse-engineering them is brittle and risks breaking on SDK upgrades.
+- **Register a synthetic `Wallet` via `@wallet-standard`** — full Wallet Standard implementation is overkill for a test-only bypass.
+
+### Consequences
+- ✅ One concept (the keypair) carries the whole adapter; no separate Signer class to maintain.
+- ✅ Test-mode flow is identical to prod-mode flow at every call site — same Signer shape, same return shapes.
+- ⚠️ The `signAndExecuteTransaction` call site needs a `client` arg (which the keypair uses to execute the transaction). Plan-016 U4 added `useSuiClient()` to LaunchCollectionPage for this.
+- 🔮 If future expansion (e.g., `/create` automation) needs the adapter, the same keypair singleton is reused — no class hierarchy to extend.
+
+### Related
+- Brainstorm: `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` §Key decisions / D-058 candidate
+- Plan: `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` §U1 / §U2
+- Code: `frontend/src/test-wallet/loadKeypair.ts`
+
+---
+
+## D-059: Activation = build-time `VITE_TEST_WALLET=1` + thin wrapper hooks at call sites
+
+**Status**: Accepted
+**Date**: 2026-05-27
+**Phase**: Phase 4 follow-up (plan-016)
+
+### Context
+The test wallet must be invisible in production builds (no behavioral change, no code in the bundle, no ambient possibility of activation). It must integrate at the dapp-kit hook boundary without forking every call site or shadowing dapp-kit's React context. Critical operating assumption: the test-wallet key is the user's *existing* funded testnet key (the one Slush also holds). Test-wallet address == Slush address == creator-of-existing-Model3Ds. If the test wallet were a different key, the user would have to /create a Model3D on that address before /launch — out of scope.
+
+### Decision
+Activation is a build-time env var: `VITE_TEST_WALLET=1` in `frontend/.env.local`. Vite replaces `import.meta.env.VITE_TEST_WALLET` with a string literal at build time, so the wrapper hooks' `TEST_WALLET_ENABLED` constant becomes a compile-time `true` or `false`. Integration uses two thin wrapper hooks (`useAppAccount`, `useAppSigner`) at the relevant call sites instead of shadowing `WalletProvider` context.
+
+### Rationale
+- **Build-time over runtime**: localStorage / URL-param activation could be triggered accidentally in production. Build-time activation requires deliberate `.env.local` setup; no production user can flip the flag.
+- **Wrapper hooks over shadow context**: dapp-kit's React context internals aren't publicly exported; mirroring them is brittle. Wrapper hooks at 3 call sites (useSession, LaunchCollectionPage, future adopters) is ~6 lines per site and gives precise control.
+- **Tree-shake**: when `TEST_WALLET_ENABLED` is the compile-time `false`, Rollup eliminates the test-mode branch + the static `test-wallet/*` imports → zero bytes of adapter logic in the production bundle (AE4 grep verifies).
+
+### Alternatives Considered
+- **Runtime flag via localStorage** — rejected. Too easy to accidentally activate; defeats tree-shake.
+- **URL param (e.g., `?testWallet=1`)** — rejected. Same activation-risk concerns.
+- **Shadow dapp-kit context** — rejected per D-058 rationale.
+
+### Consequences
+- ✅ Production builds: zero behavior change, verified by AE4 grep (only inert UI string literals remain).
+- ✅ Test builds: 3 call sites refactored, every other surface untouched.
+- ⚠️ Anyone activating must use the SAME key as Slush — different keys would break the user's existing model state. `.env.example` warns about this.
+- 🔮 Future call sites (CreateModelPage, MarketPage, TrackPage) can adopt the same wrapper hooks with no adapter changes.
+
+### Related
+- Brainstorm: `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` §Context "Critical operating assumption — same address"
+- Plan: `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` §U2
+- Code: `frontend/src/wallet/testWalletEnabled.ts`, `useAppAccount.ts`, `useAppSigner.ts`
+
+---
+
+## D-060: TestWallet adapter scope = `/launch` only for v1
+
+**Status**: Accepted
+**Date**: 2026-05-27
+**Phase**: Phase 4 follow-up (plan-016)
+
+### Context
+The demo-blocking crash is on `/launch` (writeFilesFlow encode during the 8-variant upload). `/create`, `/market`, and `/track` use their own dapp-kit hook call sites and have their own crash characteristics (or none). Adopting wrapper hooks across all four routes triples the file refactor scope. Hackathon submission is 25 days away.
+
+### Decision
+Wrapper-hook adoption is scoped to `useSession.ts` (sign-in JWT challenge) + `LaunchCollectionPage.tsx` (3 mint popups) for plan-016 v1. `/create`, `/market`, and `/track` keep direct dapp-kit hooks. `CreateModelPage.tsx`'s own in-file `useDappKitSigner` helper stays on Slush.
+
+### Rationale
+- **Demo unblock is the bottleneck.** The submission demo is /create → /launch → /market. `/launch` is the broken link. `/create` already works on Slush (single popup, no 8-variant encode). `/market` works on Slush. `/track` is a read-only view.
+- **Refactor cost.** Each adopter is ~6 lines but multiplies the test-mock surface and the verification effort. Deferring keeps v1 focused.
+- **No architectural lock-in.** Future expansion (full automation for /create or /market) re-uses the same adapter — only adds wrapper-hook adoption to those call sites.
+
+### Alternatives Considered
+- **Full adoption across all 4 routes in v1** — rejected. Triples scope; doesn't help demo.
+- **Adopt only on the JWT-sign site** — rejected. The /launch crash is on the upload path, not the sign-in; partial adoption wouldn't unblock the demo.
+
+### Consequences
+- ✅ Demo unblocked with minimal code change.
+- ⚠️ /create still requires Slush. If the user's /create flow also starts crashing, this decision needs revisiting.
+- 🔮 Plan-014 follow-up (agent-browser automation for /launch CI) is enabled. Extending to /create automation requires adding wrapper-hook adoption to CreateModelPage — out of plan-016 scope.
+
+### Related
+- Brainstorm: `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` §Key decisions / D-060 candidate
+- Plan: `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` §Scope Boundaries
+
+---
+
+## D-061: All test-wallet code lives in `frontend/src/test-wallet/` + ESLint allow-list
+
+**Status**: Accepted
+**Date**: 2026-05-27
+**Phase**: Phase 4 follow-up (plan-016)
+
+### Context
+The test-wallet adapter must not ship to production. Three independent belts protect against accidental leak; this decision is about the file-system + import-graph belt.
+
+### Decision
+All test-only code lives under `frontend/src/test-wallet/`. Two production-safety belts at the import-graph level:
+1. **Module-eval guard**: `test-wallet/index.ts` throws at module load if `import.meta.env.PROD === true`. Belt against accidental ship even if tree-shake fails.
+2. **ESLint allow-list (documented intent)**: `no-restricted-imports` blocks `*/test-wallet/*` imports from all files except those under `src/wallet/*` and `src/test-wallet/*`. NOTE: ESLint is not currently installed in this project (no `lint` script, no `eslint` dep); the config file documents the intended ruleset for when ESLint gets wired up. Actual enforcement comes from belts 1 + 3 (AE4 grep, see below).
+
+### Rationale
+- **Single quarantine directory** makes the test-only surface easy to audit and rip out if needed.
+- **Module-eval throw** catches the case where a future refactor accidentally imports from test-wallet at a production code path even when the env flag is unset.
+- **ESLint rule** (when active) catches the issue at write time rather than at production runtime.
+- **AE4 grep** is the final belt — actual verification on the built bundle, independent of code-level guarantees.
+
+### Alternatives Considered
+- **`__dev/test-wallet/` directory naming** — considered. `test-wallet/` is conventional in Vite/React projects and clearer in PR diffs.
+- **Conditional dynamic `import('./test-wallet')`** — rejected for hook ergonomics (dynamic imports return Promises; hooks can't easily await). Static import + tree-shake produces the same end-state with simpler call sites.
+- **Install ESLint and wire `lint` script in plan-016** — rejected as scope creep. Brainstorm explicitly accepted "manual grep verification acceptable for v1" as a non-goal.
+
+### Consequences
+- ✅ Three independent belts against production leak: module guard + tree-shake + grep verification.
+- ✅ Quarantine directory makes future audit / removal trivial.
+- ⚠️ ESLint rule is documented intent only until ESLint gets installed; relies on grep verification meanwhile.
+- 🔮 If ESLint is added later, the existing config in `eslint.config.js` is ready to enforce without further changes.
+
+### Related
+- Brainstorm: `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` §Key decisions / D-061 candidate
+- Plan: `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` §U6 verification
+- Code: `frontend/src/test-wallet/index.ts` (module guard), `frontend/eslint.config.js` (allow-list)
+- AE4 grep result: 7 plan-016-specific identifiers → 0 matches; 2 inert UI string matches (banner testid, constant-folded `data-test-wallet="false"`)
+
+---
+
 # Reserved Decision Numbers
 
-D-058 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-062 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
