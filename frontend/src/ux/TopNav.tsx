@@ -83,7 +83,7 @@ export function TopNav() {
   return (
     <nav style={navBar} data-testid="top-nav">
       <Link to="/" style={brandStyle} data-testid="brand-mark">
-        Model3D
+        Tusk3D
       </Link>
 
       <div style={navLinksContainer}>

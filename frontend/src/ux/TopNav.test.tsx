@@ -47,7 +47,7 @@ function renderAt(pathname: string) {
 describe('TopNav', () => {
   it('renders the brand mark, all four nav links, and the TESTNET badge', () => {
     renderAt('/');
-    expect(screen.getByTestId('brand-mark').textContent).toBe('Model3D');
+    expect(screen.getByTestId('brand-mark').textContent).toBe('Tusk3D');
     expect(screen.getByTestId('nav-create')).toBeTruthy();
     expect(screen.getByTestId('nav-launch')).toBeTruthy();
     expect(screen.getByTestId('nav-market')).toBeTruthy();
