@@ -1,13 +1,51 @@
 # Phase Progress
 
-## Last Updated: 2026-05-28 / Evening (plan-017 walrus-OOM-fix — **PLAN READY, ce-work not yet started**: ce-debug confirmed root cause via Brave minidump V8 GC trace, brainstorm written + committed, plan-017 written + committed + 3-reviewer review pass + 10 fixes applied. 3 commits on main. **Next session = `/ce-work` against plan-017** (6 units, ~4-5 hr; S1=U1/U2/U6 foundation, S2=U3/U4/U5 UI+verification on user's Brave).)
+## Last Updated: 2026-05-28 / Late evening (plan-017 walrus-OOM-fix — **CE-WORK COMPLETE, AE2 user-side smoke pending**: all 6 units (U1–U6) shipped on `fix/walrus-oom` branch in one session; 652/652 frontend tests + zero typecheck errors; agent-browser smoke caught + fixed an `engine.wipeCaches` race on full unmount; ADRs D-062–D-065 captured. **Next session = user runs AE2 killer check on their actual Brave** — 8-variant /launch with 10+ sibling tabs should complete without renderer crash via Slush 4 popups. If AE2 passes → merge branch and update phase-progress; if AE2 fails → drop QUILT_SIZE to 2 (one-line constant change).)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
 
 ---
 
-### Plan-017 walrus-OOM-fix — PLAN READY (this session, 2026-05-28 evening)
+### Plan-017 walrus-OOM-fix — CE-WORK COMPLETE (this session, 2026-05-28 evening continued)
+
+After preparing plan-017 earlier in the day, ran `/ce-work` against it in a single session. Branch `fix/walrus-oom` carries 8 commits implementing all 6 units + ADRs + post-smoke hotfix.
+
+**Branch commits (`main..fix/walrus-oom`):**
+- 95268f1 — U6 uploadTrail sessionStorage breadcrumb (13 tests)
+- be84622 — U2 PreviewCanvas dispose/remount handle (5 new tests + mock extension)
+- ddcf4a5 — U1 multi-quilt batching in useWalrusUpload (12 new tests, identifier-padding test updated for per-chunk semantics)
+- fb6c88f — U3 LaunchCollectionPage Babylon lifecycle wire-up via VariantPreview ref forwarding (4 new tests; vi.hoisted mock state)
+- 795377b — U4 BatchProgressPanel multi-quilt UX (19 tests; pre-flight breakdown + stepped progress + orphan-blob warning + Suiscan links)
+- 1785f09 — U5 MemoryPressureBanner pre-flight warning with hysteresis (9 tests; recheckSignal re-fires on LAUNCH click)
+- ac5d178 — ADRs D-062..D-065 in docs/decisions.md
+- f64b7e6 — hotfix from agent-browser smoke: `engine.wipeCaches` guard against `engine.isDisposed`. React 19's component-delete cleanup path doesn't strictly run useEffect cleanups in reverse declaration order; the engine effect's cleanup can run before the scene effect's cleanup, throwing inside `Engine.unbindAllAttributes`. Added `isDisposed` check + test mock update.
+
+**Verification done in-session:**
+- ✅ 652/652 frontend tests (61 new across U1–U6)
+- ✅ `tsc --noEmit` zero new errors
+- ✅ agent-browser smoke on `/launch`: test wallet auto-signs in, base picker renders 3 forkable models with PreviewCanvas thumbnails. No render crash, no error boundary. (Hotfix f64b7e6 was needed before this passed.)
+
+**Verification pending user-side:**
+- ⏳ **AE2 killer check**: user manually loads `/launch` on their actual Brave (10+ sibling tabs, Slush extension, ~3 GB baseline heap), configures 8 variants, clicks LAUNCH. Expected: no renderer crash. 4 Slush popups (2 quilts × register+certify) + 1 launch popup = 5 total signatures. BatchProgressPanel should surface the structure. MemoryPressureBanner may fire pre-LAUNCH given the user's typical baseline.
+- ⏳ Stale-trail console surface check: trigger an intentional pre-fix-state crash (or simulate by writing `sessionStorage['walrus_upload_diagnostic']` + reloading), confirm `[WALRUS CRASH DIAGNOSTIC]` appears in DevTools on next /launch mount.
+- ⏳ If AE2 fails (renderer still crashes at 8 variants), fallback: `QUILT_SIZE = 2` in `frontend/src/walrus/useWalrusUpload.ts` (one-line change). 8 variants becomes 4 quilts → 8 popups + 1 launch = 9 sigs. Update U4 test math + re-run.
+
+**Plan unit metadata preserved:**
+- U1 / R1, R3 / D-062: multi-quilt batching with `QUILT_SIZE=4`, exposed in UX
+- U2 / R2 / D-063: PreviewCanvas dispose via useImperativeHandle, engine stays alive
+- U3 / R2: LaunchCollectionPage previewRef wire-up (VariantPreview accepts ref prop, threads to inner PreviewCanvas)
+- U4 / R6: BatchProgressPanel — pre-flight breakdown + per-quilt stepped progress + Suiscan links + partial-failure orphan-blob warning
+- U5 / R4 / D-064: MemoryPressureBanner — 2.5 GB ON / 2.2 GB OFF hysteresis, recheckSignal on LAUNCH click
+- U6 / R5 / D-065: uploadTrail — sessionStorage (not localStorage), queueMicrotask defer, in-memory cache to prevent race, surface-once-per-page-load guard
+
+**Engineering posture observations (for next session if any drift):**
+- Both `editorState.variants.length > QUILT_SIZE` checks in LaunchCollectionPage drive conditional UX (pre-flight panel + in-progress panel). If we change the variant cap from 8, need to revisit the multi-quilt UX threshold story.
+- The U6 module-scope `surfacedThisLoad` guard means only ONE useWalrusUpload mount per page load surfaces a stale trail. CreateModelPage and LaunchCollectionPage both mount useWalrusUpload; whichever mounts first wins. Acceptable for v1.
+
+---
+
+### Plan-017 walrus-OOM-fix — PLAN READY (earlier this session, 2026-05-28 evening)
 
 After plan-016 wrap-up, user surfaced "what about the original Walrus crash issue?" Triggered `/ce-debug` for root-cause analysis. Brave minidump `b69ca99a-…ead.dmp` at 2026-05-28 09:53:41 caught the V8 GC signature `Mark-Compact 3997.3 / 4000.5 MB, mu=0.003, last resort` — confirms **V8 heap exhaustion**, not Slush, not Brave Wallet, not dapp-kit IPC, not extension interception. User's dose-response observation (5 variants OK, 8 crash) matches OOM exactly. All 11 prior debug-branch hypotheses (RPC swap, GPU collapse, prewarm) falsified.
 
