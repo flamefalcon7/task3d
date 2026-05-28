@@ -1,7 +1,7 @@
 ---
 title: Tusk3D Landing Lede (S1)
 type: feat
-status: active
+status: completed
 date: 2026-05-28
 origin: docs/brainstorms/2026-05-28-tusk3d-landing-lede-requirements.md
 ---

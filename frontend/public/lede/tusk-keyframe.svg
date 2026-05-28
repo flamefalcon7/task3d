@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 750" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Tusk3D Collection #001 — low-poly walrus tusk, line drawing gradient at 45% sweep">
+  <!--
+    plan-019 U5 placeholder. Replace with the manually-exported key frame
+    captured from U2's edgesGradientSweep at setProgress(0.45) on Rick's
+    real Tripo tusk GLB. Target ≥ 1200×750 (16:10 aspect, matches
+    LedeHero wellStyle), brutalist editorial palette (#F5F5F0 paper,
+    #000000 ink, #FF4500 accent ≤ 1 instance).
+  -->
+  <rect width="1200" height="750" fill="#000000"/>
+  <g fill="none" stroke="#F5F5F0" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter">
+    <!-- Stylised tusk silhouette — crescent curve, 3/4 view -->
+    <path d="M 360 540 Q 480 200 760 220 Q 820 230 840 280 Q 800 280 720 320 Q 540 400 460 540 Z"/>
+    <!-- Crease line suggesting form -->
+    <path d="M 460 540 Q 580 380 760 270" opacity="0.6"/>
+    <!-- Right half hint of mesh facets -->
+    <path d="M 760 270 L 780 320 L 820 310 L 840 280" opacity="0.5"/>
+    <path d="M 720 320 L 740 360 L 780 350" opacity="0.5"/>
+  </g>
+  <!-- Sweep marker (45% across canvas) — accent rule -->
+  <line x1="600" y1="60" x2="600" y2="690" stroke="#FF4500" stroke-width="1.5"/>
+  <g font-family="'JetBrains Mono', monospace" font-size="14" fill="#F5F5F0" letter-spacing="2">
+    <text x="60" y="700">// L1 COLLECTION #001 · TUSK3D · PLACEHOLDER KEYFRAME</text>
+  </g>
+</svg>
