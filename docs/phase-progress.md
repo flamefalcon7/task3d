@@ -1,9 +1,43 @@
 # Phase Progress
 
-## Last Updated: 2026-05-28 / Late PM (plan-016 test-wallet-adapter — **DONE**: brainstorm + plan + implementation + browser smoke + 12-reviewer code review + fixer pass + 4 OQs captured + 3 solution docs written + merged to main; 13 commits on main, 591/591 tests green, AE1+AE5 verified on-chain via agent-browser smoke) — **Next = pick up the demo polish queue: U15 demo recording prep, 5 plan-015 learnings still pending capture, 8 plan-015 suppressed findings + 4 prior-session deferred UX items.**
+## Last Updated: 2026-05-28 / Evening (plan-017 walrus-OOM-fix — **PLAN READY, ce-work not yet started**: ce-debug confirmed root cause via Brave minidump V8 GC trace, brainstorm written + committed, plan-017 written + committed + 3-reviewer review pass + 10 fixes applied. 3 commits on main. **Next session = `/ce-work` against plan-017** (6 units, ~4-5 hr; S1=U1/U2/U6 foundation, S2=U3/U4/U5 UI+verification on user's Brave).)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
+
+---
+
+### Plan-017 walrus-OOM-fix — PLAN READY (this session, 2026-05-28 evening)
+
+After plan-016 wrap-up, user surfaced "what about the original Walrus crash issue?" Triggered `/ce-debug` for root-cause analysis. Brave minidump `b69ca99a-…ead.dmp` at 2026-05-28 09:53:41 caught the V8 GC signature `Mark-Compact 3997.3 / 4000.5 MB, mu=0.003, last resort` — confirms **V8 heap exhaustion**, not Slush, not Brave Wallet, not dapp-kit IPC, not extension interception. User's dose-response observation (5 variants OK, 8 crash) matches OOM exactly. All 11 prior debug-branch hypotheses (RPC swap, GPU collapse, prewarm) falsified.
+
+**Plan-017 architecture (post-review-pass):**
+- R1 = D2 multi-quilt batching with `QUILT_SIZE=4` (rejected: per-variant 16-popup anti-pattern + SDK-patch ~20MB savings not worth half-day)
+- R2 PreviewCanvas dispose via `forwardRef + useImperativeHandle` (frees 200-400 MB) — keeps Engine alive, only disposes scene/highlightLayer; adds `engine.wipeCaches(true)` belt-and-suspenders + `isDisposedRef` async-load race guard
+- R3 variant cap unchanged at 8 (R1+R2 budget math fits)
+- R4 `performance.memory` pre-flight warning banner with hysteresis + Brave quantization probe (OQ-C elevated to U5 first step)
+- R5 `sessionStorage` breadcrumb trail (corrected from brainstorm's localStorage) with `queueMicrotask` defer
+- R6 (NEW vs brainstorm) BatchProgressPanel surfacing Walrus quilt structure to users — pre-flight transaction breakdown + stepped ✓/⟳/○ progress + partial-failure orphan-cost surfacing
+
+**3 commits on main:**
+- 542169e — brainstorm doc
+- cba4567 — plan doc (6 units, 4 ADRs D-062–D-065)
+- df8fdfb — review pass (10 fixes from ce-coherence + ce-feasibility + ce-scope-guardian)
+
+**Reviewer findings dispatched:**
+- Coherence: 0 P0 · 2 P1 (math typo, key structure) — both fixed
+- Feasibility: 3 P1 + 3 P2 + 2 P3 — all fixed (pre-impl probe, flow=null + retention check, async-load race, engine.wipeCaches, quantization hysteresis, orphan-blob UX, queueMicrotask)
+- Scope-guardian: 2 P1 + 2 P2 + 1 P3 — 3 fixed (typo, 9-variant test, key drift); 2 declined (BatchProgressPanel "overscope" → R6 was explicit user choice; ADR weight → already right-sized)
+
+**Verification killer check** (deferred to ce-work S2): user's Brave with 10+ sibling tabs + 8 variants → Slush 4 popups → completes without crash. This is AE2.
+
+**Decisions captured on the way to the plan (this session, in chat):**
+- D-062 candidate: multi-quilt + UX education chosen over per-variant (16 popups) or SDK patch (half-day for ~20MB)
+- D-063 candidate: forwardRef imperative dispose + isDisposedRef async guard
+- D-064 candidate: 2.5GB threshold with hysteresis + Brave quantization probe
+- D-065 candidate: sessionStorage single-array key (corrected from brainstorm's localStorage)
+
+ADRs will land in `docs/decisions.md` during U-impl commits (per CLAUDE.md decision protocol — capture before each unit's implementation).
 
 ### Plan-016 test-wallet-adapter — DONE (this session + previous)
 
