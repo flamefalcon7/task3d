@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 // ---------------------------------------------------------------------------
 // Mock surfaces (load-bearing — per plan U4 verification rule, mock at the
@@ -163,9 +164,11 @@ describe('LedeHero — render-mode branching', () => {
   it('AE1/AE2 — static-fallback mode renders <img>, no Babylon engine, no canvas', async () => {
     mockMode.mockReturnValue('static-fallback');
     render(
-      <StrictMode>
-        <LedeHero />
-      </StrictMode>,
+      <MemoryRouter>
+        <StrictMode>
+          <LedeHero />
+        </StrictMode>
+      </MemoryRouter>,
     );
     await waitFor(() => {
       expect(screen.getByTestId('lede-static-image')).toBeTruthy();
@@ -180,7 +183,11 @@ describe('LedeHero — render-mode branching', () => {
   it('live mode mounts canvas and constructs Engine + Scene + camera framing in order', async () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(state.engineCtor).toHaveBeenCalled());
     await waitFor(() => expect(state.sceneCtor).toHaveBeenCalled());
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
@@ -196,7 +203,11 @@ describe('LedeHero — Walrus fetch behaviour', () => {
   it('AE3 — fetch timeout swaps source to embedded GLB; engine stays alive', async () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockRejectedValue(new WalrusFetchTimeoutError('walrus://x', 3000));
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
     expect(state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb'))).toBe(
       true,
@@ -209,7 +220,11 @@ describe('LedeHero — Walrus fetch behaviour', () => {
   it('happy fetch never loads the embedded GLB', async () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
     expect(
       state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb')),
@@ -221,7 +236,11 @@ describe('LedeHero — Walrus fetch behaviour', () => {
     mockFetch.mockRejectedValue(new WalrusFetchTimeoutError('walrus://x', 3000));
     state.loadAssetImpl = () => Promise.reject(new Error('boom'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
     // Settle pending microtasks so the rejected load resolves into the catch.
     await act(async () => {
@@ -238,7 +257,11 @@ describe('LedeHero — 15s dwell CTA', () => {
     vi.useFakeTimers();
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     expect(screen.queryByTestId('lede-cta')).toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15000);
@@ -253,7 +276,11 @@ describe('LedeHero — 15s dwell CTA', () => {
   it('static-fallback + 15s dwell does NOT render CTA (R15 — fallback has no dwell)', async () => {
     vi.useFakeTimers();
     mockMode.mockReturnValue('static-fallback');
-    render(<LedeHero />);
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     await act(async () => {
       vi.advanceTimersByTime(20000);
     });
@@ -266,9 +293,11 @@ describe('LedeHero — StrictMode + lifecycle safety', () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
     render(
-      <StrictMode>
-        <LedeHero />
-      </StrictMode>,
+      <MemoryRouter>
+        <StrictMode>
+          <LedeHero />
+        </StrictMode>
+      </MemoryRouter>,
     );
     await waitFor(() => expect(state.engineCtor).toHaveBeenCalled());
     // StrictMode dev-mount: engine ctor count >= 1, dispose count >= 0; no
@@ -287,7 +316,11 @@ describe('LedeHero — StrictMode + lifecycle safety', () => {
         }),
     );
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    const { unmount } = render(<LedeHero />);
+    const { unmount } = render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
     unmount();
     // After unmount, the in-flight fetch promise resolving should NOT call
     // any post-resolve setState that produces a React warning. Resolving

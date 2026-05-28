@@ -129,7 +129,15 @@ export function setupEdgesGradientSweep(
 
     // Independent clone so we can configure the edges side without touching
     // the original (alpha + clipPlane on the clone-side won't leak back).
-    const clone = original.clone(`${original.name ?? 'mesh'}__edgesSweepClone_${i}`, null);
+    // Pass the original's parent so the clone inherits __root__ / asset
+    // transforms — without this, GLBs that live under a non-identity root
+    // would render the edges clone in a different world position than the
+    // PBR original, and the mirror cut would misalign.
+    const cloneParent = (original as unknown as { parent: unknown }).parent ?? null;
+    const clone = original.clone(
+      `${original.name ?? 'mesh'}__edgesSweepClone_${i}`,
+      cloneParent,
+    );
     if (!clone) {
       // Babylon returns null for non-cloneable nodes — skip silently to match
       // PreviewCanvas precedent of "best-effort iteration over a mesh array."
@@ -142,17 +150,24 @@ export function setupEdgesGradientSweep(
     let edgesMat: { clipPlane?: Plane | null; alpha?: number; disableLighting?: boolean; dispose?: () => void } | null = null;
     if (original.material && typeof original.material.clone === 'function') {
       edgesMat = original.material.clone(`${original.name ?? 'mesh'}__edgesMat_${i}`) as typeof edgesMat;
-      // Hide the clone's PBR pass — only its EdgesRenderer line layer should
-      // contribute pixels. Alpha 0 is enough; disableLighting saves an unused
-      // shader path on materials that respect it.
-      if (edgesMat) {
-        edgesMat.alpha = 0;
-        if ('disableLighting' in edgesMat) {
-          edgesMat.disableLighting = true;
-        }
-        (clone as MeshLike).material = edgesMat as MeshLike['material'];
-      }
     }
+    if (!edgesMat) {
+      // Without an independent material, the clone would still reference the
+      // original's material — writing the edges-side clipPlane onto it would
+      // collide with the PBR-side write and the edges layer would never
+      // render. Drop the clone for this mesh; we'd rather show a missing
+      // edges layer than corrupt the original.
+      clone.dispose();
+      continue;
+    }
+    // Hide the clone's PBR pass — only its EdgesRenderer line layer should
+    // contribute pixels. Alpha 0 is enough; disableLighting saves an unused
+    // shader path on materials that respect it.
+    edgesMat.alpha = 0;
+    if ('disableLighting' in edgesMat) {
+      edgesMat.disableLighting = true;
+    }
+    (clone as MeshLike).material = edgesMat as MeshLike['material'];
 
     // Enable the edge line layer on the clone. Epsilon 0.95 is Babylon's
     // documented default; the call returns the mesh itself (per .d.ts), but
@@ -221,20 +236,20 @@ export function setupEdgesGradientSweep(
         if (rec.originalMaterial) {
           rec.originalMaterial.clipPlane = null;
         }
-        // Dispose the cloned material before the clone mesh disposes; the
-        // mesh disposer may not chain into the material we substituted in.
-        if (rec.edgesMaterial && typeof rec.edgesMaterial.dispose === 'function') {
-          rec.edgesMaterial.dispose();
-        }
+        // Dispose the mesh FIRST so its renderer detaches from the material
+        // cleanly; then dispose the cloned material. Reverse order risks the
+        // mesh's internal renderer dereferencing a disposed material.
         if (typeof rec.edgesClone.dispose === 'function') {
           rec.edgesClone.dispose();
         }
+        if (rec.edgesMaterial && typeof rec.edgesMaterial.dispose === 'function') {
+          rec.edgesMaterial.dispose();
+        }
       }
-      // No scene-level clipPlane was written by this primitive (strategy b);
-      // null them anyway in case a host effect set them earlier and is now
-      // relying on us to clear (defensive — matches the plan's dispose contract).
-      scene.clipPlane = null;
-      scene.clipPlane2 = null;
+      // This primitive uses strategy (b) — per-material clipPlane override.
+      // It never writes scene.clipPlane / clipPlane2, so we don't null them
+      // on dispose either; doing so would stomp host effects that legitimately
+      // use scene-level clipping for their own features.
     },
   };
 }

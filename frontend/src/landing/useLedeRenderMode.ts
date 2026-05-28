@@ -31,7 +31,7 @@ export function useLedeRenderMode(): 'live' | 'static-fallback' {
   // -------------------------------------------------------------------------
   // ALL HOOKS declared unconditionally at the top of the function body.
   // -------------------------------------------------------------------------
-  const aliveRef = useRef(false);
+  const viewportAliveRef = useRef(false);
 
   const [viewportMatches, setViewportMatches] = useState<boolean>(() => {
     if (!hasMatchMedia) return false;
@@ -42,53 +42,13 @@ export function useLedeRenderMode(): 'live' | 'static-fallback' {
     }
   });
 
-  // WebGL is assumed-available until we run the detection effect. On platforms
-  // without `window` we'll just never run the effect and `webglAvailable`
-  // remains true — the `hasMatchMedia` short-circuit at the bottom routes
-  // those environments to static-fallback anyway.
-  const [webglAvailable, setWebglAvailable] = useState<boolean>(true);
-
-  // Viewport reactive effect — register matchMedia change listener.
-  useEffect(() => {
-    aliveRef.current = true;
-    if (!hasMatchMedia) {
-      return () => {
-        aliveRef.current = false;
-      };
-    }
-
-    let mql: MediaQueryList;
-    try {
-      mql = window.matchMedia('(min-width: 768px)');
-    } catch {
-      return () => {
-        aliveRef.current = false;
-      };
-    }
-
-    const handleChange = (event: MediaQueryListEvent) => {
-      if (aliveRef.current) {
-        setViewportMatches(event.matches);
-      }
-    };
-
-    mql.addEventListener('change', handleChange);
-    return () => {
-      aliveRef.current = false;
-      mql.removeEventListener('change', handleChange);
-    };
-  }, [hasMatchMedia]);
-
-  // WebGL detection effect — run once.
-  useEffect(() => {
-    aliveRef.current = true;
-    if (typeof document === 'undefined') {
-      return () => {
-        aliveRef.current = false;
-      };
-    }
-
-    let supported = false;
+  // WebGL detection runs SYNCHRONOUSLY in the state initializer so the very
+  // first render reflects reality — no flash-of-live before a detection
+  // effect demotes us to fallback (and no Engine spin-up on a no-WebGL
+  // platform). Detection is one-shot; once the page loads with WebGL gone,
+  // we don't switch back without a remount.
+  const [webglAvailable] = useState<boolean>(() => {
+    if (typeof document === 'undefined') return false;
     try {
       const canvas = document.createElement('canvas');
       let ctx: RenderingContext | null = null;
@@ -104,19 +64,42 @@ export function useLedeRenderMode(): 'live' | 'static-fallback' {
           ctx = null;
         }
       }
-      supported = ctx !== null;
+      return ctx !== null;
     } catch {
-      supported = false;
+      return false;
+    }
+  });
+
+  // Viewport reactive effect — register matchMedia change listener.
+  useEffect(() => {
+    viewportAliveRef.current = true;
+    if (!hasMatchMedia) {
+      return () => {
+        viewportAliveRef.current = false;
+      };
     }
 
-    if (aliveRef.current) {
-      setWebglAvailable(supported);
+    let mql: MediaQueryList;
+    try {
+      mql = window.matchMedia('(min-width: 768px)');
+    } catch {
+      return () => {
+        viewportAliveRef.current = false;
+      };
     }
 
-    return () => {
-      aliveRef.current = false;
+    const handleChange = (event: MediaQueryListEvent) => {
+      if (viewportAliveRef.current) {
+        setViewportMatches(event.matches);
+      }
     };
-  }, []);
+
+    mql.addEventListener('change', handleChange);
+    return () => {
+      viewportAliveRef.current = false;
+      mql.removeEventListener('change', handleChange);
+    };
+  }, [hasMatchMedia]);
 
   // -------------------------------------------------------------------------
   // Branch lives ONLY in the return value — no hooks below this line.

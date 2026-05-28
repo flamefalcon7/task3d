@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import {
   type AbstractMesh,
   ArcRotateCamera,
@@ -11,7 +12,11 @@ import {
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
 
-import { fetchBlobWithTimeout, WalrusFetchTimeoutError } from '../walrus/fetchWithTimeout';
+import {
+  fetchBlobWithTimeout,
+  WalrusFetchAbortedError,
+  WalrusFetchTimeoutError,
+} from '../walrus/fetchWithTimeout';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 import {
   setupEdgesGradientSweep,
@@ -96,7 +101,9 @@ export function LedeHero(): JSX.Element {
       new Vector3(0, 0.5, 0),
       scene,
     );
-    if (canvasRef.current) camera.attachControl(canvasRef.current, true);
+    // No attachControl — the lede is a marketing surface; user grabbing the
+    // hero canvas to orbit the tusk would drag it out of the framed 3/4
+    // composition the static keyframe asset promises.
     new HemisphericLight('lede-hl', new Vector3(0, 1, 0), scene);
     scene.clearColor.set(0, 0, 0, 1);
     sceneRef.current = scene;
@@ -117,39 +124,46 @@ export function LedeHero(): JSX.Element {
   // Walrus fetch effect — runs once per live mount. Sets sourceUrl to a
   // blob: URL on success OR to EMBEDDED_GLB_URL on timeout. External abort
   // (component unmount) is a silent no-op.
+  //
+  // Blob URL lifetime: ownership is transferred to the GLB-load effect once
+  // setSourceUrl is called — its cleanup revokes the URL when sourceUrl
+  // changes or on unmount. The fetch cleanup only revokes URLs we created
+  // but never published to state (the unmount-mid-resolve window).
   useEffect(() => {
     if (!isLive) return;
-    aliveRef.current = true;
+    const localAlive = { current: true };
     const controller = new AbortController();
-    let createdObjectUrl: string | null = null;
+    let unpublishedUrl: string | null = null;
     (async () => {
       try {
         const bytes = await fetchBlobWithTimeout(WALRUS_BLOB_URL, {
           timeoutMs: WALRUS_TIMEOUT_MS,
           signal: controller.signal,
         });
-        if (!aliveRef.current) return;
+        if (!localAlive.current) return;
         const blob = new Blob([bytes], { type: 'model/gltf-binary' });
-        createdObjectUrl = URL.createObjectURL(blob);
-        if (aliveRef.current) setSourceUrl(createdObjectUrl);
+        const objectUrl = URL.createObjectURL(blob);
+        unpublishedUrl = objectUrl;
+        if (localAlive.current) {
+          setSourceUrl(objectUrl);
+          unpublishedUrl = null; // ownership handed off to GLB-load cleanup
+        }
       } catch (err) {
-        if (!aliveRef.current) return;
+        if (!localAlive.current) return;
         if (err instanceof WalrusFetchTimeoutError) {
           setSourceUrl(EMBEDDED_GLB_URL);
           return;
         }
-        // WalrusFetchAbortedError → silent (component is unmounting).
-        // Other errors → log and fall back to embedded GLB so the lede has
-        // something to render rather than an empty well.
-        if (err instanceof Error && err.name === 'WalrusFetchAbortedError') return;
+        if (err instanceof WalrusFetchAbortedError) return;
         // eslint-disable-next-line no-console
         console.warn('LedeHero: Walrus fetch failed, using embedded GLB', err);
         setSourceUrl(EMBEDDED_GLB_URL);
       }
     })();
     return () => {
+      localAlive.current = false;
       controller.abort();
-      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+      if (unpublishedUrl) URL.revokeObjectURL(unpublishedUrl);
     };
   }, [isLive]);
 
@@ -193,6 +207,12 @@ export function LedeHero(): JSX.Element {
     })();
     return () => {
       cancelled = true;
+      // Own the blob: URL's lifetime here — revoke when the source changes
+      // (Walrus→embedded swap) or on unmount. Static/embedded URLs are
+      // never revoked.
+      if (sourceUrl && sourceUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(sourceUrl);
+      }
     };
   }, [isLive, sourceUrl]);
 
@@ -240,9 +260,9 @@ export function LedeHero(): JSX.Element {
         </p>
       </div>
       {isLive && dwellElapsed && (
-        <a href="/launch" style={ctaStyle} data-testid="lede-cta">
+        <Link to="/launch" style={ctaStyle} data-testid="lede-cta">
           fork your own →
-        </a>
+        </Link>
       )}
     </section>
   );
