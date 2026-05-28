@@ -52,7 +52,7 @@ import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders'
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
-import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
 import {
   buttonOutline,
@@ -548,12 +548,25 @@ export function LaunchCollectionPage() {
   // wallet-popup interstitial to serialize clicks). useRef flips
   // synchronously, so the second invocation early-returns immediately.
   const launchingRef = useRef(false);
+  // plan-017 U3 — imperative handle on the main VariantPreview canvas so
+  // onLaunch can free its Babylon scene during the Walrus upload window.
+  // ~200–400 MB of Babylon heap (meshes, materials, textures, observers)
+  // drops out of the OOM danger zone while the SDK's encodeQuilt Promise.all
+  // runs over each 4-variant chunk. Restored in the finally block whether
+  // upload succeeded, failed, or was cancelled.
+  const previewRef = useRef<PreviewCanvasHandle | null>(null);
   const onLaunch = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base || !baseGlb) return;
     launchingRef.current = true;
     setErrorMsg(null);
     setPhase('building-variants');
+    // Free the Babylon scene BEFORE runBuildVariants starts allocating the
+    // material-swap GLBs and BEFORE uploadFiles encodes them into quilts.
+    // Engine stays alive (avoids WebGL context loss); only scene/HL/observers
+    // are disposed. remount() in finally restores the scene for the
+    // post-launch success or error UI.
+    previewRef.current?.dispose();
     try {
       const swapped = await runBuildVariants();
 
@@ -603,6 +616,10 @@ export function LaunchCollectionPage() {
       setPhase('error');
     } finally {
       launchingRef.current = false;
+      // Always remount the Babylon scene — success path lands on the
+      // share/copy UI which doesn't need it, but the error path returns
+      // the user to the authoring flow with the preview restored.
+      previewRef.current?.remount();
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
@@ -1042,6 +1059,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
+                previewRef={previewRef}
               />
               <div style={previewSideRail}>
                 <MeshInfoPanel

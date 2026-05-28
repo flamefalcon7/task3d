@@ -9,9 +9,9 @@
 // Brutalist editorial styling per D-044: pure-black viewer well, mono caption
 // labels, 1.5px ink borders on tiles with accent on the active variant.
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, Ref } from 'react';
 import { useEffect, useState } from 'react';
-import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import type { CanvasMode } from '../babylon/modePalette';
 import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
@@ -54,6 +54,12 @@ export interface VariantPreviewProps {
    * before the user has ever clicked PREVIEW.
    */
   baseGlbUrl?: string | null;
+  /**
+   * plan-017 U3 — imperative dispose/remount handle forwarded to the inner
+   * PreviewCanvas so LaunchCollectionPage can free Babylon scene memory
+   * during the Walrus upload window.
+   */
+  previewRef?: Ref<PreviewCanvasHandle>;
 }
 
 const wellSized: CSSProperties = {
@@ -100,6 +106,7 @@ export function VariantPreview({
   autoRotate,
   partColors,
   baseGlbUrl,
+  previewRef,
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
   // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
@@ -142,6 +149,7 @@ export function VariantPreview({
       <div style={wellSized} data-testid="variant-preview-canvas">
         {displayGlbUrl ? (
           <PreviewCanvas
+            ref={previewRef}
             glbUrl={displayGlbUrl}
             mode={mode}
             onModeCycle={onModeCycle}
