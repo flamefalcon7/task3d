@@ -2814,7 +2814,7 @@ All test-only code lives under `frontend/src/test-wallet/`. Two production-safet
 
 ## D-062: Multi-quilt batching with `QUILT_SIZE = 4`, exposed in UX
 
-**Status**: Accepted
+**Status**: Accepted; **partial failure** captured by D-067 post-mortem
 **Date**: 2026-05-28
 **Phase**: Phase 4 follow-up (plan-017)
 
@@ -2958,6 +2958,103 @@ Brainstorm doc said `localStorage`; the debug branch (`debug/walrus-upload-crash
 
 ---
 
+## D-066: Restore QUILT_SIZE = 4 after multi-quilt batching proved inert against the encoder OOM it was designed for
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017 post-mortem)
+
+### Context
+D-062 chose `QUILT_SIZE = 4` based on the heap-budget calculation in plan-017's brainstorm. After AE2 testing on 2026-05-28 evening, we tested three QS values empirically on pickup truck × 8 variants:
+- QS=4 → V8 OOM at 4 GB ceiling
+- QS=2 → V8 OOM at 4 GB ceiling
+- QS=16 (effectively single-quilt) → V8 OOM at 4 GB ceiling
+
+All three QS values produce identical OOM signatures. Multi-quilt batching does **not** reduce the Walrus WASM encoder's peak working memory.
+
+### Decision
+Restore `QUILT_SIZE = 4` (the original D-062 value) and ship as-is. Do **not** rip out the chunking code path even though it doesn't solve the headline problem.
+
+### Rationale
+- Chunking is functionally inert for OOM, but ALSO doesn't make anything worse. The code is correct and tested (24/24 tests passing across the multi-quilt suite).
+- QS=4 gives the cleanest demo UX: 8 variants → 2 quilts → 5 popups, BatchProgressPanel surfaces the Walrus quilt structure to users — a hackathon positioning beat for the Walrus track.
+- QS=2 doubles popups to 9 with zero functional benefit.
+- QS=16 loses BatchProgressPanel (gated on `N > QUILT_SIZE`) and the demo storytelling.
+- Future Walrus SDK improvements that make the encoder streaming-friendly would make chunking actually load-bearing — keeping the code is future-proofing.
+
+### Alternatives Considered
+- **Rip out R1 entirely** — rejected: pure cleanup work with no value gain; would also rip out the demo-relevant BatchProgressPanel UX.
+- **QS=2** — rejected: adds popups for no benefit.
+- **Dynamic QS based on per-variant size** — over-engineered for v1; complexity not justified by the marginal UX improvement.
+
+### Consequences
+- ✅ Code shipped is correct and tested; supports any future SDK improvement that benefits from chunking.
+- ✅ BatchProgressPanel keeps its UX role as a Walrus-track positioning beat.
+- ⚠️ Multi-quilt batching is functionally inert. Complex bases × 8 variants still crash. Tracked in D-067.
+
+### Related
+- D-062: original multi-quilt batching decision (now partially failed)
+- D-067: encoder-memory-cliff finding that supersedes D-062's premise
+- Plan: `docs/plans/2026-05-28-017-fix-walrus-oom-plan.md`
+- Investigation: `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md`
+
+---
+
+## D-067: Encoder-memory-cliff finding — total input bytes is the OOM gate, not chunk count
+
+**Status**: Accepted (empirical finding; supersedes D-062's premise)
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017 post-mortem)
+
+### Context
+Plan-017's R1 multi-quilt batching (D-062) assumed that splitting N variants into K smaller chunks would reduce each per-chunk encoder peak proportionally. AE2 testing on 2026-05-28 evening invalidated this assumption.
+
+### Decision
+Capture as a finding (not a behavior change): the Walrus WASM encoder's peak working memory is governed by **total input bytes** with an empirical multiplier of ~85–100×, **not** by chunk count. The OOM gate for browser-side encoding is roughly:
+
+```
+total_input_bytes × ~85-100 < V8_old_space_limit (4 GB on Brave / Chrome)
+```
+
+Concretely:
+- 35 MB input → succeeds (peak < 4 GB)
+- 46 MB input → fails at 4 GB
+
+### Empirical Data
+| Base | paintable_count | variant size | N | total | result |
+|---|---|---|---|---|---|
+| shuriken | 3 | 4.40 MB | 8 | 35 MB | ✅ pass |
+| pickup truck | 14 | 5.80 MB | 5 | 29 MB | ✅ pass |
+| pickup truck | 14 | 5.80 MB | 8 | 46 MB | ❌ V8 OOM |
+
+The boundary lives between 35 MB and 46 MB of total input bytes.
+
+### Rationale
+- Hypothesis testing established that chunk size does not affect outcome.
+- Hard data: shuriken × 8 at QS=16 (single quilt, no chunking) passes; pickup truck × 8 at QS=2 (4 quilts) fails. Chunk count is independent of the OOM signature.
+- Working theory: Walrus's Reed-Solomon encoder materializes a full sliver matrix sized roughly `input × shard_count × redundancy`. For Walrus testnet's hundreds of shards, a naive implementation could need 10–100× the input size. Source dive into `@mysten/walrus-wasm` not performed; behavior is consistent with this theory.
+
+### Alternatives Considered
+- **Backend mesh decimation** to reduce per-variant size — user explicitly declined: doesn't want to sacrifice visual quality without confirming there's no better path. Filed as a mentor-consult question.
+- **`writeBlobFlow` per file** instead of quilted upload — sacrifices quilt-patch indexing (one Walrus blob → N logical files), but encodes one ~6 MB file at a time. Could fit. Pending mentor input on whether this is the recommended pattern for our use case.
+- **Tune Walrus shard count** — not exposed as a client-side configurable; would require SDK or protocol-level intervention.
+
+### Consequences
+- ✅ Findings recorded; future sessions don't repeat the multi-quilt fix attempt.
+- ⚠️ Complex segmented bases (paintable_count ≥ ~10) × 8 variants remain unsupported.
+- 🔮 Resolution path:
+  - Short-term: demo with simpler bases (shuriken-class); document the constraint as v1.1 work in README.
+  - Medium-term: hackathon mentor / Walrus team consult — see `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md` for the 6 specific questions filed.
+  - Long-term: SDK fix for streaming encode, OR project-side mesh decimation (if mentor confirms it's the only path AND we accept the visual trade-off).
+
+### Related
+- D-062: original multi-quilt batching (premise invalidated by this finding)
+- D-063: PreviewCanvas dispose (kept — provides marginal heap headroom)
+- D-066: QUILT_SIZE = 4 restoration
+- Investigation doc: `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md`
+
+---
+
 # Reserved Decision Numbers
 
-D-066 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-068 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

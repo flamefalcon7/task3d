@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-28 / Late evening (plan-017 walrus-OOM-fix — **CE-WORK + 5-REVIEWER P1 SWEEP COMPLETE, AE2 user-side smoke pending**: all 6 units shipped + 5-reviewer code-review pass dispatched + 5 P1 findings fixed and committed. 658/658 frontend tests + zero typecheck errors. **Next session = user runs AE2 killer check on their actual Brave** — 8-variant /launch with 10+ sibling tabs should complete without renderer crash via Slush 4 popups. If AE2 passes → merge branch; if AE2 fails → drop QUILT_SIZE to 2.)
+## Last Updated: 2026-05-28 / Night (plan-017 walrus-OOM-fix — **SHIPPED AS-IS, complex-base OOM open + mentor consult pending**: AE2 testing revealed R1 multi-quilt batching is functionally inert against the encoder OOM; root cause is total-bytes × 85-100x encoder multiplier, not chunk count. shuriken × 8 (35 MB) passes, pickup truck × 8 (46 MB) crashes regardless of QUILT_SIZE. R2/R4/R5/R6 plan-017 work landed cleanly + actively useful. R1 kept (functional but inert) for demo UX storytelling. Detailed investigation + 6 open questions for Walrus team filed at `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md`. **Next session(s) = (a) mentor consult; (b) demo prep with shuriken (= verified passing base).**)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
@@ -48,6 +48,30 @@ After preparing plan-017 earlier in the day, ran `/ce-work` against it in a sing
   - **P1-D** (correctness): `stepStatusForRegister` was falling through to `'done'` on `stage='error'`, painting ✓ green-check on a tx that never landed. Added `errorStage` prop threading `UploadError.stage` so register row shows ✗ on register-failure, ✓ + Suiscan link on certify-failure-after-register-success. New `StepStatus = 'error'` + ✗ glyph.
   - **P1-E** (correctness): tighten pre-flight panel render gate to exclude `phase === 'error'` — `busy` doesn't cover error, so without the explicit guard both pre-flight ("you'll sign N transactions") AND progress panels rendered simultaneously with contradictory copy
 - **Deferred P2/P3** (not blockers): stale uploadError state flashes on retry, orphan-blob warning undercount on register-success-certify-failure (partially mitigated by errorStage threading), `clearTrail()` on caught error wipes diagnostic, 5 PreviewCanvas test mocks not migrated to forwardRef, `popupCount` semantic change without rename. Plan-doc inaccuracy: §System-Wide-Impact claims preserved stage names that differ from actual code (real names kept — plan was misremembered). All captured for follow-up.
+
+**AE2 post-mortem (2026-05-28 night session, after the 5-reviewer P1 sweep):**
+
+Tested AE2 on user's real Brave with both shuriken and pickup truck × 8 variants. Three QUILT_SIZE values tested empirically (4 → 2 → 16 single-quilt). All three produce identical V8 OOM signatures on pickup truck × 8. **Multi-quilt batching does not save the encoder OOM it was designed for.**
+
+Hard data:
+- shuriken (3 paintable, 4.40 MB/variant) × 8 = 35 MB total → ✅ passes at any QS (17.8s encode)
+- pickup truck (14 paintable, 5.80 MB/variant) × 8 = 46 MB total → ❌ V8 OOM at any QS
+- sport car seg × 8 → ❌ V8 OOM at any QS
+
+Working theory: `@mysten/walrus-wasm` Reed-Solomon encoder allocates working memory proportional to total quilt input × ~85-100× constant (likely a sliver-matrix materialization step that scales with shard count). Chunk count is independent of this peak.
+
+**What's shipped on `fix/walrus-oom` and merged:** plan-017 in its entirety (R1-R6) plus a 5-reviewer P1 sweep (commit f65076d) plus post-mortem cleanup (commit 4b2e542). R1's multi-quilt path is functionally inert against the OOM but kept for UX storytelling. R2/R4/R5/R6 deliver real value.
+
+**ADRs added in post-mortem:** D-066 (restore QS=4 after testing all values), D-067 (encoder-memory-cliff finding supersedes D-062 premise).
+
+**Mentor consult brief:** `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md` — full investigation record + 6 specific questions for Walrus team. User will raise these at upcoming hackathon mentor office hours.
+
+**Demo strategy:** shuriken (verified passing). Complex bases documented as v1.1 work in README. The Walrus-track positioning beat (BatchProgressPanel showing "8 variants → 2 quilts → 5 transactions") still works for shuriken at any QS.
+
+**User-explicitly-declined paths** (don't re-propose without new evidence):
+- Backend mesh decimation to shrink variants. User: "我不想犧牲 model 品質" — don't pursue without mentor confirmation that there's no other way.
+
+---
 
 **Engineering posture observations (for next session if any drift):**
 - Both `editorState.variants.length > QUILT_SIZE` checks in LaunchCollectionPage drive conditional UX (pre-flight panel + in-progress panel). If we change the variant cap from 8, need to revisit the multi-quilt UX threshold story.
