@@ -1,0 +1,89 @@
+/* D-044 brutalist editorial — 4-keycap dispatch row.
+   No transition (D-044 §7 instant). All borders 1.5px solid #000. */
+
+.keycaps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-top: 1.5px solid #000;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.keycap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* do not reduce below 44px effective height on mobile */
+  padding: 24px 16px;
+  border-right: 1.5px solid #000;
+  text-decoration: none;
+  color: #000;
+  background: transparent;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.keycap:last-child {
+  border-right: none;
+}
+
+/* Layout-neutral hover thickening — box-shadow keeps the box model stable
+   so neighbors don't shift by 1.5px on hover. */
+.keycap:hover {
+  box-shadow: inset 0 0 0 3px #000;
+}
+
+/* D-044 black borders swallow the browser-default focus ring; restore it
+   explicitly for keyboard users. */
+.keycap:focus-visible {
+  outline: 3px solid #000;
+  outline-offset: 2px;
+}
+
+.verb {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route {
+  font-size: 11px;
+  color: #595959;
+  letter-spacing: 1px;
+}
+
+.accentDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #ff4500;
+}
+
+@media (max-width: 767px) {
+  .keycaps {
+    grid-template-columns: 1fr 1fr;
+  }
+  .keycap:nth-child(2),
+  .keycap:last-child {
+    border-right: none;
+  }
+  .keycap:nth-child(1),
+  .keycap:nth-child(2) {
+    border-bottom: 1.5px solid #000;
+  }
+  .keycap:nth-child(2),
+  .keycap:nth-child(4) {
+    border-right: none;
+  }
+  .keycap:nth-child(1),
+  .keycap:nth-child(3) {
+    border-right: 1.5px solid #000;
+  }
+}

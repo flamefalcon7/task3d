@@ -19,6 +19,7 @@ export const tokens = {
     accentInk: '#FFFFFF',
     muted: 'rgba(0,0,0,0.9)',
     hint: 'rgba(0,0,0,0.6)',
+    subtle: '#595959',
     ok: '#0F8A4A',
     warn: '#B58900',
     err: '#C81E1E',
