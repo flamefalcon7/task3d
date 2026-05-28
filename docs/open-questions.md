@@ -350,3 +350,76 @@ Expected behavior: a Slush-signed JWT in `localStorage` should continue to valid
 
 **Blocker level**: 🟢 Open — manual smoke only.
 
+---
+
+## OQ-023: Plan-016 — Vite build-time gate against `VITE_TEST_WALLET=1` + production build
+
+**Status**: 🟢 Open — deferred to v1.1 / pre-mainnet hardening. Surfaced by plan-016 code-review pass (security sec-002 + adversarial adv-006).
+**Surfaced**: 2026-05-28 (ce-code-review run `20260528-000110-fef1786a`)
+**Blocking**: nothing for 6/21 testnet submission (demo path is `pnpm dev`, no production build runs). Relevant before 8/27 mainnet deploy.
+
+Vite inlines all `VITE_*` env vars as string literals into the built JS bundle at build time. If a future CI / deploy runner accidentally has both `VITE_TEST_WALLET=1` AND `VITE_TEST_WALLET_KEY=suiprivkey1...` set when `pnpm build` runs, the **private key string ships in the public bundle**.
+
+Three layers protect against this today:
+- The module-level `if (import.meta.env.PROD) throw` in `frontend/src/test-wallet/loadKeypair.ts` — fires at first key load in the user's browser, AFTER the bundle is already distributed.
+- AE4 grep on `frontend/dist/` — manual one-shot check that requires someone to remember.
+- The tree-shake pathway — only effective when `VITE_TEST_WALLET` is unset.
+
+The plan-016 code-review found the dual-set misconfiguration (both flags + production build) is NOT caught at build time — only at runtime in someone's browser by then. A `vite.config.ts` plugin that throws during `vite build` would catch the misconfig before the bundle is emitted.
+
+**Proposed implementation**: in `frontend/vite.config.ts`, add a `defineConfig` plugin hook:
+
+```ts
+plugins: [
+  // ...existing plugins
+  {
+    name: 'plan-016-prod-test-wallet-guard',
+    enforce: 'pre',
+    config(_, { command, mode }) {
+      const inProdBuild = command === 'build' && mode === 'production';
+      const testWalletOn = process.env.VITE_TEST_WALLET === '1';
+      if (inProdBuild && testWalletOn) {
+        throw new Error(
+          'Refusing to build for production with VITE_TEST_WALLET=1. ' +
+          'This would inline VITE_TEST_WALLET_KEY into the bundle. ' +
+          'Unset VITE_TEST_WALLET before running pnpm build.',
+        );
+      }
+    },
+  },
+],
+```
+
+**When to land**: before 8/27 mainnet deploy or when CI starts running `pnpm build`. Not blocking 6/21 testnet submission.
+
+**Blocker level**: 🟢 Open — defense-in-depth, no current attack path.
+
+---
+
+## OQ-024: Plan-016 — Runtime testnet/mainnet check on `VITE_TEST_WALLET_KEY`
+
+**Status**: 🟢 Open — conceptually open, mechanically unresolvable offline. Surfaced by plan-016 code-review pass (adversarial adv-002).
+**Surfaced**: 2026-05-28 (ce-code-review run `20260528-000110-fef1786a`)
+**Blocking**: nothing — the dapp is hardcoded to testnet endpoints (`walrusClient.ts`, `~/.sui/sui_config/client.yaml`, `dapp-kit` provider config), so even a mainnet key produces only testnet TXs.
+
+Sui's Ed25519 bech32 private key format is **network-agnostic**. The same key bytes produce the same `0x...` address on testnet AND mainnet. Nothing in `loadKeypair.ts` verifies that the loaded key is "for testnet" because no such metadata exists in the key string itself.
+
+`.env.example` warns the user via comment ("must be a TESTNET key"), and the dapp is structurally bound to testnet, so a misconfigured mainnet key would today produce:
+- All Sui TXs sent to testnet RPC → mainnet objects don't exist there → `ObjectNotFound` or similar errors
+- All Walrus uploads sent to testnet upload-relay → succeed but tied to a key that controls real mainnet funds
+
+The actual harm path requires BOTH:
+1. Test wallet active (`VITE_TEST_WALLET=1`)
+2. Dapp wired to mainnet (would require flipping endpoint constants OR a future mainnet build that somehow loads the test-wallet — blocked by `import.meta.env.PROD` throw)
+
+**Why no clean fix exists offline**:
+- Can't tell network from the bech32 string itself.
+- Could call mainnet RPC to check if the address has any mainnet balance / object history — but: requires network access at module load, adds latency, leaks the address to a third party, and a "clean" testnet key the user reused on mainnet would still trigger a false positive.
+- Could require an additional `VITE_TEST_WALLET_NETWORK=testnet` env var as a self-declaration — adds friction without real safety (the user could still set it wrong).
+
+**Recommendation**: keep the documentation warning in `.env.example` + module-eval PROD throw + tree-shake. Don't add a runtime check; the cost / benefit is wrong.
+
+**When to revisit**: if mainnet deploy (8/27) ever ships a path that loads the test-wallet adapter (today blocked by `import.meta.env.PROD` throw — that boundary is the real defense).
+
+**Blocker level**: 🟢 Open — accept the risk; documented.
+
