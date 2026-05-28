@@ -118,7 +118,7 @@ None. `docs/solutions/` corpus (25 entries) is 100% engineering-track — no UX 
 
 **Complexity:** High
 
-**Status:** Unexplored
+**Status:** Explored
 
 ---
 
