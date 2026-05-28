@@ -7,19 +7,29 @@ import { clearTrail, surfaceStaleTrail, writeDiag } from './uploadTrail';
 // plan-017 U1 / D-062 — multi-quilt batching size. N variants chunked into
 // K = ⌈N/QUILT_SIZE⌉ quilts.
 //
-// Originally 4 (plan budget assumed ~120 MB encode peak per quilt). User
-// AE2 testing on 2026-05-28 evening revealed the real encode peak scales
-// with per-variant GLB size, which itself scales with the base's
-// `paintable_count` (=segmented mesh count from plan-013). Empirical data:
-//   - shuriken (3 paintable) × 8 variants: ✅ at QS=4
-//   - pickup truck (14 paintable) × 5 variants: ✅ at QS=4
-//   - pickup truck (14 paintable) × 8 variants: ❌ V8 OOM at 4 GB at QS=4
-//   - sport car seg × 8 variants: ❌ V8 OOM at QS=4
-// Lowered to 2 to cover the complex-base × 8-variant envelope. Trade-off:
-// Slush popups double (5 → 9 for 8 variants). Plan-018 candidate: backend
-// mesh decimation in swap pipeline so QS=4 fits all bases again.
-// Exported so the UI (BatchProgressPanel — U4) computes the same K.
-export const QUILT_SIZE = 2;
+// POST-MORTEM (2026-05-28): R1 multi-quilt batching turned out to NOT
+// solve the OOM it was designed for. Empirical data:
+//   - shuriken (4.40 MB/variant) × 8 = 35 MB total: ✅ at any QS (4/2/16)
+//   - pickup truck (5.80 MB/variant) × 8 = 46 MB total: ❌ at any QS
+// The Walrus WASM encoder (`@mysten/walrus-wasm` Reed-Solomon) has a
+// per-quilt baseline working memory that doesn't scale linearly with
+// input bytes — chunking provides negligible heap savings. The actual
+// OOM gate is total input bytes × encoder constant ≈ 100×, regardless
+// of chunk count. See docs/solutions/integration-issues/
+// walrus-encoder-oom-investigation-2026-05-28.md for the full
+// investigation + open questions filed for Walrus team consult.
+//
+// QUILT_SIZE = 4 kept anyway, because:
+//   1. The chunked code path is correct and tested (no harm)
+//   2. BatchProgressPanel UX surfaces the Walrus quilt structure to
+//      users — kept as a hackathon positioning beat for the Walrus track
+//   3. Future SDK improvements may make chunking actually load-bearing
+//   4. Reverting would just be cleanup for cleanup's sake
+//
+// Real root-cause fix (mesh decimation in backend swap pipeline) deferred
+// pending mentor consult; user does not want to sacrifice mesh quality
+// without confirming there's no better path from the Walrus team.
+export const QUILT_SIZE = 4;
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 

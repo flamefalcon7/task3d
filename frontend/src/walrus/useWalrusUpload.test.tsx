@@ -208,7 +208,7 @@ describe('useWalrusUpload', () => {
   });
 
   it('identifier padding preserves within-chunk lex order (Walrus SDK sorts by identifier per quilt)', async () => {
-    // plan-017 U1: with multi-quilt batching (QUILT_SIZE=2), the SDK sorts
+    // plan-017 U1: with multi-quilt batching (QUILT_SIZE=4), the SDK sorts
     // lex within each writeFilesFlow call, not across calls. Per-chunk
     // zero-padding to width 2 keeps lex order == numeric order inside each
     // quilt; cross-chunk order is preserved by the for-loop's iteration order.
@@ -221,24 +221,21 @@ describe('useWalrusUpload', () => {
       );
     });
 
-    // 12 files → 6 quilts of 2. Each quilt restarts identifiers at file-00.
+    // 12 files → 3 quilts of 4. Each quilt restarts identifiers at file-00.
     const identifiers = walrusFileFromMock.mock.calls.map(
       (call) => call?.[0]?.identifier ?? '',
     );
     expect(identifiers).toEqual([
-      'file-00', 'file-01', // quilt 0
-      'file-00', 'file-01', // quilt 1
-      'file-00', 'file-01', // quilt 2
-      'file-00', 'file-01', // quilt 3
-      'file-00', 'file-01', // quilt 4
-      'file-00', 'file-01', // quilt 5
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 0
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 1
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 2
     ]);
 
     // Critical (within-chunk): lex sort of each chunk's identifiers MUST
     // equal input order — otherwise the SDK's quilt-internal sort would
     // silently misalign patchIds vs input files.
-    for (let chunkStart = 0; chunkStart < identifiers.length; chunkStart += 2) {
-      const chunk = identifiers.slice(chunkStart, chunkStart + 2);
+    for (let chunkStart = 0; chunkStart < identifiers.length; chunkStart += 4) {
+      const chunk = identifiers.slice(chunkStart, chunkStart + 4);
       expect([...chunk].sort()).toEqual(chunk);
     }
   });
@@ -385,27 +382,10 @@ describe('useWalrusUpload', () => {
   // -- plan-017 U1 — multi-quilt batching ----------------------------------
 
   describe('uploadFiles (multi-quilt batching, plan-017 U1)', () => {
-    it('2 variants → 1 quilt → writeFilesFlow called once (boundary: exactly QUILT_SIZE)', async () => {
+    it('4 variants → 1 quilt → writeFilesFlow called once (single-quilt preserved)', async () => {
       writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) =>
         makeQuiltFlow(0, arg.files.length),
       );
-      const { result } = renderHook(() => useWalrusUpload());
-      await act(async () => {
-        await result.current.uploadFiles(
-          Array.from({ length: 2 }, (_, i) => new Uint8Array([i])),
-          makeSigner(),
-        );
-      });
-      expect(writeFilesFlowFactory).toHaveBeenCalledOnce();
-      expect(result.current.batchTotal).toBe(1);
-    });
-
-    it('4 variants → 2 quilts (2 + 2) → writeFilesFlow called twice', async () => {
-      const calls: number[] = [];
-      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
-        calls.push(arg.files.length);
-        return makeQuiltFlow(calls.length - 1, arg.files.length);
-      });
       const { result } = renderHook(() => useWalrusUpload());
       await act(async () => {
         await result.current.uploadFiles(
@@ -413,12 +393,11 @@ describe('useWalrusUpload', () => {
           makeSigner(),
         );
       });
-      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
-      expect(calls).toEqual([2, 2]);
-      expect(result.current.batchTotal).toBe(2);
+      expect(writeFilesFlowFactory).toHaveBeenCalledOnce();
+      expect(result.current.batchTotal).toBe(1);
     });
 
-    it('5 variants → 3 quilts (2 + 2 + 1) → writeFilesFlow called three times', async () => {
+    it('5 variants → 2 quilts (4 + 1) → writeFilesFlow called twice', async () => {
       const calls: number[] = [];
       writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
         calls.push(arg.files.length);
@@ -431,12 +410,12 @@ describe('useWalrusUpload', () => {
           makeSigner(),
         );
       });
-      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(3);
-      expect(calls).toEqual([2, 2, 1]);
-      expect(result.current.batchTotal).toBe(3);
+      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([4, 1]);
+      expect(result.current.batchTotal).toBe(2);
     });
 
-    it('8 variants → 4 quilts (2 × 4) → writeFilesFlow called four times (AE2)', async () => {
+    it('8 variants → 2 quilts (4 + 4) → writeFilesFlow called twice (AE2)', async () => {
       const calls: number[] = [];
       writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
         calls.push(arg.files.length);
@@ -449,14 +428,13 @@ describe('useWalrusUpload', () => {
           makeSigner(),
         );
       });
-      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(4);
-      expect(calls).toEqual([2, 2, 2, 2]);
-      expect(result.current.batchTotal).toBe(4);
-      // 4 quilts × (register + certify) = 8 popups total (was 4 at QS=4).
-      // Plus 1 launch popup = 9 total signatures for 8 variants.
+      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([4, 4]);
+      expect(result.current.batchTotal).toBe(2);
+      // 2 quilts × (register + certify) = 4 popups + 1 launch = 5 total.
     });
 
-    it('6 variants → 3 quilts (2 × 3) → all chunks full', async () => {
+    it('6 variants → 2 quilts (4 + 2) → boundary chunk-not-full case', async () => {
       const calls: number[] = [];
       writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
         calls.push(arg.files.length);
@@ -469,7 +447,7 @@ describe('useWalrusUpload', () => {
           makeSigner(),
         );
       });
-      expect(calls).toEqual([2, 2, 2]);
+      expect(calls).toEqual([4, 2]);
     });
 
     it('1 variant → 1 quilt of 1', async () => {
@@ -498,19 +476,15 @@ describe('useWalrusUpload', () => {
           makeSigner(),
         );
       });
-      // 8 variants → 4 quilts of 2. Each quilt contributes 2 patches.
-      // Order: quilt-0 (2 patches) → quilt-1 → quilt-2 → quilt-3.
+      // Quilt 0 contributes 4 patches with blob-quilt-0; quilt 1 contributes
+      // 4 with blob-quilt-1. Order: quilt-0 first, quilt-1 second.
       expect(res?.patchIds).toEqual([
-        'patch-q0-0', 'patch-q0-1',
-        'patch-q1-0', 'patch-q1-1',
-        'patch-q2-0', 'patch-q2-1',
-        'patch-q3-0', 'patch-q3-1',
+        'patch-q0-0', 'patch-q0-1', 'patch-q0-2', 'patch-q0-3',
+        'patch-q1-0', 'patch-q1-1', 'patch-q1-2', 'patch-q1-3',
       ]);
       expect(res?.blobIds).toEqual([
-        'blob-quilt-0', 'blob-quilt-0',
-        'blob-quilt-1', 'blob-quilt-1',
-        'blob-quilt-2', 'blob-quilt-2',
-        'blob-quilt-3', 'blob-quilt-3',
+        'blob-quilt-0', 'blob-quilt-0', 'blob-quilt-0', 'blob-quilt-0',
+        'blob-quilt-1', 'blob-quilt-1', 'blob-quilt-1', 'blob-quilt-1',
       ]);
     });
 
@@ -528,13 +502,8 @@ describe('useWalrusUpload', () => {
         );
       });
       await waitFor(() => expect(result.current.status).toBe('done'));
-      expect(result.current.batchTotal).toBe(4);
-      expect(result.current.txDigests).toEqual([
-        '0xdigest-q0',
-        '0xdigest-q1',
-        '0xdigest-q2',
-        '0xdigest-q3',
-      ]);
+      expect(result.current.batchTotal).toBe(2);
+      expect(result.current.txDigests).toEqual(['0xdigest-q0', '0xdigest-q1']);
     });
 
     it('mid-batch failure surfaces batchIndex and stops subsequent quilts', async () => {
@@ -565,9 +534,9 @@ describe('useWalrusUpload', () => {
       await waitFor(() => expect(result.current.status).toBe('error'));
       expect(result.current.error?.stage).toBe('awaiting-register');
       expect(result.current.error?.batchIndex).toBe(1);
-      expect(result.current.error?.batchTotal).toBe(4);
+      expect(result.current.error?.batchTotal).toBe(2);
       // Only 2 flows constructed (quilt 0 + quilt 1 failed at register).
-      // Subsequent quilts 2 and 3 never start.
+      // No third quilt because the loop bailed.
       expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
     });
 
@@ -617,12 +586,13 @@ describe('useWalrusUpload', () => {
       expect(result.current.txDigests).toEqual([]);
     });
 
-    it('exports QUILT_SIZE = 2', async () => {
-      // plan-017 follow-up (post-AE2): lowered from 4 to 2 after pickup
-      // truck (14 paintable parts) × 8 variants still OOM'd at QS=4.
-      // See useWalrusUpload.ts header comment for the empirical envelope.
+    it('exports QUILT_SIZE = 4', async () => {
+      // plan-017 post-mortem: QS=4 kept even though R1 didn't actually
+      // solve the OOM it was designed for — chunking has near-zero
+      // effect on Walrus WASM encoder peak. See useWalrusUpload.ts
+      // header comment for the post-mortem analysis.
       const mod = await import('./useWalrusUpload');
-      expect(mod.QUILT_SIZE).toBe(2);
+      expect(mod.QUILT_SIZE).toBe(4);
     });
   });
 });
