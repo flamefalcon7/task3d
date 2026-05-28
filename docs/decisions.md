@@ -3055,6 +3055,140 @@ The boundary lives between 35 MB and 46 MB of total input bytes.
 
 ---
 
+## D-068: Product name = Tusk3D; tagline = "Carve. Mint. Riff."
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 — pre-submission branding
+
+### Context
+Project has shipped the bulk of plan-017 and is ~23 days from the 2026-06-21 Sui Overflow 2026 submission deadline (Walrus track), but never settled on a public product name. The submission form, demo video, pitch deck, README, GitHub org, social handles, and shortlisting page all need a single canonical name. Brainstorm covered four angles: composable/derivative ("Riff", "Stem"), 3D/mesh ("Facet", "Loom", "Topo"), Walrus/marine ("Tusk", "Floe", "Pod"), and game-dev native ("Spawn", "Prop", "Rig"). Initial pick was the bare word "Tusk" with a walrus-ivory-carving narrative; due-diligence surfaced two blockers that disqualified the bare form.
+
+### Decision
+**Product name = "Tusk3D".** Tagline = **"Carve. Mint. Riff."**
+
+### Rationale
+- **Two issues with the bare word "Tusk" forced the "3D" qualifier**:
+  1. **Brand collision in dev-tools space**: *Tusk (YC W24)* is a known AI coding-agent (unit / integration test generation) — owns `tusk.io`, `usetusk.ai`. Hackathon evaluators read HN / YC content; the bare "Tusk" would be conflated.
+  2. **Animal-welfare framing risk**: The literal etymology routes through walrus ivory and 19th-century scrimshaw / whaling. Pacific walrus is IUCN-Threatened; the Sui sponsor track is named *Walrus*. A submission named "Tusk" on the *Walrus* track carries an unintended "killed-the-mascot-for-its-tusk" reading — exactly the wrong optics for Gen-Z evaluators.
+- **"Tusk3D" resolves both**: the "3D" suffix unambiguously positions in 3D-content space (away from Tusk YC) and shifts the brand semantics from "an extracted animal part" to "3D Tusk = sharp distinctive 3D-content mark." Once the historical-carving narrative is no longer load-bearing for the name to be intelligible, the ethical baggage no longer attaches to the brand.
+- **Tagline "Carve. Mint. Riff." still maps 1:1 to architecture without the ivory framing**: in 3D content authoring, *Carve* is industry-standard terminology for digital sculpting (Blender, ZBrush, MeshMixer). *Carve* = author the GLB (Tripo prompt or upload), *Mint* = publish Model3D on Sui, *Riff* = L2 Derivative authored by another creator.
+- **Brandable as a compound**: short, pronounceable, follows the established web3 / dev-tools convention of *Word + digit/qualifier* (Web3, Three3D-pattern, etc.). Initial scan found no direct collision (TUKA3D is unrelated fashion software).
+
+### Alternatives Considered
+- **Bare "Tusk"** — rejected per the two blockers above.
+- **Spawn** — game-dev native vocabulary, strong "spawns derivatives" narrative; rejected because Tusk3D is more distinctive in a brand sense after the disambiguation.
+- **Scrim / Scrimshaw** — proposed mid-brainstorm to lean into the 19th-century carving narrative; rejected because scrimshaw is directly tied to whaling and walrus-ivory extraction — same ethical-framing risk as bare Tusk, only sharper.
+- **Cast** — lost-wax casting analogy (5,000-year reproducible-3D-content metaphor); strong ethical clean slate but the verb "Cast" overlaps with "Mint" in the tagline, requiring tagline rewrite; user preference settled on Tusk3D.
+- **Floe / Pod** — Walrus-adjacent, no ethical baggage; user preference settled on Tusk3D.
+
+### Consequences
+- ✅ Submission-ready brand identity with built-in pitch opening that does not require defending an ethically-fraught historical claim.
+- ✅ Move package `model3d::model3d` stays unchanged (already on testnet); product name and on-chain module name are intentionally decoupled — renaming Move would burn gas and break references for no user-visible gain.
+- ⚠️ Domain availability and trademark check are follow-up items. Initial WebFetch scan of `tusk3d.com / .xyz / .io / .app / .gg` all returned ECONNREFUSED (no live server), suggesting probable availability — but a registrar lookup is required to confirm. If a hard collision surfaces, follow-up ADR supersedes.
+- ⚠️ Public-facing narrative should use the safer "Built on Walrus, named for it" framing; the "3,000-year ivory carving" narrative is no longer the recommended pitch opener.
+- 🔮 Rename surface (post-availability check): `README.md` title, `package.json` `name` fields (root + backend + frontend + shared), pitch deck title slide, demo video script, Sui Overflow submission form Project Name field, GitHub org / repo name, Twitter/X handle.
+
+### Related
+- Memory: `project_product_name_tusk3d.md`
+- Submission deadline: 2026-06-21 (Sui Overflow 2026, Walrus track)
+- Spec: `docs/spec.md` §1.7 (three-tier composable creator economy)
+
+---
+
+## D-069: Walrus read-path acceleration = Cloudflare DNS proxy (Method A); Worker (Method B) deferred
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 — read-path performance
+
+### Context
+Reading 3D model GLBs from a single public Walrus mainnet aggregator gives variable latency to global users (single-region RTT, no edge caching). For the 2026-06-21 submission and the 2026-07-20/21 demo day, perceived model-load speed materially affects evaluator UX. Walrus blob content is **immutable** (content-addressed by blob ID), making it a textbook candidate for long-TTL edge caching. Two implementation strategies considered: (A) Cloudflare DNS proxy + Cache Rule fronting the aggregator (zero application code, hostname swap in frontend), or (B) Cloudflare Worker fronting Walrus with clean URLs and aggregator-failover logic.
+
+### Decision
+**Method A — Cloudflare DNS proxy (orange-cloud) + Cache Rule with `Edge TTL = 1 year`, fronting one public Walrus mainnet aggregator at `cdn.<domain>/v1/blobs/<blob_id>`.** Frontend reads from `VITE_WALRUS_READ_BASE` (config-driven, never hardcoded). Method B (Worker) is **deferred, not rejected** — migration triggered by either (1) need for clean / branded URLs (e.g. blob URLs embedded in NFT metadata or shared links), or (2) need for aggregator failover when public aggregators go down.
+
+### Rationale
+- **Fastest measurable win**: zero application code, dashboard-only setup, reversible in 5 min if numbers are flat.
+- **`immutable` blobs make long TTL always safe**: content-addressing means the blob ID itself is the cache key; no invalidation logic ever needed.
+- **Cloudflare free plan sufficient**: no per-request cost dimension; budget-predictable for hackathon scope.
+- **Config var preserves migration path**: Method B drop-in is a single env-var swap, not a code rewrite — locks in the optionality without paying for it now.
+- **Single-aggregator dependency accepted at MVP**: Method B's failover capability is itself the trigger to revisit, not a code concern today.
+
+### Alternatives Considered
+- **Method B — Cloudflare Worker** — better long-term (clean URLs, multi-aggregator failover, header rewrites) but adds maintained code; deferred until a trigger condition fires.
+- **Self-hosted aggregator** — out of scope per Plan-018 scope boundary; storage-layer ownership is a separate concern from read-path caching.
+- **No CDN, public-aggregator-only** — leaves global-RTT latency on the table; acceptable for testing but unacceptable for demo day.
+
+### Consequences
+- ✅ Warm-cache read latency drops materially; demo / submission load faster from any region.
+- ✅ Read path costs $0 (no Sui gas, no WAL) and ~0 lines of application code beyond the URL base swap.
+- ⚠️ **Single-aggregator SPOF**: if the chosen public aggregator goes down, all reads fail until DNS is repointed. Mitigation: identify a fallback aggregator host before 2026-06-21 submission; monitor health.
+- ⚠️ **The cached subdomain (`cdn.<domain>`) must live on an ICANN TLD** — `.sui` names are not in DNS and cannot be proxied by Cloudflare. This makes purchasing `tusk3d.xyz` (or equivalent) mandatory, not optional. SuiNS `.sui` names remain usable for the marketing/landing surface but cannot serve the CDN path.
+- 🔮 Method B migration when triggered: Worker bound to the same `cdn.<domain>`, frontend untouched (config var). Plan-018 explicitly enumerates the triggers.
+
+### Related
+- Plan: `docs/plans/2026-05-28-018-feat-walrus-cdn-read-cache-plan.md`
+- Memory: `project_walrus_read_cdn_method_a.md`
+- Depends on: D-068 (Tusk3D / `tusk3d.xyz` provides the ICANN domain this CDN path needs)
+
+---
+
+## D-070: Frontend hosting = Vercel / Cloudflare Pages; Walrus Sites deployment is out of scope for hackathon submission
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 — pre-submission scope
+
+### Context
+Mid-discussion on 2026-05-28, a proposal surfaced to deploy the Tusk3D frontend to **Walrus Sites** (with optional SuiNS `.sui` name resolution via wal.app portal or self-hosted portal) as a "Sui-native flex" for the Walrus track. The instinct behind this — that the Walrus track rewards visible Walrus usage — is correct, but the proposal pushes the native-story bet onto the wrong layer.
+
+The setup cost is non-trivial during a 23-day hackathon sprint:
+1. Walrus Sites give you a **b36 URL** (~50-character base36 string) that is unreadable / unspeakable in a live demo. SuiNS resolution makes it nicer but adds another moving part to register, fund, and verify.
+2. Walrus blobs have **epoch expiry** (2-week mainnet epochs); insufficiently-funded storage means the site can vanish overnight. This is a demo-day risk that traditional hosting doesn't have.
+3. Either depends on **wal.app portal availability** (third-party SPOF) or requires running a **self-hosted portal** on a VPS (additional infra to maintain during the sprint).
+4. None of the above is perceptible to evaluators looking at the demo. A site is a site.
+
+Meanwhile the *real* Walrus-native technical depth lives in the data layer:
+- 3D model GLBs stored as Walrus blobs (the asset surface, with the L1/L2/L3 economy on top)
+- Move contract `model3d::model3d` managing ownership / licensing / derivative composition
+- Sui object as the on-chain index for each Model3D
+- Walrus aggregator reads accelerated via Cloudflare CDN (see [D-069])
+
+Those three pieces collectively make the "Sui-native" case at evaluation time. Frontend hosting contributes ~0% of the technical depth and ~100% of the setup friction.
+
+### Decision
+**Frontend ships on Vercel (or Cloudflare Pages) for the 2026-06-21 submission and 2026-07-20/21 demo day. Walrus Sites deployment is explicitly out of scope for v1.** The "Sui-native" narrative is owned by the data layer (Walrus blob storage of models, Move contract, Sui object index, Cloudflare-CDN-accelerated Walrus reads), not by the hosting layer. Pitch / demo language acknowledges this gap verbally rather than paying setup cost for it (see Consequences for the demo-talking-track verbatim).
+
+### Rationale
+- **b36 URL is a demo killer**: evaluators can't read, type, or remember it; SuiNS fixes the symptom but adds another component to register, fund, and maintain.
+- **Epoch expiry is a real demo-day risk**: Vercel doesn't disappear overnight; under-funded Walrus blobs can. Hackathon-stage projects should not absorb that variance.
+- **Native depth lives where there's actual technical content**: storing 3D model bytes on a decentralized, erasure-coded blob protocol with on-chain Move ownership is genuinely native. Static-site hosting on Walrus Sites is one bullet point with negligible technical depth — and the bullet point can be earned with a verbal claim.
+- **"Tell, don't host"**: a 12-second demo line ("our frontend currently hosts on Vercel for iteration speed, but because it's purely static, it's one site-builder command away from Walrus Sites for full on-chain hosting") buys ~90% of the perceived native-ness at 0% of the setup cost. Evaluators do not inspect HTTP headers during judging.
+- **Time saved goes into core demo polish**: the 2-4 hours that would have gone to site-builder CLI, portal setup, SuiNS registration, and epoch-management testing redeploys into pitch-deck polish, demo-video editing, and model-loading performance verification.
+
+### Alternatives Considered
+- **Walrus Sites + SuiNS (`tusk3d.sui` via wal.app portal)** — pure Sui-native flex but high setup cost, b36-URL-via-portal ergonomics still flaky, wal.app SPOF, epoch-expiry risk; rejected per rationale.
+- **Walrus Sites + self-hosted portal on `tusk3d.xyz`** — eliminates wal.app SPOF and gives a clean URL, but VPS + Caddy + portal binary is 2+ hours of sprint-stage infra work; rejected because evaluator-perceived value is still ~zero.
+- **Walrus Sites with bare b36 URL** — cheapest Walrus-Sites option; rejected because the URL is unusable in any demo / pitch context.
+- **Vercel deployment + verbal native claim** — selected: 5-minute setup, clean URL (`tusk3d.vercel.app` or `tusk3d.xyz` fronting Vercel via Cloudflare), zero demo-day risk, and the native-story line is rhetorically as strong as actually doing it because no evaluator audits the host.
+
+### Consequences
+- ✅ Frontend setup is a `git push` away; iteration speed is preserved through demo day.
+- ✅ Demo URL is clean and memorable (`tusk3d.xyz` → Cloudflare → Vercel, or `tusk3d.vercel.app`).
+- ✅ Zero epoch / portal / SuiNS dependency on the host critical path; one less failure mode during the 2026-06-21 → 2026-07-21 evaluator window.
+- ✅ **Verbal native-story template (for pitch / demo)**: *"Our frontend currently hosts on Vercel for iteration speed, but because it's purely static, it's one site-builder command away from Walrus Sites for full on-chain hosting. Where Walrus actually carries our weight is the 3D-model layer — that's where the bytes live, and that's where Cloudflare accelerates them globally."*
+- ⚠️ A judge with extreme dogmatic preference for end-to-end Sui-native deployment could perceive Vercel as web2-dependent. Mitigation: the verbal claim above acknowledges and contextualizes the choice on the spot; the post-submission v1.1 roadmap can include "migrate static frontend to Walrus Sites" as a 1-day item.
+- 🔮 Post-hackathon (if traction warrants), a Walrus Sites migration is a 1-day task: `site-builder publish ./dist`, point SuiNS, swap DNS. The decision can be revisited without architectural impact.
+
+### Related
+- D-068 (product = Tusk3D; the same `tusk3d.xyz` ICANN domain that fronts Vercel also fronts the CDN per D-069)
+- D-069 (Walrus read-path CDN; the Walrus-native technical depth this ADR points at)
+- Plan: `docs/plans/2026-05-28-018-feat-walrus-cdn-read-cache-plan.md` (scope-cross-reference section added)
+- Memory: `project_frontend_host_not_walrus_sites.md`
+
+---
+
 # Reserved Decision Numbers
 
-D-068 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-071 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
