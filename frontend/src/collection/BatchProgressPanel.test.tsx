@@ -7,11 +7,11 @@ afterEach(() => cleanup());
 
 describe('BatchProgressPanel', () => {
   describe('pre-flight breakdown (stage === "idle")', () => {
-    // formula: totalTxs(N) = 2 * ceil(N/QUILT_SIZE) + 1
-    it('4 variants → 1 quilt → 3 transactions', () => {
+    // formula: totalTxs(N) = 2 * ceil(N/QUILT_SIZE) + 1; QUILT_SIZE=2.
+    it('2 variants → 1 quilt → 3 transactions (boundary: exactly QUILT_SIZE)', () => {
       render(
         <BatchProgressPanel
-          variantCount={4}
+          variantCount={2}
           stage="idle"
           batchIndex={0}
           batchTotal={1}
@@ -22,43 +22,56 @@ describe('BatchProgressPanel', () => {
       expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('3');
     });
 
-    it('5 variants → 2 quilts → 5 transactions', () => {
+    it('4 variants → 2 quilts → 5 transactions', () => {
+      render(
+        <BatchProgressPanel
+          variantCount={4}
+          stage="idle"
+          batchIndex={0}
+          batchTotal={2}
+          txDigests={[]}
+        />,
+      );
+      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('5');
+    });
+
+    it('5 variants → 3 quilts (boundary: chunk-not-full) → 7 transactions', () => {
       render(
         <BatchProgressPanel
           variantCount={5}
           stage="idle"
           batchIndex={0}
-          batchTotal={2}
+          batchTotal={3}
           txDigests={[]}
         />,
       );
-      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('5');
+      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('7');
     });
 
-    it('6 variants → 2 quilts (boundary) → 5 transactions', () => {
+    it('6 variants → 3 quilts → 7 transactions', () => {
       render(
         <BatchProgressPanel
           variantCount={6}
           stage="idle"
           batchIndex={0}
-          batchTotal={2}
+          batchTotal={3}
           txDigests={[]}
         />,
       );
-      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('5');
+      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('7');
     });
 
-    it('8 variants → 2 quilts → 5 transactions (AE2 visible UX)', () => {
+    it('8 variants → 4 quilts → 9 transactions (AE2 visible UX)', () => {
       render(
         <BatchProgressPanel
           variantCount={8}
           stage="idle"
           batchIndex={0}
-          batchTotal={2}
+          batchTotal={4}
           txDigests={[]}
         />,
       );
-      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('5');
+      expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('9');
     });
 
     it('1 variant → 1 quilt → 3 transactions, plural handling reads "1 transaction" not "1 transactions"', () => {
@@ -94,15 +107,18 @@ describe('BatchProgressPanel', () => {
       expect(screen.getByTestId('batch-progress-tx-total').textContent).toBe('1');
     });
 
-    it('totalTxsFor returns the canonical formula values', () => {
+    it('totalTxsFor returns the canonical formula values (QUILT_SIZE=2)', () => {
+      // totalTxs(N) = 2 × ceil(N/2) + 1
       expect(totalTxsFor(0)).toBe(1);
       expect(totalTxsFor(1)).toBe(3);
-      expect(totalTxsFor(4)).toBe(3);
-      expect(totalTxsFor(5)).toBe(5);
-      expect(totalTxsFor(6)).toBe(5);
-      expect(totalTxsFor(7)).toBe(5);
-      expect(totalTxsFor(8)).toBe(5);
-      expect(totalTxsFor(9)).toBe(7);
+      expect(totalTxsFor(2)).toBe(3);
+      expect(totalTxsFor(3)).toBe(5);
+      expect(totalTxsFor(4)).toBe(5);
+      expect(totalTxsFor(5)).toBe(7);
+      expect(totalTxsFor(6)).toBe(7);
+      expect(totalTxsFor(7)).toBe(9);
+      expect(totalTxsFor(8)).toBe(9);
+      expect(totalTxsFor(9)).toBe(11);
     });
   });
 

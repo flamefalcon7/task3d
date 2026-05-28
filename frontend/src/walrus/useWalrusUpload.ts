@@ -5,13 +5,21 @@ import { getWalrusClient, type WalrusEnhancedClient } from './walrusClient';
 import { clearTrail, surfaceStaleTrail, writeDiag } from './uploadTrail';
 
 // plan-017 U1 / D-062 — multi-quilt batching size. N variants chunked into
-// K = ⌈N/4⌉ quilts of up to 4 each. The inner SDK Promise.all over a
-// QUILT_SIZE-sized chunk peaks at ~120 MB during encodeQuilt — fits inside
-// V8's 4 GB ceiling even with sibling-tab pressure + Babylon scene (which
-// U2/U3 dispose during this window). If AE2 still OOMs on user's Brave,
-// drop to 2 (no architecture impact; only the constant changes).
+// K = ⌈N/QUILT_SIZE⌉ quilts.
+//
+// Originally 4 (plan budget assumed ~120 MB encode peak per quilt). User
+// AE2 testing on 2026-05-28 evening revealed the real encode peak scales
+// with per-variant GLB size, which itself scales with the base's
+// `paintable_count` (=segmented mesh count from plan-013). Empirical data:
+//   - shuriken (3 paintable) × 8 variants: ✅ at QS=4
+//   - pickup truck (14 paintable) × 5 variants: ✅ at QS=4
+//   - pickup truck (14 paintable) × 8 variants: ❌ V8 OOM at 4 GB at QS=4
+//   - sport car seg × 8 variants: ❌ V8 OOM at QS=4
+// Lowered to 2 to cover the complex-base × 8-variant envelope. Trade-off:
+// Slush popups double (5 → 9 for 8 variants). Plan-018 candidate: backend
+// mesh decimation in swap pipeline so QS=4 fits all bases again.
 // Exported so the UI (BatchProgressPanel — U4) computes the same K.
-export const QUILT_SIZE = 4;
+export const QUILT_SIZE = 2;
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
