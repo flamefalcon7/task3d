@@ -272,7 +272,13 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
       // Flush Babylon's effect/material caches so GPU memory returns to
       // the driver on macOS Metal (and other backends where scene.dispose
       // alone doesn't release VBO/texture allocations promptly).
-      engine.wipeCaches(true);
+      //
+      // Guard against the engine having already been disposed by the
+      // outer engine effect's cleanup — React 19's unmount-on-delete
+      // does not strictly run cleanups in reverse declaration order,
+      // and wipeCaches on a disposed engine throws inside
+      // Engine.unbindAllAttributes ("Cannot set 'active' of undefined").
+      if (!engine.isDisposed) engine.wipeCaches(true);
     };
   }, [mounted]);
 

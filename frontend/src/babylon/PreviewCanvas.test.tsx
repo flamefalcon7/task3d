@@ -54,6 +54,7 @@ const state: {
 
 vi.mock('@babylonjs/core', () => {
   class Engine {
+    isDisposed = false;
     constructor(..._a: unknown[]) {
       state.engineCtor();
     }
@@ -63,6 +64,7 @@ vi.mock('@babylonjs/core', () => {
       state.engineWipeCaches();
     }
     dispose() {
+      this.isDisposed = true;
       state.engineDispose();
     }
   }
