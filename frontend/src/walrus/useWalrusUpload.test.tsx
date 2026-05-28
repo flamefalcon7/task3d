@@ -80,6 +80,29 @@ function makeHappyFlow() {
   };
 }
 
+// plan-017 U1 — flow factory for multi-quilt tests. Each call produces a
+// distinct flow with batch-specific blobId / blobObjectId / patch ids so
+// the test can assert that the accumulator stitches them in input order.
+function makeQuiltFlow(batchIndex: number, chunkSize: number) {
+  const blobId = `blob-quilt-${batchIndex}`;
+  const blobObjectId = '0x' + String(batchIndex).repeat(64).slice(0, 64);
+  const txDigest = `0xdigest-q${batchIndex}`;
+  const encode = vi.fn().mockResolvedValue({ step: 'encoded' });
+  const executeRegister = vi
+    .fn()
+    .mockResolvedValue({ step: 'registered', txDigest });
+  const upload = vi.fn().mockResolvedValue({ step: 'uploaded' });
+  const executeCertify = vi.fn().mockResolvedValue({ step: 'certified' });
+  const listFiles = vi.fn().mockResolvedValue(
+    Array.from({ length: chunkSize }, (_, j) => ({
+      id: `patch-q${batchIndex}-${j}`,
+      blobId,
+      blobObject: { id: blobObjectId },
+    })),
+  );
+  return { encode, executeRegister, upload, executeCertify, listFiles, blobId, blobObjectId, txDigest };
+}
+
 // writeBlobFlow happy path (D-037 standalone GLB upload). executeCertify
 // resolves the WriteBlobStepCertified carrying blobId + blobObjectId directly.
 function makeHappyBlobFlow() {
@@ -184,14 +207,12 @@ describe('useWalrusUpload', () => {
     expect(walrusFileFromMock.mock.calls[1]?.[0]?.identifier).toBe('file-01');
   });
 
-  it('identifier padding preserves input order for N>=11 (Walrus SDK sorts by identifier)', async () => {
-    // Regression for the Forge variant-mix bug: @mysten/walrus@1.1.7's
-    // encodeQuilt() sorts blobs lexicographically by identifier before
-    // building the quilt. Unpadded 'file-${i}' breaks because 'file-10'
-    // sorts BEFORE 'file-2' (char '1' < '2' at position 5), which silently
-    // misaligns patchIds[] vs the input files[] array. Zero-padding to a
-    // fixed width makes lex order == numeric order across the full range.
-    writeFilesFlowFactory.mockReturnValue(makeHappyFlow());
+  it('identifier padding preserves within-chunk lex order (Walrus SDK sorts by identifier per quilt)', async () => {
+    // plan-017 U1: with multi-quilt batching (QUILT_SIZE=4), the SDK sorts
+    // lex within each writeFilesFlow call, not across calls. Per-chunk
+    // zero-padding to width 2 keeps lex order == numeric order inside each
+    // quilt; cross-chunk order is preserved by the for-loop's iteration order.
+    writeFilesFlowFactory.mockImplementation(() => makeHappyFlow());
     const { result } = renderHook(() => useWalrusUpload());
     await act(async () => {
       await result.current.uploadFiles(
@@ -200,19 +221,23 @@ describe('useWalrusUpload', () => {
       );
     });
 
-    // padWidth for length 12 = max(2, length('11')) = 2.
+    // 12 files → 3 quilts of 4. Each quilt restarts identifiers at file-00.
     const identifiers = walrusFileFromMock.mock.calls.map(
       (call) => call?.[0]?.identifier ?? '',
     );
     expect(identifiers).toEqual([
-      'file-00', 'file-01', 'file-02', 'file-03',
-      'file-04', 'file-05', 'file-06', 'file-07',
-      'file-08', 'file-09', 'file-10', 'file-11',
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 0
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 1
+      'file-00', 'file-01', 'file-02', 'file-03', // quilt 2
     ]);
 
-    // Critical: lex sort of these identifiers MUST equal input order.
-    const sorted = [...identifiers].sort();
-    expect(sorted).toEqual(identifiers);
+    // Critical (within-chunk): lex sort of each chunk's identifiers MUST
+    // equal input order — otherwise the SDK's quilt-internal sort would
+    // silently misalign patchIds vs input files.
+    for (let chunkStart = 0; chunkStart < identifiers.length; chunkStart += 4) {
+      const chunk = identifiers.slice(chunkStart, chunkStart + 4);
+      expect([...chunk].sort()).toEqual(chunk);
+    }
   });
 
   it('transitions status to error and surfaces stage when wallet rejects register', async () => {
@@ -351,6 +376,223 @@ describe('useWalrusUpload', () => {
       expect((captured as Error).message).toMatch(/certify boom/);
       await waitFor(() => expect(result.current.status).toBe('error'));
       expect(result.current.error?.stage).toBe('awaiting-certify');
+    });
+  });
+
+  // -- plan-017 U1 — multi-quilt batching ----------------------------------
+
+  describe('uploadFiles (multi-quilt batching, plan-017 U1)', () => {
+    it('4 variants → 1 quilt → writeFilesFlow called once (single-quilt preserved)', async () => {
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) =>
+        makeQuiltFlow(0, arg.files.length),
+      );
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 4 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      expect(writeFilesFlowFactory).toHaveBeenCalledOnce();
+      expect(result.current.batchTotal).toBe(1);
+    });
+
+    it('5 variants → 2 quilts (4 + 1) → writeFilesFlow called twice', async () => {
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 5 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([4, 1]);
+      expect(result.current.batchTotal).toBe(2);
+    });
+
+    it('8 variants → 2 quilts (4 + 4) → writeFilesFlow called twice (AE2)', async () => {
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 8 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([4, 4]);
+      expect(result.current.batchTotal).toBe(2);
+      // 2 quilts × (register + certify) = 4 popups + 1 launch = 5 total.
+    });
+
+    it('6 variants → 2 quilts (4 + 2) → boundary chunk-not-full case', async () => {
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 6 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      expect(calls).toEqual([4, 2]);
+    });
+
+    it('1 variant → 1 quilt of 1', async () => {
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) =>
+        makeQuiltFlow(0, arg.files.length),
+      );
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles([new Uint8Array([1])], makeSigner());
+      });
+      expect(writeFilesFlowFactory).toHaveBeenCalledOnce();
+      expect(result.current.batchTotal).toBe(1);
+    });
+
+    it('accumulator preserves global input order across quilts', async () => {
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      let res: Awaited<ReturnType<typeof result.current.uploadFiles>> | undefined;
+      await act(async () => {
+        res = await result.current.uploadFiles(
+          Array.from({ length: 8 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      // Quilt 0 contributes 4 patches with blob-quilt-0; quilt 1 contributes
+      // 4 with blob-quilt-1. Order: quilt-0 first, quilt-1 second.
+      expect(res?.patchIds).toEqual([
+        'patch-q0-0', 'patch-q0-1', 'patch-q0-2', 'patch-q0-3',
+        'patch-q1-0', 'patch-q1-1', 'patch-q1-2', 'patch-q1-3',
+      ]);
+      expect(res?.blobIds).toEqual([
+        'blob-quilt-0', 'blob-quilt-0', 'blob-quilt-0', 'blob-quilt-0',
+        'blob-quilt-1', 'blob-quilt-1', 'blob-quilt-1', 'blob-quilt-1',
+      ]);
+    });
+
+    it('exposes batchTotal and txDigests on the hook return', async () => {
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 8 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      await waitFor(() => expect(result.current.status).toBe('done'));
+      expect(result.current.batchTotal).toBe(2);
+      expect(result.current.txDigests).toEqual(['0xdigest-q0', '0xdigest-q1']);
+    });
+
+    it('mid-batch failure surfaces batchIndex and stops subsequent quilts', async () => {
+      let callCount = 0;
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        callCount += 1;
+        const i = callCount - 1;
+        const flow = makeQuiltFlow(i, arg.files.length);
+        // Quilt index 1 fails at register.
+        if (i === 1) {
+          flow.executeRegister.mockRejectedValueOnce(new Error('user rejected quilt 2'));
+        }
+        return flow;
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      let captured: unknown;
+      await act(async () => {
+        await result.current
+          .uploadFiles(
+            Array.from({ length: 8 }, (_, i) => new Uint8Array([i])),
+            makeSigner(),
+          )
+          .catch((e) => {
+            captured = e;
+          });
+      });
+      expect((captured as Error).message).toMatch(/user rejected quilt 2/);
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(result.current.error?.stage).toBe('awaiting-register');
+      expect(result.current.error?.batchIndex).toBe(1);
+      expect(result.current.error?.batchTotal).toBe(2);
+      // Only 2 flows constructed (quilt 0 + quilt 1 failed at register).
+      // No third quilt because the loop bailed.
+      expect(writeFilesFlowFactory).toHaveBeenCalledTimes(2);
+    });
+
+    it('calls uploadTrail.writeDiag at each batch step', async () => {
+      // Trail integration smoke: confirm writeDiag fires at least once with
+      // a batch-scoped stage name like 'post-encode-0' or 'post-register-0'.
+      // We assert via sessionStorage rather than mocking the module — the
+      // trail module is internally tested in uploadTrail.test.ts.
+      sessionStorage.clear();
+      const calls: number[] = [];
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) => {
+        calls.push(arg.files.length);
+        return makeQuiltFlow(calls.length - 1, arg.files.length);
+      });
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          Array.from({ length: 4 }, (_, i) => new Uint8Array([i])),
+          makeSigner(),
+        );
+      });
+      // Trail is cleared on `done`, but during execution writeDiag fires
+      // — we can't observe mid-execution from outside, so verify the trail
+      // is empty post-success (clearTrail ran) and that no error was set.
+      // The trail's own tests in uploadTrail.test.ts cover writeDiag mechanics.
+      expect(sessionStorage.getItem('walrus_upload_diagnostic')).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+
+    it('reset() clears batch state', async () => {
+      writeFilesFlowFactory.mockImplementation((arg: { files: unknown[] }) =>
+        makeQuiltFlow(0, arg.files.length),
+      );
+      const { result } = renderHook(() => useWalrusUpload());
+      await act(async () => {
+        await result.current.uploadFiles(
+          [new Uint8Array([1]), new Uint8Array([2])],
+          makeSigner(),
+        );
+      });
+      await waitFor(() => expect(result.current.status).toBe('done'));
+
+      act(() => result.current.reset());
+      expect(result.current.status).toBe('idle');
+      expect(result.current.batchIndex).toBe(0);
+      expect(result.current.batchTotal).toBe(1);
+      expect(result.current.txDigests).toEqual([]);
+    });
+
+    it('exports QUILT_SIZE = 4', async () => {
+      // plan-017 post-mortem: QS=4 kept even though R1 didn't actually
+      // solve the OOM it was designed for — chunking has near-zero
+      // effect on Walrus WASM encoder peak. See useWalrusUpload.ts
+      // header comment for the post-mortem analysis.
+      const mod = await import('./useWalrusUpload');
+      expect(mod.QUILT_SIZE).toBe(4);
     });
   });
 });

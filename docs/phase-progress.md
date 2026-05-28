@@ -1,13 +1,85 @@
 # Phase Progress
 
-## Last Updated: 2026-05-28 / Evening (plan-017 walrus-OOM-fix — **PLAN READY, ce-work not yet started**: ce-debug confirmed root cause via Brave minidump V8 GC trace, brainstorm written + committed, plan-017 written + committed + 3-reviewer review pass + 10 fixes applied. 3 commits on main. **Next session = `/ce-work` against plan-017** (6 units, ~4-5 hr; S1=U1/U2/U6 foundation, S2=U3/U4/U5 UI+verification on user's Brave).)
+## Last Updated: 2026-05-28 / Night (plan-017 walrus-OOM-fix — **SHIPPED AS-IS, complex-base OOM open + mentor consult pending**: AE2 testing revealed R1 multi-quilt batching is functionally inert against the encoder OOM; root cause is total-bytes × 85-100x encoder multiplier, not chunk count. shuriken × 8 (35 MB) passes, pickup truck × 8 (46 MB) crashes regardless of QUILT_SIZE. R2/R4/R5/R6 plan-017 work landed cleanly + actively useful. R1 kept (functional but inert) for demo UX storytelling. Detailed investigation + 6 open questions for Walrus team filed at `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md`. **Next session(s) = (a) mentor consult; (b) demo prep with shuriken (= verified passing base).**)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
 
 ---
 
-### Plan-017 walrus-OOM-fix — PLAN READY (this session, 2026-05-28 evening)
+### Plan-017 walrus-OOM-fix — CE-WORK COMPLETE (this session, 2026-05-28 evening continued)
+
+After preparing plan-017 earlier in the day, ran `/ce-work` against it in a single session. Branch `fix/walrus-oom` carries 8 commits implementing all 6 units + ADRs + post-smoke hotfix.
+
+**Branch commits (`main..fix/walrus-oom`):**
+- 95268f1 — U6 uploadTrail sessionStorage breadcrumb (13 tests)
+- be84622 — U2 PreviewCanvas dispose/remount handle (5 new tests + mock extension)
+- ddcf4a5 — U1 multi-quilt batching in useWalrusUpload (12 new tests, identifier-padding test updated for per-chunk semantics)
+- fb6c88f — U3 LaunchCollectionPage Babylon lifecycle wire-up via VariantPreview ref forwarding (4 new tests; vi.hoisted mock state)
+- 795377b — U4 BatchProgressPanel multi-quilt UX (19 tests; pre-flight breakdown + stepped progress + orphan-blob warning + Suiscan links)
+- 1785f09 — U5 MemoryPressureBanner pre-flight warning with hysteresis (9 tests; recheckSignal re-fires on LAUNCH click)
+- ac5d178 — ADRs D-062..D-065 in docs/decisions.md
+- f64b7e6 — hotfix from agent-browser smoke: `engine.wipeCaches` guard against `engine.isDisposed`. React 19's component-delete cleanup path doesn't strictly run useEffect cleanups in reverse declaration order; the engine effect's cleanup can run before the scene effect's cleanup, throwing inside `Engine.unbindAllAttributes`. Added `isDisposed` check + test mock update.
+
+**Verification done in-session:**
+- ✅ 652/652 frontend tests (61 new across U1–U6)
+- ✅ `tsc --noEmit` zero new errors
+- ✅ agent-browser smoke on `/launch`: test wallet auto-signs in, base picker renders 3 forkable models with PreviewCanvas thumbnails. No render crash, no error boundary. (Hotfix f64b7e6 was needed before this passed.)
+
+**Verification pending user-side:**
+- ⏳ **AE2 killer check**: user manually loads `/launch` on their actual Brave (10+ sibling tabs, Slush extension, ~3 GB baseline heap), configures 8 variants, clicks LAUNCH. Expected: no renderer crash. 4 Slush popups (2 quilts × register+certify) + 1 launch popup = 5 total signatures. BatchProgressPanel should surface the structure. MemoryPressureBanner may fire pre-LAUNCH given the user's typical baseline.
+- ⏳ Stale-trail console surface check: trigger an intentional pre-fix-state crash (or simulate by writing `sessionStorage['walrus_upload_diagnostic']` + reloading), confirm `[WALRUS CRASH DIAGNOSTIC]` appears in DevTools on next /launch mount.
+- ⏳ If AE2 fails (renderer still crashes at 8 variants), fallback: `QUILT_SIZE = 2` in `frontend/src/walrus/useWalrusUpload.ts` (one-line change). 8 variants becomes 4 quilts → 8 popups + 1 launch = 9 sigs. Update U4 test math + re-run.
+
+**Plan unit metadata preserved:**
+- U1 / R1, R3 / D-062: multi-quilt batching with `QUILT_SIZE=4`, exposed in UX
+- U2 / R2 / D-063: PreviewCanvas dispose via useImperativeHandle, engine stays alive
+- U3 / R2: LaunchCollectionPage previewRef wire-up (VariantPreview accepts ref prop, threads to inner PreviewCanvas)
+- U4 / R6: BatchProgressPanel — pre-flight breakdown + per-quilt stepped progress + Suiscan links + partial-failure orphan-blob warning
+- U5 / R4 / D-064: MemoryPressureBanner — 2.5 GB ON / 2.2 GB OFF hysteresis, recheckSignal on LAUNCH click
+- U6 / R5 / D-065: uploadTrail — sessionStorage (not localStorage), queueMicrotask defer, in-memory cache to prevent race, surface-once-per-page-load guard
+
+**5-reviewer P1 sweep (commit f65076d, after ce-work):**
+- 5 parallel reviewers (ce-correctness, ce-testing, ce-api-contract, ce-adversarial, ce-julik-frontend-races) ran against `main..fix/walrus-oom`. 45 findings total, 11 P1s with overlap.
+- Dedup'd 5 P1s, all fixed:
+  - **P1-A** (3 reviewers): extend `engine.isDisposed` guard to whole scene-effect cleanup body (the original hotfix only guarded the explicit outer `wipeCaches` call; `scene.dispose()` internally calls `wipeCaches` per Babylon `scene.js:4748`, same crash class)
+  - **P1-B** (adversarial): add `await new Promise(r => setTimeout(r, 0))` between multi-quilt chunks — V8's opportunistic major-GC may not reclaim previous chunk's encode buffer without a task-queue boundary; without this fix the heap envelope this plan was designed around (~120 MB/chunk) doubles to ~240 MB transient peak, defeating the OOM fix itself on the very Brave that motivated it
+  - **P1-C** (adversarial): one-time `performance.memory` probe logged on `/launch` mount so user can verify on actual Brave whether fingerprint protection is capping the heap reading (if it is, R4 banner never fires regardless of real memory pressure — known Brave behavior is `~10 MB cap` in some profiles)
+  - **P1-D** (correctness): `stepStatusForRegister` was falling through to `'done'` on `stage='error'`, painting ✓ green-check on a tx that never landed. Added `errorStage` prop threading `UploadError.stage` so register row shows ✗ on register-failure, ✓ + Suiscan link on certify-failure-after-register-success. New `StepStatus = 'error'` + ✗ glyph.
+  - **P1-E** (correctness): tighten pre-flight panel render gate to exclude `phase === 'error'` — `busy` doesn't cover error, so without the explicit guard both pre-flight ("you'll sign N transactions") AND progress panels rendered simultaneously with contradictory copy
+- **Deferred P2/P3** (not blockers): stale uploadError state flashes on retry, orphan-blob warning undercount on register-success-certify-failure (partially mitigated by errorStage threading), `clearTrail()` on caught error wipes diagnostic, 5 PreviewCanvas test mocks not migrated to forwardRef, `popupCount` semantic change without rename. Plan-doc inaccuracy: §System-Wide-Impact claims preserved stage names that differ from actual code (real names kept — plan was misremembered). All captured for follow-up.
+
+**AE2 post-mortem (2026-05-28 night session, after the 5-reviewer P1 sweep):**
+
+Tested AE2 on user's real Brave with both shuriken and pickup truck × 8 variants. Three QUILT_SIZE values tested empirically (4 → 2 → 16 single-quilt). All three produce identical V8 OOM signatures on pickup truck × 8. **Multi-quilt batching does not save the encoder OOM it was designed for.**
+
+Hard data:
+- shuriken (3 paintable, 4.40 MB/variant) × 8 = 35 MB total → ✅ passes at any QS (17.8s encode)
+- pickup truck (14 paintable, 5.80 MB/variant) × 8 = 46 MB total → ❌ V8 OOM at any QS
+- sport car seg × 8 → ❌ V8 OOM at any QS
+
+Working theory: `@mysten/walrus-wasm` Reed-Solomon encoder allocates working memory proportional to total quilt input × ~85-100× constant (likely a sliver-matrix materialization step that scales with shard count). Chunk count is independent of this peak.
+
+**What's shipped on `fix/walrus-oom` and merged:** plan-017 in its entirety (R1-R6) plus a 5-reviewer P1 sweep (commit f65076d) plus post-mortem cleanup (commit 4b2e542). R1's multi-quilt path is functionally inert against the OOM but kept for UX storytelling. R2/R4/R5/R6 deliver real value.
+
+**ADRs added in post-mortem:** D-066 (restore QS=4 after testing all values), D-067 (encoder-memory-cliff finding supersedes D-062 premise).
+
+**Mentor consult brief:** `docs/solutions/integration-issues/walrus-encoder-oom-investigation-2026-05-28.md` — full investigation record + 6 specific questions for Walrus team. User will raise these at upcoming hackathon mentor office hours.
+
+**Demo strategy:** shuriken (verified passing). Complex bases documented as v1.1 work in README. The Walrus-track positioning beat (BatchProgressPanel showing "8 variants → 2 quilts → 5 transactions") still works for shuriken at any QS.
+
+**User-explicitly-declined paths** (don't re-propose without new evidence):
+- Backend mesh decimation to shrink variants. User: "我不想犧牲 model 品質" — don't pursue without mentor confirmation that there's no other way.
+
+---
+
+**Engineering posture observations (for next session if any drift):**
+- Both `editorState.variants.length > QUILT_SIZE` checks in LaunchCollectionPage drive conditional UX (pre-flight panel + in-progress panel). If we change the variant cap from 8, need to revisit the multi-quilt UX threshold story.
+- The U6 module-scope `surfacedThisLoad` guard means only ONE useWalrusUpload mount per page load surfaces a stale trail. CreateModelPage and LaunchCollectionPage both mount useWalrusUpload; whichever mounts first wins. Acceptable for v1.
+
+---
+
+### Plan-017 walrus-OOM-fix — PLAN READY (earlier this session, 2026-05-28 evening)
 
 After plan-016 wrap-up, user surfaced "what about the original Walrus crash issue?" Triggered `/ce-debug` for root-cause analysis. Brave minidump `b69ca99a-…ead.dmp` at 2026-05-28 09:53:41 caught the V8 GC signature `Mark-Compact 3997.3 / 4000.5 MB, mu=0.003, last resort` — confirms **V8 heap exhaustion**, not Slush, not Brave Wallet, not dapp-kit IPC, not extension interception. User's dose-response observation (5 variants OK, 8 crash) matches OOM exactly. All 11 prior debug-branch hypotheses (RPC swap, GPU collapse, prewarm) falsified.
 

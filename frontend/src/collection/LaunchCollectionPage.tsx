@@ -28,7 +28,9 @@ import type {
 import { useSession } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
-import { useWalrusUpload } from '../walrus/useWalrusUpload';
+import { QUILT_SIZE, useWalrusUpload } from '../walrus/useWalrusUpload';
+import { BatchProgressPanel } from './BatchProgressPanel';
+import { MemoryPressureBanner } from './MemoryPressureBanner';
 import {
   VariantEditor,
   LEGACY_LABEL,
@@ -52,7 +54,7 @@ import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders'
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
-import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import { glbUrlForSummary } from '../walrus/aggregator';
 import {
   buttonOutline,
@@ -341,7 +343,14 @@ export function LaunchCollectionPage() {
   // separate account read here; session.address is the source of truth
   // post-sign-in.
   const { signer, loadError: signerLoadError } = useAppSigner();
-  const { uploadFiles, stage: uploadStage } = useWalrusUpload();
+  const {
+    uploadFiles,
+    stage: uploadStage,
+    batchIndex: uploadBatchIndex,
+    batchTotal: uploadBatchTotal,
+    txDigests: uploadTxDigests,
+    error: uploadError,
+  } = useWalrusUpload();
   const suiClient = useSuiClient();
   const { models, loading: modelsLoading } = useModelIndex();
 
@@ -548,12 +557,33 @@ export function LaunchCollectionPage() {
   // wallet-popup interstitial to serialize clicks). useRef flips
   // synchronously, so the second invocation early-returns immediately.
   const launchingRef = useRef(false);
+  // plan-017 U5 — bumped on every LAUNCH click so MemoryPressureBanner
+  // re-checks heap pressure and re-surfaces if still over threshold even
+  // when the user dismissed it earlier in the session.
+  const [memoryRecheckSignal, setMemoryRecheckSignal] = useState(0);
+  // plan-017 U3 — imperative handle on the main VariantPreview canvas so
+  // onLaunch can free its Babylon scene during the Walrus upload window.
+  // ~200–400 MB of Babylon heap (meshes, materials, textures, observers)
+  // drops out of the OOM danger zone while the SDK's encodeQuilt Promise.all
+  // runs over each 4-variant chunk. Restored in the finally block whether
+  // upload succeeded, failed, or was cancelled.
+  const previewRef = useRef<PreviewCanvasHandle | null>(null);
   const onLaunch = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base || !baseGlb) return;
+    // plan-017 U5 — fresh memory check on LAUNCH click. If the heap is
+    // still over threshold the banner re-surfaces even after a prior
+    // dismiss. Bump synchronously (cheap; just a setState).
+    setMemoryRecheckSignal((n) => n + 1);
     launchingRef.current = true;
     setErrorMsg(null);
     setPhase('building-variants');
+    // Free the Babylon scene BEFORE runBuildVariants starts allocating the
+    // material-swap GLBs and BEFORE uploadFiles encodes them into quilts.
+    // Engine stays alive (avoids WebGL context loss); only scene/HL/observers
+    // are disposed. remount() in finally restores the scene for the
+    // post-launch success or error UI.
+    previewRef.current?.dispose();
     try {
       const swapped = await runBuildVariants();
 
@@ -603,6 +633,10 @@ export function LaunchCollectionPage() {
       setPhase('error');
     } finally {
       launchingRef.current = false;
+      // Always remount the Babylon scene — success path lands on the
+      // share/copy UI which doesn't need it, but the error path returns
+      // the user to the authoring flow with the preview restored.
+      previewRef.current?.remount();
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
@@ -873,6 +907,7 @@ export function LaunchCollectionPage() {
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
         <TestWalletBanner error={signerLoadError} />
+        <MemoryPressureBanner recheckSignal={memoryRecheckSignal} />
         <div style={headerStack}>
           <span style={eyebrow}>— L2 / MINT</span>
           <h1 style={displayHeadline}>Launch a collection.</h1>
@@ -1042,6 +1077,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
+                previewRef={previewRef}
               />
               <div style={previewSideRail}>
                 <MeshInfoPanel
@@ -1093,6 +1129,29 @@ export function LaunchCollectionPage() {
               disabled={busy}
             />
 
+            {/* plan-017 U4 — pre-flight breakdown. Only shown when multi-
+                quilt is in play (N > QUILT_SIZE) AND we haven't started
+                launching yet. The pre-flight reads as a structure preview,
+                not status — once phase moves into the launch flow, the
+                stepped progress panel below replaces it.
+
+                plan-017 P1-E (review fix): `busy` covers only the in-flight
+                phases (uploading/signing/etc) — NOT 'error' or 'success'.
+                Without the explicit phase guard, an error state would render
+                BOTH the pre-flight panel and the progress panel
+                simultaneously, with contradictory copy. */}
+            {editorState.variants.length > QUILT_SIZE &&
+              !busy &&
+              phase !== 'success' &&
+              phase !== 'error' && (
+                <BatchProgressPanel
+                  variantCount={editorState.variants.length}
+                  stage="idle"
+                  batchIndex={0}
+                  batchTotal={Math.ceil(editorState.variants.length / QUILT_SIZE)}
+                  txDigests={[]}
+                />
+              )}
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -1118,12 +1177,30 @@ export function LaunchCollectionPage() {
               </button>
             </div>
             <p style={launchHelper}>SIGNS 3× · PAYS GAS · MINTS L2</p>
-            {/* Pill scopes to the SILENT Walrus phases only (encoding +
-                relay-upload). The wallet-popup stages already get a
-                dedicated launch-button label — duplicating "UPLOADING ...
-                TO WALRUS" both as button text and pill was flagged by
-                the correctness reviewer. */}
-            {phase === 'uploading' &&
+            {/* plan-017 U4 — Multi-quilt scope. When N > QUILT_SIZE, the
+                user signs 2K+1 transactions instead of the single-quilt 3.
+                BatchProgressPanel surfaces the quilt structure honestly so
+                the extra popups read as known protocol shape, not surprise
+                UX regression. Single-quilt path retains the existing pill. */}
+            {editorState.variants.length > QUILT_SIZE &&
+              (phase === 'uploading' || phase === 'signing' || phase === 'success' || phase === 'error') && (
+                <BatchProgressPanel
+                  variantCount={editorState.variants.length}
+                  stage={uploadStage}
+                  batchIndex={uploadBatchIndex}
+                  batchTotal={uploadBatchTotal}
+                  txDigests={uploadTxDigests}
+                  launchTxDigest={txDigest ?? undefined}
+                  launchInProgress={phase === 'signing'}
+                  errorBatchIndex={uploadError?.batchIndex}
+                  errorStage={uploadError?.stage}
+                />
+              )}
+            {/* Single-quilt path: existing pill (preserved minimal UX for the
+                N ≤ QUILT_SIZE case so the typical "3 quick variants" flow
+                doesn't get a multi-row progress block). */}
+            {editorState.variants.length <= QUILT_SIZE &&
+              phase === 'uploading' &&
               (uploadStage === 'encoding' || uploadStage === 'relay-upload') && (
                 <div>
                   <span style={uploadStatusPill} data-testid="upload-status-pill">
