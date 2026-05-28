@@ -219,7 +219,14 @@ describe('LaunchCollectionPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-blob-1'], blobObjects: [{ blobId: 'quilt-blob-1', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
-    signAndExecuteMock.mockResolvedValue({ digest: 'LAUNCHDIGEST' });
+    // plan-016 code-review hotfix — the AppSigner contract returns the SDK
+    // TransactionResult discriminated union; the pre-U7 {digest} flat shape
+    // is gone. Tests must mock the real shape so a future shape regression
+    // surfaces in tests instead of at smoke time.
+    signAndExecuteMock.mockResolvedValue({
+      $kind: 'Transaction',
+      Transaction: { digest: 'LAUNCHDIGEST' },
+    });
 
     renderPage();
     await act(async () => {
@@ -295,9 +302,15 @@ describe('LaunchCollectionPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-b'], blobObjects: [{ blobId: 'quilt-b', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
+    // plan-016 code-review hotfix — status.error is an ExecutionError object
+    // {message, command?}, not a string. Pre-hotfix code accessed it as a
+    // string which would have rendered '[object Object]' in the banner.
     signAndExecuteMock.mockResolvedValue({
       $kind: 'FailedTransaction',
-      FailedTransaction: { digest: '0xfail', status: { error: 'insufficient_gas' } },
+      FailedTransaction: {
+        digest: '0xfail',
+        status: { error: { message: 'insufficient_gas' } },
+      },
     });
 
     renderPage();
@@ -310,7 +323,11 @@ describe('LaunchCollectionPage', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('launch-error')).toBeTruthy());
-    expect(screen.getByTestId('launch-error').textContent).toMatch(/insufficient_gas|Launch tx failed/);
+    // Tightened (was: /insufficient_gas|Launch tx failed/). The disjunction
+    // let a regression silently drop status.error propagation and still pass
+    // via the generic "Launch tx failed" fallback. Asserting the exact
+    // error.message string locks the propagation path.
+    expect(screen.getByTestId('launch-error').textContent).toMatch(/insufficient_gas/);
   });
 
   // ----- plan-013 U7 — palette → partColors resolution (AE2, AE4) ----------
@@ -953,17 +970,19 @@ describe('LaunchCollectionPage', () => {
   // plan-016 U5 / R5 / AE2 — test-wallet missing-key banner. Renders the
   // wrapper hook's loadError message verbatim above the page content;
   // LAUNCH stays disabled via the existing signer-null check.
-  it('renders the missing-key banner with verbatim AE2 copy on the sign-in scaffold', () => {
+  it('renders the missing-key banner with verbatim AE2 copy + Vite restart hint on the sign-in scaffold', () => {
+    // plan-016 code-review hotfix — banner now includes ", then restart
+    // Vite (env vars are loaded at server start)" so devs don't sit
+    // stuck on the banner after editing .env.local without restarting
+    // pnpm dev. The verbatim match locks the user-visible string.
     useSessionMock.mockReturnValue({ session: null });
     useAppAccountMock.mockReturnValue(null);
-    mockSignerLoadError = new Error(
-      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local',
-    );
+    const expected =
+      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local, then restart Vite (env vars are loaded at server start)';
+    mockSignerLoadError = new Error(expected);
     renderPage();
     const banner = screen.getByTestId('test-wallet-banner');
-    expect(banner.textContent).toBe(
-      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local',
-    );
+    expect(banner.textContent).toBe(expected);
     expect(banner.getAttribute('role')).toBe('alert');
   });
 
@@ -981,5 +1000,76 @@ describe('LaunchCollectionPage', () => {
     mockSignerLoadError = null;
     renderPage();
     expect(screen.queryByTestId('test-wallet-banner')).toBeNull();
+  });
+
+  // plan-016 code-review hotfix — synchronous double-click guard. Two
+  // clicks within the same synchronous task should result in exactly ONE
+  // signAndExecuteMock invocation. The `busy` state alone doesn't protect
+  // because React state lags behind a synchronous click event; the useRef
+  // guard in onLaunch is the actual serializer.
+  it('LAUNCH double-click race: second synchronous click is a no-op (only one PTB sign)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-b'], blobObjects: [{ blobId: 'quilt-b', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
+    signAndExecuteMock.mockResolvedValue({
+      $kind: 'Transaction',
+      Transaction: { digest: 'ONLY_ONCE' },
+    });
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+
+    // Two synchronous clicks back-to-back; the ref guard inside onLaunch
+    // must serialize them so only one upload + sign chain runs.
+    await act(async () => {
+      const btn = screen.getByTestId('launch-button');
+      fireEvent.click(btn);
+      fireEvent.click(btn);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('launch-success')).toBeTruthy());
+    expect(signAndExecuteMock).toHaveBeenCalledTimes(1);
+    expect(uploadFilesMock).toHaveBeenCalledTimes(1);
+  });
+
+  // plan-016 code-review hotfix — exercise the "neither digest path"
+  // throw in onLaunch. If a future signer impl returns an unexpected
+  // shape (no Transaction property, no FailedTransaction), the page must
+  // surface a launch-error rather than silently leaving txDigest null.
+  // Note: the AppSigner contract is now the discriminated union, so this
+  // case is structurally precluded for compliant signers — the throw is
+  // defense-in-depth against `as` casts at future call sites.
+  it('LAUNCH surfaces launch-error when signer returns a shape with no digest at all', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    uploadFilesMock.mockResolvedValue({ blobIds: ['quilt-b'], blobObjects: [{ blobId: 'quilt-b', blobObjectId: '0xobj' }], patchIds: ['patch-0'] });
+    // Off-contract shape: neither $kind branch is set.
+    signAndExecuteMock.mockResolvedValue({} as unknown as { $kind: 'Transaction'; Transaction: { digest: string } });
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('launch-error')).toBeTruthy());
   });
 });

@@ -9,13 +9,32 @@
 // when the flag is unset, and ESLint blocks accidental imports from
 // outside frontend/src/wallet/* (see eslint.config.js, plan-016 U6).
 
+// plan-016 code-review hotfix — the wrapper hooks import THIS file
+// directly (`'../test-wallet/loadKeypair'`), not the public `./index`
+// barrel. The PROD throw originally lived in index.ts as a "belt against
+// accidental ship even if tree-shake fails" (D-061), but because nothing
+// in frontend/src/ ever imports index.ts the belt was dead code on the
+// real import graph. Moving the guard here means it fires on the
+// actually-imported module.
+if (import.meta.env.PROD) {
+  throw new Error(
+    'test-wallet/loadKeypair loaded in production build — refusing. ' +
+      'Build with VITE_TEST_WALLET unset; the wrapper hooks dead-eliminate ' +
+      'this import in production.',
+  );
+}
+
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 
 export class MissingTestWalletKeyError extends Error {
   override name = 'MissingTestWalletKey';
   constructor() {
     super(
-      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local',
+      // plan-016 code-review hotfix — append the Vite restart hint. Vite
+      // reads .env files only at server start; a dev who adds the key
+      // while pnpm dev is running will see the banner persist until they
+      // restart. The hint avoids the most common first-use friction.
+      'TEST_WALLET enabled but VITE_TEST_WALLET_KEY is missing — set it in .env.local, then restart Vite (env vars are loaded at server start)',
     );
   }
 }

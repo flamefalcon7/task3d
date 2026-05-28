@@ -19,7 +19,6 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSuiClient } from '@mysten/dapp-kit';
-import { useAppAccount } from '../wallet/useAppAccount';
 import { useAppSigner } from '../wallet/useAppSigner';
 import type {
   CollectionBuildRequest,
@@ -335,10 +334,12 @@ function TestWalletBanner({ error }: { error: Error | null }) {
 
 export function LaunchCollectionPage() {
   const { session, clearSession } = useSession();
-  const account = useAppAccount();
   // plan-016 U4/U5 — `signer` exposes the unified Signer interface;
   // `signerLoadError` is non-null only when VITE_TEST_WALLET=1 but the
   // key fails to load (missing or invalid). U5 banner uses its message.
+  // useSession internally calls useAppAccount, so we don't need a
+  // separate account read here; session.address is the source of truth
+  // post-sign-in.
   const { signer, loadError: signerLoadError } = useAppSigner();
   const { uploadFiles, stage: uploadStage } = useWalrusUpload();
   const suiClient = useSuiClient();
@@ -539,15 +540,33 @@ export function LaunchCollectionPage() {
     }
   }, [session, baseGlb, runBuildVariants]);
 
+  // plan-016 code-review hotfix — synchronous guard against double-click.
+  // `busy` is React state and the DOM disabled attr only updates after
+  // the next render; two clicks within ~16ms both pass the disabled check
+  // and dispatch concurrent onLaunch calls, submitting the launch PTB
+  // twice (the test-wallet path makes this easier because there's no
+  // wallet-popup interstitial to serialize clicks). useRef flips
+  // synchronously, so the second invocation early-returns immediately.
+  const launchingRef = useRef(false);
   const onLaunch = useCallback(async () => {
+    if (launchingRef.current) return;
     if (!session || !signer || !base || !baseGlb) return;
+    launchingRef.current = true;
     setErrorMsg(null);
     setPhase('building-variants');
     try {
       const swapped = await runBuildVariants();
 
       setPhase('uploading');
-      const upload = await uploadFiles(swapped, signer);
+      // plan-016 — walrus's uploadFiles expects a full Sui SDK Signer, but
+      // AppSigner intentionally exposes only the methods consumers need
+      // (toSuiAddress + signAndExecuteTransaction + signPersonalMessage).
+      // At runtime walrus's writeFilesFlow only calls those two of the
+      // four it advertises, so structural compatibility is real even
+      // though TS can't see it. The cast scopes the type-erasure to this
+      // single call site rather than polluting the AppSigner interface
+      // with abstract Signer methods it can't honestly implement.
+      const upload = await uploadFiles(swapped, signer as never);
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
       setPhase('signing');
@@ -563,38 +582,27 @@ export function LaunchCollectionPage() {
         tokenPatchIds,
       });
       // plan-016 U4 — use the unified Signer.signAndExecuteTransaction
-      // shape ({transaction, client}). In prod mode useAppSigner wraps
-      // dapp-kit's useSignTransaction + client.core.executeTransaction
-      // (same flow as the previous in-file useDappKitSigner). In test
-      // mode the keypair signs locally with no wallet popup.
-      //
-      // The underlying client.core.executeTransaction returns a
-      // discriminated-union TransactionResult: either
-      //   {Transaction: {digest, ...}} on success
-      //   {FailedTransaction: {digest, status: {error}}} on failure
-      // (NOT the dapp-kit mutation shape {digest} the pre-U4 code consumed).
-      const res = (await signer.signAndExecuteTransaction({
+      // shape ({transaction, client}). AppSigner declares the return as
+      // the SDK's TransactionResult discriminated union, so no cast is
+      // needed at the call site — TS narrows via $kind. The U7
+      // code-review pass dropped an earlier inline cast that lied about
+      // the return shape.
+      const res = await signer.signAndExecuteTransaction({
         transaction: tx,
-        client: suiClient as unknown,
-      })) as {
-        Transaction?: { digest: string };
-        FailedTransaction?: { digest: string; status?: { error?: string } };
-        digest?: string;
-      };
-      if (res.FailedTransaction) {
+        client: suiClient,
+      });
+      if (res.$kind === 'FailedTransaction') {
         throw new Error(
-          `Launch tx failed (${res.FailedTransaction.digest}): ${res.FailedTransaction.status?.error ?? 'unknown'}`,
+          `Launch tx failed (${res.FailedTransaction.digest}): ${res.FailedTransaction.status?.error?.message ?? 'unknown'}`,
         );
       }
-      // Prefer the discriminated-union path; fall back to flat `.digest` for
-      // any future signer impl that pre-unwraps.
-      const digest = res.Transaction?.digest ?? res.digest;
-      if (!digest) throw new Error('Launch tx returned no digest');
-      setTxDigest(digest);
+      setTxDigest(res.Transaction.digest);
       setPhase('success');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setPhase('error');
+    } finally {
+      launchingRef.current = false;
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
@@ -1098,7 +1106,11 @@ export function LaunchCollectionPage() {
               <button
                 type="button"
                 onClick={() => void onLaunch()}
-                disabled={busy}
+                // plan-016 code-review hotfix — gate on !signer too so the
+                // button is HTML-disabled (not just silently no-op via the
+                // click handler) when test mode has a missing/invalid key.
+                // Matches R5/AE2 plan intent ("mint button disabled").
+                disabled={busy || !signer}
                 data-testid="launch-button"
                 style={buttonPrimary}
               >

@@ -50,9 +50,19 @@ describe('useAppSigner (plan-016 U2)', () => {
     expect(result.current.loadError).toBeNull();
   });
 
-  it('production: signTransaction delegates to dapp-kit useSignTransaction', async () => {
+  it('production: signAndExecuteTransaction wires dapp-kit signTx + client.core.executeTransaction', async () => {
+    // plan-016 code-review hotfix — this previously tested signTransaction
+    // directly, but that method has been removed from the AppSigner
+    // interface (signTransaction(bytes: Uint8Array) on the SDK keypair did
+    // not structurally match the wrapper's ({transaction}) shape). The
+    // prod-path uses dappKitSignTx internally and then calls
+    // client.core.executeTransaction — verify the assembly chain.
     vi.stubEnv('VITE_TEST_WALLET', '');
-    const signTxMock = vi.fn().mockResolvedValue({ bytes: 'b', signature: 's' });
+    const signTxMock = vi.fn().mockResolvedValue({ bytes: 'b64', signature: 'sig' });
+    const executeTransactionMock = vi.fn().mockResolvedValue({
+      $kind: 'Transaction',
+      Transaction: { digest: 'EXEC_DIGEST' },
+    });
     vi.doMock('@mysten/dapp-kit', () => ({
       useCurrentAccount: () => ({ address: '0xabc' }),
       useSignTransaction: () => ({ mutateAsync: signTxMock }),
@@ -60,9 +70,18 @@ describe('useAppSigner (plan-016 U2)', () => {
     }));
     const { useAppSigner } = await import('./useAppSigner');
     const { result } = renderHook(() => useAppSigner());
-    const out = await result.current.signer!.signTransaction({ transaction: 'TX' });
+    const mockClient = { core: { executeTransaction: executeTransactionMock } };
+    const out = await result.current.signer!.signAndExecuteTransaction({
+      transaction: 'TX',
+      client: mockClient,
+    });
     expect(signTxMock).toHaveBeenCalledWith({ transaction: 'TX' });
-    expect(out).toEqual({ bytes: 'b', signature: 's' });
+    expect(executeTransactionMock).toHaveBeenCalledWith({
+      transaction: 'b64',
+      signatures: ['sig'],
+      include: { transaction: true, effects: true },
+    });
+    expect(out).toEqual({ $kind: 'Transaction', Transaction: { digest: 'EXEC_DIGEST' } });
   });
 
   it('production: signPersonalMessage delegates to dapp-kit useSignPersonalMessage', async () => {

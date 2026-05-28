@@ -76,9 +76,13 @@ describe('TopNav', () => {
   it('shows a truncated address pill when a wallet is connected', () => {
     mockAddress = `0xc731848b${'a'.repeat(50)}48BA`;
     renderAt('/');
-    const pill = screen.getByTestId('wallet-pill').textContent ?? '';
+    const pill = screen.getByTestId('wallet-pill');
     // Truncation: 0xXXXX…YYYY (6 chars + ellipsis + 4 chars)
-    expect(pill).toMatch(/^0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
+    expect(pill.textContent ?? '').toMatch(/^0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
+    // plan-016 code-review hotfix — data-test-wallet must NOT appear on
+    // the prod-path DOM (prevents the attribute name from leaking into
+    // production bundles as a feature-existence hint).
+    expect(pill.hasAttribute('data-test-wallet')).toBe(false);
   });
 
   it('prepends "TEST " to the wallet pill when test mode is active (plan-016 R6)', () => {

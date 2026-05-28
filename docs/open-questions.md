@@ -312,3 +312,41 @@ Options:
 Agent lean: **(b)** — keeps the demo coherent with D-031 and avoids touching Seal. Decision affects U10's mint-page framing and U15's four-actor demo arc.
 
 **Blocker level**: 🟢 Open — resolve before demo wiring (U10/U15), not before U5.
+
+---
+
+## OQ-021: Plan-016 test-wallet — dapp-kit `WalletProvider` co-existence when test mode is active
+
+**Status**: 🟢 Open — deferred to manual `pnpm dev` smoke after plan-016 lands. Brainstorm OQ-5.
+**Surfaced**: 2026-05-27 (plan-016 brainstorm + code-review pass)
+**Blocking**: nothing in plan-016 scope (smoke verified the LAUNCH flow works end-to-end via test wallet); follow-up only if WalletProvider auto-connect surfaces noise.
+
+Plan-016 routes the 3 dapp-kit hook call sites in `LaunchCollectionPage` and the personal-message sign in `useSession` through wrapper hooks `useAppAccount` / `useAppSigner`. When `VITE_TEST_WALLET=1`, the wrapper hooks short-circuit reads. However, `WalletProvider` is still mounted at the app shell (`frontend/src/main.tsx`), so dapp-kit's internal Slush/Enoki auto-connect logic continues subscribing to wallet-state changes in the background.
+
+**Verify by**: with Slush installed + LOCKED + `VITE_TEST_WALLET=1` + valid key, refresh `/launch` and watch the console for dapp-kit auto-connect attempts / disconnect events / `useWallets()` ticks.
+
+**If noisy but harmless**: document in the brainstorm + leave alone.
+**If broken** (e.g., dapp-kit overwrites session state, races the test signer, or fights for the wallet pill): branch the app shell on `TEST_WALLET_ENABLED` to skip the `WalletProvider` mount in test mode. Roughly 10 lines in `main.tsx`.
+
+**Blocker level**: 🟢 Open — manual smoke only.
+
+---
+
+## OQ-022: Plan-016 test-wallet — does an existing Slush-signed JWT survive a mid-session toggle to test mode?
+
+**Status**: 🟢 Open — deferred to manual smoke. Brainstorm OQ-6.
+**Surfaced**: 2026-05-27 (plan-016 brainstorm + code-review pass)
+**Blocking**: nothing — the JWT is address-bound and signature-scheme-agnostic on the backend (`verifyPersonalMessageSignature`), so test wallet and Slush produce indistinguishable signatures from the same address.
+
+Expected behavior: a Slush-signed JWT in `localStorage` should continue to validate against the backend even after the dev toggles `VITE_TEST_WALLET=1` and reloads, because:
+- Both signers use the same Ed25519 private key (same address)
+- Backend `jwt.verifySession` is stateless and address-bound
+- The challenge-response signature scheme is the same (Ed25519 personal message)
+
+**Verify by**: sign in via Slush first → JWT in `localStorage` → stop Vite → add `VITE_TEST_WALLET=1` + key to `.env.local` → restart Vite → reload `/launch` → check whether `useSession.session` survives (truthy → JWT still valid) or gets dropped (the address-mismatch wipe in `useSession.ts` would fire if the addresses differed).
+
+**If JWT survives**: no special handling needed; document and close.
+**If JWT is dropped**: investigate which check fires (address mismatch should be the only path that wipes; if not, the backend or session schema has unexpected coupling). May indicate a real bug rather than a UX gap.
+
+**Blocker level**: 🟢 Open — manual smoke only.
+

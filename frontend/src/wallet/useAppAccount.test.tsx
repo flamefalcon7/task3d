@@ -67,4 +67,23 @@ describe('useAppAccount (plan-016 U2)', () => {
     const { result } = renderHook(() => useAppAccount());
     expect(result.current).toBeNull();
   });
+
+  // plan-016 code-review hotfix — pre-hotfix returned a fresh
+  // {address: ...} object literal on every render. That caused
+  // downstream useMemos and useCallbacks (useAppSigner, useSession,
+  // onLaunch) to invalidate every render. Lock identity stability so
+  // a regression doesn't silently degrade memoization across the chain.
+  it('production: returns stable object identity across rerenders when address is unchanged', async () => {
+    vi.stubEnv('VITE_TEST_WALLET', '');
+    vi.doMock('@mysten/dapp-kit', () => ({
+      useCurrentAccount: () => ({ address: '0xstable' }),
+    }));
+    const { useAppAccount } = await import('./useAppAccount');
+    const { result, rerender } = renderHook(() => useAppAccount());
+    const first = result.current;
+    rerender();
+    rerender();
+    rerender();
+    expect(result.current).toBe(first);
+  });
 });

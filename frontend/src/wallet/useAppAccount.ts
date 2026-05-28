@@ -39,6 +39,20 @@ export function useAppAccount(): AppAccount | null {
     }
   }, []);
 
-  if (TEST_WALLET_ENABLED) return testAccount;
-  return dappKitAccount ? { address: dappKitAccount.address } : null;
+  // plan-016 code-review hotfix — memoize the prod-path return on the
+  // address string primitive. Pre-hotfix, this returned `{ address: ... }`
+  // as a fresh object literal every render, which made the wrapper
+  // useAppSigner.useMemo (and onLaunch's useCallback) invalidate every
+  // render. Behavior was correct (downstream string compares short-
+  // circuited) but the memo instability eroded reuse and masked future
+  // regressions. dapp-kit's useCurrentAccount returns a stable selector
+  // result per account; mirroring that here restores the original
+  // invariant.
+  const prodAddress = dappKitAccount?.address ?? null;
+  const prodAccount = useMemo<AppAccount | null>(
+    () => (prodAddress ? { address: prodAddress } : null),
+    [prodAddress],
+  );
+
+  return TEST_WALLET_ENABLED ? testAccount : prodAccount;
 }

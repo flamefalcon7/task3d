@@ -21,18 +21,36 @@ import { TEST_WALLET_ENABLED } from './testWalletEnabled';
 import { useAppAccount } from './useAppAccount';
 import { loadKeypair } from '../test-wallet/loadKeypair';
 
+// plan-016 code-review hotfix — the SDK's executeTransaction returns a
+// discriminated union, NOT a flat {digest}. Declaring the AppSigner
+// return as {digest} was a lie that forced an inline cast at the call
+// site. Re-declare to mirror the actual SDK shape so consumers can
+// pattern-match on $kind without re-casting.
+export type AppSignAndExecuteResult =
+  | { $kind: 'Transaction'; Transaction: { digest: string }; FailedTransaction?: never }
+  | {
+      $kind: 'FailedTransaction';
+      Transaction?: never;
+      FailedTransaction: { digest: string; status?: { error?: { message?: string } } };
+    };
+
+// plan-016 code-review hotfix — signTransaction removed from the public
+// AppSigner interface. The Sui SDK's Ed25519Keypair has signTransaction
+// (bytes: Uint8Array) but AppSigner previously declared it as
+// ({transaction}). The `keypair as unknown as AppSigner` cast hid the
+// mismatch; no current consumer calls it directly (walrus uses
+// signAndExecuteTransaction; useSession uses signPersonalMessage). Drop
+// it from the interface so the contract is honest about what the
+// implementation actually supports.
 export interface AppSigner {
   toSuiAddress(): string;
   signAndExecuteTransaction(input: {
     transaction: unknown;
     client: unknown;
-  }): Promise<{ digest: string; transaction?: unknown; effects?: unknown }>;
+  }): Promise<AppSignAndExecuteResult>;
   signPersonalMessage(
     bytes: Uint8Array,
   ): Promise<{ bytes: string; signature: string }>;
-  signTransaction(input: {
-    transaction: unknown;
-  }): Promise<{ bytes: string; signature: string }>;
 }
 
 export interface UseAppSignerResult {
@@ -69,19 +87,13 @@ export function useAppSigner(): UseAppSignerResult {
     // with signPersonalMessage so useSession can also flow through.
     const signer: AppSigner = {
       toSuiAddress: () => address,
-      signTransaction: async ({ transaction }) =>
-        dappKitSignTx({ transaction: transaction as never }),
       signAndExecuteTransaction: async ({ transaction, client }) => {
         const { bytes, signature } = await dappKitSignTx({
           transaction: transaction as never,
         });
         const c = client as {
           core: {
-            executeTransaction: (input: unknown) => Promise<{
-              digest: string;
-              transaction?: unknown;
-              effects?: unknown;
-            }>;
+            executeTransaction: (input: unknown) => Promise<AppSignAndExecuteResult>;
           };
         };
         return c.core.executeTransaction({

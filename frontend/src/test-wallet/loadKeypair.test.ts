@@ -68,11 +68,15 @@ describe('loadKeypair (plan-016 U1)', () => {
     expect(() => keypairFromBech32(secpBech32)).toThrow(InvalidTestWalletKeyError);
   });
 
-  it('module-level production guard: importing test-wallet/index under PROD throws', async () => {
+  it('module-level production guard: importing loadKeypair under PROD throws', async () => {
+    // The guard lives in loadKeypair.ts (the actually-imported module by
+    // wrapper hooks), NOT in index.ts. Importing the submodule under PROD
+    // must throw so any code path that reaches the test-wallet subtree at
+    // build time fails loudly.
     vi.resetModules();
     vi.stubEnv('PROD', true);
-    await expect(import('./index')).rejects.toThrow(
-      /test-wallet module loaded in production build/,
+    await expect(import('./loadKeypair')).rejects.toThrow(
+      /test-wallet\/loadKeypair loaded in production build/,
     );
     vi.unstubAllEnvs();
     vi.resetModules();

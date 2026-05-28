@@ -111,7 +111,14 @@ export function TopNav() {
               : walletPill
           }
           data-testid="wallet-pill"
-          data-test-wallet={TEST_WALLET_ENABLED ? 'true' : 'false'}
+          // plan-016 code-review hotfix — only emit data-test-wallet when
+          // the flag is actually active. The pre-hotfix code emitted
+          // data-test-wallet="false" unconditionally because Vite constant-
+          // folds TEST_WALLET_ENABLED at build time. That leaked the
+          // attribute *name* into prod DOM, a minor info-disclosure of
+          // feature existence. Gating with a JS condition keeps the prod
+          // bundle attribute-free when the flag is unset.
+          {...(TEST_WALLET_ENABLED ? { 'data-test-wallet': 'true' } : {})}
         >
           {address
             ? `${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)}`
