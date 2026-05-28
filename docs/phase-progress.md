@@ -1,37 +1,53 @@
 # Phase Progress
 
-## Last Updated: 2026-05-27 / PM (plan-016 test-wallet-adapter — **all 6 implementation units shipped in one session** on `feat/test-wallet-adapter`; 9 commits, 586/586 tests green, AE4 grep PASS, 4 ADRs D-058/059/060/061 written) — **Next = merge to main + manual `pnpm dev` smoke on /launch per AE1/AE5 (the only verification step that can't be automated without the test-wallet activated).**
+## Last Updated: 2026-05-28 / Late PM (plan-016 test-wallet-adapter — **DONE**: brainstorm + plan + implementation + browser smoke + 12-reviewer code review + fixer pass + 4 OQs captured + 3 solution docs written + merged to main; 13 commits on main, 591/591 tests green, AE1+AE5 verified on-chain via agent-browser smoke) — **Next = pick up the demo polish queue: U15 demo recording prep, 5 plan-015 learnings still pending capture, 8 plan-015 suppressed findings + 4 prior-session deferred UX items.**
 
 ### Hackathon Tracker
-- Days to submission (6/21): 25 of 38 · demo day (7/20–21): 54 · winners (8/27): 92
+- Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
 
-### Plan-016 test-wallet-adapter — S1 complete (this session)
+### Plan-016 test-wallet-adapter — DONE (this session + previous)
 
-Bypasses Slush for `/launch` after an 11-commit debug session (branch `debug/walrus-upload-crash`) failed to clear the user's environmental Chrome crash on writeFilesFlow encode. Adapter signs locally with an Ed25519 keypair loaded from `frontend/.env.local` (same key as Slush — address-matched so LicenseTerms checks on the user's own bases pass). Demo unblock; secondary win = agent-browser CI integration.
+Bypasses Slush for `/launch` after an 11-commit debug session (branch `debug/walrus-upload-crash`) failed to clear the user's environmental Chrome crash on writeFilesFlow encode. Adapter signs locally with an Ed25519 keypair loaded from `frontend/.env.local` (same key as Slush deploy key — address-matched). Demo unblock; secondary win = agent-browser CI integration enabled.
 
-**Origin + plan (commit `a499850`):**
-- Brainstorm `docs/brainstorms/2026-05-27-test-wallet-adapter-requirements.md` — 10 R-IDs + 2 actors + 2 flows + 5 AEs + 4 candidate ADRs + 6 OQs.
-- Plan `docs/plans/2026-05-27-016-feat-test-wallet-adapter-plan.md` — 6 implementation units, status `active`.
-- 2 plan-time call-outs surfaced during code-grounding: (a) R9 signing site is `useSession.ts` not `SignInButton.tsx`; (b) /launch has 3 dapp-kit hook call sites not 2.
+**Final state on main:**
+- 13 commits land on main: a499850 (docs) → 7baa96c (U1) → 6ee2937 (U2) → e82a5eb (U3) → bbe668b (S1 ckpt) → 01bd89e (U4) → 347d82c (U5) → 969f8c3 (U6) → 63780d7 (U7 ADRs) → b0a5b23 (hotfix) → 2b7b34b (code review fixer) → 403d76a (OQs) → wrap-up (this commit)
+- 591/591 vitest green · 0 plan-016 tsc errors (17 pre-existing in unrelated files per AE5)
+- 4 ADRs: D-058 (Ed25519Keypair-as-Signer) · D-059 (build-time env + wrapper hooks) · D-060 (/launch-only scope) · D-061 (test-wallet subtree + ESLint allow-list)
+- 4 OQs appended to canonical docs/open-questions.md: OQ-021 (Slush co-existence) · OQ-022 (stale JWT survival) · OQ-023 (vite.config build-time gate) · OQ-024 (testnet/mainnet runtime check, won't-fix with rationale)
+- 3 reusable solution docs: `architecture-patterns/ed25519-keypair-is-sui-signer-2026-05-28.md` · `design-patterns/vite-build-time-flag-tree-shake-gate-2026-05-28.md` · `integration-issues/react-hooks-after-early-return-oauth-mask-2026-05-28.md`
 
-**Implementation — 6 units shipped in one session, serial inline, commit-per-unit (plan budgeted 2 sessions / 6-10 hr; actual one session):**
-- `7baa96c` **U1** — `frontend/src/test-wallet/` subtree. `Ed25519Keypair.fromSecretKey(bech32)` is the whole adapter (the keypair instance already satisfies the Signer interface dapp-kit hooks produce). Module-level `import.meta.env.PROD` throw + two named errors (`MissingTestWalletKeyError`, `InvalidTestWalletKeyError`). 7 vitest cases. Resolves OQ-2 (bech32 accepted directly).
-- `6ee2937` **U2** — `frontend/src/wallet/{testWalletEnabled, useAppAccount, useAppSigner}`. Wrapper hooks branch on `TEST_WALLET_ENABLED` (Vite compile-time literal from `import.meta.env.VITE_TEST_WALLET === '1'`). Unified Signer shape: `toSuiAddress / signAndExecuteTransaction / signPersonalMessage / signTransaction`. 10 vitest cases.
-- `e82a5eb` **U3** — `useSession.signIn` signs JWT challenge via `useAppSigner().signPersonalMessage(bytes)` instead of dapp-kit's `useSignPersonalMessage`. Backend untouched (`verifyPersonalMessageSignature` is signature-scheme-agnostic). SignInButton.tsx unchanged.
-- `01bd89e` **U4** — `LaunchCollectionPage.tsx` removes in-file `useDappKitSigner` helper, replaces 3 dapp-kit call sites with wrapper hooks. Launch PTB at line 558 now uses unified shape `signer.signAndExecuteTransaction({transaction, client: suiClient})`. Test mocks switch from dapp-kit boundary to wrapper-hook boundary; all 38 existing cases pass unchanged.
-- `347d82c` **U5** — TopNav wallet pill prepends `TEST ` in accent color when `TEST_WALLET_ENABLED && address`. `TestWalletBanner` component renders `useAppSigner().loadError.message` verbatim above page content (AE2 copy comes from the `MissingTestWalletKeyError` class — can't drift). 5 new tests.
-- `969f8c3` **U6** — `frontend/.env.example` documents `VITE_TEST_WALLET` + `VITE_TEST_WALLET_KEY` with TESTNET-only safety warnings. `frontend/eslint.config.js` adds the D-061 allow-list (documented intent; ESLint not currently installed in project). AE4 grep on `vite build` dist: 7 plan-016 identifiers → **0 matches**. Two inert UI string matches remain (banner testid, constant-folded `data-test-wallet="false"`).
-- `<this commit>` **U7** — ADRs D-058 (Ed25519Keypair-as-Signer), D-059 (build-time env + wrapper hooks), D-060 (/launch-only scope), D-061 (test-wallet subtree + ESLint allow-list) written to `docs/decisions.md`. Phase-progress refreshed.
+**Implementation arc (U1-U7 + 2 hotfixes + review-fix):**
 
-**Tests:** 564 → 586 (22 new). All green. tsc clean.
+U1-U6 (single session, 2026-05-27): adapter core + wrapper hooks + useSession refactor + LaunchCollectionPage refactor + wallet pill + missing-key banner + env.example + ESLint allow-list + AE4 grep PASS. Plan budgeted 2 sessions / 6-10 hr; actual one session.
 
-**Open implementation-time questions (deferred to manual smoke):**
-- **OQ-5** Slush co-existence — verify whether dapp-kit's WalletProvider auto-connects when test mode is active. Wrapper hooks short-circuit reads, but dapp-kit's internal state may still tick. Smoke during `pnpm dev` test: if noisy but harmless, document; if breaking, branch app shell to skip WalletProvider mount in test mode.
-- **OQ-6** Stale Slush-signed JWT survival when toggling test mode — expected to "just work" because both signers use the same private key → same Ed25519 sig → same address. Verify by toggling flag + refreshing /launch.
+U7: ADRs D-058–D-061 written to docs/decisions.md.
 
-**Verification still owed (cannot be automated without the test-wallet activated, which requires the user's private key):**
-- AE1 — full /launch flow completes E2E without Slush popups; collection minted to test address visible on-chain (`suiscan.xyz/testnet/object/...`).
-- AE5 — `pnpm dev` smoke from sign-in through LAUNCH button click.
+Browser smoke 2026-05-27 (deployer key loaded from ~/.sui/sui_config via `sui keytool export`, written to .env.local, agent-browser drove /launch end-to-end): on-chain TX `CndwZBuDApr3W3a4pPZ6fFt2bXJaJLbZsSNiowPD9ac7` — collection minted via test wallet, 3 objects created, walrus encode (the original crash spot) DID NOT crash. AE1 + AE5 verified.
+
+Hotfix b0a5b23 (smoke surfaced 2 pre-existing bugs):
+- **Hooks-after-early-return**: LaunchCollectionPage had 11 hooks after `if (!session) return ...`. Slush OAuth-redirect signin masked it for 5 weeks (first render is always post-signin via localStorage). Test wallet in-page signin exposed the transition. Fix: early return moved to after all hooks. Captured as solution doc.
+- **TransactionResult shape lie**: U4 changed launch PTB sign to walrus-shape `signer.signAndExecuteTransaction({transaction, client})` but `setTxDigest(res.digest)` assumed flat shape; real SDK returns discriminated union `{$kind, Transaction|FailedTransaction}`. Fix: unwrap via `$kind`.
+
+Code-review pass 2b7b34b (12-reviewer parallel ce-code-review against feat branch):
+- Reviewers: correctness, testing, maintainability, project-standards, agent-native, learnings (always-on) + security, api-contract, reliability, adversarial (cross-cutting) + kieran-typescript, julik-frontend-races (stack)
+- 19 unique findings (after dedup + cross-reviewer promotion): 4 P1 · 7 P2 · 8 P3
+- Auto-resolve-best-judgment route: 11 fixer edits across 12 files (PROD guard relocation, signTransaction interface drop, TransactionResult return-type honesty, useAppAccount memoization, LAUNCH HTML-disabled, FailedTransaction error.message access, banner Vite restart hint, double-click race guard, data-test-wallet attribute gating, __resetCacheForTests internalization, OQ docs)
+- 2 deferred-design + 4 advisory: captured as OQ-023/024 and noted in review report
+
+**Manual smoke status:**
+- AE1 ✓ verified (on-chain TX above)
+- AE2 ✓ verified (banner copy verbatim assertion)
+- AE3 ✓ verified (prod-mode setup.ts stub keeps existing tests in prod path)
+- AE4 ✓ verified (grep on vite build dist, 7 identifiers → 0 hits)
+- AE5 ✓ verified (smoke ran through /launch end-to-end via test wallet)
+- OQ-021 (Slush co-existence): not yet smoked under unlocked Slush — user-side check
+- OQ-022 (stale Slush JWT survives test-mode toggle): not yet smoked — user-side check
+
+**What's left in the post-016 queue (carried from plan-015 retrospective, still open):**
+- 5 learnings entries that ce-learnings-researcher flagged during plan-015 review (HighlightLayer single-effect coordination, LoadAssetContainerAsync cancellation, etc.)
+- 8 plan-015 suppressed findings (anchor < 75 from that run, kept in artifact for later triage)
+- 4 prior-session deferred UX-judgment items
+- U15 demo recording prep (plan-007 pitch deck + demo video)
 
 ### --- Prior session (plan-015) below this line, kept verbatim ---
 
