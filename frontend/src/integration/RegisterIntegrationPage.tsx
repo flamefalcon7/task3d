@@ -117,7 +117,7 @@ export function RegisterIntegrationPage() {
     <div data-testid="integrate-page" style={pageStyle}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1 style={{ fontSize: 20, margin: 0 }}>Register a Game Integration</h1>
-        <Link to="/" style={{ color: '#7aa2ff' }}>← Browse</Link>
+        <Link to="/browse" style={{ color: '#7aa2ff' }}>← Browse</Link>
       </header>
 
       {/* Step 1 — pick a permissionless collection */}

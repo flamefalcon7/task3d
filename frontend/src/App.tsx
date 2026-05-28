@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { BrowsePage } from './browse/BrowsePage';
+import { LandingPage } from './landing/LandingPage';
 import { CreateModelPage } from './creator/CreateModelPage';
 import { ModelDetailPage } from './buy/ModelDetailPage';
 import { LaunchCollectionPage } from './collection/LaunchCollectionPage';
@@ -24,7 +25,8 @@ export function Shell() {
     <>
       <NavGuard />
       <Routes>
-        <Route path="/" element={<BrowsePage />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/browse" element={<BrowsePage />} />
         <Route path="/create" element={<CreateModelPage />} />
         <Route path="/model/:objectId" element={<ModelDetailPage />} />
         <Route path="/launch" element={<LaunchCollectionPage />} />

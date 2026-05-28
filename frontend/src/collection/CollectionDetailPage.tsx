@@ -47,7 +47,7 @@ export function CollectionDetailPage() {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#888' }} data-testid="collection-empty">
         Collection not found.{' '}
-        <Link to="/" style={{ color: '#7aa2ff' }}>Back to Browse</Link>
+        <Link to="/browse" style={{ color: '#7aa2ff' }}>Back to Browse</Link>
       </div>
     );
   }
@@ -69,7 +69,7 @@ export function CollectionDetailPage() {
           borderBottom: '1px solid #222',
         }}
       >
-        <Link to="/" style={{ color: '#7aa2ff', textDecoration: 'none', fontSize: 14 }}>
+        <Link to="/browse" style={{ color: '#7aa2ff', textDecoration: 'none', fontSize: 14 }}>
           ← Back to Browse
         </Link>
         <div style={{ minWidth: 200 }}>

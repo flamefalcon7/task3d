@@ -445,7 +445,7 @@ export function TrackPage() {
               OR BUY ONE ON{' '}
               <Link to="/market" style={emptyLink}>/MARKET</Link>.
             </p>
-            <Link to="/" data-testid="track-empty-browse" style={emptyLink}>
+            <Link to="/browse" data-testid="track-empty-browse" style={emptyLink}>
               ← BROWSE
             </Link>
           </div>

@@ -257,7 +257,7 @@ export function BrowsePage() {
   const collectionGroups = useMemo(() => groupByCollection(models), [models]);
 
   return (
-    <div style={pagePaper}>
+    <div style={pagePaper} data-testid="browse-page">
       <main style={mainStyle}>
         <section style={heroStack}>
           <span style={eyebrow}>— SUI OVERFLOW 2026 / WALRUS TRACK</span>

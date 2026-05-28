@@ -211,7 +211,7 @@ describe('BrowsePage', () => {
       loading: false,
       error: null,
     });
-    renderPage('/?filter=integration');
+    renderPage('/browse?filter=integration');
     expect(useCollectionsMock).toHaveBeenCalledWith(true);
     expect(screen.getByTestId('integration-grid')).toBeTruthy();
     expect(screen.getByTestId('integration-card-0xopen')).toBeTruthy();
@@ -227,7 +227,7 @@ describe('BrowsePage', () => {
   it('?filter=integration shows the empty state when no collection is open', () => {
     mockHook({ models: [] });
     useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
-    renderPage('/?filter=integration');
+    renderPage('/browse?filter=integration');
     expect(screen.getByTestId('integration-empty')).toBeTruthy();
   });
 });

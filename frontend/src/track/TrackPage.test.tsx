@@ -157,7 +157,7 @@ describe('TrackPage', () => {
     renderPage();
     expect(screen.getByTestId('track-empty')).toBeTruthy();
     const link = screen.getByTestId('track-empty-browse') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/');
+    expect(link.getAttribute('href')).toBe('/browse');
   });
 
   it('renders the carousel + canvas when variants exist', () => {

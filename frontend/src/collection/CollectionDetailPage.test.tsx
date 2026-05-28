@@ -81,5 +81,9 @@ describe('CollectionDetailPage', () => {
     });
     renderAt('0xnope');
     expect(screen.getByTestId('collection-empty')).toBeTruthy();
+    // plan-020 U4 — error-state "Back to Browse" link points at /browse,
+    // not the legacy / path that used to host the catalog.
+    const backLink = screen.getByText('Back to Browse') as HTMLAnchorElement;
+    expect(backLink.getAttribute('href')).toBe('/browse');
   });
 });
