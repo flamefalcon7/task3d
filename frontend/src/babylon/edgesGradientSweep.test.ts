@@ -286,7 +286,7 @@ describe('setupEdgesGradientSweep', () => {
     expect(state.removedObservers).toBe(1);
   });
 
-  it('integration — after dispose, observer is removed, clone disposed, scene.clipPlane null', () => {
+  it('integration — after dispose, observer removed, clone disposed, original material clipPlane cleared, scene-level clipPlanes untouched', () => {
     const scene = makeScene();
     const mesh = makeMesh('tusk', 0, 10);
     // Capture the clone created internally so we can assert its disposal.
@@ -297,6 +297,14 @@ describe('setupEdgesGradientSweep', () => {
       cloneRef = child;
       return child;
     };
+
+    // Plant non-null sentinels on scene.clipPlane / clipPlane2 so we can
+    // verify dispose does NOT stomp them — strategy (b) only owns material
+    // slots, scene-level planes belong to host effects.
+    const hostPlane1 = { d: -1 } as unknown as typeof scene.clipPlane;
+    const hostPlane2 = { d: -2 } as unknown as typeof scene.clipPlane;
+    scene.clipPlane = hostPlane1;
+    scene.clipPlane2 = hostPlane2;
 
     const control = setupEdgesGradientSweep(scene as never, [mesh as never]);
     control.setProgress(0.5);
@@ -310,13 +318,12 @@ describe('setupEdgesGradientSweep', () => {
     expect(state.beforeRenderCbs.length).toBe(0);
     // Cloned mesh disposed
     expect(cloneRef!.disposed).toBe(true);
-    // scene clipPlane slots cleared (strategy b leaves them null throughout,
-    // but dispose explicitly nulls them as a safety contract)
-    expect(scene.clipPlane).toBeNull();
-    expect(scene.clipPlane2).toBeNull();
     // Original's clipPlane override cleared so the source mesh returns to
     // pre-mount render state.
     expect(mesh.material!.clipPlane).toBeNull();
+    // Host's scene-level planes untouched — strategy (b) only owns materials.
+    expect(scene.clipPlane).toBe(hostPlane1);
+    expect(scene.clipPlane2).toBe(hostPlane2);
   });
 
   it('setProgress(null) after frozen → next frame uses auto-loop value', () => {

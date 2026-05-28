@@ -148,7 +148,10 @@ describe('fetchBlobWithTimeout', () => {
     controller.abort();
 
     await expect(promise).rejects.toBeInstanceOf(WalrusFetchAbortedError);
-    await expect(promise).rejects.toMatchObject({ name: 'WalrusFetchAbortedError' });
+    await expect(promise).rejects.toMatchObject({
+      name: 'WalrusFetchAbortedError',
+      url: URL,
+    });
     await expect(promise).rejects.toThrowError(new RegExp(URL));
   });
 

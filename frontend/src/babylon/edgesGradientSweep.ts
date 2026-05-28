@@ -194,22 +194,32 @@ export function setupEdgesGradientSweep(
   let frozenProgress: number | null = null;
   let disposed = false;
 
+  // The source meshes don't move during the sweep, so the union bbox is
+  // invariant. Compute once at setup and reuse in tick(); a 60fps observer
+  // calling computeWorldMatrix(true) + getBoundingInfo on every mesh every
+  // frame was N×60/s of wasted work feeding GC churn.
+  const cachedBbox = computeUnionBbox(records.map((r) => r.original));
+
+  // Pre-allocate the two Plane instances and mutate their `d` field in tick.
+  // Allocating two Planes per frame at 60fps was 120 short-lived allocations/s
+  // for no semantic gain (Plane has a writable `d`).
+  const pbrPlane = new Plane(1, 0, 0, 0);
+  const edgesPlane = new Plane(-1, 0, 0, 0);
+
   function currentProgress(): number {
     if (frozenProgress !== null) return frozenProgress;
     return (Date.now() % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS;
   }
 
   function tick(): void {
-    if (disposed) return;
-    const bbox = computeUnionBbox(records.map((r) => r.original));
-    if (!bbox) return;
+    if (disposed || !cachedBbox) return;
     const t = currentProgress();
-    const sweepX = bbox.minX + t * (bbox.maxX - bbox.minX);
+    const sweepX = cachedBbox.minX + t * (cachedBbox.maxX - cachedBbox.minX);
 
     // PBR (original): visible at x ≤ sweepX → discard when (+1)·x + (-sweepX) > 0.
-    const pbrPlane = new Plane(1, 0, 0, -sweepX);
+    pbrPlane.d = -sweepX;
     // Edges (clone): visible at x ≥ sweepX → discard when (-1)·x + (+sweepX) > 0.
-    const edgesPlane = new Plane(-1, 0, 0, sweepX);
+    edgesPlane.d = sweepX;
 
     for (const rec of records) {
       if (rec.originalMaterial) rec.originalMaterial.clipPlane = pbrPlane;

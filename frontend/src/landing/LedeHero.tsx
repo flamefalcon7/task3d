@@ -180,7 +180,11 @@ export function LedeHero(): JSX.Element {
         const container = await LoadAssetContainerAsync(sourceUrl, scene, {
           pluginExtension: '.glb',
         });
-        if (cancelled) {
+        // After await: the scene effect's cleanup may have disposed the scene
+        // (StrictMode double-mount, viewport flip across breakpoint). Babylon's
+        // addAllToScene silently writes to a dead render graph, so we must
+        // detect a disposed scene here and bail before mutating anything.
+        if (cancelled || scene.isDisposed) {
           container.dispose();
           return;
         }
@@ -216,9 +220,13 @@ export function LedeHero(): JSX.Element {
     };
   }, [isLive, sourceUrl]);
 
-  // Dwell timer — 15s after live mount, flip the CTA flag.
+  // Dwell timer — 15s after live mount, flip the CTA flag. Resets the flag on
+  // each isLive=true entry so a viewport flip false→true→false→true doesn't
+  // pop the CTA instantly the second time around (the brutalist spec requires
+  // a real 15s dwell on each fresh entry, not a persisted boolean).
   useEffect(() => {
     if (!isLive) return;
+    setDwellElapsed(false);
     const timer = window.setTimeout(() => {
       setDwellElapsed(true);
     }, DWELL_MS);

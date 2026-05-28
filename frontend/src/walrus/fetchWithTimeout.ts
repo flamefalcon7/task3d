@@ -33,6 +33,7 @@ export class WalrusFetchAbortedError extends Error {
   constructor(url: string) {
     super(`Walrus fetch aborted by caller: ${url}`);
     this.name = 'WalrusFetchAbortedError';
+    this.url = url;
   }
 }
 
