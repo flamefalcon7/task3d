@@ -1,14 +1,26 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Signer } from '@mysten/sui/cryptography';
 import { WalrusFile } from '@mysten/walrus';
 import { getWalrusClient, type WalrusEnhancedClient } from './walrusClient';
+import { clearTrail, surfaceStaleTrail, writeDiag } from './uploadTrail';
+
+// plan-017 U1 / D-062 — multi-quilt batching size. N variants chunked into
+// K = ⌈N/4⌉ quilts of up to 4 each. The inner SDK Promise.all over a
+// QUILT_SIZE-sized chunk peaks at ~120 MB during encodeQuilt — fits inside
+// V8's 4 GB ceiling even with sibling-tab pressure + Babylon scene (which
+// U2/U3 dispose during this window). If AE2 still OOMs on user's Brave,
+// drop to 2 (no architecture impact; only the constant changes).
+// Exported so the UI (BatchProgressPanel — U4) computes the same K.
+export const QUILT_SIZE = 4;
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
 // Finer-grained stage exposed reactively so consumers (MintButton) can label
-// each wallet popup correctly — generic counts are unreliable since the
-// underlying writeFilesFlow always uses exactly 2 popups regardless of file
+// each wallet popup correctly — generic counts are unreliable since
+// writeFilesFlow always uses exactly 2 popups per quilt regardless of file
 // count (see docs/solutions/architecture-patterns/walrus-writefilesflow-popup-batching).
+// plan-017 U1 — names preserved for backward compat with existing consumers;
+// multi-quilt is layered orthogonally via batchIndex/batchTotal.
 export type UploadStage =
   | 'idle'
   | 'encoding'
@@ -29,13 +41,22 @@ export interface UploadResult {
   // Synthetic quilt-patch IDs from encodeQuiltPatchId — one per file. All files
   // in a quilt share the same Sui Blob object; patchIds address individual
   // files within the shared blob. Used by Collection Forge to bind each
-  // Model3D variant to its slice (KTD-3).
+  // Model3D variant to its slice (KTD-3). With multi-quilt batching, the
+  // accumulator preserves global input order across quilts.
   patchIds: string[];
 }
 
 export interface UploadError {
   stage: Exclude<UploadStage, 'idle' | 'done' | 'error'>;
   cause: unknown;
+  // plan-017 U1 — populated when the failure occurred during the chunked
+  // upload loop. batchIndex = the failing quilt (0-based); batchTotal =
+  // total quilts the upload tried. Earlier quilts (< batchIndex) succeeded
+  // and their Walrus blobs are alive but orphaned (no on-chain Collection
+  // object exists yet — created by LaunchCollectionPage after upload
+  // resolves). The orphan blobs expire on the epoch boundary if unused.
+  batchIndex?: number;
+  batchTotal?: number;
 }
 
 export interface UseWalrusUploadOptions {
@@ -45,19 +66,33 @@ export interface UseWalrusUploadOptions {
   epochs?: number;
 }
 
-// writeFilesFlow encodes N files into a single quilt blob then delegates to
-// writeBlobFlow → 1 register + 1 certify regardless of file count. The Walrus
-// portion of any creator flow is exactly 2 popups; U7 layers a third for the
-// model3d::publish_and_share PTB. Verified against @mysten/walrus@1.1.7 source
-// (dist/flows/write-files.mjs). See docs/solutions/architecture-patterns/
-// walrus-writefilesflow-popup-batching for the rationale.
-const WALRUS_POPUP_COUNT = 2;
+// Each writeFilesFlow call encodes K files into a single quilt blob then
+// produces 2 wallet popups (register + certify). With multi-quilt batching,
+// total popups = 2K + 1 (the +1 is the launch PTB owned by LaunchCollectionPage).
+// Verified against @mysten/walrus@1.1.7 source (dist/flows/write-files.mjs):
+// createWriteFilesFlow uses closure-scoped `let quiltBytes/quiltIndex` so
+// each invocation returns an independent flow (no cross-quilt contamination).
+// See docs/solutions/architecture-patterns/walrus-writefilesflow-popup-batching.
+const WALRUS_POPUP_COUNT_PER_QUILT = 2;
 
 export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [stage, setStage] = useState<UploadStage>('idle');
+  // plan-017 U1 — multi-quilt progress state. batchIndex is 0-based; consumers
+  // (BatchProgressPanel — U4) compute display strings like
+  // "Quilt {batchIndex + 1} of {batchTotal}".
+  const [batchIndex, setBatchIndex] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(1);
+  const [txDigests, setTxDigests] = useState<readonly string[]>([]);
   const [error, setError] = useState<UploadError | null>(null);
   const clientRef = useRef<WalrusEnhancedClient | null>(options.client ?? null);
+
+  // plan-017 U6 — surface any stale crash diagnostic on first mount. The
+  // surface guard inside uploadTrail makes this idempotent across multiple
+  // useWalrusUpload mounts on the same page.
+  useEffect(() => {
+    surfaceStaleTrail();
+  }, []);
 
   const getClient = useCallback((): WalrusEnhancedClient => {
     if (!clientRef.current) clientRef.current = getWalrusClient('testnet');
@@ -68,8 +103,8 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   // Unlike uploadFiles (which always quilts, even for N=1), the returned blobId
   // resolves directly at the aggregator's `/v1/blobs/<blobId>` path to the raw
   // bytes — required by D-037 so a published Model3D's glb_blob_id previews the
-  // base mesh and an nft creator can fork it. Same 2-popup cost as uploadFiles
-  // (1 register + 1 certify); writeFilesFlow delegates to this same flow.
+  // base mesh and an nft creator can fork it. Same 2-popup cost as a single
+  // uploadFiles quilt; writeFilesFlow delegates to this same flow.
   const uploadBlob = useCallback(
     async (bytes: Uint8Array, signer: Signer): Promise<BlobUploadResult> => {
       if (!bytes || bytes.length === 0) {
@@ -128,76 +163,132 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
       setError(null);
       setStatus('uploading');
       setStage('encoding');
+      setBatchIndex(0);
+      setTxDigests([]);
+
+      const total = Math.ceil(files.length / QUILT_SIZE);
+      setBatchTotal(total);
+
+      const startedAt = performance.now();
+      writeDiag('pre-encode', startedAt, {
+        fileCount: files.length,
+        batchTotal: total,
+      });
 
       const client = options.client ?? getClient();
       const owner = signer.toSuiAddress();
-      // Identifier MUST zero-pad the index. @mysten/walrus@1.1.7 sorts blobs
-      // lexicographically by identifier inside encodeQuilt (utils/quilts.mjs)
-      // before building quiltIndex, and listFiles() returns patches in that
-      // sorted order. Without padding, identifiers like 'file-10' sort BEFORE
-      // 'file-2' (lex compare at position 5: '1' < '2'), which silently
-      // misaligns patchIds[] vs the input `files` order for N >= 11. With
-      // zero-padding to a fixed width, lex order == numeric order for the
-      // full N range (we cap at 16 per Move MAX_VARIANTS).
-      const padWidth = Math.max(2, String(files.length - 1).length);
-      const walrusFiles = files.map((bytes, i) =>
-        WalrusFile.from({
-          contents: bytes,
-          identifier: `file-${String(i).padStart(padWidth, '0')}`,
-        }),
-      );
 
-      const flow = client.walrus.writeFilesFlow({ files: walrusFiles });
+      // Accumulators preserving global input order across quilts. The for-loop
+      // iterates chunks in input order, so appending to flat arrays inside
+      // each iteration gives a globally-ordered final result.
+      const aggBlobIds: string[] = [];
+      const aggBlobObjects: BlobUploadResult[] = [];
+      const aggPatchIds: string[] = [];
+      const collectedDigests: string[] = [];
 
       let lastStage: UploadStage = 'encoding';
+      let currentBatchIndex = 0;
+
       try {
-        await flow.encode();
+        for (let i = 0; i < total; i++) {
+          currentBatchIndex = i;
+          setBatchIndex(i);
+          const chunk = files.slice(i * QUILT_SIZE, (i + 1) * QUILT_SIZE);
+          // Identifier zero-pad MUST be set per-chunk (not globally) because
+          // @mysten/walrus@1.1.7 sorts lex within each quilt's encodeQuilt
+          // call. Within a chunk of up to QUILT_SIZE=4, pad-width 2 is
+          // always sufficient (max identifier 'file-03') and lex order
+          // equals numeric order.
+          const padWidth = Math.max(2, String(chunk.length - 1).length);
+          const walrusFiles = chunk.map((bytes, idx) =>
+            WalrusFile.from({
+              contents: bytes,
+              identifier: `file-${String(idx).padStart(padWidth, '0')}`,
+            }),
+          );
 
-        lastStage = 'awaiting-register';
-        setStage(lastStage);
-        // executeRegister returns a WriteBlobStepRegistered carrying the
-        // on-chain register tx digest. flow.upload() needs that digest
-        // (or a resume.blobObjectId) to bind the upload-relay write to
-        // the just-registered Blob — without it the SDK throws
-        // "Either resume.blobObjectId or upload digest must be provided".
-        const registerResult = await flow.executeRegister({
-          signer,
-          epochs: options.epochs ?? 10,
-          deletable: false,
-          owner,
-        });
+          // typed as nullable so we can release the flow reference between
+          // chunks — V8 reclaims the quilt assembly buffer before the next
+          // chunk allocates its own.
+          let flow: ReturnType<WalrusEnhancedClient['walrus']['writeFilesFlow']> | null =
+            client.walrus.writeFilesFlow({ files: walrusFiles });
 
-        lastStage = 'relay-upload';
-        setStage(lastStage);
-        await flow.upload({ digest: registerResult.txDigest });
+          setStage('encoding');
+          lastStage = 'encoding';
+          writeDiag(`pre-encode-${i}`, startedAt, { batchIndex: i });
+          await flow.encode();
+          writeDiag(`post-encode-${i}`, startedAt, { batchIndex: i });
 
-        lastStage = 'awaiting-certify';
-        setStage(lastStage);
-        await flow.executeCertify({ signer });
+          lastStage = 'awaiting-register';
+          setStage(lastStage);
+          writeDiag(`pre-register-${i}`, startedAt, { batchIndex: i });
+          // executeRegister returns a WriteBlobStepRegistered carrying the
+          // on-chain register tx digest. flow.upload() needs that digest
+          // (or a resume.blobObjectId) to bind the upload-relay write to
+          // the just-registered Blob — without it the SDK throws
+          // "Either resume.blobObjectId or upload digest must be provided".
+          const registerResult = await flow.executeRegister({
+            signer,
+            epochs: options.epochs ?? 10,
+            deletable: false,
+            owner,
+          });
+          collectedDigests.push(registerResult.txDigest);
+          setTxDigests([...collectedDigests]);
+          writeDiag(`post-register-${i}`, startedAt, {
+            batchIndex: i,
+            txDigest: registerResult.txDigest,
+          });
 
-        // flow.listFiles() returns N entries, all sharing the same blobObject
-        // and blobId (quilt = 1 Sui Blob with N internal byte-range patches).
-        // `f.id` is the synthetic encoded patch id; `f.blobObject.id` is the
-        // real Sui object id consumed by tx.object(...) in downstream PTBs.
-        type FileRef = { id: string; blobId: string; blobObject: { id: string } };
-        const fileRefs: FileRef[] = await flow.listFiles();
-        const result: UploadResult = {
-          blobIds: fileRefs.map((f) => f.blobId),
-          blobObjects: fileRefs.map((f) => ({
-            blobId: f.blobId,
-            blobObjectId: f.blobObject.id,
-          })),
-          patchIds: fileRefs.map((f) => f.id),
-        };
+          lastStage = 'relay-upload';
+          setStage(lastStage);
+          writeDiag(`pre-upload-${i}`, startedAt, { batchIndex: i });
+          await flow.upload({ digest: registerResult.txDigest });
+          writeDiag(`post-upload-${i}`, startedAt, { batchIndex: i });
+
+          lastStage = 'awaiting-certify';
+          setStage(lastStage);
+          writeDiag(`pre-certify-${i}`, startedAt, { batchIndex: i });
+          await flow.executeCertify({ signer });
+          writeDiag(`post-certify-${i}`, startedAt, { batchIndex: i });
+
+          // flow.listFiles() returns N entries (this quilt's slice), all
+          // sharing the same blobObject and blobId. Append to global
+          // accumulator so cross-quilt order = global input order.
+          type FileRef = { id: string; blobId: string; blobObject: { id: string } };
+          const fileRefs: FileRef[] = await flow.listFiles();
+          for (const f of fileRefs) {
+            aggBlobIds.push(f.blobId);
+            aggBlobObjects.push({ blobId: f.blobId, blobObjectId: f.blobObject.id });
+            aggPatchIds.push(f.id);
+          }
+
+          // Explicit null-out so V8 can reclaim this quilt's working set
+          // (Promise.all encode buffers, listFiles refs) before the next
+          // chunk's flow allocates. React closure refs hold only the digest
+          // strings + result accumulator, never raw flow objects.
+          flow = null;
+        }
 
         setStage('done');
         setStatus('done');
-        return result;
+        clearTrail();
+        return {
+          blobIds: aggBlobIds,
+          blobObjects: aggBlobObjects,
+          patchIds: aggPatchIds,
+        };
       } catch (cause) {
         const failedStage = lastStage as UploadError['stage'];
-        setError({ stage: failedStage, cause });
+        setError({
+          stage: failedStage,
+          cause,
+          batchIndex: currentBatchIndex,
+          batchTotal: total,
+        });
         setStage('error');
         setStatus('error');
+        clearTrail();
         throw cause;
       }
     },
@@ -207,6 +298,9 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   const reset = useCallback(() => {
     setStatus('idle');
     setStage('idle');
+    setBatchIndex(0);
+    setBatchTotal(1);
+    setTxDigests([]);
     setError(null);
   }, []);
 
@@ -215,8 +309,12 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
     uploadBlob,
     status,
     stage,
+    batchIndex,
+    batchTotal,
+    txDigests,
     error,
     reset,
-    popupCount: WALRUS_POPUP_COUNT,
+    /** Per-quilt popup count (register + certify). Total = popupCount × ceil(N/QUILT_SIZE). */
+    popupCount: WALRUS_POPUP_COUNT_PER_QUILT,
   };
 }
