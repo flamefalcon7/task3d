@@ -30,6 +30,7 @@ import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
 import { QUILT_SIZE, useWalrusUpload } from '../walrus/useWalrusUpload';
 import { BatchProgressPanel } from './BatchProgressPanel';
+import { MemoryPressureBanner } from './MemoryPressureBanner';
 import {
   VariantEditor,
   LEGACY_LABEL,
@@ -556,6 +557,10 @@ export function LaunchCollectionPage() {
   // wallet-popup interstitial to serialize clicks). useRef flips
   // synchronously, so the second invocation early-returns immediately.
   const launchingRef = useRef(false);
+  // plan-017 U5 — bumped on every LAUNCH click so MemoryPressureBanner
+  // re-checks heap pressure and re-surfaces if still over threshold even
+  // when the user dismissed it earlier in the session.
+  const [memoryRecheckSignal, setMemoryRecheckSignal] = useState(0);
   // plan-017 U3 — imperative handle on the main VariantPreview canvas so
   // onLaunch can free its Babylon scene during the Walrus upload window.
   // ~200–400 MB of Babylon heap (meshes, materials, textures, observers)
@@ -566,6 +571,10 @@ export function LaunchCollectionPage() {
   const onLaunch = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base || !baseGlb) return;
+    // plan-017 U5 — fresh memory check on LAUNCH click. If the heap is
+    // still over threshold the banner re-surfaces even after a prior
+    // dismiss. Bump synchronously (cheap; just a setState).
+    setMemoryRecheckSignal((n) => n + 1);
     launchingRef.current = true;
     setErrorMsg(null);
     setPhase('building-variants');
@@ -898,6 +907,7 @@ export function LaunchCollectionPage() {
     <div data-testid="launch-page" style={pagePaper}>
       <main style={mainStyle}>
         <TestWalletBanner error={signerLoadError} />
+        <MemoryPressureBanner recheckSignal={memoryRecheckSignal} />
         <div style={headerStack}>
           <span style={eyebrow}>— L2 / MINT</span>
           <h1 style={displayHeadline}>Launch a collection.</h1>
