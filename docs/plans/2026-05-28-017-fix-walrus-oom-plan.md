@@ -117,6 +117,7 @@ Origin Acceptance Examples carried forward verbatim:
 
 - **Decision**: Trail breadcrumb writes to `sessionStorage`, not `localStorage`. Trail survives Brave's "Aw Snap" tab recovery reload (sessionStorage persists across recovered-tab reload). Cleared on `done` or `error`, surfaced on hook init if a stale trail from prior crash is found.
 - **Correction from brainstorm**: brainstorm doc said `localStorage`; debug branch actually used `sessionStorage`. The latter is correct — `localStorage` would persist across all tabs and sessions, polluting diagnostic signal. `sessionStorage` scopes to the tab session.
+- **Key structure**: a single key `sessionStorage['walrus_upload_diagnostic']` holds a JSON array of `{stage, tMs, heapUsedMb, heapLimitMb}` entries, cap MAX_ENTRIES=16, oldest dropped on overflow. Not per-stage keys (cheaper to read, simpler to clear, doesn't pollute storage namespace).
 - **Ported from**: `debug/walrus-upload-crash` branch's `useWalrusUpload.ts` lines 41-46 + helper functions; trimmed by dropping the SDK-internal substage wrappers, keeping `writeDiag` + `readHeapMb` + the surface-on-init effect.
 
 ---
@@ -161,12 +162,14 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 - `frontend/src/walrus/useWalrusUpload.test.tsx` (modify; mirror existing mock pattern)
 
 **Approach**:
+- **Pre-impl probe (NOT optional)**: before refactoring `uploadFiles`, write a throwaway 2-quilt spike test that calls `client.walrus.writeFilesFlow({files: [a]})` twice in succession. Verify two distinct `blobObject.id` values returned, no shared state contamination (test wallet sufficient). If contamination found, plan must pivot — see Risks table. Read `node_modules/@mysten/walrus/dist/flows/write-files.mjs` first to confirm each `writeFilesFlow()` call returns an independent flow instance with no module-level shared mutable state.
 - Export `QUILT_SIZE = 4` constant so the UI (U4) consumes the same value.
 - Inside `uploadFiles(files, signer)`, replace the single `writeFilesFlow({files: walrusFiles})` call with a `for` loop over chunks of `walrusFiles`, awaiting each `flow.encode → executeRegister → upload → executeCertify` cycle in turn.
+- **After each chunk iteration**: explicitly set `flow = null` and the chunk's encode buffers to null so V8 can reclaim quilt-N's working set before quilt-(N+1) allocates. React closure refs (status object accumulator, txDigests array) should hold only digest strings, never raw flow objects.
 - Each chunk gets its own `flow.listFiles()` result; accumulate into a flat result array preserving global file index ordering (the zero-padded `file-NN` identifier convention at current line 142–148 must remain stable across chunks).
 - Status / stage object expanded: `{ stage: 'encoding' | 'registering' | 'uploading' | 'certifying' | 'done', batchIndex: number, batchTotal: number, txDigests: string[] }`. UI in U4 consumes this.
 - Sequential **between** quilts; encode **inside** one quilt remains the SDK's `Promise.all` (we can't change that without a patch — see D-062 rejected alts). With `QUILT_SIZE = 4` the inside-one-quilt peak is ~120 MB, comfortably under the heap budget.
-- Failure mid-batch (quilt 2 register fails after quilt 1 succeeds): surface the failed batch index in `error`, leave quilt 1's already-uploaded blob alive on Walrus (it will expire on epoch boundary if unused). Do NOT attempt rollback — Walrus blobs aren't deletable, and surfacing for retry is the right UX.
+- Failure mid-batch (quilt 2 register fails after quilt 1 succeeds): surface the failed batch index in `error`, leave quilt 1's already-uploaded blob alive on Walrus (it will expire on epoch boundary if unused). Do NOT attempt rollback — Walrus blobs aren't deletable. Error surface (consumed by U4) carries the partial-success cost so UX can warn user: "You paid for {batchIndex} quilt(s) of storage; retry will re-publish all {batchTotal}."
 
 **Patterns to follow**:
 - Current `uploadFiles` at `frontend/src/walrus/useWalrusUpload.ts:122-205` — keep the existing high-level structure, just wrap the single flow in a chunked loop
@@ -182,7 +185,7 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 - **Edge cases**:
   - Empty `files` array → throw before signing (no wasted popup)
   - Exactly `QUILT_SIZE` (4) → exactly 1 quilt (boundary check)
-  - 9 variants → 3 quilts (4 + 4 + 1) → signer called 6 times (verifies chunking generalizes)
+  - Heap-retention regression check: assert mock `flow` object reference is unreachable after iteration (verify via mock cleanup count or weak-ref polyfill in test)
 - **Error paths**:
   - Quilt 1 register fails → `error` set, `stage = 'error'`, no subsequent quilts attempted
   - Quilt 2 register fails after quilt 1 success → `error` includes `batchIndex: 1`, returned partial result contains quilt 1's file refs
@@ -214,6 +217,8 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 - `remount()` sets an internal `mountKey` state which forces the existing useEffect to re-run via dep change.
 - During `dispose`, render a static placeholder `<div>` with the same dimensions so layout doesn't shift.
 - Do NOT destroy the `Engine` — only `scene.dispose()` + `highlightLayer.dispose()` + null the refs. Engine destruction triggers WebGL context loss which is heavier than we need.
+- **GPU reclamation belt-and-suspenders**: after `scene.dispose()`, call `engine.wipeCaches(true)` to flush Babylon's effect/material caches. On macOS Metal/WebGL2, `scene.dispose()` alone does not guarantee VBO/texture release back to the OS; `wipeCaches(true)` is cheap and forces it. Verify GPU process RSS drop via `chrome://memory-internals` during U3 verification.
+- **Async-load race guard**: the existing `glbUrl` effect (line 230+) calls `LoadAssetContainerAsync` which is async — if `dispose()` fires while the load is in flight, the resolved container will write to a disposed scene. Add an `isDisposedRef` boolean ref; set true in `dispose`, check before any post-load scene mutation, and reset to false in `remount`. This is in addition to the existing `loadTokenRef` (which guards state mutation but not scene mutation).
 
 **Patterns to follow**:
 - Existing cleanup at `frontend/src/babylon/PreviewCanvas.tsx:206-217` — already does the right thing in the cleanup function
@@ -230,6 +235,8 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
   - Remount called without prior dispose → no-op or recreates harmlessly
 - **Integration (StrictMode trap)**:
   - Render inside `<StrictMode>`. Initial mount → double-effect runs but final state is mounted. Then `dispose()` → scene gone. Then `remount()` → scene back. This explicitly catches the `react-strictmode-cleanup-only-effect-with-useref` regression mode.
+- **Async-load race**:
+  - Mock `LoadAssetContainerAsync` with a pending promise. Render component, then call `ref.current.dispose()` before the load resolves. Resolve the load — assert no scene-mutation side effects fire (no `.scene.addMesh` calls, no throw from operating on disposed objects). Verifies the `isDisposedRef` guard.
 
 **Verification**: `pnpm --dir frontend test PreviewCanvas` green including the new `<StrictMode>` test.
 
@@ -304,6 +311,7 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 - Mirror the visual language of `TestWalletBanner` (the existing in-page banner pattern at `LaunchCollectionPage.tsx:314-340`): same 1.5px accent border, 10×12 padding, mono font 12px, 0.5px letter-spacing
 - `data-testid="batch-progress-panel"` and per-step `data-testid="batch-step-{batchIndex}-{stepName}"` for agent-browser introspection
 - Pure component — no internal state; everything driven by props from `useWalrusUpload`'s status
+- **Partial-failure state**: when `error` is present with `batchIndex > 0` (some quilts succeeded before failure), the panel surfaces a small explanatory line: "Quilts 1–{batchIndex} were stored on Walrus and paid for. Retrying will re-publish all {batchTotal} quilts (the failed ones aren't recoverable, and Walrus blobs can't be deleted)." This makes the orphan-storage cost honest. On testnet this is a non-issue; on mainnet (8/27 deploy) it's small but real.
 
 **Patterns to follow**:
 - `TestWalletBanner` at `frontend/src/collection/LaunchCollectionPage.tsx:314-340` for visual language
@@ -311,11 +319,11 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 - Token imports at top of `LaunchCollectionPage.tsx`
 
 **Test scenarios** (`frontend/src/collection/BatchProgressPanel.test.tsx`):
-- **Happy path / breakdown rendering**:
-  - `variantCount=4` → "1 quilt", "5 transactions total" (4 walrus + 1 launch — wait, 2×1+1=3; double-check breakdown). Re-state: 2K+1 transactions where K=1 → 3 transactions.
-  - `variantCount=5` → 2 quilts, 5 transactions (2×2+1)
-  - `variantCount=8` → 2 quilts, 5 transactions. Covers AE2 visible UX.
-  - `variantCount=9` → 3 quilts, 7 transactions
+- **Happy path / breakdown rendering** (formula: `totalTxs(N) = 2 * Math.ceil(N / QUILT_SIZE) + 1`):
+  - `variantCount=4` → 1 quilt, **3 transactions** (2×1 walrus + 1 launch)
+  - `variantCount=5` → 2 quilts, **5 transactions** (2×2 + 1)
+  - `variantCount=8` → 2 quilts, **5 transactions**. Covers AE2 visible UX.
+  - `variantCount=6` → 2 quilts (sizes 4 + 2), **5 transactions** (boundary: chunk-not-full case)
 - **Step progression**:
   - `stage='encoding'`, `batchIndex=0` → batch 0 "Register" shows ⟳, all others ○
   - `stage='registering'`, `batchIndex=0` → batch 0 "Register" shows ⟳
@@ -348,6 +356,8 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
 **Approach**:
 - Component reads `performance.memory.usedJSHeapSize` (Chromium-only) via a small helper `readHeapMb()` shared with `uploadTrail.ts` from U6.
 - Threshold = 2_500 * 1024 * 1024 bytes (2.5 GB). Constant exported so tests can override.
+- **Pre-impl probe (U5 first step)**: log `performance.memory.usedJSHeapSize` on user's actual Brave over ~10 seconds with a few state changes. Brave's fingerprint-protection rounds heap values to ~100 MB buckets — if confirmed, snap threshold to a bucket boundary (e.g. 2_400 * 1024 * 1024 for cleaner trigger). Capture finding in OQ-C resolution comment.
+- **Hysteresis**: once banner shows, it stays until heap drops *below* a lower threshold (e.g. 2_200 MB) — prevents on/off flicker if usedJSHeapSize sits near the boundary across snapshot quantization. Implement as two constants: `HEAP_WARN_ON_BYTES` and `HEAP_WARN_OFF_BYTES`.
 - Internal `dismissed` state via `useState(false)` — once dismissed, stays dismissed for that page session (not persisted).
 - Re-check fires on a hook prop `recheckSignal: number` — `LaunchCollectionPage` bumps it on LAUNCH click so dismissed banner re-fires if the new check still trips.
 - If `performance.memory` is undefined (Firefox/Safari), component returns `null` — graceful no-op.
@@ -396,6 +406,7 @@ ADRs land in `docs/decisions.md` as D-062 through D-065.
   - `clearTrail(): void` — called on `done` or `error`
 - Stages written by U1: `'pre-encode'`, `'post-encode-{batchIndex}'`, `'pre-register-{batchIndex}'`, `'post-register-{batchIndex}'`, `'pre-upload-{batchIndex}'`, `'post-upload-{batchIndex}'`, `'pre-certify-{batchIndex}'`, `'post-certify-{batchIndex}'`, `'pre-launch-tx'`, `'post-launch-tx'`
 - Do NOT wrap the SDK's internal substages (the debug branch did this with monkey-patching; that's expensive and brittle; out of scope)
+- **Defer `setItem` off the React render path**: `sessionStorage.setItem` is synchronous and can stall 5–50 ms under memory pressure (precisely when the trail is most valuable). Wrap the actual `setItem` call in `queueMicrotask(() => sessionStorage.setItem(...))` so the React state-setter that triggered `writeDiag` completes before the storage I/O runs. Trail order is preserved because microtasks queue in order.
 - Trail is a tap, not a load-bearing dependency — exceptions in `writeDiag` swallowed (better breadcrumb fails silent than upload crashes from a sessionStorage quota error)
 
 **Patterns to follow**:
