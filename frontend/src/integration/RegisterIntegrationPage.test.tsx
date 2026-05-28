@@ -101,6 +101,12 @@ describe('RegisterIntegrationPage', () => {
     expect(screen.getByTestId(`collection-option-${COLL}`).textContent).toMatch(/Roadster collection/);
   });
 
+  it('plan-020 U4 — connected header "← Browse" link points at /browse', () => {
+    renderPage();
+    const back = screen.getByText('← Browse') as HTMLAnchorElement;
+    expect(back.getAttribute('href')).toBe('/browse');
+  });
+
   it('rejects a non-https URL client-side and disables Register', () => {
     renderPage();
     fireEvent.click(screen.getByTestId(`collection-option-${COLL}`));
