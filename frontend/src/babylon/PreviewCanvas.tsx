@@ -262,23 +262,31 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
     sceneRef.current = scene;
 
     return () => {
-      containerRef.current?.dispose();
-      hl.dispose();
-      scene.dispose();
+      // Guard the entire engine-touching dispose chain. React 19's
+      // unmount-on-delete does NOT strictly run cleanups in reverse
+      // declaration order — the engine effect's cleanup may run BEFORE
+      // this scene-effect cleanup on full unmount. In that case the
+      // engine is already disposed and every dispose call here that
+      // walks into engine state will throw:
+      //   - scene.dispose() internally calls engine.wipeCaches(true)
+      //     (Babylon @9.7.0 scene.js:4748)
+      //   - hl.dispose() removes effects from engine's effect registry
+      //   - containerRef.dispose() releases VBOs via the GL context
+      // On a disposed engine, the GPU resources are already gone — there
+      // is nothing for these calls to free, so skipping them is correct.
+      // Refs are still nulled unconditionally so the next remount starts
+      // with a clean slate. Found by plan-017 5-reviewer pass (3 reviewers
+      // converged on this gap left by the initial f64b7e6 hotfix).
+      if (!engine.isDisposed) {
+        containerRef.current?.dispose();
+        hl.dispose();
+        scene.dispose();
+        engine.wipeCaches(true);
+      }
       sceneRef.current = null;
       containerRef.current = null;
       highlightLayerRef.current = null;
       meshesRef.current = [];
-      // Flush Babylon's effect/material caches so GPU memory returns to
-      // the driver on macOS Metal (and other backends where scene.dispose
-      // alone doesn't release VBO/texture allocations promptly).
-      //
-      // Guard against the engine having already been disposed by the
-      // outer engine effect's cleanup — React 19's unmount-on-delete
-      // does not strictly run cleanups in reverse declaration order,
-      // and wipeCaches on a disposed engine throws inside
-      // Engine.unbindAllAttributes ("Cannot set 'active' of undefined").
-      if (!engine.isDisposed) engine.wipeCaches(true);
     };
   }, [mounted]);
 

@@ -36,6 +36,12 @@ export interface BatchProgressPanelProps {
   launchInProgress?: boolean;
   /** When stage === 'error' AND batchIndex > 0, surface the orphan-blob warning. */
   errorBatchIndex?: number;
+  /**
+   * plan-017 P1-D: substage that failed in the error-batch (UploadError['stage']).
+   * Threaded so register/certify rows can show ✗ on the actual failing step
+   * instead of ✓ on a tx that never landed (the prior fall-through bug).
+   */
+  errorStage?: ErrorStage;
 }
 
 const TX_PER_QUILT = 2; // register + certify
@@ -47,18 +53,41 @@ export function totalTxsFor(variantCount: number): number {
   return TX_PER_QUILT * Math.ceil(variantCount / QUILT_SIZE) + LAUNCH_TX_COUNT;
 }
 
-type StepStatus = 'pending' | 'active' | 'done';
+// plan-017 P1-D: 'error' status for the specific step that failed in the
+// error-batch. Visible as ✗ in the panel; carries the failure marker
+// instead of the misleading ✓ green-check that the fall-through to 'done'
+// previously emitted.
+type StepStatus = 'pending' | 'active' | 'done' | 'error';
+
+// plan-017 P1-D: substage that failed within the error-batch. Mirrors
+// UploadError['stage'] minus the 'done'/'idle' values that never appear
+// in an error. Threaded from the parent so the panel can distinguish
+// "register failed" (register row 'error') from "certify failed after
+// register succeeded" (register row 'done', certify row 'error').
+type ErrorStage = 'encoding' | 'awaiting-register' | 'relay-upload' | 'awaiting-certify';
 
 function stepStatusForRegister(
   rowBatch: number,
   currentBatch: number,
   stage: UploadStage,
+  errorStage?: ErrorStage,
 ): StepStatus {
   if (stage === 'idle') return 'pending';
   if (rowBatch < currentBatch) return 'done';
   if (rowBatch > currentBatch) return 'pending';
   // rowBatch === currentBatch
   if (stage === 'encoding' || stage === 'awaiting-register') return 'active';
+  // plan-017 P1-D: on the failing batch, decode the failure substage. If
+  // register itself failed ('encoding' / 'awaiting-register'), the row
+  // never landed — show 'error' so the user doesn't see a green check
+  // for a tx that never went on-chain. If a later substage failed,
+  // register did succeed and the row should still read 'done'.
+  if (stage === 'error') {
+    if (errorStage === 'encoding' || errorStage === 'awaiting-register') {
+      return 'error';
+    }
+    return 'done';
+  }
   // After register completed for this batch, the relay-upload / certify /
   // done stages all mean register is finished.
   return 'done';
@@ -68,6 +97,7 @@ function stepStatusForCertify(
   rowBatch: number,
   currentBatch: number,
   stage: UploadStage,
+  errorStage?: ErrorStage,
 ): StepStatus {
   if (stage === 'idle') return 'pending';
   if (rowBatch < currentBatch) return 'done';
@@ -81,10 +111,12 @@ function stepStatusForCertify(
     return 'pending';
   }
   if (stage === 'awaiting-certify') return 'active';
-  // 'done' and 'error' both leave the current batch's certify as done if
-  // we got that far. Caller signals error via errorBatchIndex; the certify
-  // row is the appropriate place to surface 'pending' for the failed batch.
-  return stage === 'done' ? 'done' : 'pending';
+  if (stage === 'done') return 'done';
+  // stage === 'error' on this batch — if certify was the failing
+  // substage, show 'error'; otherwise (register or upload failed) the
+  // certify step never started → 'pending'.
+  if (errorStage === 'awaiting-certify') return 'error';
+  return 'pending';
 }
 
 function stepStatusForLaunch(
@@ -101,6 +133,7 @@ const GLYPH: Record<StepStatus, string> = {
   done: '✓',
   active: '⟳',
   pending: '○',
+  error: '✗',
 };
 
 const panel: CSSProperties = {
@@ -190,6 +223,7 @@ export function BatchProgressPanel({
   launchTxDigest,
   launchInProgress,
   errorBatchIndex,
+  errorStage,
 }: BatchProgressPanelProps) {
   const K = Math.max(1, Math.ceil(Math.max(0, variantCount) / QUILT_SIZE));
   const total = totalTxsFor(variantCount);
@@ -220,8 +254,11 @@ export function BatchProgressPanel({
   const usedBatchTotal = Math.max(1, batchTotal);
   const rows = [];
   for (let i = 0; i < usedBatchTotal; i++) {
-    const registerStatus = stepStatusForRegister(i, batchIndex, stage);
-    const certifyStatus = stepStatusForCertify(i, batchIndex, stage);
+    // Only forward errorStage when this row IS the error-batch — other
+    // batches' rows aren't affected by where the current batch failed.
+    const rowErrorStage = i === errorBatchIndex ? errorStage : undefined;
+    const registerStatus = stepStatusForRegister(i, batchIndex, stage, rowErrorStage);
+    const certifyStatus = stepStatusForCertify(i, batchIndex, stage, rowErrorStage);
     rows.push(
       <StepRow
         key={`reg-${i}`}

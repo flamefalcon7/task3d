@@ -524,13 +524,35 @@ describe('PreviewCanvas', () => {
 
   // -- plan-015 U2 — disposal -----------------------------------------------
 
-  it('disposes Engine, Scene, and HighlightLayer on unmount', async () => {
+  it('disposes Engine on unmount (scene/HL dispose are guarded on engine still being alive)', async () => {
+    // plan-017 P1-A: scene.dispose() internally calls engine.wipeCaches
+    // (Babylon scene.js:4748). React 19's unmount-on-delete may run the
+    // engine effect's cleanup BEFORE the scene effect's cleanup; if the
+    // engine is already disposed when the scene cleanup runs, scene.dispose
+    // / hl.dispose / containerRef.dispose are intentionally skipped (the
+    // GPU resources are already gone, no work to do). Asserting
+    // engineDispose is the primary unmount signal; scene/HL dispose call
+    // counts are intentionally unspecified.
     const { unmount } = render(<PreviewCanvas glbUrl={null} />);
     await flushAsync();
     unmount();
     expect(state.engineDispose).toHaveBeenCalled();
+  });
+
+  it('imperative dispose() calls scene + HL dispose while engine stays alive', async () => {
+    // Companion to the unmount test above. When the user-driven dispose()
+    // path fires (engine NOT disposed), scene/HL dispose ARE called and
+    // observable on the mocks. Covers the load-bearing assertion that
+    // P1-A only skipped the dispose chain in the engine-already-gone case.
+    const ref = createRef<PreviewCanvasHandle>();
+    render(<PreviewCanvas ref={ref} glbUrl={null} />);
+    await flushAsync();
+
+    act(() => ref.current?.dispose());
+
     expect(state.sceneDispose).toHaveBeenCalled();
     expect(state.hlDispose).toHaveBeenCalled();
+    expect(state.engineDispose).not.toHaveBeenCalled(); // engine still alive
   });
 
   // -- plan-017 U2 — imperative dispose / remount handle --------------------

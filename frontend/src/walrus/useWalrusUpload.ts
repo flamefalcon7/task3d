@@ -268,6 +268,19 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           // chunk's flow allocates. React closure refs hold only the digest
           // strings + result accumulator, never raw flow objects.
           flow = null;
+          // plan-017 P1-B: yield to the event loop between chunks. V8's
+          // major-GC is opportunistic — without a task-queue boundary
+          // between `flow = null` and the next iteration's `writeFilesFlow`
+          // + `flow.encode()` allocations, the previous chunk's encode
+          // buffer (~120 MB) may still be live garbage when the next
+          // 120 MB allocation begins → 240 MB transient peak instead of
+          // the budgeted 120 MB, undercutting the entire heap envelope
+          // this plan was designed around. setTimeout(0) costs ~4ms per
+          // chunk (negligible vs the ~10s upload) but gives V8 a clean
+          // allocation pause. Found by plan-017 adversarial review.
+          if (i < total - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
         }
 
         setStage('done');

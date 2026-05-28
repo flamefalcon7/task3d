@@ -1133,16 +1133,25 @@ export function LaunchCollectionPage() {
                 quilt is in play (N > QUILT_SIZE) AND we haven't started
                 launching yet. The pre-flight reads as a structure preview,
                 not status — once phase moves into the launch flow, the
-                stepped progress panel below replaces it. */}
-            {editorState.variants.length > QUILT_SIZE && !busy && phase !== 'success' && (
-              <BatchProgressPanel
-                variantCount={editorState.variants.length}
-                stage="idle"
-                batchIndex={0}
-                batchTotal={Math.ceil(editorState.variants.length / QUILT_SIZE)}
-                txDigests={[]}
-              />
-            )}
+                stepped progress panel below replaces it.
+
+                plan-017 P1-E (review fix): `busy` covers only the in-flight
+                phases (uploading/signing/etc) — NOT 'error' or 'success'.
+                Without the explicit phase guard, an error state would render
+                BOTH the pre-flight panel and the progress panel
+                simultaneously, with contradictory copy. */}
+            {editorState.variants.length > QUILT_SIZE &&
+              !busy &&
+              phase !== 'success' &&
+              phase !== 'error' && (
+                <BatchProgressPanel
+                  variantCount={editorState.variants.length}
+                  stage="idle"
+                  batchIndex={0}
+                  batchTotal={Math.ceil(editorState.variants.length / QUILT_SIZE)}
+                  txDigests={[]}
+                />
+              )}
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -1184,6 +1193,7 @@ export function LaunchCollectionPage() {
                   launchTxDigest={txDigest ?? undefined}
                   launchInProgress={phase === 'signing'}
                   errorBatchIndex={uploadError?.batchIndex}
+                  errorStage={uploadError?.stage}
                 />
               )}
             {/* Single-quilt path: existing pill (preserved minimal UX for the

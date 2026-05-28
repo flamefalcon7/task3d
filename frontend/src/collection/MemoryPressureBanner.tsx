@@ -60,9 +60,44 @@ const dismissButton: CSSProperties = {
   padding: 0,
 };
 
+// plan-017 P1-C: one-time probe so we can verify on the user's actual Brave
+// whether `performance.memory.usedJSHeapSize` is being capped or quantized
+// by fingerprint protection. Known Brave behaviors include (a) coarse
+// 100 MB bucketing and (b) capping at a small constant (~10 MB) regardless
+// of real heap. If (b) is in effect on the user's Brave, this banner
+// will never fire — defeating R4. The probe logs once per page load so
+// the user can read the raw values in DevTools after loading /launch.
+let probedThisLoad = false;
+
 export function MemoryPressureBanner({ recheckSignal = 0 }: MemoryPressureBannerProps) {
   const [showing, setShowing] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+
+  // Probe runs ONCE per page load on first mount of any MemoryPressureBanner.
+  // The output lets the user (or dev) verify that Brave isn't capping the
+  // heap reading below the threshold this component checks.
+  useEffect(() => {
+    if (probedThisLoad) return;
+    probedThisLoad = true;
+    const perf = performance as unknown as {
+      memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number };
+    };
+    if (!perf.memory) {
+      // eslint-disable-next-line no-console
+      console.info('[plan-017 P1-C heap probe] performance.memory unavailable (Firefox/Safari/strict-privacy). MemoryPressureBanner will be a no-op.');
+      return;
+    }
+    const mb = (b: number) => Math.round(b / 1024 / 1024);
+    // eslint-disable-next-line no-console
+    console.info(
+      '[plan-017 P1-C heap probe] performance.memory readings — usedJSHeapSize=%d MB, totalJSHeapSize=%d MB, jsHeapSizeLimit=%d MB. ' +
+        'If usedJSHeapSize stays ≤ ~10 MB regardless of real usage, Brave is capping the read and the 2.5 GB threshold will never fire ' +
+        '(R4 banner effectively disabled — close other tabs manually before LAUNCH on heavy sessions).',
+      mb(perf.memory.usedJSHeapSize),
+      mb(perf.memory.totalJSHeapSize),
+      mb(perf.memory.jsHeapSizeLimit),
+    );
+  }, []);
 
   useEffect(() => {
     const heap = readHeapMb();

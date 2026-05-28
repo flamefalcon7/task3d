@@ -256,6 +256,86 @@ describe('BatchProgressPanel', () => {
     });
   });
 
+  describe('plan-017 P1-D — error step rendering on the failing batch', () => {
+    it('register failed on quilt 1 → batch 1 register shows ✗, batch 1 certify shows pending', () => {
+      render(
+        <BatchProgressPanel
+          variantCount={8}
+          stage="error"
+          batchIndex={1}
+          batchTotal={2}
+          txDigests={['0xq0digest']}
+          errorBatchIndex={1}
+          errorStage="awaiting-register"
+        />,
+      );
+      expect(screen.getByTestId('batch-step-0-register').getAttribute('data-status')).toBe('done');
+      expect(screen.getByTestId('batch-step-0-certify').getAttribute('data-status')).toBe('done');
+      // Failing batch's register row is the failure point — ✗, NOT ✓.
+      expect(screen.getByTestId('batch-step-1-register').getAttribute('data-status')).toBe('error');
+      expect(screen.getByTestId('batch-step-1-register').textContent).toContain('✗');
+      expect(screen.getByTestId('batch-step-1-certify').getAttribute('data-status')).toBe('pending');
+    });
+
+    it('certify failed on quilt 1 → batch 1 register shows ✓ (succeeded with link), batch 1 certify shows ✗', () => {
+      render(
+        <BatchProgressPanel
+          variantCount={8}
+          stage="error"
+          batchIndex={1}
+          batchTotal={2}
+          txDigests={['0xq0digest', '0xq1digest']}
+          errorBatchIndex={1}
+          errorStage="awaiting-certify"
+        />,
+      );
+      // Register on quilt 1 succeeded — should show ✓ + Suiscan link.
+      expect(screen.getByTestId('batch-step-1-register').getAttribute('data-status')).toBe('done');
+      expect(screen.getByTestId('batch-step-1-register-link')).toBeTruthy();
+      // Certify was the actual failure point.
+      expect(screen.getByTestId('batch-step-1-certify').getAttribute('data-status')).toBe('error');
+      expect(screen.getByTestId('batch-step-1-certify').textContent).toContain('✗');
+    });
+
+    it('relay-upload failed on quilt 1 → register ✓, certify pending (upload sits between)', () => {
+      render(
+        <BatchProgressPanel
+          variantCount={8}
+          stage="error"
+          batchIndex={1}
+          batchTotal={2}
+          txDigests={['0xq0digest', '0xq1digest']}
+          errorBatchIndex={1}
+          errorStage="relay-upload"
+        />,
+      );
+      // Register succeeded (tx already on-chain).
+      expect(screen.getByTestId('batch-step-1-register').getAttribute('data-status')).toBe('done');
+      // Certify never started — pending. The relay-upload step itself
+      // doesn't have its own row in the panel; the upload-relay failure
+      // surfaces in the gap between register-done and certify-pending.
+      expect(screen.getByTestId('batch-step-1-certify').getAttribute('data-status')).toBe('pending');
+    });
+
+    it('error without errorStage threaded → safe fall-through (legacy behavior)', () => {
+      render(
+        <BatchProgressPanel
+          variantCount={8}
+          stage="error"
+          batchIndex={1}
+          batchTotal={2}
+          txDigests={['0xq0digest']}
+          errorBatchIndex={1}
+        />,
+      );
+      // No errorStage → can't distinguish; register falls through to
+      // 'done' (the original behavior, not ideal but not a regression
+      // for callers that don't pass errorStage).
+      expect(screen.getByTestId('batch-step-1-register').getAttribute('data-status')).toBe('done');
+      expect(screen.getByTestId('batch-step-1-certify').getAttribute('data-status')).toBe('pending');
+    });
+  });
+
   describe('partial-failure orphan-blob warning', () => {
     it('stage === "error" with errorBatchIndex > 0 → warning visible', () => {
       render(
