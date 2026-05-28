@@ -57,7 +57,20 @@ vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMo
 
 const uploadFilesMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
-  useWalrusUpload: () => ({ uploadFiles: uploadFilesMock, stage: 'idle', status: 'idle', error: null }),
+  // plan-017 U1 — multi-quilt state returned alongside the legacy idle shape.
+  // batchIndex/batchTotal/txDigests default to zero/one/empty so the
+  // BatchProgressPanel integration in LaunchCollectionPage gets stable
+  // values during pre-flight rendering.
+  QUILT_SIZE: 4,
+  useWalrusUpload: () => ({
+    uploadFiles: uploadFilesMock,
+    stage: 'idle',
+    status: 'idle',
+    error: null,
+    batchIndex: 0,
+    batchTotal: 1,
+    txDigests: [],
+  }),
 }));
 
 const buildLaunchMock = vi.fn();

@@ -28,7 +28,8 @@ import type {
 import { useSession } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
-import { useWalrusUpload } from '../walrus/useWalrusUpload';
+import { QUILT_SIZE, useWalrusUpload } from '../walrus/useWalrusUpload';
+import { BatchProgressPanel } from './BatchProgressPanel';
 import {
   VariantEditor,
   LEGACY_LABEL,
@@ -341,7 +342,14 @@ export function LaunchCollectionPage() {
   // separate account read here; session.address is the source of truth
   // post-sign-in.
   const { signer, loadError: signerLoadError } = useAppSigner();
-  const { uploadFiles, stage: uploadStage } = useWalrusUpload();
+  const {
+    uploadFiles,
+    stage: uploadStage,
+    batchIndex: uploadBatchIndex,
+    batchTotal: uploadBatchTotal,
+    txDigests: uploadTxDigests,
+    error: uploadError,
+  } = useWalrusUpload();
   const suiClient = useSuiClient();
   const { models, loading: modelsLoading } = useModelIndex();
 
@@ -1111,6 +1119,20 @@ export function LaunchCollectionPage() {
               disabled={busy}
             />
 
+            {/* plan-017 U4 — pre-flight breakdown. Only shown when multi-
+                quilt is in play (N > QUILT_SIZE) AND we haven't started
+                launching yet. The pre-flight reads as a structure preview,
+                not status — once phase moves into the launch flow, the
+                stepped progress panel below replaces it. */}
+            {editorState.variants.length > QUILT_SIZE && !busy && phase !== 'success' && (
+              <BatchProgressPanel
+                variantCount={editorState.variants.length}
+                stage="idle"
+                batchIndex={0}
+                batchTotal={Math.ceil(editorState.variants.length / QUILT_SIZE)}
+                txDigests={[]}
+              />
+            )}
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -1136,12 +1158,29 @@ export function LaunchCollectionPage() {
               </button>
             </div>
             <p style={launchHelper}>SIGNS 3× · PAYS GAS · MINTS L2</p>
-            {/* Pill scopes to the SILENT Walrus phases only (encoding +
-                relay-upload). The wallet-popup stages already get a
-                dedicated launch-button label — duplicating "UPLOADING ...
-                TO WALRUS" both as button text and pill was flagged by
-                the correctness reviewer. */}
-            {phase === 'uploading' &&
+            {/* plan-017 U4 — Multi-quilt scope. When N > QUILT_SIZE, the
+                user signs 2K+1 transactions instead of the single-quilt 3.
+                BatchProgressPanel surfaces the quilt structure honestly so
+                the extra popups read as known protocol shape, not surprise
+                UX regression. Single-quilt path retains the existing pill. */}
+            {editorState.variants.length > QUILT_SIZE &&
+              (phase === 'uploading' || phase === 'signing' || phase === 'success' || phase === 'error') && (
+                <BatchProgressPanel
+                  variantCount={editorState.variants.length}
+                  stage={uploadStage}
+                  batchIndex={uploadBatchIndex}
+                  batchTotal={uploadBatchTotal}
+                  txDigests={uploadTxDigests}
+                  launchTxDigest={txDigest ?? undefined}
+                  launchInProgress={phase === 'signing'}
+                  errorBatchIndex={uploadError?.batchIndex}
+                />
+              )}
+            {/* Single-quilt path: existing pill (preserved minimal UX for the
+                N ≤ QUILT_SIZE case so the typical "3 quick variants" flow
+                doesn't get a multi-row progress block). */}
+            {editorState.variants.length <= QUILT_SIZE &&
+              phase === 'uploading' &&
               (uploadStage === 'encoding' || uploadStage === 'relay-upload') && (
                 <div>
                   <span style={uploadStatusPill} data-testid="upload-status-pill">
