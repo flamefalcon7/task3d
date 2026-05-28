@@ -2812,6 +2812,152 @@ All test-only code lives under `frontend/src/test-wallet/`. Two production-safet
 
 ---
 
+## D-062: Multi-quilt batching with `QUILT_SIZE = 4`, exposed in UX
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017)
+
+### Context
+On user's Brave with sibling tabs, an 8-variant `/launch` upload crashed the renderer mid-encode. The Brave minidump at `2026-05-28 09:53:41` showed V8 GC at the 4 GB ceiling with mu = 0.003 (last resort). User dose-response: 5 variants OK, 8 variants crash. Root cause is V8 heap OOM: the SDK's `encodeQuilt` runs `Promise.all` over all variants, peaking at 20–40 MB × N on top of Brave baseline + Babylon scene + cached state.
+
+### Decision
+`useWalrusUpload.uploadFiles` chunks N variants into K = ⌈N / 4⌉ quilts of up to 4 variants each. Each quilt is one `writeFilesFlow({files: [chunk]})` call → 2 wallet signatures per quilt (register + certify). Total user signatures = 2K + 1 (+1 for the launch PTB). UX (`BatchProgressPanel`, R6) surfaces this structure explicitly: pre-flight breakdown ("8 variants → 2 quilts → 5 transactions") plus stepped per-quilt progress.
+
+### Rationale
+- Inside-one-quilt `Promise.all` peak with `QUILT_SIZE=4` is ~120 MB — fits inside V8's 4 GB ceiling even with sibling-tab pressure (when paired with Babylon dispose during upload, D-063).
+- Verified `createWriteFilesFlow` independence: each call returns a fresh closure (`let quiltBytes / quiltIndex`); no module-level shared state. Sequential multi-quilt is safe.
+- 2 → 4 popups looks like UX regression in isolation. Pre-flight breakdown + stepped progress reframes as honest Walrus-protocol surfacing, not regression. Doubles as Walrus-track positioning win.
+
+### Alternatives Considered
+- **Per-variant `writeBlobFlow` loop** — rejected: produces 2N popups (16 for 8 variants), unusable for Slush users. Catalogued anti-pattern in `docs/solutions/architecture-patterns/walrus-writefilesflow-popup-batching-2026-05-15.md`.
+- **SDK patch to make `encodeQuilt` sequential** — rejected: half-day cost for ~20 MB peak savings; pnpm-patch fragility through SDK upgrades. Multi-quilt achieves the same heap envelope with no SDK dependency.
+- **Lower variant cap to 4** — rejected: regresses the demo story; AE2's 8-variant flow is core to the pitch.
+
+### Consequences
+- ✅ Heap envelope fits under V8 cap for N ≤ 8 (the current MAX_VARIANTS) on user's Brave.
+- ✅ No SDK fork or upstream patch — survives @mysten/walrus upgrades transparently.
+- ⚠️ User signs 2K+1 transactions instead of 3. Mitigated by R6 UX.
+- ⚠️ Mid-batch failure leaves orphan Walrus blobs (paid storage that can't be deleted). `UploadError.batchIndex` surfaces the cost in U4's panel; on testnet this is free, on mainnet it's small.
+- 🔮 If AE2 still OOMs on user's Brave despite Babylon dispose, drop `QUILT_SIZE` to 2 (constant-only change; doubles popups but halves peak).
+
+### Related
+- Plan: `docs/plans/2026-05-28-017-fix-walrus-oom-plan.md` §U1, §U4
+- Brainstorm: `docs/brainstorms/2026-05-28-walrus-oom-fix-requirements.md`
+- Code: `frontend/src/walrus/useWalrusUpload.ts` (refactor); `frontend/src/collection/BatchProgressPanel.tsx` (UX surface)
+- Source check: `frontend/node_modules/@mysten/walrus/dist/flows/write-files.mjs` confirms closure-scoped flow state.
+
+---
+
+## D-063: PreviewCanvas dispose via imperative `useImperativeHandle` ref; engine stays alive
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017)
+
+### Context
+The Babylon scene on `/launch` holds ~200–400 MB of meshes, materials, textures, observers, and HighlightLayer. While the user is authoring variants this is necessary, but during the Walrus upload window it sits idle and contributes to the heap envelope that triggers OOM (see D-062). It needs to drop during upload and restore after.
+
+### Decision
+`PreviewCanvas` is wrapped in `forwardRef<PreviewCanvasHandle>` exposing `dispose()` and `remount()` via `useImperativeHandle`. Engine creation moves to a `useEffect(() => {...}, [])` that persists for the component lifetime; scene + camera + light + HighlightLayer + pointer observable cycle in a `useEffect(() => {...}, [mounted])` whose cleanup disposes them and calls `engine.wipeCaches(true)`. LaunchCollectionPage holds the ref, calls `previewRef.current?.dispose()` before `runBuildVariants`, and `remount()` in the `finally` block. `VariantPreview` accepts a `previewRef` prop and threads it through.
+
+### Rationale
+- **Imperative ref vs conditional render**: a `phase === 'uploading'` gate would dispose the scene but expose the `react-strictmode-cleanup-only-effect-with-useref` trap (documented in `docs/solutions/integration-issues/...`) under React 19 StrictMode. The imperative ref is deterministic — caller decides exactly when dispose fires.
+- **Engine stays alive**: destroying the Engine triggers WebGL context loss which can ripple into other GL features and adds 100+ms to recreation. Disposing only scene/HL is the surgical scope.
+- **`engine.wipeCaches(true)`** flushes Babylon's effect/material caches. Verified necessary on macOS Metal where `scene.dispose()` alone doesn't return VBO/texture allocations to the driver.
+- **`isDisposedRef` guard** in the async GLB-load path catches the case where dispose() fires between `LoadAssetContainerAsync` resolution and the cancellation-check branch (belt to the per-effect `cancelled` flag, which only handles same-cycle re-runs).
+
+### Alternatives Considered
+- **Conditional render gated on phase** — rejected per StrictMode trap above.
+- **Engine-level destroy + recreate** — rejected: WebGL context loss is heavier than we need; the scene/HL scope is sufficient to free the memory in question.
+- **CSS `display: none`** — rejected: hides the canvas but doesn't free the Babylon GPU/CPU resources; the heap problem persists.
+
+### Consequences
+- ✅ ~200–400 MB heap drops during the upload window; restored afterward.
+- ✅ Engine stays alive; no WebGL context-loss thrash.
+- ⚠️ All dependent effects (`bg`, `glbUrl`, `autoRotate`) gained `mounted` in their deps so they re-fire after remount against the new scene.
+- 🔮 If GPU memory still doesn't reclaim on some platforms, follow-up could add explicit `engine.releaseEffects()` per OQ-B.
+
+### Related
+- Plan: `docs/plans/2026-05-28-017-fix-walrus-oom-plan.md` §U2, §U3
+- Code: `frontend/src/babylon/PreviewCanvas.tsx`, `frontend/src/forge/VariantPreview.tsx`, `frontend/src/collection/LaunchCollectionPage.tsx`
+- Solution doc reference: `docs/solutions/integration-issues/react-strictmode-cleanup-only-effect-with-useref-2026-05-23.md`
+
+---
+
+## D-064: `performance.memory` warning threshold = 2.5 GB with 2.2 GB hysteresis; Chromium-only is acceptable scope
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017)
+
+### Context
+Walrus encoding peaks at ~120 MB per quilt (D-062). On Brave with 10+ sibling tabs, baseline heap can sit at 3 GB+ before LAUNCH — leaving < 1 GB headroom before V8's 4 GB ceiling. A pre-flight signal helps users see the risk and close other tabs before they hit the crash that motivated this entire plan.
+
+### Decision
+`MemoryPressureBanner` reads `performance.memory.usedJSHeapSize` via the shared `readHeapMb()` helper. Banner appears when usage ≥ 2.5 GB (`HEAP_WARN_ON_BYTES`) and stays visible until usage drops below 2.2 GB (`HEAP_WARN_OFF_BYTES`) — hysteresis prevents flicker when the value sits near the boundary across Brave's fingerprint-protection quantization. The banner is dismissable; a `recheckSignal` prop bumped on LAUNCH click re-surfaces a dismissed banner if heap is still over threshold. On browsers without `performance.memory` (Firefox, Safari) the component returns `null` — graceful no-op.
+
+### Rationale
+- **Threshold**: 2.5 GB leaves ~1.5 GB headroom for encode + dapp state, matching the OOM math from the Brave minidump.
+- **Hysteresis**: Brave rounds heap reads in ~100 MB buckets (fingerprint-protection); a sharp threshold flickers under bucket transitions.
+- **Chromium-only scope is OK**: Slush wallet is Chromium-only; the test wallet path (D-058) doesn't need this signal; production users on non-Chromium would already fail at Slush connection. R4 is best-effort signal, not a correctness gate.
+- **Best-effort, not blocking**: the user can dismiss and proceed at their own risk. The banner exists to inform, not to gate.
+
+### Alternatives Considered
+- **Hard gate on heap > threshold** — rejected: false positives would block legitimate uploads; signal not authoritative enough.
+- **Single threshold without hysteresis** — rejected: Brave quantization causes visual flicker.
+- **Different threshold per browser** — over-engineered for v1; one threshold is good enough.
+
+### Consequences
+- ✅ User gets a pre-flight signal that high heap = crash risk; can close tabs proactively.
+- ⚠️ Firefox / Safari users see no banner ever (acceptable scope per Chromium-only rationale).
+- ⚠️ Threshold may need tuning if real users report false positives or false negatives in production.
+
+### Related
+- Plan: `docs/plans/2026-05-28-017-fix-walrus-oom-plan.md` §U5
+- Code: `frontend/src/collection/MemoryPressureBanner.tsx`, `frontend/src/walrus/uploadTrail.ts` (`readHeapMb`)
+
+---
+
+## D-065: `sessionStorage` (not localStorage) for Walrus upload crash breadcrumb
+
+**Status**: Accepted
+**Date**: 2026-05-28
+**Phase**: Phase 4 follow-up (plan-017)
+
+### Context
+Renderer-process OOM kills the tab. The user needs to know what happened — and ideally what stage the upload was in — so a post-crash reload can surface the diagnostic. The trail must survive the crash + tab-recovery reload.
+
+### Decision
+`uploadTrail.writeDiag` appends timestamped breadcrumbs to **`sessionStorage['walrus_upload_diagnostic']`** as a JSON array, capped at MAX_ENTRIES = 16. On `useWalrusUpload` mount, `surfaceStaleTrail()` reads any stale trail and emits `[WALRUS CRASH DIAGNOSTIC]` to console once per page load. Cleared on `done` / `error`. `setItem` is wrapped in `queueMicrotask` so the synchronous storage I/O runs after the React state-setter that triggered the write. An in-memory cache prevents back-to-back-write races between deferred persistence.
+
+### Rationale
+- **sessionStorage scope**: scoped to the tab session. Brave's "Aw Snap" tab recovery preserves sessionStorage across the recovered-tab reload, so the trail survives the very crash it's diagnosing.
+- **Not localStorage**: would persist across all tabs and sessions, polluting the diagnostic signal and surfacing stale trails after unrelated reloads.
+- **Single JSON-array key**: cheaper to read, simpler to clear, doesn't pollute namespace. Cap protects sessionStorage from runaway growth.
+- **Microtask defer**: `sessionStorage.setItem` is synchronous and can stall 5–50 ms under memory pressure (precisely when the trail is most valuable). The microtask boundary keeps the React render path unblocked.
+- **In-memory cache**: two writeDiag calls in the same React tick must produce a consistent trail. Without a synchronous cache, both reads would return the same pre-write state and the second write would clobber the first.
+
+### Rationale (correction note)
+Brainstorm doc said `localStorage`; the debug branch (`debug/walrus-upload-crash`) actually used `sessionStorage`. The latter is correct for tab-scoped diagnostic value. This decision captures the corrected choice.
+
+### Alternatives Considered
+- **localStorage** — rejected per scope rationale above.
+- **Per-stage keys** — rejected: more reads to assemble the trail, harder to clear, namespace pollution. Single array key is canonical.
+- **Sync `setItem` without microtask** — rejected per heap-pressure stall reason.
+
+### Consequences
+- ✅ Trail survives "Aw Snap" recovery; user sees `[WALRUS CRASH DIAGNOSTIC]` with the last 16 stages.
+- ✅ No cross-session pollution.
+- ⚠️ Trail clears on `done` / `error`; a non-crashing error leaves no diagnostic for the next session (acceptable — the error is surfaced to the user inline).
+
+### Related
+- Plan: `docs/plans/2026-05-28-017-fix-walrus-oom-plan.md` §U6
+- Code: `frontend/src/walrus/uploadTrail.ts`
+- Ported (trimmed) from: `debug/walrus-upload-crash` branch's `useWalrusUpload.ts`
+
+---
+
 # Reserved Decision Numbers
 
-D-062 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-066 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
