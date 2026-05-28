@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-05-28 / Late evening (plan-017 walrus-OOM-fix — **CE-WORK COMPLETE, AE2 user-side smoke pending**: all 6 units (U1–U6) shipped on `fix/walrus-oom` branch in one session; 652/652 frontend tests + zero typecheck errors; agent-browser smoke caught + fixed an `engine.wipeCaches` race on full unmount; ADRs D-062–D-065 captured. **Next session = user runs AE2 killer check on their actual Brave** — 8-variant /launch with 10+ sibling tabs should complete without renderer crash via Slush 4 popups. If AE2 passes → merge branch and update phase-progress; if AE2 fails → drop QUILT_SIZE to 2 (one-line constant change).)
+## Last Updated: 2026-05-28 / Late evening (plan-017 walrus-OOM-fix — **CE-WORK + 5-REVIEWER P1 SWEEP COMPLETE, AE2 user-side smoke pending**: all 6 units shipped + 5-reviewer code-review pass dispatched + 5 P1 findings fixed and committed. 658/658 frontend tests + zero typecheck errors. **Next session = user runs AE2 killer check on their actual Brave** — 8-variant /launch with 10+ sibling tabs should complete without renderer crash via Slush 4 popups. If AE2 passes → merge branch; if AE2 fails → drop QUILT_SIZE to 2.)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **24 of 38** · demo day (7/20–21): 53 · winners (8/27): 91
@@ -38,6 +38,16 @@ After preparing plan-017 earlier in the day, ran `/ce-work` against it in a sing
 - U4 / R6: BatchProgressPanel — pre-flight breakdown + per-quilt stepped progress + Suiscan links + partial-failure orphan-blob warning
 - U5 / R4 / D-064: MemoryPressureBanner — 2.5 GB ON / 2.2 GB OFF hysteresis, recheckSignal on LAUNCH click
 - U6 / R5 / D-065: uploadTrail — sessionStorage (not localStorage), queueMicrotask defer, in-memory cache to prevent race, surface-once-per-page-load guard
+
+**5-reviewer P1 sweep (commit f65076d, after ce-work):**
+- 5 parallel reviewers (ce-correctness, ce-testing, ce-api-contract, ce-adversarial, ce-julik-frontend-races) ran against `main..fix/walrus-oom`. 45 findings total, 11 P1s with overlap.
+- Dedup'd 5 P1s, all fixed:
+  - **P1-A** (3 reviewers): extend `engine.isDisposed` guard to whole scene-effect cleanup body (the original hotfix only guarded the explicit outer `wipeCaches` call; `scene.dispose()` internally calls `wipeCaches` per Babylon `scene.js:4748`, same crash class)
+  - **P1-B** (adversarial): add `await new Promise(r => setTimeout(r, 0))` between multi-quilt chunks — V8's opportunistic major-GC may not reclaim previous chunk's encode buffer without a task-queue boundary; without this fix the heap envelope this plan was designed around (~120 MB/chunk) doubles to ~240 MB transient peak, defeating the OOM fix itself on the very Brave that motivated it
+  - **P1-C** (adversarial): one-time `performance.memory` probe logged on `/launch` mount so user can verify on actual Brave whether fingerprint protection is capping the heap reading (if it is, R4 banner never fires regardless of real memory pressure — known Brave behavior is `~10 MB cap` in some profiles)
+  - **P1-D** (correctness): `stepStatusForRegister` was falling through to `'done'` on `stage='error'`, painting ✓ green-check on a tx that never landed. Added `errorStage` prop threading `UploadError.stage` so register row shows ✗ on register-failure, ✓ + Suiscan link on certify-failure-after-register-success. New `StepStatus = 'error'` + ✗ glyph.
+  - **P1-E** (correctness): tighten pre-flight panel render gate to exclude `phase === 'error'` — `busy` doesn't cover error, so without the explicit guard both pre-flight ("you'll sign N transactions") AND progress panels rendered simultaneously with contradictory copy
+- **Deferred P2/P3** (not blockers): stale uploadError state flashes on retry, orphan-blob warning undercount on register-success-certify-failure (partially mitigated by errorStage threading), `clearTrail()` on caught error wipes diagnostic, 5 PreviewCanvas test mocks not migrated to forwardRef, `popupCount` semantic change without rename. Plan-doc inaccuracy: §System-Wide-Impact claims preserved stage names that differ from actual code (real names kept — plan was misremembered). All captured for follow-up.
 
 **Engineering posture observations (for next session if any drift):**
 - Both `editorState.variants.length > QUILT_SIZE` checks in LaunchCollectionPage drive conditional UX (pre-flight panel + in-progress panel). If we change the variant cap from 8, need to revisit the multi-quilt UX threshold story.
