@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   type AbstractMesh,
   ArcRotateCamera,
@@ -122,13 +122,24 @@ interface PreviewCanvasProps {
   partColors?: readonly string[];
 }
 
-// Imperative Babylon wrapper (D-007: drop react-babylonjs). useEffect builds
-// Engine/Scene/Camera/Light once; a separate effect swaps assets when glbUrl
-// changes. The bg-cycle effect (deps [entry]) owns scene.clearColor end-to-
-// end — the mount effect deliberately does NOT set clearColor any more (it
-// fires synchronously alongside the bg-cycle effect on first render anyway,
-// so the prior double-write was dead code per julik+correctness review).
-export function PreviewCanvas({
+// plan-017 U2 — imperative dispose/remount handle. LaunchCollectionPage
+// holds a ref to this and calls dispose() before the Walrus upload window so
+// the Babylon scene's 200–400 MB heap drops out of the OOM danger zone;
+// remount() restores the scene in the finally block. Scene/HL/observers are
+// disposed but the Engine stays alive (avoids WebGL context-loss thrash).
+export interface PreviewCanvasHandle {
+  dispose(): void;
+  remount(): void;
+}
+
+// Imperative Babylon wrapper (D-007: drop react-babylonjs). Engine creation
+// runs once on outer mount and persists across the dispose/remount cycle.
+// Scene + camera + light + HighlightLayer are recreated on each remount via
+// the [mounted]-keyed effect; the safe render loop calls
+// `sceneRef.current?.render()` so disposing the scene mid-flight is benign.
+// The bg-cycle effect (deps [entry, mounted]) owns scene.clearColor end-to-
+// end — re-fires after remount so the new scene picks up the user's BG.
+export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>(function PreviewCanvas({
   glbUrl,
   defaultBg = 'black',
   bgToggle = true,
@@ -140,7 +151,7 @@ export function PreviewCanvas({
   onPartClick,
   autoRotate = false,
   partColors,
-}: PreviewCanvasProps) {
+}, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -157,6 +168,14 @@ export function PreviewCanvas({
   // already started — prevents a slow first load from overwriting state
   // populated by a faster second load (real on rapid base re-pick).
   const loadTokenRef = useRef(0);
+  // plan-017 U2 — module-level dispose state checked by the in-flight GLB
+  // load before any scene-mutating call. Belt to the per-effect `cancelled`
+  // flag: if dispose() fires while the load is between LoadAssetContainerAsync
+  // and the cancellation-check branch, isDisposedRef catches it.
+  const isDisposedRef = useRef(false);
+  // plan-017 U2 — false during the upload window. Cycles the scene effect.
+  // Engine stays alive across cycles; only scene/HL/observers are recreated.
+  const [mounted, setMounted] = useState(true);
   const { bg, entry, cycle } = useBgCycle(defaultBg);
   // Bumped after each successful GLB load so the mode effect re-applies
   // mode against the new meshes ref. The setState is gated by the
@@ -170,12 +189,56 @@ export function PreviewCanvas({
     onPartClickRef.current = onPartClick;
   }, [onPartClick]);
 
+  // plan-017 U2 — imperative dispose/remount. Setting mounted=false fires
+  // the scene effect's cleanup which disposes the scene, HL, and observers.
+  // Engine stays alive. Setting mounted=true re-fires the scene effect and
+  // recreates everything. isDisposedRef guards in-flight async GLB loads.
+  useImperativeHandle(
+    ref,
+    (): PreviewCanvasHandle => ({
+      dispose: () => {
+        isDisposedRef.current = true;
+        setMounted(false);
+      },
+      remount: () => {
+        isDisposedRef.current = false;
+        setMounted(true);
+      },
+    }),
+    [],
+  );
+
+  // Engine: one per outer component lifetime. Stays alive across the
+  // dispose/remount cycle. The render loop is `sceneRef.current?.render()`
+  // so disposing the scene mid-flight is a no-op rather than a throw.
   useEffect(() => {
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, true);
+    engine.runRenderLoop(() => sceneRef.current?.render());
+    engineRef.current = engine;
+
+    const onResize = () => engine.resize();
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      engine.dispose();
+      engineRef.current = null;
+    };
+  }, []);
+
+  // Scene + camera + light + HighlightLayer + pointer observable. Cycles
+  // with `mounted`. Cleanup disposes everything except the Engine and
+  // calls engine.wipeCaches(true) — flushes Babylon's effect/material
+  // caches so VBO/texture memory actually returns to the GPU driver on
+  // macOS Metal (scene.dispose alone doesn't guarantee this).
+  useEffect(() => {
+    if (!mounted) return;
+    const engine = engineRef.current;
+    if (!engine) return;
     const scene = new Scene(engine);
     const camera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 3, 4, new Vector3(0, 0.5, 0), scene);
-    camera.attachControl(canvasRef.current, true);
+    if (canvasRef.current) camera.attachControl(canvasRef.current, true);
     camera.wheelDeltaPercentage = 0.01;
     new HemisphericLight('hl', new Vector3(0, 1, 0), scene);
     const hl = new HighlightLayer('preview-hl', scene);
@@ -196,36 +259,32 @@ export function PreviewCanvas({
       if (idx >= 0) handler(idx);
     });
 
-    engine.runRenderLoop(() => scene.render());
-    engineRef.current = engine;
     sceneRef.current = scene;
 
-    const onResize = () => engine.resize();
-    window.addEventListener('resize', onResize);
-
     return () => {
-      window.removeEventListener('resize', onResize);
       containerRef.current?.dispose();
       hl.dispose();
       scene.dispose();
-      engine.dispose();
-      engineRef.current = null;
       sceneRef.current = null;
       containerRef.current = null;
       highlightLayerRef.current = null;
       meshesRef.current = [];
+      // Flush Babylon's effect/material caches so GPU memory returns to
+      // the driver on macOS Metal (and other backends where scene.dispose
+      // alone doesn't release VBO/texture allocations promptly).
+      engine.wipeCaches(true);
     };
-  }, []);
+  }, [mounted]);
 
   // Sole owner of scene.clearColor. Fires once on mount alongside the
   // Engine/Scene init effect (same commit phase), and again every time
-  // useBgCycle updates `entry`.
+  // useBgCycle updates `entry` OR the scene is recreated on remount.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     const [r, g, b] = entry.rgb;
     scene.clearColor.set(r, g, b, 1);
-  }, [entry]);
+  }, [entry, mounted]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -247,7 +306,10 @@ export function PreviewCanvas({
         const container = await LoadAssetContainerAsync(glbUrl, scene, {
           pluginExtension: '.glb',
         });
-        if (cancelled || token !== loadTokenRef.current) {
+        // plan-017 U2 — isDisposedRef catches the case where dispose() ran
+        // between effect start and load resolution; the per-effect cancelled
+        // flag covers same-cycle re-runs, this covers the cross-cycle dispose.
+        if (cancelled || token !== loadTokenRef.current || isDisposedRef.current) {
           container.dispose();
           return;
         }
@@ -275,7 +337,7 @@ export function PreviewCanvas({
     return () => {
       cancelled = true;
     };
-  }, [glbUrl]);
+  }, [glbUrl, mounted]);
 
   // plan-015 U2 / U7 — mode effect. Applies the mode-specific material
   // overlay via applyCanvasMode (snapshot/restore semantics) and updates
@@ -343,7 +405,7 @@ export function PreviewCanvas({
       scene.onPointerObservable.remove(pointerObs);
       scene.onBeforeRenderObservable.remove(renderObs);
     };
-  }, [autoRotate]);
+  }, [autoRotate, mounted]);
 
   // Wrap the canvas so the absolute-positioned pills anchor to the well.
   // `position: relative` is required; the rest mirrors the bare-canvas size.
@@ -372,4 +434,4 @@ export function PreviewCanvas({
       )}
     </div>
   );
-}
+});

@@ -1,5 +1,6 @@
+import { createRef, StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 
 // Babylon needs WebGL — jsdom doesn't have it. Mock @babylonjs/core entirely
 // so the smoke test verifies the React shell renders + mount/unmount lifecycle,
@@ -10,8 +11,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 // the TaggingCanvas.test.tsx setup so the two canvases share a single mocking
 // pattern.
 const state: {
+  engineCtor: ReturnType<typeof vi.fn>;
   engineDispose: ReturnType<typeof vi.fn>;
+  engineWipeCaches: ReturnType<typeof vi.fn>;
+  sceneCtor: ReturnType<typeof vi.fn>;
   sceneDispose: ReturnType<typeof vi.fn>;
+  hlCtor: ReturnType<typeof vi.fn>;
   hlDispose: ReturnType<typeof vi.fn>;
   hlRemoveAll: ReturnType<typeof vi.fn>;
   hlAddMesh: ReturnType<typeof vi.fn>;
@@ -30,8 +35,12 @@ const state: {
   }>;
   camera: { alpha: number };
 } = {
+  engineCtor: vi.fn(),
   engineDispose: vi.fn(),
+  engineWipeCaches: vi.fn(),
+  sceneCtor: vi.fn(),
   sceneDispose: vi.fn(),
+  hlCtor: vi.fn(),
   hlDispose: vi.fn(),
   hlRemoveAll: vi.fn(),
   hlAddMesh: vi.fn(),
@@ -45,9 +54,14 @@ const state: {
 
 vi.mock('@babylonjs/core', () => {
   class Engine {
-    constructor(..._a: unknown[]) {}
+    constructor(..._a: unknown[]) {
+      state.engineCtor();
+    }
     runRenderLoop() {}
     resize() {}
+    wipeCaches(_full?: boolean) {
+      state.engineWipeCaches();
+    }
     dispose() {
       state.engineDispose();
     }
@@ -77,7 +91,9 @@ vi.mock('@babylonjs/core', () => {
     dispose() {
       state.sceneDispose();
     }
-    constructor(_e: unknown) {}
+    constructor(_e: unknown) {
+      state.sceneCtor();
+    }
   }
   class ArcRotateCamera {
     wheelDeltaPercentage = 0;
@@ -109,7 +125,9 @@ vi.mock('@babylonjs/core', () => {
     dispose() {
       state.hlDispose();
     }
-    constructor(..._a: unknown[]) {}
+    constructor(..._a: unknown[]) {
+      state.hlCtor();
+    }
   }
   class Color3 {
     constructor(public r: number, public g: number, public b: number) {}
@@ -173,7 +191,7 @@ vi.mock('@babylonjs/core', () => {
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
-import { PreviewCanvas } from './PreviewCanvas';
+import { PreviewCanvas, type PreviewCanvasHandle } from './PreviewCanvas';
 
 function vec3Mock() {
   return {
@@ -239,8 +257,12 @@ async function flushAsync() {
 }
 
 beforeEach(() => {
+  state.engineCtor = vi.fn();
   state.engineDispose = vi.fn();
+  state.engineWipeCaches = vi.fn();
+  state.sceneCtor = vi.fn();
   state.sceneDispose = vi.fn();
+  state.hlCtor = vi.fn();
   state.hlDispose = vi.fn();
   state.hlRemoveAll = vi.fn();
   state.hlAddMesh = vi.fn();
@@ -507,5 +529,119 @@ describe('PreviewCanvas', () => {
     expect(state.engineDispose).toHaveBeenCalled();
     expect(state.sceneDispose).toHaveBeenCalled();
     expect(state.hlDispose).toHaveBeenCalled();
+  });
+
+  // -- plan-017 U2 — imperative dispose / remount handle --------------------
+
+  it('imperative dispose() disposes Scene + HighlightLayer but keeps Engine alive', async () => {
+    const ref = createRef<PreviewCanvasHandle>();
+    render(<PreviewCanvas ref={ref} glbUrl={null} />);
+    await flushAsync();
+
+    expect(state.engineCtor).toHaveBeenCalledTimes(1);
+    expect(state.sceneCtor).toHaveBeenCalledTimes(1);
+    state.engineDispose.mockClear();
+
+    act(() => ref.current?.dispose());
+
+    expect(state.sceneDispose).toHaveBeenCalled();
+    expect(state.hlDispose).toHaveBeenCalled();
+    expect(state.engineWipeCaches).toHaveBeenCalled();
+    // Engine must still be alive — only scene/HL are freed.
+    expect(state.engineDispose).not.toHaveBeenCalled();
+  });
+
+  it('imperative dispose() is idempotent (second call is no-op)', async () => {
+    const ref = createRef<PreviewCanvasHandle>();
+    render(<PreviewCanvas ref={ref} glbUrl={null} />);
+    await flushAsync();
+
+    act(() => ref.current?.dispose());
+    const firstDisposeCount = state.sceneDispose.mock.calls.length;
+
+    act(() => ref.current?.dispose());
+
+    // Second dispose triggers no additional scene teardown — already disposed.
+    expect(state.sceneDispose.mock.calls.length).toBe(firstDisposeCount);
+  });
+
+  it('imperative remount() after dispose recreates Scene (Engine stays the one from mount)', async () => {
+    const ref = createRef<PreviewCanvasHandle>();
+    render(<PreviewCanvas ref={ref} glbUrl={null} />);
+    await flushAsync();
+
+    expect(state.engineCtor).toHaveBeenCalledTimes(1);
+    expect(state.sceneCtor).toHaveBeenCalledTimes(1);
+
+    act(() => ref.current?.dispose());
+    act(() => ref.current?.remount());
+    await flushAsync();
+
+    // Engine NOT reconstructed — still the same instance from initial mount.
+    expect(state.engineCtor).toHaveBeenCalledTimes(1);
+    // Scene constructed twice: once at mount, once at remount.
+    expect(state.sceneCtor).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders inside StrictMode without breaking the dispose/remount cycle', async () => {
+    const ref = createRef<PreviewCanvasHandle>();
+    render(
+      <StrictMode>
+        <PreviewCanvas ref={ref} glbUrl={null} />
+      </StrictMode>,
+    );
+    await flushAsync();
+
+    // StrictMode double-invokes effects in dev: in vitest's react env this
+    // surfaces as engineCtor/sceneCtor=2 OR 1 depending on the React build.
+    // The invariant we actually care about: dispose+remount still works.
+    state.sceneCtor.mockClear();
+
+    act(() => ref.current?.dispose());
+    act(() => ref.current?.remount());
+    await flushAsync();
+
+    expect(state.sceneCtor).toHaveBeenCalled();
+  });
+
+  it('async GLB load resolving after dispose() does not mutate the disposed scene', async () => {
+    const babylon = await import('@babylonjs/core');
+    const loadSpy = babylon.LoadAssetContainerAsync as unknown as ReturnType<typeof vi.fn>;
+    loadSpy.mockClear();
+
+    // Hold the load in a pending state until we resolve it manually.
+    let resolveLoad: (container: { meshes: typeof state.meshes; addAllToScene: () => void; dispose: () => void }) => void = () => {};
+    const containerDispose = vi.fn();
+    const addAllToScene = vi.fn();
+    loadSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+
+    const ref = createRef<PreviewCanvasHandle>();
+    render(<PreviewCanvas ref={ref} glbUrl="blob:http://localhost/pending" />);
+    await flushAsync();
+    expect(loadSpy).toHaveBeenCalled();
+    addAllToScene.mockClear();
+
+    // Dispose mid-load.
+    act(() => ref.current?.dispose());
+
+    // Resolve the load AFTER dispose. The branch guard (cancelled ||
+    // isDisposedRef.current) must dispose the container without
+    // adding it to the (now-disposed) scene.
+    await act(async () => {
+      resolveLoad({
+        meshes: state.meshes,
+        addAllToScene,
+        dispose: containerDispose,
+      });
+      await flushAsync();
+    });
+
+    expect(addAllToScene).not.toHaveBeenCalled();
+    expect(containerDispose).toHaveBeenCalled();
   });
 });
