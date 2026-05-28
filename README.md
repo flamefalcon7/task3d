@@ -1,4 +1,4 @@
-# 3D Model Generation Service
+# Tusk3D
 
 A Sui-native **composable creator economy** for low-poly 3D game assets — mint a 16-variant car collection in 3 wallet signatures, then drive the cars you buy in a Babylon + Havok racing scene. All on Walrus + Sui.
 

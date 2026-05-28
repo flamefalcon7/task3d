@@ -1,4 +1,4 @@
-# Project: 3D Model Generation Service
+# Project: Tusk3D
 
 A web3 service that lets users generate simple 3D models through constrained inputs, preview them, and publish as Sui-native content with **composable creator economy** — backed by Walrus decentralized storage and Sui Move.
 
