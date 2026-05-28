@@ -1,0 +1,7 @@
+# plan-019 U5 — walrus-tusk.glb pending Rick's pre-flight /create + /launch run.
+#
+# Target: gltf-transform compressed, ≤ 500 KB. Prune materials after
+# texture strip (plan-013 lesson). File is the L1 Collection #001 base
+# mesh, identical to the canonical Walrus blob referenced by WALRUS_BLOB_CID
+# in frontend/src/landing/LedeHero.tsx — byte-equality required so the
+# Walrus-timeout fallback renders the same geometry the live blob would.
