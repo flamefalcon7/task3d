@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="IN-GAME — the tusk floating as a usable object in a neutral game scene with a floor and horizon">
+  <!--
+    S4 lifecycle strip, panel 4 (plan-023 U1). The owned tusk placed in a
+    generic engine scene — floor + horizon, deliberately NOT the /track
+    racing demo. Brutalist editorial palette, zero orange accent (S4 KD-6).
+  -->
+  <rect width="600" height="450" fill="#000000"/>
+  <g fill="none" stroke="#F5F5F0" stroke-linecap="square">
+    <!-- horizon -->
+    <line x1="0" y1="250" x2="600" y2="250" stroke-width="1.5" opacity="0.7"/>
+    <!-- floor perspective lines (a neutral ground plane) -->
+    <g stroke-width="1" opacity="0.3">
+      <line x1="300" y1="250" x2="40" y2="450"/>
+      <line x1="300" y1="250" x2="220" y2="450"/>
+      <line x1="300" y1="250" x2="380" y2="450"/>
+      <line x1="300" y1="250" x2="560" y2="450"/>
+      <line x1="60" y1="330" x2="540" y2="330"/>
+      <line x1="20" y1="400" x2="580" y2="400"/>
+    </g>
+  </g>
+  <!-- floating tusk (rescaled silhouette), slightly above the horizon -->
+  <g transform="translate(190,70)">
+    <path d="M 0 150 Q 60 -50 220 -40 Q 260 -35 272 -8 Q 248 -8 204 14 Q 102 58 58 150 Z"
+          fill="#F5F5F0" fill-opacity="0.10" stroke="#F5F5F0" stroke-width="1.5" stroke-linejoin="miter"/>
+  </g>
+  <!-- contact shadow ellipse on the floor -->
+  <ellipse cx="320" cy="300" rx="120" ry="14" fill="none" stroke="#F5F5F0" stroke-width="1" opacity="0.35"/>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="MODEL — a low-poly walrus tusk shown half as a solid model, half as a wireframe mesh">
+  <!--
+    S4 lifecycle strip, panel 2 (plan-023 U1). Derived from the tusk
+    silhouette in public/lede/tusk-keyframe.svg. Suggests the model↔mesh
+    gradient: left = solid model (paper fill), right = wireframe mesh.
+    Brutalist editorial palette, zero orange accent (S4 KD-6).
+  -->
+  <rect width="600" height="450" fill="#000000"/>
+  <defs>
+    <!-- tusk path, rescaled from the 1200x750 keyframe into this 600x450 box -->
+    <path id="tusk" d="M 180 330 Q 240 110 400 120 Q 440 125 452 152 Q 428 152 384 174 Q 282 218 238 330 Z"/>
+    <clipPath id="modelHalf"><rect x="0" y="0" width="320" height="450"/></clipPath>
+  </defs>
+  <!-- MODEL side: solid paper fill, clipped to the left portion -->
+  <use href="#tusk" fill="#F5F5F0" fill-opacity="0.16" clip-path="url(#modelHalf)"/>
+  <!-- whole silhouette outline -->
+  <use href="#tusk" fill="none" stroke="#F5F5F0" stroke-width="1.5" stroke-linejoin="miter"/>
+  <!-- MESH side: wireframe facet lines on the right portion -->
+  <g fill="none" stroke="#F5F5F0" stroke-width="1.5" stroke-linecap="square" opacity="0.55">
+    <path d="M 384 174 L 396 210 L 430 200 L 452 152"/>
+    <path d="M 360 196 L 372 232 L 404 224"/>
+    <path d="M 320 220 L 332 262 L 372 232"/>
+    <path d="M 300 250 L 312 300 L 340 280"/>
+  </g>
+  <!-- model↔mesh divider — paper rule, NOT accent -->
+  <line x1="320" y1="60" x2="320" y2="390" stroke="#F5F5F0" stroke-width="1" stroke-dasharray="3 5" opacity="0.4"/>
+</svg>
