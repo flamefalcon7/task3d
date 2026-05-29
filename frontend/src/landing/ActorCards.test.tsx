@@ -30,12 +30,19 @@ describe('ActorCards', () => {
     renderCards();
     for (const key of ['modelCreator', 'nftCreator', 'buyer', 'gameDev']) {
       const card = screen.getByTestId(`actor-card-${key}`);
-      // name (the actor key doubles as the displayed name)
+      // name (the actor key doubles as the displayed name by design)
       expect(card.textContent).toContain(key);
       // cost line — non-empty text containing a cost token
       expect(card.textContent).toMatch(/gas|royalty|fee|price/i);
-      // ability — a full sentence ending in a period
-      expect(card.textContent).toMatch(/\.\s*$|\.[^.]/);
+      // ability — the <p> is the ability element; assert IT ends in a period
+      // (not the whole-card textContent, which would vacuously match any
+      // period anywhere in the concatenation — e.g. the flavor line).
+      const ability = card.querySelector('p');
+      expect(ability?.textContent?.trim()).toMatch(/\.$/);
+      // name + cost + flavor all render as <span>s (gameDev adds a 4th, the
+      // kicker). >=3 spans confirms the flavor part is present without
+      // coupling to hashed CSS-module class names.
+      expect(card.querySelectorAll('span').length).toBeGreaterThanOrEqual(3);
       // provenance — a clickable link to the route
       const link = within(card).getByTestId(`actor-route-${key}`);
       expect(link.getAttribute('href')).toBeTruthy();
@@ -52,14 +59,17 @@ describe('ActorCards', () => {
   });
 
   it('never surfaces unshipped-mechanic vocabulary (AC-3)', () => {
-    renderCards();
-    const text = screen.getByTestId('actor-cards').textContent ?? '';
+    const container = renderCards();
     // Access / Seal are v1.1 (Seal-gated access sale); "Derivative" is the
     // deferred fork flavor — none ship in v1, so none may appear. Word-boundary
     // match so legitimate copy like "license" / "forks" wouldn't false-trip.
-    expect(text).not.toMatch(/\baccess\b/i);
-    expect(text).not.toMatch(/\bseal\b/i);
-    expect(text).not.toMatch(/\bderivative\b/i);
+    // Scan innerHTML (not just textContent) so a forbidden term hiding in an
+    // attribute — aria-label, title, alt — is caught too (mirrors the AC-5
+    // ff4500 check). AC-3 is load-bearing, so the guard covers attributes.
+    const html = container.innerHTML;
+    expect(html).not.toMatch(/\baccess\b/i);
+    expect(html).not.toMatch(/\bseal\b/i);
+    expect(html).not.toMatch(/\bderivative\b/i);
   });
 
   it('buyer card asserts ownership (not access); gameDev asserts integration (AC-4)', () => {
@@ -95,6 +105,10 @@ describe('ActorCards', () => {
     const gameDev = screen.getByTestId('actor-card-gameDev');
     expect(gameDev.getAttribute('data-downstream')).toBe('true');
     expect(gameDev.textContent).toContain('CONSUMES OUTPUT');
+    // The kicker is decorative — must stay aria-hidden so screen readers
+    // don't announce the "↳ CONSUMES OUTPUT" glyph as content.
+    const kicker = within(gameDev).getByText(/CONSUMES OUTPUT/);
+    expect(kicker.getAttribute('aria-hidden')).toBe('true');
   });
 
   // AC-8 (375px no horizontal overflow) is enforced by the grid→2×2 pattern

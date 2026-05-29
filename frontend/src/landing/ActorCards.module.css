@@ -7,6 +7,11 @@
   border-top: 1.5px solid #000;
   border-bottom: 1.5px solid #000;
   background: #f5f5f0;
+  /* The :hover tilt rotates edge cards a few px past the grid edge; clip the
+     horizontal overhang so it can't flash a transient page scrollbar on hover.
+     `clip` (not `hidden`) confines the paint without establishing a new BFC,
+     so it won't disturb sticky/layout of sibling sections. */
+  overflow-x: clip;
 }
 
 .grid {
@@ -38,17 +43,27 @@
 }
 
 /* The lone motion concession (D-044 otherwise instant): a subtle tilt.
-   Small angle so rotated corners of edge cards never poke past the viewport
-   and trigger a horizontal scrollbar (KD-D / AC-8). Gated behind
-   reduced-motion so the transition only animates when the user allows it. */
+   Small angle, and .section clips the horizontal overhang (KD-D / AC-8).
+   Hover affordance = tilt + a 3px outline. Outline (not inset box-shadow)
+   stays axis-aligned under the rotation instead of skewing with the card,
+   and matches the .provenance:focus-visible treatment. */
 .card:hover {
   transform: rotate(-1.5deg);
-  box-shadow: inset 0 0 0 3px #000;
+  outline: 3px solid #000;
+  outline-offset: -3px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .card {
     transition: transform 80ms ease-out;
+  }
+}
+
+/* Reduced-motion users get the outline affordance with no spatial tilt at
+   all — zero the transform itself, not just the transition easing. */
+@media (prefers-reduced-motion: reduce) {
+  .card:hover {
+    transform: none;
   }
 }
 

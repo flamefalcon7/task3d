@@ -10,10 +10,10 @@ export function LandingPage(): JSX.Element {
   return (
     <main style={pagePaper} data-testid="landing-page">
       <Masthead />
+      {/* S3 identity mark — future survivor plan (mounts inside Masthead's reserved slot) */}
       <TelemetryStrip />
       <LedeHero />
       <LifecycleStrip />
-      {/* S3 identity mark — future survivor plan (mounts inside Masthead's reserved slot) */}
       <ActorCards />
       <KeycapRow />
     </main>

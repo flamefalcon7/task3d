@@ -54,7 +54,12 @@ const ACTORS: readonly Actor[] = [
     key: 'gameDev',
     name: 'gameDev',
     cost: 'registration fee + gas',
-    ability: 'Registers an integration to drop Tusk3D collections into any game.',
+    // Honest to shipped v1: register_integration writes an on-chain
+    // attestation ({name, url}) that a game can verify — it is NOT an
+    // in-game runtime/SDK render path (none ships for 6/21). Avoids the
+    // S4 IN-GAME overclaim. The aspiration lives in the flavor line, not
+    // the literal ability.
+    ability: 'Registers an on-chain integration that any game can verify.',
     flavor: 'Where the carving ends up.',
     route: '/integrate',
     downstream: true,
