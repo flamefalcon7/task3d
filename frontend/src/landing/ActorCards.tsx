@@ -1,0 +1,103 @@
+import { type JSX } from 'react';
+import { Link } from 'react-router-dom';
+import styles from './ActorCards.module.css';
+
+interface Actor {
+  /** stable key + testid suffix */
+  key: string;
+  /** actor name (Newsreader italic) */
+  name: string;
+  /** MTG "mana cost" — qualitative honest cost, NO hardcoded SUI (KD-2) */
+  cost: string;
+  /** one-sentence ability (body sans) */
+  ability: string;
+  /** one-line italic role poem */
+  flavor: string;
+  /** provenance route — a real App.tsx route, clickable (KD-A) */
+  route: string;
+  /** gameDev is downstream of L1/L2/L3, not a parallel peer (KD-3/KD-B) */
+  downstream?: boolean;
+}
+
+// The four Tusk3D actors. Copy is verbatim from the S5 requirements Card
+// Content table and is honest to SHIPPED v1 (plan-024 KD-1):
+//   - buyer OWNS an NftToken (ownership, not access)
+//   - gameDev REGISTERS an integration (register_integration)
+// "Access" / "Seal" / "Derivative" are v1.1 / unshipped and must not appear
+// anywhere on this surface (enforced by ActorCards.test.tsx, word-boundary).
+const ACTORS: readonly Actor[] = [
+  {
+    key: 'modelCreator',
+    name: 'modelCreator',
+    cost: 'SUI gas + Tripo fee',
+    ability: 'Publishes a base model to Walrus and sets its license terms.',
+    flavor: 'Every tusk begins as a sentence.',
+    route: '/create',
+  },
+  {
+    key: 'nftCreator',
+    name: 'nftCreator',
+    cost: 'pay-to-derive + gas',
+    ability: 'Forks a base into a variant collection — one signature launches the whole palette.',
+    flavor: 'Riff on what already exists.',
+    route: '/launch',
+  },
+  {
+    key: 'buyer',
+    name: 'buyer',
+    cost: 'listing price + 5% royalty',
+    ability: 'Buys and owns an on-chain token — the variant is yours, not rented.',
+    flavor: 'Own the object, not a license.',
+    route: '/browse',
+  },
+  {
+    key: 'gameDev',
+    name: 'gameDev',
+    cost: 'registration fee + gas',
+    ability: 'Registers an integration to drop Tusk3D collections into any game.',
+    flavor: 'Where the carving ends up.',
+    route: '/integrate',
+    downstream: true,
+  },
+];
+
+/**
+ * S5 actor cards — a static 4-card row casting the Tusk3D actors as
+ * brutalist-editorial trading cards (MTG anatomy: name / cost / ability /
+ * flavor / provenance). Mounted between the S4 lifecycle strip and the S6
+ * keycap row. Pure presentational: no state, no effects, no Babylon, no
+ * fetch (plan-024 KD-7). The only motion is a CSS :hover tilt. Zero #FF4500
+ * accent (D-044; budget full — KD-6). Provenance routes are clickable Links
+ * (KD-A) and offer role-based dispatch complementing S6's verb dispatch.
+ * The gameDev card is marked downstream (KD-B): it consumes the output of the
+ * create → launch → browse production chain rather than being a parallel peer.
+ */
+export function ActorCards(): JSX.Element {
+  return (
+    <section className={styles.section} data-testid="actor-cards" aria-label="Who Tusk3D is for">
+      <ol className={styles.grid}>
+        {ACTORS.map((a) => (
+          <li
+            key={a.key}
+            className={a.downstream ? `${styles.card} ${styles.downstream}` : styles.card}
+            data-testid={`actor-card-${a.key}`}
+            data-downstream={a.downstream ? 'true' : undefined}
+          >
+            {a.downstream && (
+              <span className={styles.kicker} aria-hidden="true">
+                ↳ CONSUMES OUTPUT
+              </span>
+            )}
+            <span className={styles.name}>{a.name}</span>
+            <span className={styles.cost}>{a.cost}</span>
+            <p className={styles.ability}>{a.ability}</p>
+            <span className={styles.flavor}>{a.flavor}</span>
+            <Link className={styles.provenance} to={a.route} data-testid={`actor-route-${a.key}`}>
+              → {a.route}
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
