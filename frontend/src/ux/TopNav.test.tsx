@@ -45,14 +45,24 @@ function renderAt(pathname: string) {
 }
 
 describe('TopNav', () => {
-  it('renders the brand mark, all four nav links, and the TESTNET badge', () => {
-    renderAt('/');
+  it('renders the brand mark, all four nav links, and the TESTNET badge (non-landing route)', () => {
+    renderAt('/market');
     expect(screen.getByTestId('brand-mark').textContent).toBe('Tusk3D');
     expect(screen.getByTestId('nav-create')).toBeTruthy();
     expect(screen.getByTestId('nav-launch')).toBeTruthy();
     expect(screen.getByTestId('nav-market')).toBeTruthy();
     expect(screen.getByTestId('nav-track')).toBeTruthy();
     expect(screen.getByTestId('network-badge').textContent).toBe('TESTNET');
+  });
+
+  it('suppresses the brand mark + TESTNET badge on the landing route (S7 — Masthead owns identity)', () => {
+    renderAt('/');
+    // The editorial <Masthead /> owns the wordmark + TESTNET EDITION on `/`.
+    expect(screen.queryByTestId('brand-mark')).toBeNull();
+    expect(screen.queryByTestId('network-badge')).toBeNull();
+    // nav links + wallet pill still render (the testnet signal survives via the pill).
+    expect(screen.getByTestId('nav-create')).toBeTruthy();
+    expect(screen.getByTestId('wallet-pill')).toBeTruthy();
   });
 
   it('highlights the active route with the accent underline (at /market)', () => {

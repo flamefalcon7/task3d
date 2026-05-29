@@ -80,11 +80,23 @@ export function TopNav() {
   const location = useLocation();
   const { address } = useSession();
 
+  // S7 (plan-022): on the landing route the editorial <Masthead /> owns the
+  // "Tusk3D" wordmark and the "TESTNET EDITION" tag. Suppress the TopNav
+  // brand-mark + network badge on `/` so the page shows one intentional
+  // identity instead of two stacked wordmarks. The brand link is a no-op on
+  // `/` anyway (already home); the wallet pill keeps the testnet signal.
+  const isLanding = location.pathname === '/';
+
   return (
     <nav style={navBar} data-testid="top-nav">
-      <Link to="/" style={brandStyle} data-testid="brand-mark">
-        Tusk3D
-      </Link>
+      {isLanding ? (
+        // empty flex slot keeps the nav links centered (navBar is space-between)
+        <span aria-hidden="true" />
+      ) : (
+        <Link to="/" style={brandStyle} data-testid="brand-mark">
+          Tusk3D
+        </Link>
+      )}
 
       <div style={navLinksContainer}>
         {NAV_ITEMS.map((item) => {
@@ -124,9 +136,11 @@ export function TopNav() {
             ? `${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)}`
             : 'NO WALLET'}
         </span>
-        <span style={networkBadge} data-testid="network-badge">
-          TESTNET
-        </span>
+        {!isLanding && (
+          <span style={networkBadge} data-testid="network-badge">
+            TESTNET
+          </span>
+        )}
       </div>
     </nav>
   );

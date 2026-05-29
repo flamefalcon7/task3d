@@ -16,8 +16,21 @@ function resolveIssueNumber(): number {
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     const n = Number.parseInt(count, 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    if (Number.isFinite(n) && n > 0) return n;
+    console.warn(
+      `[masthead] git rev-list --count main returned ${JSON.stringify(count)} → stamping sentinel 0 (the № token will not render). ` +
+        `If this is a production build, ensure a full git clone with the main ref present.`,
+    );
+    return 0;
   } catch {
+    // why: the catch path is hit on shallow clones (Vercel default --depth=1),
+    // detached HEAD with no local `main` ref, or a non-git checkout. The build
+    // must not fail — but a SILENT sentinel means S7's whole point (the №)
+    // vanishes in exactly the deploy env that matters, with no breadcrumb.
+    // Surface it on stderr so the build log shows why the masthead lost its №.
+    console.warn(
+      '[masthead] could not resolve git commit count (no `main` ref / shallow clone / non-git build) → stamping sentinel 0; the № token will not render.',
+    );
     return 0;
   }
 }
