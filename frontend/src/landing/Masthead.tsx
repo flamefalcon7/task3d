@@ -30,15 +30,21 @@ export function Masthead({ issueNumber = buildIssueNumber }: MastheadProps = {})
       {/* S3 topology identity mark (plan-025). Static baked ridgeline tusk —
           NOT a live Walrus fetch (S1 LedeHero already carries that proof).
           Decorative: the wordmark carries the name, so alt="" keeps screen
-          readers from double-announcing. onError hides it on a sub-path deploy
-          (mirrors LifecycleStrip). */}
+          readers from double-announcing (the SVG itself carries no role/
+          aria-label, so the decorative intent has a single source). Intrinsic
+          width/height reserve the box to avoid masthead reflow before the SVG
+          decodes (CLS). onError collapses the box (display:none, not
+          visibility:hidden) so a sub-path-deploy 404 leaves no phantom gap in
+          this flex row. */}
       <img
         className={styles.mark}
         src="/mark/tusk-ridge.svg"
         alt=""
+        width={43}
+        height={30}
         data-testid="masthead-mark"
         onError={(e) => {
-          e.currentTarget.style.visibility = 'hidden';
+          e.currentTarget.style.display = 'none';
         }}
       />
       <span className={styles.wordmark} data-testid="masthead-wordmark">

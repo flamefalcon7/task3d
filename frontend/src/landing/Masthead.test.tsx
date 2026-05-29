@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Masthead } from './Masthead';
 
 const MARK_SVG = join(
@@ -68,9 +68,29 @@ describe('Masthead', () => {
     expect(mark.getAttribute('src')).toBe('/mark/tusk-ridge.svg');
     // decorative — wordmark carries the name, so empty alt avoids double-announce
     expect(mark.getAttribute('alt')).toBe('');
+    // intrinsic dimensions reserve the box (no CLS before the SVG decodes)
+    expect(mark.getAttribute('width')).toBe('43');
+    expect(mark.getAttribute('height')).toBe('30');
     // DOM order: the mark leads the wordmark
     const wordmark = screen.getByTestId('masthead-wordmark');
     expect(mark.compareDocumentPosition(wordmark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('collapses the mark (display:none) if the asset 404s (S3 onError)', () => {
+    render(<Masthead issueNumber={313} />);
+    const mark = screen.getByTestId('masthead-mark');
+    fireEvent.error(mark);
+    // display:none (not visibility:hidden) so no phantom gap in the flex row
+    expect((mark as HTMLElement).style.display).toBe('none');
+  });
+
+  it('keeps decorative intent single-sourced — no exposed accessible name (S3)', () => {
+    const { container } = render(<Masthead issueNumber={313} />);
+    // The mark is alt="" (decorative). Guard against a future regression that
+    // inlines the SVG with its own aria-label, which would double-announce
+    // "Tusk3D" — the asset must carry no accessible name of its own.
+    expect(container.querySelector('svg[aria-label]')).toBeNull();
+    expect(container.querySelector('[aria-label="Tusk3D topology mark"]')).toBeNull();
   });
 
   it('is static — no canvas in the masthead (S3)', () => {
@@ -83,6 +103,8 @@ describe('Masthead', () => {
   // itself — the real zero-accent surface (S4 lesson).
   it('the topology mark SVG asset contains no #FF4500 accent (S3 / D-044)', () => {
     const svg = readFileSync(MARK_SVG, 'utf8').toLowerCase();
-    expect(svg).not.toContain('ff4500');
+    // Cover the aliases #FF4500 can hide behind, not just the literal hex:
+    // the named color `orangered` IS #FF4500, plus the rgb() and #f40 forms.
+    expect(svg).not.toMatch(/ff4500|#f40\b|orangered|rgb\(\s*255\s*[, ]\s*69\s*[, ]\s*0\s*\)/);
   });
 });
