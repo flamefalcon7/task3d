@@ -18,11 +18,13 @@
 - Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
 
 ### Landing survivors status (7-survivor ideation `docs/ideation/2026-05-28-tusk3d-landing-page-ideation.md`)
-- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ S6 KeycapRow (plan-020) · ✅ **S7 Versioned Masthead (plan-022, this session)**
-- ⬜ Remaining: **S3** topology mark (shares masthead — slot already reserved in `Masthead.tsx`), **S4** PROMPT→MODEL→VARIANT→IN-GAME lifecycle strip, **S5** MTG actor cards.
+- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ S6 KeycapRow (plan-020) · ✅ **S7 Versioned Masthead (plan-022)**
+- 🔜 **S4 PROMPT→MODEL→VARIANT→IN-GAME lifecycle strip — CHOSEN AS NEXT** (highest compounding: same asset feeds README architecture diagram + pitch-deck slide + demo-video opening → directly serves the "leave runway for deck + demo" priority).
+- ⏸️ **S3 topology mark — DEFERRED behind S4 + form decided** (brainstorm 2026-05-29). Decision: when built, S3 is a **static baked tusk line-mark** in the masthead's reserved slot (`Masthead.tsx`), **NOT a live Walrus fetch** as the ideation originally framed. Rationale: S1 LedeHero already carries the live-Walrus-proof + prints the CID, so a 2nd masthead fetch is redundant proof and would put two tusks on the first screen (same redundancy class as the two-Tusk3D bug just fixed) + a 2nd Babylon WebGL context (D-003 cap) + masthead↔S1 lifecycle coupling. The Joy-Division ridgeline look is also better pre-rendered than as a live 3D wireframe. Asset blocker bites equally (no real minted CID yet — S1 runs on placeholder + embedded GLB). S3 is ~30-min polish, slot-in anytime.
+- ⬜ **S5 MTG actor cards** — remaining.
 
 ### Next Concrete Step
-Pick the next landing survivor. Natural next = **S3 topology-of-real-tusk identity mark** — it mounts into the reserved slot inside `Masthead.tsx` (left of the wordmark) and is the strongest Walrus-track signal (brand mark literally fetched from Walrus). Alternatively S4 (highest compounding — same asset feeds README diagram + pitch deck slide + demo opening). Run canonical flow: ce-brainstorm → ce-plan → ce-work.
+**S4 lifecycle strip** — run canonical flow ce-brainstorm → ce-plan → ce-work. Key things the S4 brainstorm must resolve: the 4 panel visualizations (PROMPT text / MODEL gradient / VARIANT grid / IN-GAME scene) and whether to share S1's model↔mesh gradient asset (visual rhyme, ideation §S4); the L1/L2/L3 sub-captions; and the "build once, reuse in README+deck+demo" compound-asset goal. Panel 4 = a neutral "any Babylon/Unity/Godot scene," explicitly NOT the existing /track racing demo.
 
 ### Notes for Next Session
 - S7 masthead is **structurally contained to LandingPage**; full demo-arc browser check scoped to `/` (per CLAUDE.md, noted not silently skipped).
