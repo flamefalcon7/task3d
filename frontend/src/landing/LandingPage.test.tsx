@@ -29,6 +29,13 @@ vi.mock('./LifecycleStrip', () => ({
   LifecycleStrip: () => <div data-testid="lifecycle-strip">stub</div>,
 }));
 
+// Stub ActorCards — its own rendering contract (MTG anatomy, routes,
+// forbidden-vocab guard) is covered by ActorCards.test.tsx; here we only
+// assert composition + order.
+vi.mock('./ActorCards', () => ({
+  ActorCards: () => <div data-testid="actor-cards">stub</div>,
+}));
+
 import { LandingPage } from './LandingPage';
 
 function renderPage(): void {
@@ -40,27 +47,30 @@ function renderPage(): void {
 }
 
 describe('LandingPage', () => {
-  it('renders Masthead, TelemetryStrip, LedeHero, LifecycleStrip, and KeycapRow inside the landing-page root', () => {
+  it('renders Masthead, TelemetryStrip, LedeHero, LifecycleStrip, ActorCards, and KeycapRow inside the landing-page root', () => {
     renderPage();
     expect(screen.getByTestId('landing-page')).toBeTruthy();
     expect(screen.getByTestId('masthead')).toBeTruthy();
     expect(screen.getByTestId('telemetry-strip')).toBeTruthy();
     expect(screen.getByTestId('lede-hero')).toBeTruthy();
     expect(screen.getByTestId('lifecycle-strip')).toBeTruthy();
+    expect(screen.getByTestId('actor-cards')).toBeTruthy();
     expect(screen.getByTestId('keycap-row')).toBeTruthy();
   });
 
-  it('document order is Masthead → TelemetryStrip → LedeHero → LifecycleStrip → KeycapRow', () => {
+  it('document order is Masthead → TelemetryStrip → LedeHero → LifecycleStrip → ActorCards → KeycapRow', () => {
     renderPage();
     const masthead = screen.getByTestId('masthead');
     const strip = screen.getByTestId('telemetry-strip');
     const lede = screen.getByTestId('lede-hero');
     const lifecycle = screen.getByTestId('lifecycle-strip');
+    const actors = screen.getByTestId('actor-cards');
     const row = screen.getByTestId('keycap-row');
     // DOCUMENT_POSITION_FOLLOWING (4) — left node is followed by right node.
     expect(masthead.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(strip.compareDocumentPosition(lede) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(lede.compareDocumentPosition(lifecycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(lifecycle.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lifecycle.compareDocumentPosition(actors) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actors.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
