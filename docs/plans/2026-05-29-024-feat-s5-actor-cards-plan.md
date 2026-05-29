@@ -1,7 +1,7 @@
 ---
 title: "feat: S5 MTG-style actor cards for the Tusk3D landing page"
 type: feat
-status: active
+status: completed
 date: 2026-05-29
 plan_number: 024
 origin: docs/brainstorms/2026-05-29-s5-actor-cards-requirements.md

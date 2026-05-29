@@ -1,6 +1,37 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 2:10pm GMT+8 (S4 Lifecycle Strip — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, all on `main` direct-to-trunk. 7 commits: `5e90ffb` brainstorm + `e46011d` plan-023 + `f31106e` U1 + `a2e01d9` U2 + `c2d69da` U3 + `51a4f7a` review-pass. 720/720 vitest; tsc baseline unchanged (32). Browser-verified at `/`: 4-panel strip renders between LedeHero and KeycapRow — PROMPT / MODEL / VARIANT (16-fork grid) / IN-GAME OBJ, layer captions INPUT · Tripo / L1 · Model3D / L2 · NftToken / L3 · Integration, Newsreader-italic tagline, zero accent.
+## Last Updated: 2026-05-29 / 2:52pm GMT+8 (S5 MTG Actor Cards — **SHIPPED + REVIEWED**: the LAST full landing survivor. Full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, direct-to-trunk on `feat/s2-telemetry-strip`. 5 commits: `03e0701` brainstorm + `c9ff211` plan-024 + `41776de` U1 + `b1e7a46` U2 + `421e610` review-pass. 729/729 vitest; tsc baseline unchanged (32). Browser-verified at `/` desktop + 375px.
+
+### S5 — what shipped
+- **U1** (`41776de`): `frontend/src/landing/ActorCards.tsx` + `.module.css` + `.test.tsx`. Static 4-card MTG actor row (modelCreator / nftCreator / buyer / gameDev), full 5-part anatomy: name (Newsreader italic) / cost (mono, qualitative honest cost — NO hardcoded SUI) / ability / flavor / clickable provenance `<Link>`. Mirrors LifecycleStrip grid→2×2@767px; KeycapRow Link + focus-visible. gameDev marked downstream (`.downstream` tint + `data-downstream` + `↳ CONSUMES OUTPUT` kicker). Zero accent.
+- **U2** (`b1e7a46`): mounted between `<LifecycleStrip />` and `<KeycapRow />`; extended `LandingPage.test.tsx` doc-order to Masthead → TelemetryStrip → LedeHero → LifecycleStrip → **ActorCards** → KeycapRow.
+- **Review pass** (`421e610`): 5-reviewer ce-code-review (report-only). Fixes: **P1 (adversarial) gameDev overclaim** — "drop collections into any game" implied a non-existent in-game runtime (same class as S4 IN-GAME); reworded to "Registers an on-chain integration that any game can verify" (honest to `register_integration`). P2 **hover-tilt overflow** (adversarial+julik agreed) → `overflow-x:clip` on `.section`. P2 **reduced-motion** now zeroes the `:hover` transform itself. P3 hover affordance → `outline` (was inset box-shadow that skewed under rotation). P2 **AC-2 vacuous period assertion** → scoped to the `<p>`. P3 **AC-3 forbidden-vocab** now scans innerHTML (catches attributes; load-bearing). P2 kicker `aria-hidden` assertion. Relocated stale S3 comment.
+
+### S5 — honest-semantics carry-forward (same correction as S4)
+Card copy is honest to **shipped v1** (per `model3d.move` + spec D-029 chain): modelCreator publishes base + license terms (L1) · nftCreator forks a variant collection via `launch_collection` (pay-to-derive, L2) · **buyer OWNS the NftToken** via `mint_nft_token` (ownership, NOT access — L2) · gameDev **registers an integration** via `register_integration` (L3). **Access / Seal / Derivative never appear** (v1.1/unshipped) — AC-3 enforces via innerHTML word-boundary test.
+
+### S5 — accepted (not changed, per review)
+- buyer **"5% royalty"** is headline-rate shorthand (`AMOUNT_BP_DEFAULT` 500 bps); omits the `MIN_ROYALTY_AMOUNT_MIST` floor that only dominates below ~0.02 SUI — both correctness + adversarial deemed it defensible marketing copy. Revisit only if a judge tests a sub-0.02-SUI listing.
+- `KeycapRow.tsx` missing `import { type JSX }` (uses ambient) — pre-existing, out of scope; future 1-line cleanup.
+
+### Hackathon Tracker
+- Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
+
+### Landing survivors status (7-survivor ideation `docs/ideation/2026-05-28-tusk3d-landing-page-ideation.md`)
+- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ S4 Lifecycle Strip (plan-023) · ✅ **S5 Actor Cards (plan-024, this session)** · ✅ S6 KeycapRow (plan-020) · ✅ S7 Masthead (plan-022)
+- ⏸️ **S3 topology mark** — the ONLY remaining survivor. DEFERRED + form decided (static baked mark in Masthead's reserved slot, NOT a live fetch). ~30-min polish. Landing page page-flow top→bottom is now: Masthead(S7) → TelemetryStrip(S2) → LedeHero(S1) → LifecycleStrip(S4) → **ActorCards(S5)** → KeycapRow(S6).
+
+### Next Concrete Step
+The 6 full landing survivors are shipped. Two clean options: **(a) S3 static topology mark** — the last ~30-min masthead-slot polish, closing out the 7-survivor set; or **(b) pivot to demo/deck prep** — the S4 lifecycle SVGs + S5 cards are deliberately compound assets (screenshot well, feed README architecture diagram + pitch-deck "how it works" / "who it's for" slides + demo-video opening). Given the user's stated priority (finish early, leave runway for pitch + demo), S3 is small enough to finish first, then pivot. Confirm direction with user.
+
+### Notes for Next Session
+- S5 is structurally contained to LandingPage; full demo-arc browser check scoped to `/` (per CLAUDE.md, noted not silently skipped).
+- The S5 actor cards + S4 lifecycle SVGs are the **compound-asset reserve** for deck/demo/README (KD-5 follow-up, still unwired).
+- Branch is `feat/s2-telemetry-strip` (working trunk; no remote; all recent survivors landed here despite the name).
+
+---
+
+## Older: 2026-05-29 / 2:10pm GMT+8 (S4 Lifecycle Strip — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, all on `main` direct-to-trunk. 7 commits: `5e90ffb` brainstorm + `e46011d` plan-023 + `f31106e` U1 + `a2e01d9` U2 + `c2d69da` U3 + `51a4f7a` review-pass. 720/720 vitest; tsc baseline unchanged (32). Browser-verified at `/`: 4-panel strip renders between LedeHero and KeycapRow — PROMPT / MODEL / VARIANT (16-fork grid) / IN-GAME OBJ, layer captions INPUT · Tripo / L1 · Model3D / L2 · NftToken / L3 · Integration, Newsreader-italic tagline, zero accent.
 
 ### S4 — what shipped
 - **U1** (`f31106e`): 3 zero-accent panel SVGs at `frontend/public/lifecycle/` (model / variant / in-game), all derived from the tusk silhouette in `public/lede/tusk-keyframe.svg`.
