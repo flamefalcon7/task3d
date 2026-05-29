@@ -1,6 +1,33 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 2:52pm GMT+8 (S5 MTG Actor Cards — **SHIPPED + REVIEWED**: the LAST full landing survivor. Full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, direct-to-trunk on `feat/s2-telemetry-strip`. 5 commits: `03e0701` brainstorm + `c9ff211` plan-024 + `41776de` U1 + `b1e7a46` U2 + `421e610` review-pass. 729/729 vitest; tsc baseline unchanged (32). Browser-verified at `/` desktop + 375px.
+## Last Updated: 2026-05-29 / 4:00pm GMT+8 (S3 Topology Mark — **SHIPPED + REVIEWED**. The 7-survivor landing set is now **COMPLETE**. Full canonical arc (form pre-decided + ridgeline visual user-confirmed → plan-025 → ce-work → 5-reviewer ce-code-review → browser-verify), direct-to-trunk on `feat/s2-telemetry-strip`. 4 commits: `ab24293` plan-025 + `5f12514` U1 SVG + `4f325ce` U2 mount + `e793e20` review-pass. 734/734 vitest; tsc 32. Browser-verified at `/` desktop + 375px.
+
+### S3 — what shipped
+- **U1** (`5f12514`): `frontend/public/mark/tusk-ridge.svg` — a Joy-Division "Unknown Pleasures" ridgeline rendered into a tapered tusk silhouette (5 stacked contour lines clipped to the profile). Black ink on transparent (sits on the paper masthead, INVERTED from the paper-on-black lifecycle SVGs). Zero accent.
+- **U2** (`4f325ce`): mounted as a decorative `<img>` (`alt=""`) in `Masthead.tsx`'s reserved slot, leading the wordmark. `.mark` 30px (26px @767px), `align-self:center` against the baseline row.
+- **Review pass** (`e793e20`): 5-reviewer ce-code-review (report-only) — all P2/P3, no P0/P1. **Honesty confirmed clean**: baking the mark static (vs the ideation's original live-Walrus framing) is defensible — S1 LedeHero carries the live-Walrus proof, and the masthead makes NO competing claim (no fake spinner/decentralization label). Fixes: removed the SVG's `role`/`aria-label` (contradicted the `alt=""` decorative contract — double-announce trap if inlined; 4 reviewers); `display:none` not `visibility:hidden` on `onError` (phantom-gap in the flex row; 4 reviewers); added intrinsic `width`/`height` (CLS); added onError + decorative-lock tests (untested fallback, all 5); broadened the accent guard beyond literal `ff4500`.
+
+### S3 — form decision (carry-forward)
+S3 is a **static baked mark, NOT a live Walrus fetch**. Rationale (durable): S1 already carries the live-Walrus proof + CID; a 2nd masthead fetch = redundant proof + 2nd Babylon WebGL context (D-003 cap) + masthead↔S1 coupling, and the ridgeline look is better pre-rendered. If the **demo/pitch narration** frames a Walrus-proof beat, point it at **LedeHero (S1)**, not the masthead mark (adversarial residual-risk note).
+
+### 🎉 Landing complete — all 7 survivors shipped
+- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ **S3 Topology Mark (plan-025, this session)** · ✅ S4 Lifecycle Strip (plan-023) · ✅ S5 Actor Cards (plan-024) · ✅ S6 KeycapRow (plan-020) · ✅ S7 Masthead (plan-022)
+- Page flow top→bottom: **Masthead(S7, now with S3 mark) → TelemetryStrip(S2) → LedeHero(S1) → LifecycleStrip(S4) → ActorCards(S5) → KeycapRow(S6)**.
+
+### Hackathon Tracker
+- Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
+
+### Next Concrete Step
+Landing build is done. **Pivot to demo-video + pitch-deck prep** (the user's stated priority: finish early, leave runway for polish). The compound assets are ready to harvest: S4's 3 lifecycle SVGs (`/lifecycle/*.svg`), S5's actor cards, and S3's ridgeline mark all screenshot well and were authored to feed the README architecture diagram + pitch-deck "how it works"/"who it's for" slides + demo-video opening (KD-5, still unwired). Also pending product-side: the real minted tusk CID (S1 + lifecycle still on placeholder/embedded GLB) and the Walrus read-path CDN (plan-018). Confirm direction with user.
+
+### Notes for Next Session
+- Branch is `feat/s2-telemetry-strip` (working trunk; no remote; ALL landing survivors landed here despite the name — a rename/merge to a cleaner branch is a possible housekeeping step before submission).
+- Compound-asset harvest (README/deck/demo) is the highest-leverage unwired follow-up.
+- Known pre-existing nits (non-blocking): `KeycapRow.tsx` missing `import { type JSX }`; `modePalette.ts:40` stale MAX_VARIANTS comment.
+
+---
+
+## Older: 2026-05-29 / 2:52pm GMT+8 (S5 MTG Actor Cards — **SHIPPED + REVIEWED**: the LAST full landing survivor. Full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, direct-to-trunk on `feat/s2-telemetry-strip`. 5 commits: `03e0701` brainstorm + `c9ff211` plan-024 + `41776de` U1 + `b1e7a46` U2 + `421e610` review-pass. 729/729 vitest; tsc baseline unchanged (32). Browser-verified at `/` desktop + 375px.
 
 ### S5 — what shipped
 - **U1** (`41776de`): `frontend/src/landing/ActorCards.tsx` + `.module.css` + `.test.tsx`. Static 4-card MTG actor row (modelCreator / nftCreator / buyer / gameDev), full 5-part anatomy: name (Newsreader italic) / cost (mono, qualitative honest cost — NO hardcoded SUI) / ability / flavor / clickable provenance `<Link>`. Mirrors LifecycleStrip grid→2×2@767px; KeycapRow Link + focus-visible. gameDev marked downstream (`.downstream` tint + `data-downstream` + `↳ CONSUMES OUTPUT` kicker). Zero accent.

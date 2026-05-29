@@ -1,7 +1,7 @@
 ---
 title: "feat: S3 topology identity mark in the masthead"
 type: feat
-status: active
+status: completed
 date: 2026-05-29
 plan_number: 025
 origin: docs/ideation/2026-05-28-tusk3d-landing-page-ideation.md §S3
