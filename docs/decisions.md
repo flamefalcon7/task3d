@@ -3242,6 +3242,45 @@ The `●live` / `●cache` indicator dot is the contract between the data layer 
 
 ---
 
+## D-072: Build-time issue-number injection via vite `define` for the S7 versioned masthead
+
+**Status**: Accepted
+**Date**: 2026-05-29
+**Phase**: Phase 4 — landing page surface
+
+### Context
+The S7 versioned masthead (plan-022) sets the Tusk3D wordmark with an issue number `№NNN`, where `NNN` is the commit count on `main` (`git rev-list --count main`). The number is a deploy-stamp that frames Tusk3D as a continuously-published editorial product — it climbs across the 6/21 → 7/8 → 8/27 judging windows, so each judge revisit shows visible progress. It is **not** live data: it changes only when a new build is cut. This is the first build-time-injected git-derived constant in the frontend; `vite.config.ts` previously had no `define` block.
+
+### Decision
+**Resolve the commit count once during vite config evaluation (Node context) and inject it as a compile-time global constant `__ISSUE_NUMBER__` via vite `define`.** The resolution is wrapped in try/catch; on any failure (no `main` ref, shallow CI clone, non-repo checkout, non-numeric output) it returns the sentinel `0`. The consuming component (`Masthead.tsx`) renders `№{n}` only when `n > 0`, and drops the `№` token entirely on the sentinel — never `№0` / `№NaN` / `№undefined`. The global is typed in `frontend/src/vite-env.d.ts` as `declare const __ISSUE_NUMBER__: number;`.
+
+### Rationale
+- **Build-time over runtime**: the count is a deploy-stamp, not live data, so resolving it at build keeps `Masthead` a pure render with zero runtime git/network dependency. No `useEffect`, no fetch, no loading state.
+- **Node-only `child_process`**: `execSync` runs during config evaluation in the Node build process; it is never bundled into the browser output — only the resolved integer literal ships.
+- **Sentinel-drops-token over fake number**: a missing or broken count must never surface as a broken glyph on a brand-critical masthead. Degrading to wordmark + edition is coherent; `№0` is not.
+- **Sibling to D-071**: same "static deploy-stamp resolved ahead of render" philosophy as the S2 baked telemetry snapshot, but build-time-baked rather than source-baked — appropriate because the value is derivable from git rather than hand-seeded.
+
+### Alternatives Considered
+- **Runtime fetch of commit count** — no API exposes it client-side without a backend; adds a network dependency for a value that only changes per-deploy. Rejected.
+- **Hand-edited constant bumped per deploy** (like `telemetryFallback.ts`) — works, but the count is mechanically derivable from git, so automating it removes an operator step and can never drift. Chosen the automated path.
+- **`import.meta.env` via a `VITE_`-prefixed env var set in CI** — viable, but couples the number to CI env wiring and is invisible in local builds. The `define` approach works identically in local `pnpm build` and CI. Rejected for v1.
+
+### Consequences
+- ✅ Masthead is a zero-dependency pure render; `№NNN` is a literal integer in the built bundle.
+- ✅ Local and CI builds both produce a correct number with no extra configuration.
+- ✅ Git-less / shallow-clone builds degrade gracefully to a wordmark-only masthead instead of failing.
+- ⚠️ The count reflects `main` at **build time**, not the currently checked-out branch — a build cut from a feature branch still stamps `main`'s count. This is intended (the deployed landing builds from `main`), but worth knowing when verifying locally on a branch.
+- ⚠️ `__ISSUE_NUMBER__` is a global identifier; any future build-time constant should follow the same `__SCREAMING_SNAKE__` + `vite-env.d.ts` declaration convention to stay discoverable.
+- 🔮 If later surfaces need the issue number outside the landing (README header, OG image, pitch deck), promote `resolveIssueNumber()` into a shared build util rather than duplicating the `execSync`.
+
+### Related
+- plan-022 (`docs/plans/2026-05-29-022-feat-s7-versioned-masthead-plan.md`) KTD-1 / KTD-2
+- `docs/brainstorms/2026-05-29-s7-versioned-masthead-requirements.md` KD-3 / KD-4
+- D-071 (build-time baked snapshot for S2 telemetry) — sibling deploy-stamp pattern
+- D-044 (brutalist editorial tokens) — the masthead's typographic constraints; zero accent
+
+---
+
 # Reserved Decision Numbers
 
-D-072 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-073 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
