@@ -1,0 +1,101 @@
+/* D-044 brutalist editorial — S2 live "AS OF" telemetry strip.
+   Per docs/brainstorms/2026-05-29-s2-telemetry-strip-requirements.md.
+   No transitions (D-044 §7 instant). Single 1.5px black bottom border. */
+
+.strip {
+  /* Single horizontal line; horizontal scroll below 640px per KD-6. */
+  display: block;
+  border-bottom: 1.5px solid #000;
+  background: #f5f5f0;
+  color: #000;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  padding: 8px 20px;
+  /* Allow horizontal scroll on narrow viewports without vertical wrap. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  /* Hide scrollbar visually; functional drag/scroll still works. */
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
+}
+
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  white-space: nowrap;
+}
+
+/* Each separated cell renders the same way so the dot line up across fields. */
+.cell {
+  display: inline-flex;
+  align-items: center;
+  text-transform: uppercase;
+}
+
+.label {
+  color: #595959;
+  margin-right: 6px;
+}
+
+.value {
+  color: #000;
+}
+
+.sep {
+  color: #000;
+  margin: 0 12px;
+}
+
+/* ●live = the ONLY #FF4500 instance on this strip (D-044 accent rule). */
+.dotLive {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4500;
+  margin-right: 6px;
+}
+
+.dotCache {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #888;
+  margin-right: 6px;
+}
+
+/* "LIVE" / "CACHE" text stays in the strip's default ink color.
+   Per KD-2 the SINGLE #FF4500 accent on the strip is the ●live dot only;
+   colouring the adjacent word would double-spend the accent budget. The
+   cache label dims to subtle grey to read as "stale" without being a
+   second accent. */
+.statusLive {
+  color: #000;
+}
+
+.statusCache {
+  color: #595959;
+}
+
+.cidLink {
+  color: #000;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cidLink:hover {
+  background: #000;
+  color: #f5f5f0;
+}
+
+.cidArrow {
+  margin-left: 4px;
+  display: inline-block;
+}
