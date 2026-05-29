@@ -1,6 +1,25 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 01:55am GMT+8 (S2 Telemetry Strip — **SHIPPED ON BRANCH, NOT MERGED**: branch `feat/s2-telemetry-strip` carries 1 commit `e42d002` implementing the brainstorm doc end-to-end. 702/702 frontend vitest pass (697 baseline + 5 new TelemetryStrip render-contract tests). Pre-existing tsc baseline (32 errors on main) unchanged net. **Autonomous overnight chain ran**: user said "ce-brainstorm → ce-work → ce-code-review, sleeping, morning review" — chain executed as requested. 9-reviewer ce-code-review surfaced 1 P0 + 3 P1s. **CRITICAL MORNING ITEM**: the WALRUS_BLOB_URL_PREFIX I baked into TelemetryStrip.tsx line 12 (`aggregator.testnet.walrus.atalma.io`) was **a verification miss on my part** — 4 of 9 reviewers independently flagged that `frontend/src/walrus/aggregator.ts` already exports `WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space'` as the documented single-source-of-truth for Walrus testnet reads. Empirically verified post-review with `curl --max-time 10`: my atalma.io URL **times out at 10s after pulling 900KB / 6MB** (~90 KB/s); the canonical walrus-testnet URL returns **HTTP 200 in 3.4s**. Demo-day judge clicking LATEST CID would hit a near-broken host. **One-line fix**: replace local constant with import of canonical `WALRUS_AGGREGATOR`. Pre-merge MUST.
+## Last Updated: 2026-05-29 / 11:10am GMT+8 (S2 Telemetry Strip — **SHIPPED + REVIEWED + ALL PUNCHLIST CLEARED, READY TO MERGE**: branch `feat/s2-telemetry-strip` now carries 4 commits — `e42d002` initial impl + `d1cf2ad` overnight phase-progress wrap + `73f76ad` fix-pass landing 5 ce-code-review findings + `399a33c` D-071 ADR + plan-021 stub. **All 7 morning-punchlist items + bonus #9 done.** Browser re-verified post-fix: canonical URL `aggregator.walrus-testnet.walrus.space` resolves the live CID in 0.9s (HTTP 200), strip shows `●LIVE · L1 MODELS 3 · L2 NFTS 26 · WALRUS BLOBS 3 · LATEST CID JAlh…oHY` against real testnet. 702/702 vitest pass. Pre-existing tsc baseline (32 errors on main) unchanged net. Next step: push branch + open PR (user action).
+
+### Morning Punchlist — COMPLETE
+- ✅ **#1 P0** (was empirically broken) canonical aggregator URL — `73f76ad`
+- ✅ **#2 P0** zero-event guard against package-rotation cascade — `73f76ad`
+- ✅ **#3 P1** unhandled promise rejection on race loser — `73f76ad`
+- ✅ **#4 P2** thread `AbortSignal` into `queryEvents` — `73f76ad`
+- ✅ **#5 P2** D-071 ADR (build-time baked snapshot pattern + canonical-constant SoT rule) — `399a33c`
+- ✅ **#6 P3** plan-021 stub redirecting to brainstorm doc — `399a33c`
+- ✅ **#7 P3** D-071 reference + KD-1/3/4 reference in commit messages — `73f76ad` + `399a33c`
+- ✅ **#9 P3 bonus** tighten `QueryEventsLikeClient.hasNextPage` to required (folded into #4 commit) — `73f76ad`
+
+### Deferred to follow-up (not blocking 6/21)
+- **P2 hook unit tests** for `useTelemetryData.ts` — timeout race / pagination loop / AbortController / alive guard / empty-event guard. Currently only component-with-mock coverage. Listed in plan-021 follow-up section.
+- **P2 walrusBlobs field redundancy** — `walrusBlobs === l1Models` invariant; label "WALRUS BLOBS" vs spec "WALRUS N MB". Refactor opportunity, not bug.
+- **P3 polish**: `formatAsOf` invalid-ISO test, `truncateCid` ≤10-char branch test, pagination 5000-event ceiling signaling, `Object.freeze(FALLBACK_TELEMETRY)`.
+
+### Original 2026-05-29 / 01:55am session note (overnight, pre-fix-pass)
+
+S2 Telemetry Strip — **SHIPPED ON BRANCH, NOT MERGED**: branch `feat/s2-telemetry-strip` carries 1 commit `e42d002` implementing the brainstorm doc end-to-end. 702/702 frontend vitest pass (697 baseline + 5 new TelemetryStrip render-contract tests). Pre-existing tsc baseline (32 errors on main) unchanged net. **Autonomous overnight chain ran**: user said "ce-brainstorm → ce-work → ce-code-review, sleeping, morning review" — chain executed as requested. 9-reviewer ce-code-review surfaced 1 P0 + 3 P1s. **CRITICAL MORNING ITEM**: the WALRUS_BLOB_URL_PREFIX I baked into TelemetryStrip.tsx line 12 (`aggregator.testnet.walrus.atalma.io`) was **a verification miss on my part** — 4 of 9 reviewers independently flagged that `frontend/src/walrus/aggregator.ts` already exports `WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space'` as the documented single-source-of-truth for Walrus testnet reads. Empirically verified post-review with `curl --max-time 10`: my atalma.io URL **times out at 10s after pulling 900KB / 6MB** (~90 KB/s); the canonical walrus-testnet URL returns **HTTP 200 in 3.4s**. Demo-day judge clicking LATEST CID would hit a near-broken host. **One-line fix**: replace local constant with import of canonical `WALRUS_AGGREGATOR`. Pre-merge MUST.
 
 ### Hackathon Tracker
 - Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
