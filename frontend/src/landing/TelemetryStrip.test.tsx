@@ -72,7 +72,7 @@ describe('TelemetryStrip', () => {
     expect(link.rel.includes('noopener')).toBe(true);
     expect(link.rel.includes('noreferrer')).toBe(true);
     expect(link.href).toBe(
-      'https://aggregator.testnet.walrus.atalma.io/v1/blobs/bafy1234567890abcdef3kQ',
+      'https://aggregator.walrus-testnet.walrus.space/v1/blobs/bafy1234567890abcdef3kQ',
     );
     // Truncation: first 4 + ellipsis + last 3.
     expect(link.textContent?.includes('bafy…3kQ')).toBe(true);

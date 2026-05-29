@@ -30,17 +30,25 @@ const LIVE_FETCH_TIMEOUT_MS = 2000;
 // 50 is a safe ceiling that costs one round-trip per ~50 events.
 const QUERY_EVENTS_PAGE_SIZE = 50;
 
+// Structural shim over the @mysten/sui SDK's queryEvents — the dapp-kit
+// useSuiClient() return type does not surface queryEvents in its public
+// signature (per D-019 the JSON-RPC and gRPC clients are separated; the
+// underlying client supports it at runtime). Mirror the fields we actually
+// use. `hasNextPage` is required to match the real SDK's `PaginatedEvents`
+// shape — leaving it optional lets a mock silently omit the field and
+// terminate pagination on page 1.
 interface QueryEventsLikeClient {
   queryEvents: (args: {
     query: { MoveEventType: string };
     limit?: number;
     cursor?: { txDigest: string; eventSeq: string } | null;
     order?: 'ascending' | 'descending';
+    signal?: AbortSignal;
   }) => Promise<{
     data: Array<{
       parsedJson?: unknown;
     }>;
-    hasNextPage?: boolean;
+    hasNextPage: boolean;
     nextCursor?: { txDigest: string; eventSeq: string } | null;
   }>;
 }
@@ -69,6 +77,11 @@ async function sweepEventStream(
       limit: QUERY_EVENTS_PAGE_SIZE,
       cursor,
       order: 'descending',
+      // Forward the abort signal so an SDK that honors it cancels the
+      // in-flight HTTP request when the outer 2s timeout fires or the
+      // component unmounts. Without this, aborted sweeps continue server-side
+      // and waste RPC quota.
+      signal,
     });
     if (firstEvent === null && res.data.length > 0) {
       firstEvent = res.data[0];
@@ -100,6 +113,15 @@ export function useTelemetryData(): TelemetryResult {
         sweepEventStream(suiClient, modelEventType, controller.signal),
         sweepEventStream(suiClient, nftEventType, controller.signal),
       ]);
+      // Zero-event guard: an empty L1 sweep means either a rotated/stale
+      // model3dPackageId, a fresh-chain pre-mint window, or a network error
+      // that returned 200 with no data. Declaring `●live` with all-zeros and
+      // the baked placeholder CID is worse than staying on `●cache` —
+      // it's a confident lie. Throw so the outer .catch keeps fallback +
+      // ●cache rendered.
+      if (modelRes.count === 0 && modelRes.firstEvent === null) {
+        throw new Error('empty-live-sweep');
+      }
       const latestModel = modelRes.firstEvent as
         | { parsedJson?: ModelPublishedJson }
         | null;
@@ -117,6 +139,16 @@ export function useTelemetryData(): TelemetryResult {
       };
       return snapshot;
     })();
+    // Attach a no-op rejection handler to `live` BEFORE handing it to
+    // Promise.race. The race chain's .catch only subscribes to the winner;
+    // if `timeout` wins, `live`'s later rejection (from the explicit
+    // `throw new Error('aborted')` in sweepEventStream, or the
+    // empty-live-sweep guard above, or any RPC failure) would surface as an
+    // UnhandledPromiseRejection in the browser console and fail CI runs that
+    // treat unhandledRejection as a test failure. The .catch here is the
+    // sole subscriber for that path; the race chain's own .catch handles
+    // the case where `live` is the winner that rejected.
+    live.catch(() => {});
 
     const timeout = new Promise<'timeout'>((resolve) => {
       timeoutId = setTimeout(() => resolve('timeout'), LIVE_FETCH_TIMEOUT_MS);

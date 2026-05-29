@@ -5,11 +5,11 @@
 
 import styles from './TelemetryStrip.module.css';
 import { useTelemetryData } from './useTelemetryData';
+import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 
-// CDN URL for blob viewing. plan-018 will eventually publish
-// cdn.tusk3d.xyz; until then the public testnet aggregator stands in. The
-// constant lives here as one line so the swap is trivial when CDN ships.
-const WALRUS_BLOB_URL_PREFIX = 'https://aggregator.testnet.walrus.atalma.io/v1/blobs/';
+// CDN swap point: when plan-018 ships, aggregator.ts updates WALRUS_AGGREGATOR
+// to cdn.tusk3d.xyz and this component picks it up automatically. Do NOT
+// re-introduce a local URL constant — the canonical is in aggregator.ts.
 
 // Truncate a Walrus CID to "first4…last3" for display. Mirrors the visual
 // pattern from LedeHero's truncateBlobId and the ideation example.
@@ -48,7 +48,7 @@ export function TelemetryStrip(): JSX.Element {
   const { status, data } = useTelemetryData();
   const isLive = status === 'live';
   const truncatedCid = truncateCid(data.latestCid);
-  const cidHref = `${WALRUS_BLOB_URL_PREFIX}${data.latestCid}`;
+  const cidHref = `${WALRUS_AGGREGATOR}/v1/blobs/${data.latestCid}`;
 
   return (
     <section
