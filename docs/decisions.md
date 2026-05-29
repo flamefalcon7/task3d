@@ -3189,6 +3189,59 @@ Those three pieces collectively make the "Sui-native" case at evaluation time. F
 
 ---
 
+## D-071: Display-only on-chain telemetry uses build-time baked snapshot + 2s race against a live sweep
+
+**Status**: Accepted
+**Date**: 2026-05-29
+**Phase**: Phase 4 — landing page surface
+
+### Context
+The S2 telemetry strip on the Tusk3D landing page (`/`) displays four live on-chain counters and a CID drawn from a `queryEvents` sweep against the deployed `model3d::model3d` package. This is the first display-only on-chain data surface in the project — every prior consumer of chain reads is action-bearing (mint, list, buy, transfer, etc.). Naive `useState(null)` + `useEffect` fetch + spinner produces a flicker of blank or skeleton UI on first paint, which on a brutalist editorial landing page reads as "not deployed yet" — the exact opposite of the credibility signal the strip is supposed to send. A naive blocking fetch is worse — the page can't render until the chain responds.
+
+Additionally, when the live sweep returns degenerate results (rotated package, stale `model3dPackageId`, empty event log on a fresh chain, or a 200-with-empty-array response that still satisfies the SDK's success contract), declaring `status: 'live'` with all-zero counters and a placeholder CID is **strictly worse** than declaring `status: 'cache'` with the baked floor — it's a confident lie.
+
+### Decision
+**Display-only on-chain data surfaces use a three-part pattern:**
+
+1. **Build-time baked snapshot** (e.g. `frontend/src/landing/telemetryFallback.ts`) — hand-seeded constants bumped on each meaningful deploy. Rendered immediately on mount so first paint is **never empty**.
+2. **Live `queryEvents` sweep raced against a wall-clock timeout** (currently 2s). The sweep runs in the background after the initial fallback render.
+3. **Zero-event guard** — if the live sweep wins the race but returns a degenerate result (empty arrays, missing `firstEvent`, schema mismatch on critical fields), it must `throw` to land in the silent `.catch` and keep the cached fallback rendered. The fallback's `●cache` indicator is the honest signal; `●live` is only set when the live sweep returns **non-empty** results.
+
+The `●live` / `●cache` indicator dot is the contract between the data layer and the visual layer. **It must never lie about provenance.**
+
+### Rationale
+- **First paint is never empty**: the baked snapshot eliminates the loading-skeleton anti-pattern on a brand-critical surface. Judges scanning the page in 30 seconds see numbers, not a spinner.
+- **Race semantics tolerate any chain failure mode**: RPC timeout, RPC 5xx, parse error, abort-on-unmount, package rotation, fresh-chain emptiness — all resolve to "stay on cache." There is one error UI: there is no error UI.
+- **Zero-event guard preserves the dot's contract**: the `●live` dot is positioned as the most-visible truth signal on the strip (single `#FF4500` accent per D-044). Letting it pair with all-zero data because the sweep "technically succeeded" trades the signal's entire value for protocol purity.
+- **Catches the silent `model3dPackageId` drift case for free**: if the package gets republished and the env-pinned ID lags, the sweep returns empty arrays, the guard fires, and the strip falls back to cache. No special-case code path needed.
+- **Pattern reuses cleanly**: future "live-ness" indicators (Walrus blob count, byte volume, mint velocity, etc.) follow the same shape — bake floor, race live, guard degenerate.
+
+### Alternatives Considered
+- **Naive `useState(null)` + loading skeleton** — flickers blank on first paint; reads as "not deployed." Rejected.
+- **Blocking fetch (SSR-style)** — blocks page render on chain RPC latency. SPA architecture (per D-070, Vercel hosting) makes this impossible anyway. Rejected.
+- **Backend snapshot endpoint cached server-side** — adds deploy concern, cache layer, and a separate failure mode (backend down). Acceptable for v1.1 but does not pay for itself in the hackathon window where the frontend already has `useSuiClient` wired. Deferred.
+- **No baked floor, accept blank-then-populate** — fails the credibility-per-pixel goal that motivated S2 in the first place. Rejected.
+- **`●live` on empty results ("technically the sweep succeeded")** — sacrifices the dot's contract for protocol purity. Rejected: a lying indicator is worse than a missing one.
+
+### Consequences
+- ✅ Display-only surfaces render fresh numbers within ~2s on healthy networks, fall back to honest cache on any failure mode, and never paint a blank state.
+- ✅ The pattern composes: each new live counter is a `useState<TelemetryResult>` + `useEffect` race; no shared infrastructure or backend changes required.
+- ✅ Operationally simple: a single hand-edit to the fallback constants file on each meaningful deploy keeps the cache floor fresh enough that even an extended outage (RPC down for hours) shows recent numbers.
+- ⚠️ **Operator responsibility for fallback bumps is not enforced by CI.** If the fallback drifts far behind reality and the live sweep simultaneously fails (testnet down on demo day), the strip shows clearly-stale numbers labeled as cache. Mitigation: the SHIP-TIME PROCEDURE comment in `telemetryFallback.ts` documents the bump procedure; treat each meaningful deploy as the trigger.
+- ⚠️ **The 2s timeout is a fixed budget for the cold-start race.** On networks with > 2s RTT to the testnet RPC, judges always see `●cache`. Acceptable in the hackathon window (testnet RPC is < 500ms in practice); revisit if demo-day judge networks reliably exceed it.
+- ⚠️ **External-service URL constants for any data surface (live or otherwise) must come from a canonical single-source-of-truth file**, not be re-baked inline. This rule was created in this commit chain after `TelemetryStrip.tsx` initially baked a wrong aggregator URL that the canonical `frontend/src/walrus/aggregator.ts` already exported correctly. Single-source-of-truth files: `frontend/src/walrus/aggregator.ts` (Walrus reads), `frontend/src/sui/networkConfig.ts` (Sui package IDs + RPC endpoints). **Any new component reading from Walrus or Sui MUST import from these — never paste a URL into a local constant.**
+- 🔮 If a Phase 5+ initiative produces multiple display-only surfaces (e.g. footer telemetry, hero stat cards, dashboard widgets), extract `useTelemetryData`'s baked-race pattern into a reusable `useBakedLiveData(fallback, fetcher, options)` hook.
+
+### Related
+- KD-1 / KD-3 / KD-4 in `docs/brainstorms/2026-05-29-s2-telemetry-strip-requirements.md` — the operational decisions promoted to this ADR
+- D-019 (JSON-RPC vs gRPC SuiClient split) — affects the `useSuiClient` cast in `useTelemetryData.ts`
+- D-044 (brutalist editorial tokens) — constrains the `●live` accent to a single instance, which is why the dot's truth contract matters
+- D-069 (Walrus CDN read path) — when `cdn.tusk3d.xyz` ships, `WALRUS_AGGREGATOR` swaps in `aggregator.ts` and the strip picks it up automatically
+- Memory: `feedback_check_repo_constants_before_baking.md`
+- Commits: `e42d002` (initial implementation), `73f76ad` (ce-code-review fix pass)
+
+---
+
 # Reserved Decision Numbers
 
-D-071 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-072 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
