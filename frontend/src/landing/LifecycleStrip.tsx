@@ -34,7 +34,7 @@ const PANELS: readonly Panel[] = [
     header: 'VARIANT',
     layer: 'L2 · NftToken',
     img: '/lifecycle/variant.svg',
-    alt: 'A grid of eight tusk forks',
+    alt: 'A grid of sixteen tusk forks',
   },
   {
     key: 'ingame',
@@ -63,7 +63,17 @@ export function LifecycleStrip(): JSX.Element {
               {p.prompt ? (
                 <span className={styles.prompt}>&ldquo;{p.prompt}&rdquo;</span>
               ) : (
-                <img className={styles.art} src={p.img} alt={p.alt} />
+                <img
+                  className={styles.art}
+                  src={p.img}
+                  alt={p.alt}
+                  // Graceful degradation: if the asset 404s (e.g. a sub-path
+                  // deploy), hide the broken-image glyph and leave the black
+                  // well — better than a torn icon on the landing page.
+                  onError={(e) => {
+                    e.currentTarget.style.visibility = 'hidden';
+                  }}
+                />
               )}
             </div>
             <span className={styles.layer}>{p.layer}</span>

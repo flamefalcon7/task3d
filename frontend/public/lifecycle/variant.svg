@@ -1,24 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="VARIANT — a four-by-two grid of the same tusk in eight different forks">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="VARIANT — a four-by-four grid of the same tusk in sixteen different forks">
   <!--
     S4 lifecycle strip, panel 3 (plan-023 U1). The same tusk silhouette
-    repeated as a grid of forks — variation is implied by stroke weight +
-    paper fill-opacity (NOT hue), so the panel stays zero orange accent
-    (S4 KD-6). Brutalist editorial palette.
+    repeated as a grid of SIXTEEN forks — matching the "Sixteen forks"
+    tagline. Variation is implied by stroke weight + paper fill-opacity
+    (NOT hue), so the panel stays zero orange accent (S4 KD-6).
   -->
   <rect width="600" height="450" fill="#000000"/>
   <defs>
-    <!-- compact tusk glyph for grid cells (~120x90 footprint) -->
-    <path id="tuskCell" d="M 24 78 Q 40 16 96 20 Q 110 22 114 32 Q 104 32 88 42 Q 52 60 40 78 Z"/>
+    <!-- compact tusk glyph for grid cells (~114x62 footprint) -->
+    <path id="tuskCell" d="M 12 60 Q 24 12 72 15 Q 84 16 88 24 Q 78 24 64 32 Q 36 46 26 60 Z"/>
   </defs>
-  <!-- 4 columns x 2 rows = 8 forks; vary stroke-width + fill-opacity per cell -->
+  <!-- 4 columns x 4 rows = 16 forks; vary stroke-width + fill-opacity per cell -->
   <g fill="none" stroke="#F5F5F0" stroke-linejoin="miter">
-    <g transform="translate(30,70)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.20" stroke-width="1.5"/></g>
-    <g transform="translate(175,70)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.06" stroke-width="2"/></g>
-    <g transform="translate(320,70)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.32" stroke-width="1"/></g>
-    <g transform="translate(465,70) scale(0.92)"><use href="#tuskCell" fill="none" stroke-width="1.5"/></g>
-    <g transform="translate(30,230)"><use href="#tuskCell" fill="none" stroke-width="2.5"/></g>
-    <g transform="translate(175,230)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.12" stroke-width="1"/></g>
-    <g transform="translate(320,230) scale(1.05)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.24" stroke-width="1.5"/></g>
-    <g transform="translate(465,230)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.08" stroke-width="1.5"/></g>
+    <g transform="translate(35,28)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.22" stroke-width="1.5"/></g>
+    <g transform="translate(175,28)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.06" stroke-width="2"/></g>
+    <g transform="translate(315,28)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.34" stroke-width="1"/></g>
+    <g transform="translate(455,28)"><use href="#tuskCell" fill="none" stroke-width="1.5"/></g>
+
+    <g transform="translate(35,135)"><use href="#tuskCell" fill="none" stroke-width="2.5"/></g>
+    <g transform="translate(175,135)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.14" stroke-width="1"/></g>
+    <g transform="translate(315,135)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.26" stroke-width="1.5"/></g>
+    <g transform="translate(455,135)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.10" stroke-width="1.5"/></g>
+
+    <g transform="translate(35,242)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.30" stroke-width="1"/></g>
+    <g transform="translate(175,242)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.04" stroke-width="1.5"/></g>
+    <g transform="translate(315,242)"><use href="#tuskCell" fill="none" stroke-width="2"/></g>
+    <g transform="translate(455,242)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.18" stroke-width="1"/></g>
+
+    <g transform="translate(35,349)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.12" stroke-width="1.5"/></g>
+    <g transform="translate(175,349)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.28" stroke-width="2"/></g>
+    <g transform="translate(315,349)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.08" stroke-width="1"/></g>
+    <g transform="translate(455,349)"><use href="#tuskCell" fill="#F5F5F0" fill-opacity="0.20" stroke-width="1.5"/></g>
   </g>
 </svg>
