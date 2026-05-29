@@ -1,7 +1,7 @@
 ---
 title: Tusk3D Landing S4 — Lifecycle Strip (PROMPT → MODEL → VARIANT → IN-GAME)
 type: feat
-status: active
+status: completed
 date: 2026-05-29
 origin: docs/brainstorms/2026-05-29-s4-lifecycle-strip-requirements.md
 ---

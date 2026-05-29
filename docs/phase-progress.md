@@ -1,6 +1,44 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 12:35pm GMT+8 (S7 Versioned Masthead — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→ce-code-review→browser-verify in one session, all on `main` direct-to-trunk (no remote per user constraint). 6 commits: `69d4401` brainstorm + `c641c37` plan-022 + `c1c5e77` U1 + `a164f7e` U2 + `9365086` U3 + `80df265` review-pass. **S2 also merged to main this session** (`e34feac`, was on `feat/s2-telemetry-strip`). 710/710 vitest pass; tsc baseline unchanged (32 pre-existing). Browser-verified at `/`: masthead renders `Tusk3D №316` (real `git rev-list --count main`, live-injected via vite define) + `TESTNET EDITION`, first child above S2 strip, single Tusk3D wordmark after TopNav dedup, no masthead overflow at 375px.
+## Last Updated: 2026-05-29 / 2:10pm GMT+8 (S4 Lifecycle Strip — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→5-reviewer ce-code-review→browser-verify, all on `main` direct-to-trunk. 7 commits: `5e90ffb` brainstorm + `e46011d` plan-023 + `f31106e` U1 + `a2e01d9` U2 + `c2d69da` U3 + `51a4f7a` review-pass. 720/720 vitest; tsc baseline unchanged (32). Browser-verified at `/`: 4-panel strip renders between LedeHero and KeycapRow — PROMPT / MODEL / VARIANT (16-fork grid) / IN-GAME OBJ, layer captions INPUT · Tripo / L1 · Model3D / L2 · NftToken / L3 · Integration, Newsreader-italic tagline, zero accent.
+
+### S4 — what shipped
+- **U1** (`f31106e`): 3 zero-accent panel SVGs at `frontend/public/lifecycle/` (model / variant / in-game), all derived from the tusk silhouette in `public/lede/tusk-keyframe.svg`.
+- **U2** (`a2e01d9`): `frontend/src/landing/LifecycleStrip.tsx` + `.module.css` + `.test.tsx`. Static, no Babylon/canvas/fetch; `import { type JSX }`; PANELS array (panel 1 mono text-well, 2–4 `<img>`); mirrors KeycapRow grid + 767px 2×2 stack.
+- **U3** (`c2d69da`): mounted between `<LedeHero />` and `<KeycapRow />`; extended `LandingPage.test.tsx` doc-order.
+- **Review pass** (`51a4f7a`): 5-reviewer ce-code-review (report-only). Fixes: (a) **variant.svg 8→16 cells** — adversarial P1: tagline "Sixteen forks" contradicted the 8 tusks drawn; (b) `onError` fallback on panel imgs (broken-image robustness on sub-path deploy); (c) **asset-level zero-accent test** via `it.each` reading the 3 SVG files — the DOM `ff4500` check is vacuous for `<img>` SVGs; (d) word-boundary regex for the Access/Seal/Derivative guard.
+
+### S4 — KEY ARCHITECTURE CORRECTION (user caught a wrong premise — carry forward)
+The layer mapping was initially wrong; user corrected it and we reconciled against `docs/spec.md` §1.7/§2.8 ADR chain (D-029/031/032/035-040) + `contracts/model3d/sources/model3d.move`:
+- **L1 `Model3D`** = creator publishes base content (sells *access*, but access-sale is **Seal-gated v1.1, NOT shipped**; `Access` struct deleted in v3).
+- **L2 `NftToken`** = buyer **owns** the token (ownership, not access) — the **shipped v1 sales surface**.
+- **L3 = Integration** (`register_integration` / `NftCollection.integration_policy`, gameDev pays) — shipped v1. The old "L3 = Access" framing is dead.
+- **Landing must not advertise Access/Seal/Derivative** — all v1.1/unshipped. Enforced by S4's AC-3 test.
+
+### S4 — deferred / noted (non-blocking)
+- **IN-GAME OBJ panel framing** (adversarial, user-approved): the image + header read as an end-to-end in-game demo, but shipped L3 is a B2B registry write (`register_integration`) — there is no "tusk rendered in a running game" flow for 6/21. Caption `L3 · Integration` is accurate; if a judge asks "show the tusk in a game," nothing to show. User chose this framing; revisit if demo script wants a minimal GLB viewer.
+- **"Sixteen" is frontend-only** (`MAX_VARIANTS=16` in `VariantEditor.tsx`), **not a contract cap** — a direct PTB could mint >16. Pre-existing. Also `frontend/src/babylon/modePalette.ts:40` has a stale comment asserting a non-existent "Move-contract MAX_VARIANTS (16)" — worth a 1-line fix in a future cleanup.
+- **MODEL panel vs LedeHero** visual rhyme (both tusk + model↔mesh, one screen apart) — intentional per KD-2; reviewer flagged mild redundancy.
+
+### Hackathon Tracker
+- Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
+
+### Landing survivors status (7-survivor ideation `docs/ideation/2026-05-28-tusk3d-landing-page-ideation.md`)
+- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ S6 KeycapRow (plan-020) · ✅ S7 Masthead (plan-022) · ✅ **S4 Lifecycle Strip (plan-023, this session)**
+- ⏸️ **S3 topology mark** — DEFERRED + form decided (static baked mark in Masthead slot, NOT a live fetch; see the 12:35pm entry below). ~30-min polish.
+- ⬜ **S5 MTG actor cards** — the last unshipped survivor.
+
+### Next Concrete Step
+Two clean options: **(a) S5 MTG actor cards** — the final landing survivor (modelCreator / nftCreator / buyer / gameDev as trading cards; mid-size; note the corrected L1/L2/L3 actor semantics above so the card "provenance" lines are accurate); or **(b) S3 static tusk mark** — the quick ~30-min masthead-slot polish. Either via canonical flow. After both, the 7-survivor landing set is complete and focus shifts to demo-video + pitch-deck prep (the compound assets from S4 feed directly into that — see S4 KD-5 follow-up).
+
+### Notes for Next Session
+- S4 strip is structurally contained to LandingPage; full demo-arc browser check scoped to `/` (per CLAUDE.md, noted not silently skipped).
+- The 3 lifecycle SVGs are authored as a reusable **compound asset** (KD-5): they can feed the README architecture diagram (currently a stale ASCII block + outdated `/forge` routes), a pitch-deck slide, and the demo-video opening. Wiring them in is a follow-up.
+- Landing page top-to-bottom is now: Masthead(S7) → TelemetryStrip(S2) → LedeHero(S1) → LifecycleStrip(S4) → KeycapRow(S6). Only S3 (masthead-slot) and S5 (after S4, before keycaps per ideation layout) remain.
+
+---
+
+## Previous: 2026-05-29 / 12:35pm GMT+8 (S7 Versioned Masthead — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→ce-code-review→browser-verify in one session, all on `main` direct-to-trunk (no remote per user constraint). 6 commits: `69d4401` brainstorm + `c641c37` plan-022 + `c1c5e77` U1 + `a164f7e` U2 + `9365086` U3 + `80df265` review-pass. **S2 also merged to main this session** (`e34feac`, was on `feat/s2-telemetry-strip`). 710/710 vitest pass; tsc baseline unchanged (32 pre-existing). Browser-verified at `/`: masthead renders `Tusk3D №316` (real `git rev-list --count main`, live-injected via vite define) + `TESTNET EDITION`, first child above S2 strip, single Tusk3D wordmark after TopNav dedup, no masthead overflow at 375px.
 
 ### S7 — what shipped
 - **U1** (`c1c5e77`): build-time `__ISSUE_NUMBER__` injection via new vite `define` block in `frontend/vite.config.ts` (`git rev-list --count main`, try/catch→sentinel 0). New `frontend/src/vite-env.d.ts` types the global. **ADR D-072** captures the build-time-constant pattern (sibling to D-071).
