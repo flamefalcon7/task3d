@@ -27,8 +27,20 @@ export function Masthead({ issueNumber = buildIssueNumber }: MastheadProps = {})
   const showIssue = Number.isFinite(issueNumber) && issueNumber > 0;
   return (
     <header className={styles.masthead} data-testid="masthead">
-      {/* S3 topology mark slot — future survivor (separate plan). Intentionally
-          empty: the flex row already accommodates a leading mark without rework. */}
+      {/* S3 topology identity mark (plan-025). Static baked ridgeline tusk —
+          NOT a live Walrus fetch (S1 LedeHero already carries that proof).
+          Decorative: the wordmark carries the name, so alt="" keeps screen
+          readers from double-announcing. onError hides it on a sub-path deploy
+          (mirrors LifecycleStrip). */}
+      <img
+        className={styles.mark}
+        src="/mark/tusk-ridge.svg"
+        alt=""
+        data-testid="masthead-mark"
+        onError={(e) => {
+          e.currentTarget.style.visibility = 'hidden';
+        }}
+      />
       <span className={styles.wordmark} data-testid="masthead-wordmark">
         Tusk3D
       </span>

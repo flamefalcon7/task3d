@@ -12,6 +12,17 @@
   color: #000;
 }
 
+/* S3 topology mark — leads the wordmark. The row is baseline-aligned for the
+   text tokens; the mark is an image with no baseline, so center it against the
+   wordmark cap-height rather than letting it sit on the text baseline. */
+.mark {
+  height: 30px;
+  width: auto;
+  display: block;
+  flex: none;
+  align-self: center;
+}
+
 .wordmark {
   font-family: 'Newsreader', Georgia, serif;
   font-style: italic;
@@ -46,6 +57,9 @@
   }
   .wordmark {
     font-size: 20px;
+  }
+  .mark {
+    height: 26px;
   }
   .edition {
     /* let the edition wrap to its own line rather than overflow at 375px */
