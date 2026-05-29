@@ -1,7 +1,7 @@
 ---
 title: Tusk3D Landing S7 — Versioned Issue №NNN Masthead
 type: feat
-status: active
+status: completed
 date: 2026-05-29
 origin: docs/brainstorms/2026-05-29-s7-versioned-masthead-requirements.md
 ---

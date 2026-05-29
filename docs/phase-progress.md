@@ -1,6 +1,38 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 11:10am GMT+8 (S2 Telemetry Strip — **SHIPPED + REVIEWED + ALL PUNCHLIST CLEARED, READY TO MERGE**: branch `feat/s2-telemetry-strip` now carries 4 commits — `e42d002` initial impl + `d1cf2ad` overnight phase-progress wrap + `73f76ad` fix-pass landing 5 ce-code-review findings + `399a33c` D-071 ADR + plan-021 stub. **All 7 morning-punchlist items + bonus #9 done.** Browser re-verified post-fix: canonical URL `aggregator.walrus-testnet.walrus.space` resolves the live CID in 0.9s (HTTP 200), strip shows `●LIVE · L1 MODELS 3 · L2 NFTS 26 · WALRUS BLOBS 3 · LATEST CID JAlh…oHY` against real testnet. 702/702 vitest pass. Pre-existing tsc baseline (32 errors on main) unchanged net. Next step: push branch + open PR (user action).
+## Last Updated: 2026-05-29 / 12:35pm GMT+8 (S7 Versioned Masthead — **SHIPPED + REVIEWED + MERGED TO main**: full canonical arc ideate→brainstorm→plan→ce-work→ce-code-review→browser-verify in one session, all on `main` direct-to-trunk (no remote per user constraint). 6 commits: `69d4401` brainstorm + `c641c37` plan-022 + `c1c5e77` U1 + `a164f7e` U2 + `9365086` U3 + `80df265` review-pass. **S2 also merged to main this session** (`e34feac`, was on `feat/s2-telemetry-strip`). 710/710 vitest pass; tsc baseline unchanged (32 pre-existing). Browser-verified at `/`: masthead renders `Tusk3D №316` (real `git rev-list --count main`, live-injected via vite define) + `TESTNET EDITION`, first child above S2 strip, single Tusk3D wordmark after TopNav dedup, no masthead overflow at 375px.
+
+### S7 — what shipped
+- **U1** (`c1c5e77`): build-time `__ISSUE_NUMBER__` injection via new vite `define` block in `frontend/vite.config.ts` (`git rev-list --count main`, try/catch→sentinel 0). New `frontend/src/vite-env.d.ts` types the global. **ADR D-072** captures the build-time-constant pattern (sibling to D-071).
+- **U2** (`a164f7e`): `frontend/src/landing/Masthead.tsx` + `.module.css` + `.test.tsx` (7 tests). Newsreader-italic wordmark + mono `№NNN` + `TESTNET EDITION`, 1.5px rule, zero #FF4500 accent. `typeof` guard makes it safe in vitest (no define there). Optional `issueNumber` prop is the test seam. S3 topology slot reserved as a comment.
+- **U3** (`9365086`): mounted `<Masthead />` as first child of `LandingPage` above `<TelemetryStrip />`; extended `LandingPage.test.tsx` doc-order to Masthead→TelemetryStrip→LedeHero→KeycapRow.
+- **Review pass** (`80df265`): 5-reviewer ce-code-review (correctness/testing/api-contract/adversarial/julik, report-only). Two fixes applied: (a) vite.config build-log warning when count→sentinel (else S7's № silently vanishes in a Vercel shallow-clone deploy — adversarial+correctness P2); (b) **TopNav brand-mark + TESTNET badge suppressed on `/` only** (user picked option A) — browser-verify surfaced two stacked Tusk3D + two TESTNET (global TopNav vs new Masthead); ideation's page layout hadn't accounted for the global nav. Masthead now owns the wordmark on `/`; nav links + wallet pill stay. `tusk3dWordmarkCount === 1` confirmed.
+
+### S7 — deferred (non-blocking, recorded for follow-up; hackathon anti-gold-plating)
+- **P3 extract+unit-test `resolveIssueNumber()`** — cross-reviewer flagged (testing+correctness+api-contract): the 8-line build helper is inline in vite.config.ts, untestable as-is, and the real build-time injection path (define→number) is covered only by manual browser check, not vitest. Extract to a build-only module + stub-execSync test if revisited.
+- **P3 main-vs-HEAD count semantics** — adversarial(80)+correctness: `git rev-list --count main` stamps `main`'s count, so a feature-branch / Vercel-*preview* build can show a stale number. Brainstorm KD-3 deliberately chose `main`; the *production* deploy builds from main (HEAD==main) so it's correct there. Left as-is; revisit only if preview-deploy numbers matter.
+- **P3 AC-5 jsdom-inert assertion** — testing(90): the `innerHTML` check for `ff4500` can't catch CSS-module color rules in jsdom. Documented in the test comment; the real guard is "component introduces no accent element by construction."
+- **SHIP NOTE**: the masthead `№` only renders when the build env has a full git clone with the `main` ref. Vercel default is `--depth=1` shallow → number drops to nothing (now logged on stderr). If the deployed landing must show the №, ensure a full clone / fetch `main` in the deploy config (D-070 Vercel/CF Pages).
+
+### Hackathon Tracker
+- Days to submission (6/21): **23 of 38** · demo day (7/20–21): 52 · winners (8/27): 90
+
+### Landing survivors status (7-survivor ideation `docs/ideation/2026-05-28-tusk3d-landing-page-ideation.md`)
+- ✅ S1 LedeHero (plan-019) · ✅ S2 TelemetryStrip (plan-021) · ✅ S6 KeycapRow (plan-020) · ✅ **S7 Versioned Masthead (plan-022, this session)**
+- ⬜ Remaining: **S3** topology mark (shares masthead — slot already reserved in `Masthead.tsx`), **S4** PROMPT→MODEL→VARIANT→IN-GAME lifecycle strip, **S5** MTG actor cards.
+
+### Next Concrete Step
+Pick the next landing survivor. Natural next = **S3 topology-of-real-tusk identity mark** — it mounts into the reserved slot inside `Masthead.tsx` (left of the wordmark) and is the strongest Walrus-track signal (brand mark literally fetched from Walrus). Alternatively S4 (highest compounding — same asset feeds README diagram + pitch deck slide + demo opening). Run canonical flow: ce-brainstorm → ce-plan → ce-work.
+
+### Notes for Next Session
+- S7 masthead is **structurally contained to LandingPage**; full demo-arc browser check scoped to `/` (per CLAUDE.md, noted not silently skipped).
+- The `№` is live to `main`'s commit count — it will keep climbing across judging windows (the intended progress signal). Currently №316.
+- S3 will mount into the documented slot in `Masthead.tsx` (the leading comment before the wordmark span); the flex row already accommodates a leading mark without restructuring.
+- TopNav now branches on `location.pathname === '/'` to hide brand+badge. If a future survivor changes what `/` mounts, re-verify that branch.
+
+---
+
+## Previous: 2026-05-29 / 11:10am GMT+8 (S2 Telemetry Strip — **SHIPPED + REVIEWED + ALL PUNCHLIST CLEARED, READY TO MERGE**: branch `feat/s2-telemetry-strip` now carries 4 commits — `e42d002` initial impl + `d1cf2ad` overnight phase-progress wrap + `73f76ad` fix-pass landing 5 ce-code-review findings + `399a33c` D-071 ADR + plan-021 stub. **All 7 morning-punchlist items + bonus #9 done.** Browser re-verified post-fix: canonical URL `aggregator.walrus-testnet.walrus.space` resolves the live CID in 0.9s (HTTP 200), strip shows `●LIVE · L1 MODELS 3 · L2 NFTS 26 · WALRUS BLOBS 3 · LATEST CID JAlh…oHY` against real testnet. 702/702 vitest pass. Pre-existing tsc baseline (32 errors on main) unchanged net. Next step: push branch + open PR (user action).
 
 ### Morning Punchlist — COMPLETE
 - ✅ **#1 P0** (was empirically broken) canonical aggregator URL — `73f76ad`
