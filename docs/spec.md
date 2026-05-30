@@ -991,6 +991,11 @@ entry fun seal_approve(id: vector<u8>, wl: &Whitelist, ctx: &TxContext) {
 
 ### 3.7 怎麼接到我們的 Design B + Derivative 架構
 
+> ⚠️ **過期警告(2026-05-30)— 本節為舊架構,v1.1 實作前勿照抄**
+> 本節整套 `seal_approve(id, access, target_id, clock, ctx)` 基於已**刪除**的 `Access` struct(D-029/D-030 刪除 `Access`、D-032 把 `Model3D` 改為 shared object)。現行模型:買家擁有**可交易的 `NftToken`**(非 soulbound),L1 的付費事件是 **fork/derive fee**(`launch_collection` → `NftCollectionCreatorCap`),不是 `Access` 收據。
+> 因此 v1.1 的 `seal_approve` **必須重新設計到現行物件圖上**(L1 gate 在 fork `CreatorCap`;L2 如要 gate 則查 `NftToken` 擁有權)。**下方表格與「Access-based gating」描述全部失效。**
+> 收斂方向與未定叉路見 `docs/ideation/2026-05-30-content-protection-seal-ideation.md`。
+
 > 對齊 §2.8 新架構。以下都是基於「`Model3D` = content,`Access` = soulbound,`Derivative` = 2nd-tier」前提。
 
 #### Seal 在這個架構裡的角色

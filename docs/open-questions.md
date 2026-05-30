@@ -445,3 +445,30 @@ Before provisioning any paid VM, spike whether the backend runs on Cloudflare Wo
 
 ### Blocker level
 🟡 Open — off today's critical path; resolve at the start of the deploy push (the real 6/21 critical path, ahead of the CDN polish).
+
+---
+
+## OQ-026: v1.1 Seal `seal_approve` must be redesigned onto the current object graph (spec §3.7 is stale)
+
+**Status**: 🟡 Open — v1.1 design task; direction converged in ideation, not yet plan/ADR.
+**Surfaced**: 2026-05-30 (content-protection ideation; see `docs/ideation/2026-05-30-content-protection-seal-ideation.md`).
+**Blocking**: nothing for 6/21 (Seal is v1.1). Blocks any v1.1 Seal implementation.
+
+### The drift
+`spec.md §3.7` designs `seal_approve(id, access, target_id, clock, ctx)` against the **deleted `Access` struct** (removed D-029/D-030; `Model3D` made shared by D-032). A `⚠️` annotation was added at §3.7 (2026-05-30) flagging it as stale. Anyone implementing v1.1 Seal from spec §3.7 verbatim would gate on a struct that no longer exists.
+
+### Converged direction (from ideation — confirm at v1.1 brainstorm)
+- **Gate on the existing `NftCollectionCreatorCap`, not a new struct.** The cap is already `key`-only / soulbound (`model3d.move:242`) and is only obtained by paying the `derivative_mint_fee` in `launch_collection` (`model3d.move:625–675`) — i.e. it already *is* a soulbound paid-access receipt. `seal_approve` checks the caller holds a cap forked from this `model_id`. Re-introducing a separate L3 `Access` struct is unnecessary unless a **transferable or time-limited / subscription** access concept is wanted later.
+- **Encryption is derived from `LicenseTerms.policy`, not an independent toggle** — closes the "decorative `is_encrypted`" gap:
+  - `PERMISSIONLESS` → `is_encrypted=false`, base public, no Seal, no preview needed.
+  - `ALLOW_LIST` → `is_encrypted=true`, `seal_approve` = holds fork cap (paid derive fee); preview required.
+  - `RESTRICTED` → `is_encrypted=true`, `seal_approve` = `caller == creator`; no preview.
+- **Ciphertext can stay on the existing public aggregator + `cdn.tusk3d.space`** (D-073 untouched) — Seal gates the key, not the bytes.
+- **Revenue framing**: royalty (`base_royalty_bps`, Kiosk-enforced on-chain) is the *hard* rail; the fork fee is *soft* (bypassable by laundering a public L2 variant's topology — accepted as mitigate-not-prevent). Fee values stay the creator's call; the platform just offers the optional Seal lever (via policy) + sane defaults (low fork fee, royalty-primary).
+- **Preview** (for `ALLOW_LIST` forkers evaluating an encrypted base): client-side `BABYLON.Tools.CreateScreenshot` stills at publish, quilted into the same Walrus blob as the Seal-encrypted master. No MP4, no backend render, no external CDN, no extra wallet popup.
+
+### To resolve
+Run a v1.1 Seal `ce-brainstorm` → `ce-plan` that locks: the `seal_approve` signature(s) per policy, the publish-flow encryption step, the preview pipeline, and whether a transferable/expiring access concept is ever needed (the only thing that would justify a separate struct over the cap). Then update spec §3.7 with the real design and capture an ADR.
+
+### Blocker level
+🟡 Open — v1.1 only; must precede any Seal code.
