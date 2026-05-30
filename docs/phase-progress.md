@@ -1,6 +1,43 @@
 # Phase Progress
 
-## Last Updated: 2026-05-29 / 4:00pm GMT+8 (S3 Topology Mark — **SHIPPED + REVIEWED**. The 7-survivor landing set is now **COMPLETE**. Full canonical arc (form pre-decided + ridgeline visual user-confirmed → plan-025 → ce-work → 5-reviewer ce-code-review → browser-verify), direct-to-trunk on `feat/s2-telemetry-strip`. 4 commits: `ab24293` plan-025 + `5f12514` U1 SVG + `4f325ce` U2 mount + `e793e20` review-pass. 734/734 vitest; tsc 32. Browser-verified at `/` desktop + 375px.
+## Last Updated: 2026-05-30 / 12:40am GMT+8 (Walrus read-path CDN — **METHOD A KILLED, PIVOTED TO METHOD B (Worker); non-blocking prep done, awaiting human Cloudflare steps**)
+
+### What happened this session
+User asked to discuss the Walrus read-path CDN (plan-018 / D-069). While prepping to implement Method A (proxied CNAME + Cache Rule), an empirical probe killed it:
+- `curl -sI https://aggregator.walrus-testnet.walrus.space/` → `server: cloudflare` + `cf-ray`: **the aggregator is itself on Cloudflare** → a proxied cross-account CNAME hits **Error 1014 "CNAME Cross-User Banned"**.
+- `curl -I -H "Host: cdn.tusk3d.space" …` → **403**: aggregator rejects unknown Host (which a CF reverse proxy forwards).
+→ Pivoted to **Method B (Cloudflare Worker)**: a server-side `fetch()` uses the aggregator's own Host/SNI, sidesteps both. Captured in **D-073 (supersedes D-069)**.
+
+User purchased **`tusk3d.space`** (Namecheap) — NOT the old `tusk3d.xyz` placeholder. All `.xyz` refs renamed project-wide.
+
+### Completed this session (non-blocking, no Cloudflare access needed)
+- **D-073** ADR written; **D-069** marked Superseded.
+- `tusk3d.xyz` → `tusk3d.space` everywhere (decisions.md, plan-018, plan-021, brainstorm-s2, `TelemetryStrip.tsx`); grep confirms zero `.xyz` left.
+- **plan-018 rewritten** to Method B (Worker deploy steps, `x-tusk-cache` verify, honest latency caveat).
+- **`cdn-worker/`** authored & ready to deploy: `src/worker.js` (GET|HEAD `/v1/blobs/*`, immutable edge cache, ordered `WALRUS_AGGREGATORS` failover, `x-tusk-cache`/`x-tusk-origin` headers), `wrangler.toml` (custom-domain route `cdn.tusk3d.space`), `package.json`, `README.md`, `.gitignore`.
+- Memory updated: `project_walrus_read_cdn_method_b.md` (old method-a file deleted), MEMORY.md index line.
+
+### Blocked on user (doing 5/31)
+Step 1–4 of plan-018 Prerequisites: (1) add `tusk3d.space` zone to Cloudflare, (2) repoint Namecheap NS → Cloudflare, (3) wait Active, (4) create scoped API token (Account→Workers Scripts:Edit, Zone→Workers Routes:Edit + DNS:Edit) and `export CF_API_TOKEN=…` in-session.
+
+### Next Concrete Step (when user returns with zone Active + token)
+`cd cdn-worker && CLOUDFLARE_API_TOKEN="$CF_API_TOKEN" npx wrangler deploy`, then verify `x-tusk-cache: MISS→HIT`, then make `frontend/src/walrus/aggregator.ts` read `VITE_WALRUS_READ_BASE` (fallback = current testnet host) and set it to `https://cdn.tusk3d.space`. Then measure latency (plan-018 Step 5) — remember the honest caveat: aggregator already on CF edge, so raw RTT win may be modest; durable wins are our cache + failover + URL control.
+
+### Deploy sequencing decided this session
+CDN deploy (`wrangler deploy` + `aggregator.ts` swap) is **off the 6/21 critical path** and deferred to LAST. The frontend reads fine from the direct testnet aggregator (fallback) without it; CDN value (cache-HIT survivability + failover) only matters once a live app has traffic. Critical path is instead: deploy backend → contract (if needed) → frontend (Vercel + `tusk3d.space`) → demo arc end-to-end. The ONE non-deferred Cloudflare step is adding the `tusk3d.space` zone + repointing NS now (same zone fronts both the frontend domain per D-070 AND `cdn.tusk3d.space`; NS propagation is slow, so start it in the background).
+
+### Backend deploy blocked on cost — see OQ-025
+User does NOT want to open a paid always-on VM for the backend. **OQ-025** opened: the backend (Hono) is stateless and likely runs free on **Cloudflare Workers** (same account as the CDN zone) or **Vercel Functions** — spike that before provisioning any paid VM. Caveats to check: Tripo dispatch latency vs Workers CPU limits, Node-only deps (`@gltf-transform/core`), secrets as env bindings. Resolve at the start of the deploy push.
+
+### Notes for next session
+- Session wrapped with a commit of the CDN-prep batch on `feat/s2-telemetry-strip`: `feat(cdn): Walrus read-path Worker + D-073 (supersedes D-069 Method A)`.
+- `frontend/src/walrus/aggregator.ts` is still hardcoded — the config-var swap (plan-018 Step 3) is deliberately deferred until the Worker is live, so nothing breaks before then.
+- Domain `tusk3d.space` purchased; **next human action = add zone to Cloudflare + repoint Namecheap NS** (plan-018 Prereqs). API token + Worker deploy wait until after the app is deployed.
+- Untracked `frontend/public/models/tusk3d/walrus-tusk.glb` predates this session, unrelated to CDN — left alone.
+
+---
+
+## Older: 2026-05-29 / 4:00pm GMT+8 (S3 Topology Mark — **SHIPPED + REVIEWED**. The 7-survivor landing set is now **COMPLETE**. Full canonical arc (form pre-decided + ridgeline visual user-confirmed → plan-025 → ce-work → 5-reviewer ce-code-review → browser-verify), direct-to-trunk on `feat/s2-telemetry-strip`. 4 commits: `ab24293` plan-025 + `5f12514` U1 SVG + `4f325ce` U2 mount + `e793e20` review-pass. 734/734 vitest; tsc 32. Browser-verified at `/` desktop + 375px.
 
 ### S3 — what shipped
 - **U1** (`5f12514`): `frontend/public/mark/tusk-ridge.svg` — a Joy-Division "Unknown Pleasures" ridgeline rendered into a tapered tusk silhouette (5 stacked contour lines clipped to the profile). Black ink on transparent (sits on the paper masthead, INVERTED from the paper-on-black lifecycle SVGs). Zero accent.

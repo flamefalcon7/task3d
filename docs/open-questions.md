@@ -423,3 +423,25 @@ The actual harm path requires BOTH:
 
 **Blocker level**: 🟢 Open — accept the risk; documented.
 
+
+---
+
+## OQ-025: Backend hosting for 6/21 submission — VM (costs money) vs serverless (likely free)
+
+**Status**: 🟡 Open — needs a decision before the deploy push, not blocking today.
+**Surfaced**: 2026-05-30 (session: Walrus CDN wrap-up; user flagged "deploying backend means opening a VM, which costs money").
+
+### The question
+The backend (`backend/` — Node 22 + Hono + `@mysten/sui` read path + Tripo dispatch, per D-012) is not deployed anywhere yet. The user does not want to pay for an always-on VM just for the hackathon.
+
+### Why a VM may be unnecessary
+The backend is a stateless HTTP service (Hono). Hono runs on multiple **serverless / edge** runtimes with a free tier — no VM, no always-on cost:
+- **Cloudflare Workers** — Hono is first-class here; we're already setting up a Cloudflare zone (`tusk3d.space`) for the CDN, so it's the same account/tooling. Free tier 100k req/day.
+- **Vercel Functions** — same place the frontend is going (D-070), single deploy surface.
+- Caveats to check before committing: (1) Tripo dispatch latency / long-running requests vs Workers CPU-time limits; (2) any Node-only API the backend uses that isn't in the Workers runtime (e.g. `@gltf-transform/core`, fs, native deps); (3) secrets handling (Tripo key, Sui key) as env bindings.
+
+### Recommendation (to confirm next session)
+Before provisioning any paid VM, spike whether the backend runs on Cloudflare Workers or Vercel Functions as-is. If a Node-only dependency blocks it, fall back to the cheapest option that fits (e.g. a free-tier container/Render/Fly small instance) rather than a paid VM. Decide, then capture as an ADR.
+
+### Blocker level
+🟡 Open — off today's critical path; resolve at the start of the deploy push (the real 6/21 critical path, ahead of the CDN polish).

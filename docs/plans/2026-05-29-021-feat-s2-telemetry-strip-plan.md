@@ -71,4 +71,4 @@ Surfaced by 9-agent `ce-code-review` run:
 - P2 — reconsider the `walrusBlobs` field in `TelemetrySnapshot` — it's permanently identical to `l1Models`, and the display label "WALRUS BLOBS" diverges from the brainstorm-doc KD-2 spec ("WALRUS N MB"). Either drop the field and render `data.l1Models` directly, or restore the byte-count via a backend snapshot.
 - P3 — additional render-contract tests: `formatAsOf` invalid-ISO catch branch, `truncateCid` short-CID ≤10 branch, zero-count rendering, `FALLBACK_TELEMETRY` immutability via `Object.freeze`.
 - P3 — pagination silent under-count past 5000 events: emit `console.warn` or carry a `truncated: true` field when the 100-page ceiling fires.
-- Cleanup — when D-069 plan-018 CDN ships, `WALRUS_AGGREGATOR` in `frontend/src/walrus/aggregator.ts` updates to `cdn.tusk3d.xyz`; `TelemetryStrip.tsx` picks it up automatically via the canonical-constant import (D-071 SoT rule).
+- Cleanup — when D-069 plan-018 CDN ships, `WALRUS_AGGREGATOR` in `frontend/src/walrus/aggregator.ts` updates to `cdn.tusk3d.space`; `TelemetryStrip.tsx` picks it up automatically via the canonical-constant import (D-071 SoT rule).

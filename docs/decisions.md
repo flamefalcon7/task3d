@@ -3098,7 +3098,9 @@ Project has shipped the bulk of plan-017 and is ~23 days from the 2026-06-21 Sui
 
 ## D-069: Walrus read-path acceleration = Cloudflare DNS proxy (Method A); Worker (Method B) deferred
 
-**Status**: Accepted
+> **Superseded by [D-073]** (2026-05-30): Method A proved infeasible — the aggregator is itself on Cloudflare (Error 1014 cross-user CNAME ban) and rejects unknown Host headers (HTTP 403). Read path now uses a Cloudflare Worker (Method B). Body below preserved as the original decision record.
+
+**Status**: Superseded by D-073
 **Date**: 2026-05-28
 **Phase**: Phase 4 — read-path performance
 
@@ -3124,13 +3126,13 @@ Reading 3D model GLBs from a single public Walrus mainnet aggregator gives varia
 - ✅ Warm-cache read latency drops materially; demo / submission load faster from any region.
 - ✅ Read path costs $0 (no Sui gas, no WAL) and ~0 lines of application code beyond the URL base swap.
 - ⚠️ **Single-aggregator SPOF**: if the chosen public aggregator goes down, all reads fail until DNS is repointed. Mitigation: identify a fallback aggregator host before 2026-06-21 submission; monitor health.
-- ⚠️ **The cached subdomain (`cdn.<domain>`) must live on an ICANN TLD** — `.sui` names are not in DNS and cannot be proxied by Cloudflare. This makes purchasing `tusk3d.xyz` (or equivalent) mandatory, not optional. SuiNS `.sui` names remain usable for the marketing/landing surface but cannot serve the CDN path.
+- ⚠️ **The cached subdomain (`cdn.<domain>`) must live on an ICANN TLD** — `.sui` names are not in DNS and cannot be proxied by Cloudflare. This makes purchasing `tusk3d.space` (or equivalent) mandatory, not optional. SuiNS `.sui` names remain usable for the marketing/landing surface but cannot serve the CDN path.
 - 🔮 Method B migration when triggered: Worker bound to the same `cdn.<domain>`, frontend untouched (config var). Plan-018 explicitly enumerates the triggers.
 
 ### Related
 - Plan: `docs/plans/2026-05-28-018-feat-walrus-cdn-read-cache-plan.md`
 - Memory: `project_walrus_read_cdn_method_a.md`
-- Depends on: D-068 (Tusk3D / `tusk3d.xyz` provides the ICANN domain this CDN path needs)
+- Depends on: D-068 (Tusk3D / `tusk3d.space` provides the ICANN domain this CDN path needs)
 
 ---
 
@@ -3169,20 +3171,20 @@ Those three pieces collectively make the "Sui-native" case at evaluation time. F
 
 ### Alternatives Considered
 - **Walrus Sites + SuiNS (`tusk3d.sui` via wal.app portal)** — pure Sui-native flex but high setup cost, b36-URL-via-portal ergonomics still flaky, wal.app SPOF, epoch-expiry risk; rejected per rationale.
-- **Walrus Sites + self-hosted portal on `tusk3d.xyz`** — eliminates wal.app SPOF and gives a clean URL, but VPS + Caddy + portal binary is 2+ hours of sprint-stage infra work; rejected because evaluator-perceived value is still ~zero.
+- **Walrus Sites + self-hosted portal on `tusk3d.space`** — eliminates wal.app SPOF and gives a clean URL, but VPS + Caddy + portal binary is 2+ hours of sprint-stage infra work; rejected because evaluator-perceived value is still ~zero.
 - **Walrus Sites with bare b36 URL** — cheapest Walrus-Sites option; rejected because the URL is unusable in any demo / pitch context.
-- **Vercel deployment + verbal native claim** — selected: 5-minute setup, clean URL (`tusk3d.vercel.app` or `tusk3d.xyz` fronting Vercel via Cloudflare), zero demo-day risk, and the native-story line is rhetorically as strong as actually doing it because no evaluator audits the host.
+- **Vercel deployment + verbal native claim** — selected: 5-minute setup, clean URL (`tusk3d.vercel.app` or `tusk3d.space` fronting Vercel via Cloudflare), zero demo-day risk, and the native-story line is rhetorically as strong as actually doing it because no evaluator audits the host.
 
 ### Consequences
 - ✅ Frontend setup is a `git push` away; iteration speed is preserved through demo day.
-- ✅ Demo URL is clean and memorable (`tusk3d.xyz` → Cloudflare → Vercel, or `tusk3d.vercel.app`).
+- ✅ Demo URL is clean and memorable (`tusk3d.space` → Cloudflare → Vercel, or `tusk3d.vercel.app`).
 - ✅ Zero epoch / portal / SuiNS dependency on the host critical path; one less failure mode during the 2026-06-21 → 2026-07-21 evaluator window.
 - ✅ **Verbal native-story template (for pitch / demo)**: *"Our frontend currently hosts on Vercel for iteration speed, but because it's purely static, it's one site-builder command away from Walrus Sites for full on-chain hosting. Where Walrus actually carries our weight is the 3D-model layer — that's where the bytes live, and that's where Cloudflare accelerates them globally."*
 - ⚠️ A judge with extreme dogmatic preference for end-to-end Sui-native deployment could perceive Vercel as web2-dependent. Mitigation: the verbal claim above acknowledges and contextualizes the choice on the spot; the post-submission v1.1 roadmap can include "migrate static frontend to Walrus Sites" as a 1-day item.
 - 🔮 Post-hackathon (if traction warrants), a Walrus Sites migration is a 1-day task: `site-builder publish ./dist`, point SuiNS, swap DNS. The decision can be revisited without architectural impact.
 
 ### Related
-- D-068 (product = Tusk3D; the same `tusk3d.xyz` ICANN domain that fronts Vercel also fronts the CDN per D-069)
+- D-068 (product = Tusk3D; the same `tusk3d.space` ICANN domain that fronts Vercel also fronts the CDN per D-069)
 - D-069 (Walrus read-path CDN; the Walrus-native technical depth this ADR points at)
 - Plan: `docs/plans/2026-05-28-018-feat-walrus-cdn-read-cache-plan.md` (scope-cross-reference section added)
 - Memory: `project_frontend_host_not_walrus_sites.md`
@@ -3236,7 +3238,7 @@ The `●live` / `●cache` indicator dot is the contract between the data layer 
 - KD-1 / KD-3 / KD-4 in `docs/brainstorms/2026-05-29-s2-telemetry-strip-requirements.md` — the operational decisions promoted to this ADR
 - D-019 (JSON-RPC vs gRPC SuiClient split) — affects the `useSuiClient` cast in `useTelemetryData.ts`
 - D-044 (brutalist editorial tokens) — constrains the `●live` accent to a single instance, which is why the dot's truth contract matters
-- D-069 (Walrus CDN read path) — when `cdn.tusk3d.xyz` ships, `WALRUS_AGGREGATOR` swaps in `aggregator.ts` and the strip picks it up automatically
+- D-069 (Walrus CDN read path) — when `cdn.tusk3d.space` ships, `WALRUS_AGGREGATOR` swaps in `aggregator.ts` and the strip picks it up automatically
 - Memory: `feedback_check_repo_constants_before_baking.md`
 - Commits: `e42d002` (initial implementation), `73f76ad` (ce-code-review fix pass)
 
@@ -3281,6 +3283,56 @@ The S7 versioned masthead (plan-022) sets the Tusk3D wordmark with an issue numb
 
 ---
 
+## D-073: Walrus read-path CDN = Cloudflare Worker (Method B) now, not DNS proxy (Method A); domain = `tusk3d.space`
+
+**Status**: Accepted — Supersedes D-069
+**Date**: 2026-05-30
+**Phase**: Phase 4 — read-path performance
+
+### Context
+While preparing to implement D-069 / plan-018 (Method A: a proxied orange-cloud CNAME from our zone to a public Walrus aggregator, plus a Cache Rule), empirical testing on 2026-05-30 showed **Method A is infeasible against the Walrus aggregator** for two independent reasons:
+
+1. **The aggregator is itself served through Cloudflare.** `curl -sI https://aggregator.walrus-testnet.walrus.space/` returns `server: cloudflare` + a `cf-ray` header. A proxied CNAME from our zone to a hostname living in **another Cloudflare account** triggers Cloudflare **Error 1014 "CNAME Cross-User Banned"** — Cloudflare refuses to proxy a domain it sees in a different account.
+2. **The aggregator rejects unknown Host headers.** Cloudflare's reverse proxy forwards the visitor Host (`cdn.tusk3d.space`) to origin; the aggregator replies **HTTP 403** to a Host it doesn't recognize. Verified: `curl -I -H "Host: cdn.tusk3d.space" https://aggregator.walrus-testnet.walrus.space/` → `403` (vs `404` with the correct Host).
+
+Either issue alone kills Method A; both are present. Method A's premise — that the aggregator is an ordinary, proxyable third-party origin — was false.
+
+Separately, the domain actually purchased is **`tusk3d.space`** (Namecheap, 2026-05-30); earlier docs used a placeholder `.xyz` domain that was never registered. Registrar ≠ DNS: the nameservers point to a Cloudflare free-plan zone, where the Worker runs.
+
+### Decision
+**Implement Method B (Cloudflare Worker) now**, at `cdn.tusk3d.space`. The Worker does a server-side `fetch()` to the aggregator — an *outbound subrequest* that uses the aggregator's own Host/SNI, so it sidesteps both the 403 (correct Host) and the 1014 (no proxied DNS record to the foreign zone). It caches immutable blob responses in the edge **Cache API** with `cache-control: public, max-age=31536000, immutable`, and supports an ordered **aggregator failover list** via the `WALRUS_AGGREGATORS` env var. Only `/v1/blobs/*` `GET`|`HEAD` paths are proxied; everything else 404s. The frontend read contract is unchanged from D-069: `VITE_WALRUS_READ_BASE` (config-driven, never hardcoded).
+
+### Rationale
+- Method A is **technically impossible** here (1014 + 403), not merely suboptimal — empirically verified, not assumed.
+- A Worker `fetch()` is the **only** way to front a Cloudflare-hosted origin from our own separate zone.
+- The Worker hands us D-069's deferred Method B triggers **for free**: multi-aggregator failover + clean/branded-URL capability — both things we'd have needed eventually.
+- The Cache API gives us **our own edge cache**, independent of the aggregator's (uncontrolled) cache headers and — for HITs — independent of aggregator uptime.
+- Cloudflare free plan includes Workers (100k req/day) — ample for submission + demo day.
+
+### Alternatives Considered
+- **Method A (DNS proxy + Cache Rule)** — infeasible (1014 + 403 above). This ADR is the reversal of D-069.
+- **Cloudflare for SaaS / custom hostnames** — would let us proxy a foreign origin, but it's a paid feature; overkill.
+- **Self-hosted aggregator** — out of scope per plan-018 boundary (storage-layer ownership ≠ read-path caching).
+- **No CDN, aggregator-direct** — leaves us with zero failover and no control over caching; rejected for demo robustness.
+
+### Consequences
+- ✅ Reads front a branded, cacheable `cdn.tusk3d.space`; cache HITs survive aggregator slowness/outages.
+- ✅ Failover + clean-URL capability available in the same ~40-line single-file Worker.
+- ⚠️ **The raw geographic-latency win is smaller than D-069 assumed**: the aggregator is *already* on Cloudflare's edge, so it already terminates near users. The durable wins are our own immutable cache, failover, URL control — **not** raw RTT. Latency improvement must still be **measured** (plan-018 Step 5), never claimed unmeasured.
+- ⚠️ Worker is maintained code (Method A was zero code) — but it's one small file.
+- ⚠️ Origin is currently the **testnet** aggregator (we're testnet until 6/21). `WALRUS_AGGREGATORS` env makes the mainnet swap a config change, not a logic redeploy.
+- 🔮 Clean-URL rewrites (e.g. `/model/<name>`) are now possible in the same Worker whenever wanted.
+
+### Related
+- Supersedes: D-069 (Method A)
+- Plan: `docs/plans/2026-05-28-018-feat-walrus-cdn-read-cache-plan.md` (status updated to Method B)
+- Memory: `project_walrus_read_cdn_method_a.md` (updated → Method B Worker)
+- Worker source: `cdn-worker/`
+- D-070 (same `tusk3d.space` domain fronts the Vercel-hosted frontend)
+- D-068 (product = Tusk3D)
+
+---
+
 # Reserved Decision Numbers
 
-D-073 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-074 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

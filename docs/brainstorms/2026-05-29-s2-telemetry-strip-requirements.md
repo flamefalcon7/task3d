@@ -44,7 +44,7 @@ This is also the strongest available **Walrus-track-specific** signal on the lan
 - A new backend endpoint or any deploy concern beyond the existing frontend
 - Walrus aggregator HTTP-API integration
 - Server-side rendering / SSR considerations (we ship a Vite SPA per D-070)
-- Catching up with `plan-018` (Walrus CDN) — if `cdn.tusk3d.xyz` is live by S2 ship, the CID link uses it; otherwise it falls back to wal.app. Either is acceptable.
+- Catching up with `plan-018` (Walrus CDN) — if `cdn.tusk3d.space` is live by S2 ship, the CID link uses it; otherwise it falls back to wal.app. Either is acceptable.
 
 ---
 
@@ -72,7 +72,7 @@ AS OF <TS PT>  ·  ●live  ·  L1 MODELS <N>  ·  L2 NFTS <N>  ·  WALRUS <N> M
 - `L1 MODELS <N>`: total count of `ModelPublished` events.
 - `L2 NFTS <N>`: total count of `NftTokenMinted` events.
 - `WALRUS <N> MB`: total bytes uploaded to Walrus, summed from `ModelPublished` event payloads. Format: 1 decimal place when < 100 MB, integer when ≥ 100 MB.
-- `LATEST CID <bafy…XXX> ↗`: truncated CID (first 4 + ellipsis + last 3 chars) hyperlinked to either `https://cdn.tusk3d.xyz/<cid>` (if plan-018 shipped) or `https://aggregator.testnet.walrus.atalma.io/v1/<cid>` (current testnet aggregator). Opens in new tab. `↗` arrow indicates external link.
+- `LATEST CID <bafy…XXX> ↗`: truncated CID (first 4 + ellipsis + last 3 chars) hyperlinked to either `https://cdn.tusk3d.space/<cid>` (if plan-018 shipped) or `https://aggregator.testnet.walrus.atalma.io/v1/<cid>` (current testnet aggregator). Opens in new tab. `↗` arrow indicates external link.
 
 Field separator: ` · ` (mono middle-dot with spaces).
 
@@ -156,7 +156,7 @@ No changes to: `tokens.ts`, any Move file, any backend file, any `walrus/` file,
 
 **OQ-S2-1**: Does the `ModelPublished` event payload include the `bytes` field? Verify against `contracts/model3d/sources/model3d.move` ~line 537. Resolution per KD-3 — either field works.
 
-**OQ-S2-2**: Has plan-018 (`cdn.tusk3d.xyz`) shipped by the time S2 lands? If yes, use that URL; if no, use the current testnet aggregator URL. Both should be stored as a single constant in `useTelemetryData.ts` so the swap is one-line later.
+**OQ-S2-2**: Has plan-018 (`cdn.tusk3d.space`) shipped by the time S2 lands? If yes, use that URL; if no, use the current testnet aggregator URL. Both should be stored as a single constant in `useTelemetryData.ts` so the swap is one-line later.
 
 **OQ-S2-3**: Pagination — does `queryEvents` cap at 50? If so, the implementation iterates `nextCursor` until exhausted. For testnet counts likely < a few hundred this is trivial; record actual numbers in the test fixture.
 
