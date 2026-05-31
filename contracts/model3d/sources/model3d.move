@@ -44,6 +44,25 @@ const POLICY_RESTRICTED:     u8 = 0;
 const POLICY_ALLOW_LIST:     u8 = 1;
 const POLICY_PERMISSIONLESS: u8 = 2;
 
+// === Seal content protection (D-074 / D-075 / D-076) ===
+//
+// Package version stamped onto every Model3D at publish (`seal_version`) and
+// asserted in `seal_approve_*`. A future COMPATIBLE upgrade that changes the gate
+// logic MUST bump VERSION; already-encrypted models carry the OLD version and then
+// fail `seal_approve` (fail-CLOSED) rather than being silently re-gated by the new
+// rule. It is a tripwire forcing a conscious migration, NOT seamless versioning —
+// for this single republish it is inert at 1. The check rides the gas-free
+// key-server dry-run.
+const VERSION: u64 = 1;
+
+// Bounds for the Seal envelope fields (defensive, matching the module's
+// validate-everything posture). `sealed_key` is the Seal-wrapped 32-byte AES key
+// (a BCS EncryptedObject — a few hundred bytes); `seal_id` is the client's random
+// per-model Seal-identity prefix (32 bytes today); 1024 / 64 are generous ceilings.
+const MAX_SEALED_KEY_LEN:   u64 = 1024;
+const MAX_SEAL_ID_LEN:      u64 = 64;
+const MAX_PREVIEW_BLOBS:    u64 = 8;
+
 // Cap on the per-license `derivative_royalty_bps` field (D-004: 30%).
 // This is L2 derivative-royalty territory, deferred to v1.1. It is NOT
 // the Phase 4 primary-sale royalty rate — see AMOUNT_BP_DEFAULT below.
@@ -114,6 +133,33 @@ const EPolicyRestricted:     u64 = 38;
 // plan-013 — per-part label bounds on the segmented-mesh `part_labels` vector.
 const ETooManyParts:         u64 = 39;
 const EPartLabelTooLong:     u64 = 40;
+// D-076 — ALLOW_LIST base published with derivative_mint_fee == 0. With no
+// on-chain address allowlist in v1, ALLOW_LIST means "pay to fork"; fee==0 makes
+// it logically identical to PERMISSIONLESS-with-pointless-encryption.
+const EAllowListNeedsFee:    u64 = 41;
+// D-075 — Seal envelope field bounds.
+const ESealedKeyTooLong:     u64 = 42;
+const ESealIdTooLong:        u64 = 43;
+const ETooManyPreviews:      u64 = 44;
+// D-075 — Seal field/policy consistency: `is_encrypted` (derived from policy)
+// must agree with the presence of sealed_key + seal_id, and previews/seal fields
+// must be absent on an unencrypted (PERMISSIONLESS) publish. Forces each policy
+// through its correct entry (`publish` vs `publish_encrypted`).
+const ESealFieldsInconsistent: u64 = 45;
+// D-075 — `publish_encrypted` called with a PERMISSIONLESS license (must use the
+// plain `publish`).
+const ENotEncryptedPolicy:   u64 = 46;
+// D-075 — `seal_id` already recorded in the SealIdRegistry (global-uniqueness
+// guard that defeats the copy attack — see D-075 Resolution G).
+const ESealIdReused:         u64 = 47;
+// D-075 — seal_approve_cap named TRIPLE-CHECK invariant (each isolation-tested;
+// distinct codes so a test pins exactly which leg denied).
+const ECapCollectionMismatch:  u64 = 48; // cap.collection_id != id(collection)
+const ECollectionModelMismatch:u64 = 49; // collection.base_model_id != id(model)
+const EIdPrefixMismatch:       u64 = 50; // Seal id not prefixed by model.seal_id
+const ESealVersionMismatch:    u64 = 51; // model.seal_version != VERSION
+// D-075 — seal_approve_creator: caller is not the base creator (RESTRICTED).
+const ENotBaseCreator:         u64 = 52;
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -182,9 +228,40 @@ public struct Model3D has key, store {
     // color array at build time. Length-bounded by MAX_PARTS; per-element by
     // MAX_TAG_LEN.
     part_labels: vector<String>,
+    // D-075 — encryption is DERIVED from license.policy (PERMISSIONLESS → false,
+    // ALLOW_LIST/RESTRICTED → true) and fixed at publish. Closes the decorative-
+    // flag gap (was a caller-supplied bool that was never enforced). The client
+    // reads this to choose the read path: plaintext GLB vs AES-ciphertext + Seal.
     is_encrypted: bool,
+    // D-075 — Seal envelope fields (empty/0 on the PERMISSIONLESS path):
+    //   sealed_key — the Seal-wrapped AES-256-GCM key (BCS EncryptedObject) that
+    //     decrypts the (now ciphertext) blob at `glb_blob_id`.
+    //   seal_id    — the client's random per-model Seal-identity PREFIX. Made
+    //     globally unique at publish via SealIdRegistry (D-075 Resolution G), so
+    //     `is_prefix(seal_id, id)` in seal_approve binds a ciphertext to exactly
+    //     one model and the copy attack is impossible.
+    //   seal_version — VERSION at publish; asserted in seal_approve (tripwire).
+    sealed_key: vector<u8>,
+    seal_id: vector<u8>,
+    // D-075 — public preview-still Walrus blob ids. ALLOW_LIST only (lets a
+    // prospective forker evaluate an encrypted base before paying); RESTRICTED is
+    // off-catalog with none; PERMISSIONLESS shows the real mesh so none.
+    preview_blob_ids: vector<String>,
+    seal_version: u64,
     license: LicenseTerms,
     created_at_ms: u64,
+}
+
+// D-075 — singleton registry of every `seal_id` ever used, bootstrapped once in
+// `init` and shared. `publish_encrypted` asserts a new model's `seal_id` is absent
+// here before recording it, guaranteeing global uniqueness. That uniqueness is the
+// load-bearing defense behind the `is_prefix(model.seal_id, id)` binding in
+// seal_approve: without it, an attacker could publish a throwaway model carrying a
+// victim's `seal_id`, fork it cheaply, and decrypt the victim's ciphertext (see
+// D-075 Resolution G). The Table value is unit `true` (set membership).
+public struct SealIdRegistry has key {
+    id: UID,
+    used: Table<vector<u8>, bool>,
 }
 
 // === D-029 — NFT collection layer (L2) ===
@@ -271,6 +348,11 @@ public struct ModelPublished has copy, drop {
     // straight from the event payload (no follow-up `getObject` on the new
     // shared model).
     part_labels: vector<String>,
+    // D-075 — carried so the indexer routes the read path (ciphertext vs
+    // plaintext) and renders ALLOW_LIST preview stills without a getObject.
+    // RESTRICTED is filtered OFF the public catalog by the indexer (private).
+    is_encrypted: bool,
+    preview_blob_ids: vector<String>,
 }
 
 // D-029 — emitted by `launch_collection` when an nft creator derives a
@@ -319,6 +401,10 @@ public struct IntegrationRegistered has copy, drop {
 fun init(otw: MODEL3D, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
     transfer::public_transfer(publisher, ctx.sender());
+    // D-075 — bootstrap the singleton SealIdRegistry exactly once, at publish.
+    // Sharing it here (rather than via a separate ceremony) guarantees there is
+    // precisely one canonical registry per package; the frontend pins its id.
+    transfer::share_object(SealIdRegistry { id: object::new(ctx), used: table::new(ctx) });
 }
 
 // === D-029 / D-032 — TransferPolicy<NftToken> bootstrap ===
@@ -405,6 +491,10 @@ public fun lineage_blob_id(model: &Model3D): &String { &model.lineage_blob_id }
 public fun glb_blob_id(model: &Model3D): &String { &model.glb_blob_id }
 public fun part_labels(model: &Model3D): &vector<String> { &model.part_labels }
 public fun is_encrypted(model: &Model3D): bool { model.is_encrypted }
+public fun sealed_key(model: &Model3D): &vector<u8> { &model.sealed_key }
+public fun seal_id(model: &Model3D): &vector<u8> { &model.seal_id }
+public fun preview_blob_ids(model: &Model3D): &vector<String> { &model.preview_blob_ids }
+public fun seal_version(model: &Model3D): u64 { model.seal_version }
 public fun license(model: &Model3D): &LicenseTerms { &model.license }
 public fun created_at_ms(model: &Model3D): u64 { model.created_at_ms }
 public fun license_policy(license: &LicenseTerms): u8 { license.policy }
@@ -475,6 +565,36 @@ public(package) fun validate_publish_inputs(
     };
 }
 
+// D-075 / D-076 — Seal-specific publish validation, split out so tests can
+// exercise the fee assert + envelope bounds directly (mirroring why
+// `validate_publish_inputs` is package-public). Called from `new_model` alongside
+// the general validator. Bounds-only on the seal fields here; the policy↔field
+// CONSISTENCY check (encrypted ⇔ key/id present) lives in `new_model`, which is
+// where `is_encrypted` is derived.
+public(package) fun validate_seal_publish(
+    sealed_key: &vector<u8>,
+    seal_id: &vector<u8>,
+    preview_blob_ids: &vector<String>,
+    license: &LicenseTerms,
+) {
+    // D-076 — ALLOW_LIST requires a positive derive fee (pay-to-fork is its only
+    // v1 meaning; fee == 0 collapses it to PERMISSIONLESS + pointless encryption).
+    assert!(
+        license.policy != POLICY_ALLOW_LIST || license.derivative_mint_fee > 0,
+        EAllowListNeedsFee,
+    );
+    // D-075 — Seal envelope field bounds.
+    assert!(vector::length(sealed_key) <= MAX_SEALED_KEY_LEN, ESealedKeyTooLong);
+    assert!(vector::length(seal_id) <= MAX_SEAL_ID_LEN, ESealIdTooLong);
+    assert!(vector::length(preview_blob_ids) <= MAX_PREVIEW_BLOBS, ETooManyPreviews);
+    let mut pv = 0;
+    let npv = vector::length(preview_blob_ids);
+    while (pv < npv) {
+        assert!(string::length(vector::borrow(preview_blob_ids, pv)) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+        pv = pv + 1;
+    };
+}
+
 // === Model3D constructor (foundation; `publish` shares it — D-032) ===
 
 // Pure constructor — does NOT share the returned Model3D. The public entry fn
@@ -504,20 +624,37 @@ public(package) fun new_model(
     lineage_blob_id: String,
     glb_blob_id: String,
     part_labels: vector<String>,
-    is_encrypted: bool,
+    sealed_key: vector<u8>,
+    seal_id: vector<u8>,
+    preview_blob_ids: vector<String>,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
 ): Model3D {
-    validate_publish_inputs(&params_json, &name, &tags, &lineage_blob_id, &glb_blob_id, &part_labels, &license);
+    validate_publish_inputs(
+        &params_json, &name, &tags, &lineage_blob_id, &glb_blob_id, &part_labels, &license,
+    );
+    validate_seal_publish(&sealed_key, &seal_id, &preview_blob_ids, &license);
+
+    // D-075 — encryption is DERIVED from policy and fixed at publish (closes the
+    // decorative-flag gap): anything other than PERMISSIONLESS is encrypted.
+    let is_encrypted = license.policy != POLICY_PERMISSIONLESS;
+
+    // D-075 — Seal field/policy consistency. An encrypted model MUST carry both a
+    // wrapped key and a seal_id (else it is bricked: undecryptable + unforkable);
+    // an unencrypted model MUST carry neither, and no previews. This forces each
+    // policy through its correct entry (`publish` vs `publish_encrypted`).
+    let has_key = !vector::is_empty(&sealed_key);
+    let has_id = !vector::is_empty(&seal_id);
+    assert!(has_key == is_encrypted, ESealFieldsInconsistent);
+    assert!(has_id == is_encrypted, ESealFieldsInconsistent);
+    assert!(is_encrypted || vector::is_empty(&preview_blob_ids), ESealFieldsInconsistent);
 
     // Fixed Blob lifecycle (see fn-header note): transferred to creator BEFORE
     // model construction. Walrus storage stays paid for the registered epoch
     // span; the Blob object becomes a creator-owned pointer the frontend
-    // resolves to bytes via the aggregator. Creator can drop the Blob
-    // unilaterally — the shared Model3D would survive but the aggregator would
-    // 404 on its `lineage_blob_id`. Out-of-scope mitigation: encourage the
-    // creator to keep the Blob until L2 derivative work lands (v1.1).
+    // resolves to bytes via the aggregator. When encrypted, the bytes at
+    // `glb_blob_id` are AES-ciphertext (Seal gates the key, not the blob).
     transfer::public_transfer(blob, ctx.sender());
 
     let model = Model3D {
@@ -531,6 +668,10 @@ public(package) fun new_model(
         glb_blob_id,
         part_labels,
         is_encrypted,
+        sealed_key,
+        seal_id,
+        preview_blob_ids,
+        seal_version: VERSION,
         license,
         created_at_ms: clock.timestamp_ms(),
     };
@@ -540,6 +681,8 @@ public(package) fun new_model(
         policy: license.policy,
         lineage_blob_id: model.lineage_blob_id,
         part_labels: model.part_labels,
+        is_encrypted: model.is_encrypted,
+        preview_blob_ids: model.preview_blob_ids,
     });
     model
 }
@@ -553,6 +696,11 @@ public(package) fun new_model(
 // referenceable by any wallet so a different-wallet nft creator can fork it via
 // `launch_collection(model: &Model3D, …)`. License/royalty cap is enforced
 // inside `new_model` (ERoyaltyTooHigh), so `publish` cannot bypass it.
+// `publish` — the UNENCRYPTED (PERMISSIONLESS) path. Seal fields are empty; the
+// `new_model` consistency guard aborts (`ESealFieldsInconsistent`) if this is
+// called with a non-PERMISSIONLESS license, forcing encrypted policies through
+// `publish_encrypted`. `is_encrypted` is no longer a caller argument (D-075 — it
+// is derived from policy inside `new_model`).
 public entry fun publish(
     blob: Blob,
     shape_type: String,
@@ -562,7 +710,6 @@ public entry fun publish(
     lineage_blob_id: String,
     glb_blob_id: String,
     part_labels: vector<String>,
-    is_encrypted: bool,
     license: LicenseTerms,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -576,7 +723,59 @@ public entry fun publish(
         lineage_blob_id,
         glb_blob_id,
         part_labels,
-        is_encrypted,
+        vector<u8>[],     // sealed_key — unencrypted
+        vector<u8>[],     // seal_id    — unencrypted
+        vector<String>[], // preview_blob_ids — unencrypted
+        license,
+        clock,
+        ctx,
+    );
+    transfer::share_object(model);
+}
+
+// D-075 — the ENCRYPTED (ALLOW_LIST / RESTRICTED) publish path. Identical
+// one-transaction shape to `publish` (upload ciphertext → publish blob), plus:
+// the bytes at `glb_blob_id` are AES-ciphertext, `sealed_key` is the Seal-wrapped
+// AES key, and `seal_id` is the client's random Seal-identity prefix. Resolution G:
+// the registry asserts `seal_id` has never been used before recording it, which is
+// what makes `is_prefix(model.seal_id, id)` in seal_approve an unforgeable per-model
+// binding (a copied seal_id is rejected here). PERMISSIONLESS is rejected — it must
+// use `publish`.
+public entry fun publish_encrypted(
+    registry: &mut SealIdRegistry,
+    blob: Blob,
+    shape_type: String,
+    params_json: String,
+    name: String,
+    tags: vector<String>,
+    lineage_blob_id: String,
+    glb_blob_id: String,
+    part_labels: vector<String>,
+    sealed_key: vector<u8>,
+    seal_id: vector<u8>,
+    preview_blob_ids: vector<String>,
+    license: LicenseTerms,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(license.policy != POLICY_PERMISSIONLESS, ENotEncryptedPolicy);
+    // Global-uniqueness guard (copy-attack defense). `seal_id` has `copy`, so the
+    // membership check + the recording insert + the constructor each take a copy.
+    assert!(!table::contains(&registry.used, seal_id), ESealIdReused);
+    table::add(&mut registry.used, seal_id, true);
+
+    let model = new_model(
+        blob,
+        shape_type,
+        params_json,
+        name,
+        tags,
+        lineage_blob_id,
+        glb_blob_id,
+        part_labels,
+        sealed_key,
+        seal_id,
+        preview_blob_ids,
         license,
         clock,
         ctx,
@@ -651,13 +850,15 @@ fun launch_collection_internal(
     quilt_blob_id: String,
     ctx: &mut TxContext,
 ): (NftCollection, NftCollectionCreatorCap) {
-    // D-040 — enforce the base model's L1 license policy. PERMISSIONLESS (2) lets
-    // anyone who pays the fee derive; any other value (RESTRICTED, and ALLOW_LIST
-    // which has no on-chain address list in v1) collapses to creator-only, so it
-    // fails safe. This is the ONLY gate that consults license.policy; integration
-    // is gated separately at the collection level (D-030).
+    // D-040, amended by D-076 — enforce the base model's L1 license policy. Only
+    // RESTRICTED (0) is creator-only; PERMISSIONLESS (2) AND ALLOW_LIST (1) both
+    // permit any fee-paying forker. ALLOW_LIST's fee is guaranteed > 0 at publish
+    // (EAllowListNeedsFee), so a non-creator ALLOW_LIST fork always pays — that is
+    // exactly the Seal pay-to-fork gate (the encrypted base only decrypts once the
+    // forker holds the cap this call issues). This is the ONLY gate that consults
+    // license.policy; integration is gated separately at the collection level (D-030).
     assert!(
-        model.license.policy == POLICY_PERMISSIONLESS || ctx.sender() == model.creator,
+        model.license.policy != POLICY_RESTRICTED || ctx.sender() == model.creator,
         EPolicyRestricted,
     );
 
@@ -804,6 +1005,45 @@ public entry fun mint_nft_token(
     transfer::public_transfer(token, ctx.sender());
 }
 
+// D-076 — step 3 of the encrypted ALLOW_LIST 3-step fork. The cap-issuing
+// `launch_collection` (step 1) creates the collection with an as-yet-unknown
+// quilt: the variants are baked in step 2, AFTER the base is decrypted, so the
+// quilt blob id is not known at launch. This entry — cap-gated — sets the
+// collection's `quilt_blob_id` and batch-mints the colored fleet in one tx.
+// PERMISSIONLESS keeps the atomic `launch_collection_with_tokens` (base is public,
+// so the quilt is baked before launch). `token_names`/`token_patch_ids` MUST be
+// the same length (`EBatchLenMismatch`); per-token bounds are inherited from the
+// shared core. `&mut collection` reborrows immutably for the mint core.
+public entry fun mint_tokens(
+    cap: &NftCollectionCreatorCap,
+    collection: &mut NftCollection,
+    quilt_blob_id: String,
+    token_names: vector<String>,
+    token_patch_ids: vector<String>,
+    ctx: &mut TxContext,
+) {
+    assert!(cap.collection_id == object::id(collection), EWrongCollectionCap);
+    assert!(
+        vector::length(&token_names) == vector::length(&token_patch_ids),
+        EBatchLenMismatch,
+    );
+    assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    collection.quilt_blob_id = quilt_blob_id;
+
+    let n = vector::length(&token_names);
+    let mut i = 0;
+    while (i < n) {
+        let token = mint_nft_token_internal(
+            collection,
+            *vector::borrow(&token_names, i),
+            *vector::borrow(&token_patch_ids, i),
+            ctx,
+        );
+        transfer::public_transfer(token, ctx.sender());
+        i = i + 1;
+    };
+}
+
 // D-038 — one-signature L2 launch: launches the collection (pay-to-derive),
 // sets `register_fee`, mints one plain owned `NftToken` per (name, patch_id)
 // pair, then shares the collection and transfers the soulbound cap — all atomic.
@@ -907,12 +1147,69 @@ public entry fun register_integration(
     });
 }
 
+// === D-075 — Seal access policy (`seal_approve_*`) ===
+//
+// The Seal key servers DRY-RUN these against the LATEST package version (no gas,
+// no state change) and release key shares iff the call does NOT abort — abort =
+// deny. Both are `entry` (invokable in the dry-run PTB) but NOT `public`: only the
+// key-server dry-run and the forge's decrypt PTB call them; no other module
+// composes them.
+//
+// `id` is the Seal identity the client passed to `SealClient.encrypt`:
+// `[ model.seal_id ][ nonce ]` (Seal prepends the package id itself, so `id` here
+// is the inner bytes only). The prefix check binds the ciphertext to THIS model
+// via its registry-unique `seal_id` — a cap (or creator) for one model cannot
+// unlock another model's blob.
+
+// Returns true iff `prefix` is a prefix of `word`.
+fun is_prefix(prefix: &vector<u8>, word: &vector<u8>): bool {
+    let pl = vector::length(prefix);
+    if (pl > vector::length(word)) return false;
+    let mut i = 0;
+    while (i < pl) {
+        if (*vector::borrow(prefix, i) != *vector::borrow(word, i)) return false;
+        i = i + 1;
+    };
+    true
+}
+
+// ALLOW_LIST — holder of the soulbound cap for a collection derived from THIS
+// model. NAMED TRIPLE-CHECK INVARIANT (each leg isolation-tested, distinct abort
+// codes): (1) cap authorizes this collection, (2) this collection derives from
+// this model, (3) the Seal id is prefix-bound to this model's seal_id — plus the
+// seal_version tripwire. Dropping any leg lets a valid cap unlock the wrong
+// ciphertext (the canonical Seal binding pitfall).
+entry fun seal_approve_cap(
+    id: vector<u8>,
+    cap: &NftCollectionCreatorCap,
+    collection: &NftCollection,
+    model: &Model3D,
+) {
+    assert!(cap.collection_id == object::id(collection), ECapCollectionMismatch);
+    assert!(collection.base_model_id == object::id(model), ECollectionModelMismatch);
+    assert!(is_prefix(&model.seal_id, &id), EIdPrefixMismatch);
+    assert!(model.seal_version == VERSION, ESealVersionMismatch);
+}
+
+// RESTRICTED — only the recorded base creator may decrypt; no third party forks.
+entry fun seal_approve_creator(
+    id: vector<u8>,
+    model: &Model3D,
+    ctx: &TxContext,
+) {
+    assert!(is_prefix(&model.seal_id, &id), EIdPrefixMismatch);
+    assert!(ctx.sender() == model.creator, ENotBaseCreator);
+    assert!(model.seal_version == VERSION, ESealVersionMismatch);
+}
+
 // === ModelPublished accessors (test-only — production indexers parse via BCS) ===
 
 #[test_only] public fun model_published_model_id(e: &ModelPublished): ID { e.model_id }
 #[test_only] public fun model_published_creator(e: &ModelPublished): address { e.creator }
 #[test_only] public fun model_published_policy(e: &ModelPublished): u8 { e.policy }
 #[test_only] public fun model_published_part_labels(e: &ModelPublished): &vector<String> { &e.part_labels }
+#[test_only] public fun model_published_is_encrypted(e: &ModelPublished): bool { e.is_encrypted }
+#[test_only] public fun model_published_preview_blob_ids(e: &ModelPublished): &vector<String> { &e.preview_blob_ids }
 
 #[test_only] public fun nft_token_minted_token_id(e: &NftTokenMinted): ID { e.token_id }
 #[test_only] public fun nft_token_minted_collection_id(e: &NftTokenMinted): ID { e.collection_id }
@@ -953,10 +1250,58 @@ public fun destroy_model_for_testing(model: Model3D) {
         glb_blob_id: _,
         part_labels: _,
         is_encrypted: _,
+        sealed_key: _,
+        seal_id: _,
+        preview_blob_ids: _,
+        seal_version: _,
         license: _,
         created_at_ms: _,
     } = model;
     object::delete(id);
+}
+
+// D-075 — tear down the shared SealIdRegistry in tests (Table value `bool` has
+// `drop`, so a populated table can be dropped directly).
+#[test_only]
+public fun destroy_seal_id_registry_for_testing(registry: SealIdRegistry) {
+    let SealIdRegistry { id, used } = registry;
+    used.drop();
+    object::delete(id);
+}
+
+// D-075 — construct a standalone SealIdRegistry for tests (without running `init`).
+#[test_only]
+public fun new_seal_id_registry_for_testing(ctx: &mut TxContext): SealIdRegistry {
+    SealIdRegistry { id: object::new(ctx), used: table::new(ctx) }
+}
+
+// D-075 — force a model's seal_version so the version-tripwire branch of
+// seal_approve can be exercised (normal construction always stamps VERSION).
+#[test_only]
+public fun set_seal_version_for_testing(model: &mut Model3D, v: u64) {
+    model.seal_version = v;
+}
+
+// D-075 — test-only public wrappers for the non-public `seal_approve_*` entries,
+// so the sibling test module can exercise the gate assertions directly (abort
+// codes propagate unchanged for `expected_failure`).
+#[test_only]
+public fun seal_approve_cap_for_testing(
+    id: vector<u8>,
+    cap: &NftCollectionCreatorCap,
+    collection: &NftCollection,
+    model: &Model3D,
+) {
+    seal_approve_cap(id, cap, collection, model)
+}
+
+#[test_only]
+public fun seal_approve_creator_for_testing(
+    id: vector<u8>,
+    model: &Model3D,
+    ctx: &TxContext,
+) {
+    seal_approve_creator(id, model, ctx)
 }
 
 // D-036 — NftToken is now a plain owned object (mint no longer Kiosk-locks it),

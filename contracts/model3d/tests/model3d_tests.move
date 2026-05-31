@@ -204,7 +204,9 @@ fun model3d_has_key_and_store_abilities() {
         s(b"lineageBlobIdABC"),
         s(b"glbBlobIdABC"),
         empty_part_labels(),
-        false,
+        vector<u8>[],     // sealed_key (unencrypted)
+        vector<u8>[],     // seal_id
+        vector<string::String>[], // preview_blob_ids
         default_license(),
         &clk,
         sc.ctx(),
@@ -249,7 +251,9 @@ fun new_model_emits_model_published_and_transfers_blob() {
         s(b"lineageBlobZ"),
         s(b"glbBlobZ"),
         empty_part_labels(),
-        false,
+        vector<u8>[],     // sealed_key (unencrypted)
+        vector<u8>[],     // seal_id
+        vector<string::String>[], // preview_blob_ids
         default_license(),
         &clk,
         sc.ctx(),
@@ -324,7 +328,9 @@ fun new_model_stores_and_emits_part_labels() {
         s(b"lineageSeg"),
         s(b"glbSeg"),
         four_label_palette(),
-        false,
+        vector<u8>[],     // sealed_key (unencrypted)
+        vector<u8>[],     // seal_id
+        vector<string::String>[], // preview_blob_ids
         default_license(),
         &clk,
         sc.ctx(),
@@ -639,7 +645,6 @@ fun publish_shares_model_and_emits_model_published() {
         s(b"lineageBlobPub"),
         s(b"glbBlobPub"),
         empty_part_labels(),
-        false,
         default_license(),
         &clk,
         sc.ctx(),
@@ -776,6 +781,13 @@ fun mint_base_model(
     ctx: &mut tx_context::TxContext,
 ): Model3D {
     let b = mint_blob(system, ctx);
+    // D-075 — encryption is derived from policy, so a non-PERMISSIONLESS base
+    // MUST carry seal fields (new_model's consistency guard). Supply dummy values
+    // for the gate/launch tests (which don't exercise real decryption). new_model
+    // doesn't touch the registry, so a constant dummy seal_id is fine here.
+    let encrypted = model3d::license_policy(&license) != policy_permissionless();
+    let sealed_key = if (encrypted) { b"dummy-sealed-key" } else { vector<u8>[] };
+    let seal_id = if (encrypted) { b"dummy-seal-id-01" } else { vector<u8>[] };
     new_model(
         b,
         s(b"car"),
@@ -785,7 +797,9 @@ fun mint_base_model(
         s(b"lineageBlobBase"),
         s(b"glbBlobBase"),
         empty_part_labels(),
-        false,
+        sealed_key,
+        seal_id,
+        vector<string::String>[], // preview_blob_ids (none needed for gate/launch tests)
         license,
         clk,
         ctx,
@@ -898,20 +912,39 @@ fun launch_collection_restricted_creator_ok() {
     sc.end();
 }
 
-// ALLOW_LIST(1) has no on-chain address list in v1 → fails safe as creator-only;
-// a non-creator caller aborts EPolicyRestricted (same as RESTRICTED).
-#[test, expected_failure(abort_code = model3d::EPolicyRestricted)]
-fun launch_collection_allow_list_non_creator_aborts() {
+// D-076 (amends D-040) — ALLOW_LIST now permits a fee-paying NON-creator to fork.
+// The cap this issues is exactly what later authorizes Seal decryption of the
+// encrypted base (pay-to-fork). ALLOW_LIST requires fee > 0 (EAllowListNeedsFee),
+// so the forker always pays. Only RESTRICTED stays creator-only.
+#[test]
+fun launch_collection_allow_list_non_creator_ok() {
+    let fee: u64 = 1_000_000;
     let mut sc = ts::begin(CREATOR);
     let mut system = system::new_for_testing(sc.ctx());
     sc.next_tx(CREATOR);
     let clk = clock::create_for_testing(sc.ctx());
-    let license = new_license_terms(policy_allow_list(), 0, 500, true, true);
+    let license = new_license_terms(policy_allow_list(), fee, 500, true, true);
     let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+    let model_id = object::id(&model);
 
     sc.next_tx(NFT_CREATOR);
-    launch_collection(&model, coin::mint_for_testing<SUI>(0, sc.ctx()), quilt(), sc.ctx());
+    launch_collection(&model, coin::mint_for_testing<SUI>(fee, sc.ctx()), quilt(), sc.ctx());
 
+    // Base creator (CREATOR) received the derive fee.
+    sc.next_tx(CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    assert!(coin::value(&fee_coin) == fee, 392);
+    coin::burn_for_testing(fee_coin);
+
+    // The non-creator forker (NFT_CREATOR) got the soulbound cap + shared collection.
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    assert!(model3d::collection_base_model_id(&collection) == model_id, 390);
+    assert!(model3d::collection_nft_creator(&collection) == NFT_CREATOR, 391);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();
@@ -1983,6 +2016,371 @@ fun register_integration_metadata_too_long_aborts() {
     register_integration(&mut collection, coin::mint_for_testing<SUI>(0, sc.ctx()), oversized, &clk, sc.ctx());
 
     // Unreachable.
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// ===========================================================================
+// D-074 / D-075 / D-076 — Seal content protection
+// ===========================================================================
+
+// A Seal identity correctly prefix-bound to mint_base_model's dummy seal_id
+// (b"dummy-seal-id-01"). is_prefix(seal_id, this) holds.
+fun valid_seal_id(): vector<u8> { b"dummy-seal-id-01--nonce--" }
+
+// Build an ENCRYPTED ALLOW_LIST base (fee > 0) and have NFT_CREATOR fork it,
+// returning (model, collection, cap). model.seal_id == b"dummy-seal-id-01".
+// Consumes the derive-fee coin routed to CREATOR. Leaves the caller in
+// NFT_CREATOR's tx context (the cap holder).
+#[test_only]
+fun fork_encrypted_allow_list(
+    sc: &mut ts::Scenario,
+    system: &mut System,
+    clk: &clock::Clock,
+): (Model3D, NftCollection, NftCollectionCreatorCap) {
+    // Mint the base as CREATOR (reset context — a prior fork may have left us in
+    // NFT_CREATOR's tx, which would mis-set the new model's creator + fee route).
+    sc.next_tx(CREATOR);
+    let fee: u64 = 1_000_000;
+    let license = new_license_terms(policy_allow_list(), fee, 500, true, true);
+    let model = mint_base_model(system, clk, license, sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(fee, sc.ctx()), quilt(), sc.ctx());
+
+    sc.next_tx(CREATOR);
+    let fee_coin = sc.take_from_sender<coin::Coin<SUI>>();
+    coin::burn_for_testing(fee_coin);
+
+    sc.next_tx(NFT_CREATOR);
+    let cap = sc.take_from_sender<NftCollectionCreatorCap>();
+    let collection = sc.take_shared<NftCollection>();
+    (model, collection, cap)
+}
+
+// R1 / AE4 — is_encrypted is DERIVED from policy (not a caller arg), fixed at
+// publish; seal fields present iff encrypted; seal_version stamped.
+#[test]
+fun encryption_derived_from_policy() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+
+    let m_open = mint_base_model(&mut system, &clk, default_license(), sc.ctx());
+    assert!(!model3d::is_encrypted(&m_open), 600);
+    assert!(vector::is_empty(model3d::sealed_key(&m_open)), 601);
+    assert!(vector::is_empty(model3d::seal_id(&m_open)), 602);
+    assert!(model3d::seal_version(&m_open) == 1, 603);
+
+    let m_restr = mint_base_model(
+        &mut system, &clk, new_license_terms(policy_restricted(), 0, 500, true, true), sc.ctx());
+    assert!(model3d::is_encrypted(&m_restr), 604);
+    assert!(!vector::is_empty(model3d::sealed_key(&m_restr)), 605);
+    assert!(!vector::is_empty(model3d::seal_id(&m_restr)), 606);
+
+    let m_allow = mint_base_model(
+        &mut system, &clk, new_license_terms(policy_allow_list(), 1_000_000, 500, true, true), sc.ctx());
+    assert!(model3d::is_encrypted(&m_allow), 607);
+
+    destroy_model_for_testing(m_open);
+    destroy_model_for_testing(m_restr);
+    destroy_model_for_testing(m_allow);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-076 — ALLOW_LIST publish with fee == 0 aborts EAllowListNeedsFee.
+#[test, expected_failure(abort_code = model3d::EAllowListNeedsFee)]
+fun allow_list_zero_fee_aborts() {
+    let lic = new_license_terms(policy_allow_list(), 0, 500, true, true);
+    let sk = b"k"; let sid = b"id"; let pv = vector<string::String>[];
+    model3d::validate_seal_publish(&sk, &sid, &pv, &lic);
+}
+
+// D-076 — ALLOW_LIST with a positive fee validates.
+#[test]
+fun allow_list_positive_fee_validates() {
+    let lic = new_license_terms(policy_allow_list(), 1, 500, true, true);
+    let sk = b"k"; let sid = b"id"; let pv = vector<string::String>[];
+    model3d::validate_seal_publish(&sk, &sid, &pv, &lic);
+}
+
+// D-075 — the unencrypted `publish` entry with a non-PERMISSIONLESS license is
+// rejected by the policy<->field consistency guard (is_encrypted derived true, but
+// no seal fields). Forces encrypted policies through `publish_encrypted`.
+#[test, expected_failure(abort_code = model3d::ESealFieldsInconsistent)]
+fun publish_entry_with_restricted_policy_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    publish(
+        b, s(b"car"), s(b"{}"), s(b"X"), empty_tags(), s(b"lin"), s(b"glb"),
+        empty_part_labels(), new_license_terms(policy_restricted(), 0, 500, true, true),
+        &clk, sc.ctx(),
+    );
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 — `publish_encrypted` with a PERMISSIONLESS license aborts.
+#[test, expected_failure(abort_code = model3d::ENotEncryptedPolicy)]
+fun publish_encrypted_permissionless_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"X"), empty_tags(), s(b"lin"), s(b"glb"),
+        empty_part_labels(), b"key", b"sid", vector<string::String>[],
+        default_license(), &clk, sc.ctx(),
+    );
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 — `publish_encrypted` records the seal fields on the shared model and the
+// seal_id in the registry.
+#[test]
+fun publish_encrypted_records_seal_fields() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"keybytes", b"unique-seal-id-1", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true), &clk, sc.ctx(),
+    );
+
+    sc.next_tx(CREATOR);
+    let m = sc.take_shared<Model3D>();
+    assert!(model3d::is_encrypted(&m), 610);
+    assert!(*model3d::seal_id(&m) == b"unique-seal-id-1", 611);
+    assert!(*model3d::sealed_key(&m) == b"keybytes", 612);
+    assert!(model3d::seal_version(&m) == 1, 613);
+    ts::return_shared(m);
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 Resolution G — a duplicate seal_id is rejected by the registry (the
+// copy-attack defense).
+#[test, expected_failure(abort_code = model3d::ESealIdReused)]
+fun publish_encrypted_duplicate_seal_id_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+
+    let b1 = mint_blob(&mut system, sc.ctx());
+    model3d::publish_encrypted(
+        &mut registry, b1, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"k1", b"dup-seal-id", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true), &clk, sc.ctx(),
+    );
+
+    sc.next_tx(CREATOR);
+    let b2 = mint_blob(&mut system, sc.ctx());
+    // Same seal_id -> aborts ESealIdReused.
+    model3d::publish_encrypted(
+        &mut registry, b2, s(b"car"), s(b"{}"), s(b"B"), empty_tags(), s(b"lin"), s(b"glbB"),
+        empty_part_labels(), b"k2", b"dup-seal-id", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 — seal_approve_cap passes when ALL THREE checks + version hold.
+#[test]
+fun seal_approve_cap_passes_when_all_hold() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (model, collection, cap) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    model3d::seal_approve_cap_for_testing(valid_seal_id(), &cap, &collection, &model);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 triple-check isolation #1 — only cap.collection_id mismatches.
+#[test, expected_failure(abort_code = model3d::ECapCollectionMismatch)]
+fun seal_approve_cap_aborts_on_cap_collection_mismatch() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (m1, c1, cap1) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+    let (m2, c2, cap2) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    // cap2 authorizes c2, not c1.
+    model3d::seal_approve_cap_for_testing(valid_seal_id(), &cap2, &c1, &m1);
+
+    destroy_collection_cap_for_testing(cap1);
+    destroy_collection_cap_for_testing(cap2);
+    destroy_collection_for_testing(c1);
+    destroy_collection_for_testing(c2);
+    destroy_model_for_testing(m1);
+    destroy_model_for_testing(m2);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 triple-check isolation #2 — only collection.base_model_id mismatches
+// (cap<->collection holds; the passed model is not this collection's base).
+#[test, expected_failure(abort_code = model3d::ECollectionModelMismatch)]
+fun seal_approve_cap_aborts_on_collection_model_mismatch() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (m1, c1, cap1) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+    let m2 = mint_base_model(
+        &mut system, &clk, new_license_terms(policy_restricted(), 0, 500, true, true), sc.ctx());
+
+    // c1 derives from m1, not m2.
+    model3d::seal_approve_cap_for_testing(valid_seal_id(), &cap1, &c1, &m2);
+
+    destroy_collection_cap_for_testing(cap1);
+    destroy_collection_for_testing(c1);
+    destroy_model_for_testing(m1);
+    destroy_model_for_testing(m2);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 triple-check isolation #3 — only the Seal id prefix mismatches.
+#[test, expected_failure(abort_code = model3d::EIdPrefixMismatch)]
+fun seal_approve_cap_aborts_on_id_prefix_mismatch() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (model, collection, cap) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    // id not prefixed by model.seal_id (b"dummy-seal-id-01").
+    model3d::seal_approve_cap_for_testing(b"WRONG-prefix-bytes", &cap, &collection, &model);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-075 — seal_version tripwire: a model whose stored version != VERSION is denied.
+#[test, expected_failure(abort_code = model3d::ESealVersionMismatch)]
+fun seal_approve_cap_aborts_on_version_mismatch() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (mut model, collection, cap) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    model3d::set_seal_version_for_testing(&mut model, 2);
+    model3d::seal_approve_cap_for_testing(valid_seal_id(), &cap, &collection, &model);
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// AE3 — seal_approve_creator passes for the base creator, aborts for anyone else.
+#[test]
+fun seal_approve_creator_passes_for_creator() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(
+        &mut system, &clk, new_license_terms(policy_restricted(), 0, 500, true, true), sc.ctx());
+
+    // Current tx sender is CREATOR == model.creator.
+    model3d::seal_approve_creator_for_testing(valid_seal_id(), &model, sc.ctx());
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+#[test, expected_failure(abort_code = model3d::ENotBaseCreator)]
+fun seal_approve_creator_aborts_for_non_creator() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let model = mint_base_model(
+        &mut system, &clk, new_license_terms(policy_restricted(), 0, 500, true, true), sc.ctx());
+
+    sc.next_tx(NFT_CREATOR);
+    model3d::seal_approve_creator_for_testing(valid_seal_id(), &model, sc.ctx());
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-076 — step 3 of the encrypted fork: mint_tokens sets the (post-bake) quilt and
+// batch-mints the fleet to the cap holder in one tx.
+#[test]
+fun mint_tokens_sets_quilt_and_batch_mints() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (model, mut collection, cap) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    sc.next_tx(NFT_CREATOR);
+    model3d::mint_tokens(
+        &cap, &mut collection, s(b"bakedQuiltId"),
+        str_vec(b"t", 2), str_vec(b"p", 2), sc.ctx());
+
+    assert!(*string::as_bytes(model3d::collection_quilt_blob_id(&collection)) == b"bakedQuiltId", 620);
+
+    sc.next_tx(NFT_CREATOR);
+    let t1 = sc.take_from_sender<NftToken>();
+    let t2 = sc.take_from_sender<NftToken>();
+    assert!(model3d::nft_token_collection_id(&t1) == object::id(&collection), 621);
+    destroy_nft_token_for_testing(t1);
+    destroy_nft_token_for_testing(t2);
+
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
     destroy_model_for_testing(model);
