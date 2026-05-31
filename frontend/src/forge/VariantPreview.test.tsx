@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { VariantPreview } from './VariantPreview';
-import type { VariantRow } from './variantState';
+import type { VariantRow } from './VariantEditor';
 
 // Babylon preview is WebGL — stub it so jsdom can render and we can assert which
 // surface (canvas vs encrypted still vs loading placeholder) is shown.
