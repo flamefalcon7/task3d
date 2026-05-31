@@ -11,6 +11,7 @@ import { partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
+import { isUploadTaggable } from '../babylon/partMaterials';
 import { generate } from '../lib/api';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import { useSession, isJwtExpired } from '../auth/useSession';
@@ -312,6 +313,7 @@ function TaggingStep({
   glbSizeBytes,
   onContinue,
   disabled,
+  autoSkipIfNotTaggable = false,
 }: {
   glbUrl: string | null;
   /** GLB bytelength surfaced in the MeshInfoPanel SIZE row. */
@@ -326,11 +328,47 @@ function TaggingStep({
    * the legacy `partLabels = []` sentinel).
    */
   disabled?: boolean;
+  /**
+   * plan A2 — set ONLY for uploaded GLBs. When the loaded base isn't taggable
+   * (single part, duplicate/empty part material names, or > MAX_PARTS), skip
+   * the naming step automatically and emit the legacy empty partLabels — there's
+   * nothing to segment, or name-keying would be ambiguous. The Tripo path leaves
+   * this false so its "name every part" gate is preserved unchanged.
+   */
+  autoSkipIfNotTaggable?: boolean;
 }) {
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [labels, setLabels] = useState<Map<number, string>>(new Map());
+  const [materialNames, setMaterialNames] = useState<(string | null)[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const skippedRef = useRef(false);
   const { mode, cycle: cycleMode } = useModeCycle('parts');
+
+  const handleLoaded = useCallback(
+    (info: { partCount: number; materialNames: (string | null)[] }) => {
+      setPartCount(info.partCount);
+      setMaterialNames(info.materialNames);
+      setLoaded(true);
+    },
+    [],
+  );
+
+  // plan A2 — upload auto-skip. Fires once after the base loads if it isn't
+  // taggable; onContinue([]) marks the model tagged with the legacy sentinel and
+  // the parent unmounts this step (→ metadata form). skippedRef guards against a
+  // double-fire if `onContinue`'s identity changes before unmount.
+  useEffect(() => {
+    if (
+      autoSkipIfNotTaggable &&
+      loaded &&
+      !skippedRef.current &&
+      !isUploadTaggable(materialNames)
+    ) {
+      skippedRef.current = true;
+      onContinue([]);
+    }
+  }, [autoSkipIfNotTaggable, loaded, materialNames, onContinue]);
 
   // Refocus the label input whenever the user picks a different part in the
   // canvas or the PartListPanel (F1.5 — "row scrolls into view + focus
@@ -406,7 +444,7 @@ function TaggingStep({
             glbUrl={glbUrl}
             selectedIndex={selectedIndex}
             onPartSelect={setSelectedIndex}
-            onLoaded={setPartCount}
+            onLoaded={handleLoaded}
             mode={mode}
             onModeCycle={cycleMode}
             modeToggle
@@ -890,7 +928,24 @@ export function CreateModelPage() {
           />
         )}
 
-        {haveModel && (sourceMode === 'upload' || (confirmed && tagged)) && (
+        {/* plan A2 — uploaded GLBs route through the SAME tagging step (no
+            "USE THIS MODEL" confirm; the file pick is the confirm). It
+            auto-skips to the metadata form when the base isn't taggable
+            (single part / dup names / over-cap), preserving the legacy
+            partLabels=[] behavior for those uploads. */}
+        {haveModel && sourceMode === 'upload' && !tagged && (
+          <TaggingStep
+            glbUrl={glbUrl}
+            glbSizeBytes={glb?.byteLength ?? 0}
+            autoSkipIfNotTaggable
+            onContinue={(labels) => {
+              setPartLabels(labels);
+              setTagged(true);
+            }}
+          />
+        )}
+
+        {haveModel && tagged && (
           <div data-testid="metadata-form" style={metadataGrid}>
             <label style={fullRow}>
               <span style={sectionLabel}>MODEL NAME</span>

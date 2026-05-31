@@ -149,7 +149,10 @@ function makeMesh(name: string, verts = 12) {
     // plan-015 F14 — applyCanvasMode (called by the combined mode-and-
     // selection effect) reads material.{alpha, wireframe, albedoColor}.
     // Provide a minimal stub so it can mutate without throwing.
+    // plan A2 — `name` lets renderableMaterialNames (onLoaded) report per-part
+    // names; each part gets a distinct material name derived from the node name.
     material: {
+      name: `mat_${name}`,
       alpha: 1,
       wireframe: false,
       albedoColor: {
@@ -252,7 +255,7 @@ describe('TaggingCanvas', () => {
     expect(onPartSelect).toHaveBeenCalledWith(1);
   });
 
-  it('fires onLoaded with the filtered mesh count once the GLB loads', async () => {
+  it('fires onLoaded with the filtered part count + per-part material names once the GLB loads', async () => {
     const onLoaded = vi.fn();
     render(
       <TaggingCanvas
@@ -263,9 +266,13 @@ describe('TaggingCanvas', () => {
       />,
     );
     await flushAsync();
-    // Fixture has 4 raw meshes (__root__ + 3 parts); filtered count = 3.
+    // Fixture has 4 raw meshes (__root__ + 3 parts); filtered count = 3, with
+    // each part's material name surfaced in filtered order (plan A2).
     expect(onLoaded).toHaveBeenCalledTimes(1);
-    expect(onLoaded).toHaveBeenCalledWith(3);
+    expect(onLoaded).toHaveBeenCalledWith({
+      partCount: 3,
+      materialNames: ['mat_tripo_part_0', 'mat_tripo_part_1', 'mat_tripo_part_2'],
+    });
   });
 
   it('ignores non-POINTERPICK pointer events', async () => {

@@ -83,6 +83,10 @@ vi.mock('../seal/envelope', () => ({ encryptBase: encryptBaseMock }));
 //   • `tagging-mode-toggle-pill` stub when modeToggle + onModeCycle —
 //     drives the parent-owned mode cycle from the integration tests
 const TAGGING_PART_COUNT_REF = { current: 12 };
+// plan A2 — per-part material names the mock reports via onLoaded. `null` means
+// "auto-generate unique names (mat_0..mat_N-1)" → a taggable base by default.
+// Upload-path tests override this (e.g. duplicate names) to exercise auto-skip.
+const TAGGING_MATERIAL_NAMES_REF = { current: null as (string | null)[] | null };
 vi.mock('../babylon/TaggingCanvas', () => {
   const React = require('react') as typeof import('react');
   return {
@@ -96,14 +100,18 @@ vi.mock('../babylon/TaggingCanvas', () => {
       glbUrl: string | null;
       selectedIndex: number | null;
       onPartSelect: (i: number) => void;
-      onLoaded?: (n: number) => void;
+      onLoaded?: (info: { partCount: number; materialNames: (string | null)[] }) => void;
       mode?: string;
       onModeCycle?: () => void;
       modeToggle?: boolean;
     }) => {
       const count = TAGGING_PART_COUNT_REF.current;
+      const names =
+        TAGGING_MATERIAL_NAMES_REF.current ??
+        Array.from({ length: count }, (_, i) => `mat_${i}`);
       React.useEffect(() => {
-        onLoaded?.(count);
+        onLoaded?.({ partCount: count, materialNames: names });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [count, onLoaded]);
       return (
         <div data-testid="tagging-canvas-mock" data-mode={mode}>
@@ -179,6 +187,7 @@ beforeEach(() => {
     metadata: { target: 'stub::pay', expectedEvents: [] },
   });
   TAGGING_PART_COUNT_REF.current = 12;
+  TAGGING_MATERIAL_NAMES_REF.current = null;
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
   vi.stubGlobal('URL', Object.assign(URL, {
@@ -578,23 +587,56 @@ describe('CreateModelPage', () => {
     expect(args.partLabels[0]).toHaveLength(32);
   });
 
-  it('upload mode skips the tagging step entirely → partLabels = []', async () => {
-    render(<CreateModelPage />);
+  // plan A2 — uploads now route through the tagging step (with auto-skip).
+  async function uploadGlb(filename = 'model.glb') {
     fireEvent.click(screen.getByLabelText('Upload my own .glb'));
     const glbBytes = new Uint8Array(16);
     glbBytes.set([0x67, 0x6c, 0x54, 0x46]); // 'glTF' magic
-    const file = new File([glbBytes as BlobPart], 'sword.glb', { type: 'model/gltf-binary' });
+    const file = new File([glbBytes as BlobPart], filename, { type: 'model/gltf-binary' });
     // jsdom's File polyfill omits `arrayBuffer`; stub it from the underlying bytes.
     (file as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer = async () =>
       glbBytes.buffer.slice(glbBytes.byteOffset, glbBytes.byteOffset + glbBytes.byteLength);
     await act(async () => {
       fireEvent.change(screen.getByTestId('glb-file-input'), { target: { files: [file] } });
     });
-    // Metadata form is visible immediately on upload — no tagging gate.
+  }
+
+  it('plan A2 — upload of a non-taggable GLB (single part) auto-skips tagging → partLabels = []', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    TAGGING_MATERIAL_NAMES_REF.current = ['only']; // single part → not taggable
+    render(<CreateModelPage />);
+    await uploadGlb();
+    // The tagging step auto-skips; the metadata form appears with no naming.
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
     expect(screen.queryByTestId('tagging-step')).toBeNull();
     const args = await driveMintAndCaptureArgs();
     expect(args.partLabels).toEqual([]);
+  });
+
+  it('plan A2 — upload of a multi-part GLB with duplicate material names auto-skips (name-keying ambiguous) → partLabels = []', async () => {
+    TAGGING_PART_COUNT_REF.current = 2;
+    TAGGING_MATERIAL_NAMES_REF.current = ['body', 'body']; // dup → not name-keyable
+    render(<CreateModelPage />);
+    await uploadGlb();
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    expect(screen.queryByTestId('tagging-step')).toBeNull();
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual([]);
+  });
+
+  it('plan A2 — upload of a taggable multi-part GLB routes through the tagging step → partLabels populated', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
+    // Default material names (null → unique mat_0..2) make the base taggable.
+    render(<CreateModelPage />);
+    await uploadGlb();
+    // Taggable → the naming step shows; the metadata form is gated behind it.
+    await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
+    expect(screen.queryByTestId('metadata-form')).toBeNull();
+    await labelAllParts(3, ['blade', 'hilt', 'guard']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual(['blade', 'hilt', 'guard']);
   });
 
   it('Continue is disabled while TaggingCanvas has not reported a part count yet', async () => {

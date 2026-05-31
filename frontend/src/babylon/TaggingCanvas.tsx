@@ -17,6 +17,7 @@ import {
 import '@babylonjs/loaders/glTF/index.js';
 import { frameCameraToMeshes } from './PreviewCanvas';
 import { applyCanvasMode } from './applyCanvasMode';
+import { renderableMaterialNames } from './partMaterials';
 import { type BgKey, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
@@ -44,11 +45,13 @@ interface TaggingCanvasProps {
   selectedIndex: number | null;
   onPartSelect: (index: number) => void;
   /**
-   * Called once per successful GLB load with the count of filtered meshes
-   * (parts) the canvas resolved. The parent uses this to size its label
-   * palette + drive the "N of M labeled" progress indicator (U6).
+   * Called once per successful GLB load with the resolved parts: the count of
+   * filtered meshes and their per-part material names (in the same order). The
+   * parent uses partCount to size its label palette + drive the "N of M labeled"
+   * indicator (U6), and materialNames to decide taggability for uploads (plan A2
+   * — name-keyed swap needs unique non-empty part material names).
    */
-  onLoaded?: (meshCount: number) => void;
+  onLoaded?: (info: { partCount: number; materialNames: (string | null)[] }) => void;
   /** Initial well background — defaults to D-044 black. */
   defaultBg?: BgKey;
   /** Render the BG cycle pill in the well's top-right. Default true. */
@@ -190,7 +193,10 @@ export function TaggingCanvas({
         meshesRef.current = container.meshes.filter(
           (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
         );
-        onLoadedRef.current?.(meshesRef.current.length);
+        onLoadedRef.current?.({
+          partCount: meshesRef.current.length,
+          materialNames: renderableMaterialNames(container.meshes),
+        });
         setMeshLoaded(true);
 
         const camera = scene.activeCamera;
