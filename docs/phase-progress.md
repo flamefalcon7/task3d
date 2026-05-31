@@ -1,6 +1,14 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 2:20pm GMT+8 (Seal content protection → **v1 / 6/21 scope**; D0+U1+U2+U3+U4 SHIPPED, U5 next)
+## Last Updated: 2026-05-31 / 3:10pm GMT+8 (Seal content protection → **FUNCTIONALLY COMPLETE**; v9 live; only U6 landing-positioning decision left)
+
+### plan-026 status: DONE except one product decision
+All implementation units shipped + merged on `feat/seal-content-protection`. Commits incl. `8c785ac` v9 deploy · `d827ab4`/`5ce364b` U5 (forker decrypt + catalog + backend) merged from worktree. **Frontend 800/800 · backend 128/128 · Move 79/79 · tsc 32 baseline (frontend, zero new — the 17 transient errors were stale `shared/dist`, fixed by `pnpm --dir shared build`; dist is gitignored) · backend tsc 0.**
+- ✅ U1 Seal client · ✅ U2 Move v9 · ✅ U3 encrypted publish + ALLOW_LIST · ✅ U4 preview stills · ✅ **v9 deployed** · ✅ U5 forker decrypt 3-step + catalog RESTRICTED-exclusion + backend cap-verify · ✅ U7 spec §3.7 + OQ-026.
+- 🟡 **U6 = a single product decision**: whether to surface Seal on the LANDING. The 3 landing guards (`ActorCards.test`/`LifecycleStrip.test` AC-3) forbid `access`/`seal`/`derivative` as "unshipped". Seal is now SHIPPED → the `\bseal\b` guard is stale; `access`+`derivative` stay valid. If we add an honest Seal beat (mitigation framing, R14) → relax only `\bseal\b` + add copy. If not → U6 is a no-op (guards pass; the /create + /forge Seal copy is already honest). AWAITING USER CALL.
+
+### ⚠️ Live verification still pending (user's manual step — wallet-gated)
+The decrypt path needs real Slush signatures (can't drive in agent-browser). Untested-against-live-key-servers: the exact `seal_approve_cap` txBytes acceptance + step-1 `objectChanges` id extraction (forkerDecrypt/encryptedFork report §7). Do one real ALLOW_LIST encrypted publish + forker decrypt round-trip on testnet before the demo recording.
 
 ### Quick status (this session, branch `feat/seal-content-protection`)
 Commits: `77cc703` D0 (ADRs) · `c5dd1c2` U1 (Seal client) · `01484ba` U2 (Move v9, 79/79) · `1ca5fc9` U3 (encrypted publish + ALLOW_LIST) · `6a38385` U4 (preview stills) · `8c785ac` **v9 DEPLOYED to testnet**. Frontend suite **765/765**, tsc baseline **32** (zero new). **Remaining: U5** (forker decrypt 3-step + catalog RESTRICTED-exclusion + backend hardening — the largest unit, demo climax) · **U6** (landing guard tests — has a product decision: whether to surface Seal on the landing) · **U7** (rewrite spec §3.7 onto cap/creator/registry + close OQ-026 — pure docs).
