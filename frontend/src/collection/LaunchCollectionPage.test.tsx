@@ -1609,6 +1609,37 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     });
   });
 
+  it('UNLOCK is idempotent: a decrypt failure after payment does NOT re-charge on retry', async () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
+    // STEP 1 pays the fork fee + mints the cap (succeeds); the decrypt then fails
+    // once (key-server hiccup), then succeeds on retry.
+    decryptEncryptedBaseMock
+      .mockRejectedValueOnce(new Error('key-server timeout'))
+      .mockResolvedValueOnce(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
+    // First unlock: decrypt throws → error banner, gate stays (still locked).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('launch-error')).toBeTruthy());
+    expect(screen.getByTestId('unlock-gate')).toBeTruthy();
+    // Retry: resumes from the already-paid cap — launch_collection is NOT called
+    // a second time (no double-charge), only the free decrypt re-runs.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    await waitFor(() => expect(screen.queryByTestId('unlock-gate')).toBeNull());
+    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
+    expect(decryptEncryptedBaseMock).toHaveBeenCalledTimes(2);
+  });
+
   it('regression: a PERMISSIONLESS base keeps the GLB thumbnail, PREVIEW button, and LAUNCH COLLECTION label', async () => {
     // Default summary() is PERMISSIONLESS — assert the encrypted branch did not
     // bleed into the public path.

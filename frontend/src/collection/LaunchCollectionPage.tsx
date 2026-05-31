@@ -461,8 +461,10 @@ export function LaunchCollectionPage() {
     // plan A — re-lock: a freshly picked base is never unlocked yet, and the
     // previous base's decrypted plaintext must not leak into the new authoring
     // session. Both reset here (encrypted branch keeps baseGlb null; the public
-    // branch overwrites baseGlb with the fetched mesh below).
+    // branch overwrites baseGlb with the fetched mesh below). Also drop any
+    // pending-cap resume marker from a half-finished unlock of the old base.
     setUnlockedCap(null);
+    pendingCapRef.current = null;
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -659,6 +661,13 @@ export function LaunchCollectionPage() {
   // wallet-popup interstitial to serialize clicks). useRef flips
   // synchronously, so the second invocation early-returns immediately.
   const launchingRef = useRef(false);
+  // plan A — idempotent unlock. STEP 1 (launch_collection) PAYS the fork fee +
+  // mints the cap on-chain (irreversible); the SessionKey decrypt that follows
+  // is fallible (key-server 502, sig reject). If decrypt throws AFTER step 1
+  // succeeded, we MUST NOT re-pay on retry — so we stash the paid cap here the
+  // instant step 1 returns and resume from it (the decrypt is a free key-server
+  // dry-run, safe to re-run). Cleared on full unlock + on base re-pick.
+  const pendingCapRef = useRef<{ capId: string; collectionId: string; modelId: string } | null>(null);
   // plan-017 U5 — bumped on every LAUNCH click so MemoryPressureBanner
   // re-checks heap pressure and re-surfaces if still over threshold even
   // when the user dismissed it earlier in the session.
@@ -780,25 +789,43 @@ export function LaunchCollectionPage() {
 
     try {
       // ---- STEP 1 — cap-issuing launch_collection (fee paid, empty quilt) ----
-      setPhase('launching-cap');
-      const launch = await launchEncryptedCollection({
-        modelId: base.objectId,
-        feeMist: BigInt(base.derivativeMintFee || '0'),
-        signAndExecute: signAndExecutePtb,
-        fetchObjectChanges: async (digest) => {
-          // Wait for finality so getTransactionBlock's objectChanges resolve.
-          await suiClient.waitForTransaction({ digest });
-          const tb = await suiClient.getTransactionBlock({
-            digest,
-            options: { showObjectChanges: true },
-          });
-          return (tb.objectChanges ?? []) as ReadonlyArray<{
-            type?: string;
-            objectType?: string;
-            objectId?: string;
-          }>;
-        },
-      });
+      // Idempotent: if a prior unlock attempt for THIS base already paid the fee
+      // + minted the cap (decrypt then failed), resume from that cap instead of
+      // paying again. Only launch (and charge) when there's no pending cap.
+      const reuse =
+        pendingCapRef.current && pendingCapRef.current.modelId === base.objectId
+          ? pendingCapRef.current
+          : null;
+      let launch: { capId: string; collectionId: string };
+      if (reuse) {
+        launch = { capId: reuse.capId, collectionId: reuse.collectionId };
+      } else {
+        setPhase('launching-cap');
+        launch = await launchEncryptedCollection({
+          modelId: base.objectId,
+          feeMist: BigInt(base.derivativeMintFee || '0'),
+          signAndExecute: signAndExecutePtb,
+          fetchObjectChanges: async (digest) => {
+            // Wait for finality so getTransactionBlock's objectChanges resolve.
+            await suiClient.waitForTransaction({ digest });
+            const tb = await suiClient.getTransactionBlock({
+              digest,
+              options: { showObjectChanges: true },
+            });
+            return (tb.objectChanges ?? []) as ReadonlyArray<{
+              type?: string;
+              objectType?: string;
+              objectId?: string;
+            }>;
+          },
+        });
+        // Persist the PAID cap before the fallible decrypt so a retry resumes.
+        pendingCapRef.current = {
+          capId: launch.capId,
+          collectionId: launch.collectionId,
+          modelId: base.objectId,
+        };
+      }
 
       // ---- SessionKey sign + key-server decrypt ----
       setPhase('decrypting');
@@ -832,7 +859,9 @@ export function LaunchCollectionPage() {
       });
 
       // Unlocked: hold the plaintext + cap and return to LIVE authoring. No
-      // raw-download affordance is ever rendered for these bytes (R9).
+      // raw-download affordance is ever rendered for these bytes (R9). Clear the
+      // pending-cap resume marker — the unlock is fully committed now.
+      pendingCapRef.current = null;
       setBaseGlb(plaintextGlb);
       setUnlockedCap({ capId: launch.capId, collectionId: launch.collectionId });
       setPhase('editing-variants');
