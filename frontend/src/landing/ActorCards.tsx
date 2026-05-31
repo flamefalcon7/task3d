@@ -23,14 +23,19 @@ interface Actor {
 // Content table and is honest to SHIPPED v1 (plan-024 KD-1):
 //   - buyer OWNS an NftToken (ownership, not access)
 //   - gameDev REGISTERS an integration (register_integration)
-// "Access" / "Seal" / "Derivative" are v1.1 / unshipped and must not appear
-// anywhere on this surface (enforced by ActorCards.test.tsx, word-boundary).
+// "Access" / "Derivative" are unshipped (Access struct deleted D-029; "Derivative"
+// flavor deferred) and must not appear anywhere on this surface. "Seal" IS shipped
+// (v9 / plan-026 — gated bases are Seal-encrypted), so it may appear — but ONLY in
+// honest mitigation framing (R14: never "piracy-proof" / "prevented"). Enforced by
+// ActorCards.test.tsx (word-boundary).
 const ACTORS: readonly Actor[] = [
   {
     key: 'modelCreator',
     name: 'modelCreator',
     cost: 'SUI gas + Tripo fee',
-    ability: 'Publishes a base model to Walrus and sets its license terms.',
+    // plan-026 — honest Seal beat: gated (allow-list / restricted) bases are
+    // Seal-encrypted; mitigation framing (pay-to-unlock), not "piracy-proof".
+    ability: 'Publishes a base model to Walrus and sets its license terms — gated bases are Seal-encrypted, so forkers pay to unlock.',
     flavor: 'Every tusk begins as a sentence.',
     route: '/create',
   },

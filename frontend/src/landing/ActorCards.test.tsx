@@ -60,16 +60,28 @@ describe('ActorCards', () => {
 
   it('never surfaces unshipped-mechanic vocabulary (AC-3)', () => {
     const container = renderCards();
-    // Access / Seal are v1.1 (Seal-gated access sale); "Derivative" is the
-    // deferred fork flavor — none ship in v1, so none may appear. Word-boundary
+    // "Access" (struct deleted D-029) and "Derivative" (deferred fork flavor) are
+    // UNSHIPPED — neither may appear. "Seal" IS shipped (v9 / plan-026), so it is
+    // NOT forbidden here (see the dedicated honesty guard below). Word-boundary
     // match so legitimate copy like "license" / "forks" wouldn't false-trip.
     // Scan innerHTML (not just textContent) so a forbidden term hiding in an
     // attribute — aria-label, title, alt — is caught too (mirrors the AC-5
     // ff4500 check). AC-3 is load-bearing, so the guard covers attributes.
     const html = container.innerHTML;
     expect(html).not.toMatch(/\baccess\b/i);
-    expect(html).not.toMatch(/\bseal\b/i);
     expect(html).not.toMatch(/\bderivative\b/i);
+  });
+
+  it('mentions Seal only in honest mitigation framing — never "piracy-proof"/"prevented" (AC-3b, R14)', () => {
+    const container = renderCards();
+    const html = container.innerHTML;
+    // Seal is shipped + named on this surface (the modelCreator card).
+    expect(html).toMatch(/\bSeal-encrypted\b/);
+    expect(screen.getByTestId('actor-card-modelCreator').textContent ?? '').toMatch(/forkers pay to unlock/i);
+    // R14 — protection is positioned as mitigation, NOT prevention. No overclaim.
+    expect(html).not.toMatch(/piracy-?proof/i);
+    expect(html).not.toMatch(/\bprevent(s|ed|ion)?\b/i);
+    expect(html).not.toMatch(/\bunbreakable\b/i);
   });
 
   it('buyer card asserts ownership (not access); gameDev asserts integration (AC-4)', () => {
