@@ -991,53 +991,45 @@ entry fun seal_approve(id: vector<u8>, wl: &Whitelist, ctx: &TxContext) {
 
 ### 3.7 怎麼接到我們的 Design B + Derivative 架構
 
-> ⚠️ **過期警告(2026-05-30)— 本節為舊架構,v1.1 實作前勿照抄**
-> 本節整套 `seal_approve(id, access, target_id, clock, ctx)` 基於已**刪除**的 `Access` struct(D-029/D-030 刪除 `Access`、D-032 把 `Model3D` 改為 shared object)。現行模型:買家擁有**可交易的 `NftToken`**(非 soulbound),L1 的付費事件是 **fork/derive fee**(`launch_collection` → `NftCollectionCreatorCap`),不是 `Access` 收據。
-> 因此 v1.1 的 `seal_approve` **必須重新設計到現行物件圖上**(L1 gate 在 fork `CreatorCap`;L2 如要 gate 則查 `NftToken` 擁有權)。**下方表格與「Access-based gating」描述全部失效。**
-> 收斂方向與未定叉路見 `docs/ideation/2026-05-30-content-protection-seal-ideation.md`。
+> ✅ **已實作於 v9(2026-05-31)— plan-026 / D-074·D-075·D-076。本節已重寫對齊出貨版本(取代原 `Access`-based 設計)。**
+> Seal 內容保護從原訂 v1.1 提前納入 6/21 submission(D-074)。加密由 policy 推導、發布當下固定;gate 綁在付費 fork 取得的 soulbound `NftCollectionCreatorCap`(ALLOW_LIST)或 base creator(RESTRICTED)。已刪除的 `Access` 收據(D-029/D-030)**不再使用**。
 
-> 對齊 §2.8 新架構。以下都是基於「`Model3D` = content,`Access` = soulbound,`Derivative` = 2nd-tier」前提。
+#### Seal 在這個架構裡的角色(v9 出貨版)
 
-#### Seal 在這個架構裡的角色
+**加密由 policy 推導,發布當下固定**(`new_model` 內 `is_encrypted = (policy != PERMISSIONLESS)`,關掉原本裝飾性的 flag):
+- **PERMISSIONLESS** → 不加密,Walrus blob 公開(L2 social-currency 展示照常)。
+- **ALLOW_LIST** → 加密;任何人可 fork,但要付 fork fee 才拿得到能解密的 cap(pay-to-fork)。鏈上強制 `derivative_mint_fee > 0`(`EAllowListNeedsFee`)。
+- **RESTRICTED** → 加密;只有 base creator 能 fork/解密。私人,不進 public catalog。
 
-**v1.0(Phase 4 之前)**:`is_encrypted=false`,Walrus blob 公開,任何人付 access 就能下載 — Seal **完全用不到**。
+**信封加密(envelope)**:用 AES-256-GCM 加密 GLB,只用 Seal 包住那把 32-byte AES 金鑰(避開 Walrus 35/46 MB encoder OOM 懸崖;mesh decimation 已被否決)。密文走現有公開 CDN(D-073 不動)—— Seal 把關的是金鑰,不是 bytes。
 
-**v1.1(Phase 4 stretch)**:`is_encrypted=true`,Walrus blob 用 Seal 加密上傳,`seal_approve(id, access, target_id, clock, ctx)` 已寫在 §2.8 — caller 必須持有未過期 + 對得上 target 的 `Access`。
+**`seal_approve` gate**(non-public entry,key server dry-run、無 gas、abort = 拒絕):
 
-直接對應:
+| policy | 函式 | 檢查 |
+|---|---|---|
+| ALLOW_LIST | `seal_approve_cap(id, cap, collection, model)` | **具名三重檢查不變式**:`cap.collection_id == id(collection)` ∧ `collection.base_model_id == id(model)` ∧ `is_prefix(model.seal_id, id)`,外加 `seal_version == VERSION` tripwire |
+| RESTRICTED | `seal_approve_creator(id, model, ctx)` | `is_prefix(model.seal_id, id)` ∧ `sender == model.creator` ∧ version |
 
-| 功能 | 用哪個 pattern + 我們架構怎麼接 |
-|---|---|
-| **付費 model 限時 access** | §2.8 的 `purchase_model_access(model, payment, duration_ms, ...)` + Seal 加密 base blob。`seal_approve` 檢查 `Access.expires_at_ms`。**這已包含在 §2.8 設計裡** |
-| **付費 derivative 限時 access** | §2.8 的 `purchase_derivative_access` 同上,且自動拆 royalty。**§2.8 已 native 支援** |
-| Soulbound / 私人收藏 | base creator 用 `POLICY_RESTRICTED` + `is_encrypted=true` + 不開賣(`direct_access_price=u64::MAX`)→ 等同 soulbound |
-| 預告 → 時間到才解鎖 | 套 Seal 的 `tle.move` pattern,在 `seal_approve` 加 `clock.timestamp_ms() >= reveal_at` 檢查 |
-| Collection-gated(持有某 NFT 才能看) | `seal_approve` 多吃一個 `&SomeCollection` 物件參數做檢查 |
+**Seal id 綁定(Resolution G)**:object id 在 publish 才生成、但加密在 publish 前(雞生蛋),所以不能直接綁 object id;client 隨機選的 `seal_id` 又可被複製。改用 client 隨機 `seal_id`、`id = [seal_id][nonce]` 加密,並在發布時用一個 shared `SealIdRegistry`(`init` bootstrap)assert `seal_id` 全域唯一才記錄 → 提供等效且不可偽造的綁定,擋住「複製受害者 `seal_id` 來解其密文」的攻擊。
 
-**重點**:§2.8 的 `seal_approve` 已經是 Access-based gating,**不需要再另外複製 `subscription.move`** — 我們的 `Access { expires_at_ms }` 就是 subscription pattern 的 native 版本。
+**3-step ALLOW_LIST fork**(加密 base 的解密必須先於 variant bake,所以原子單筆做不到):
+1. `launch_collection`(付 fee)→ soulbound cap
+2. SessionKey 簽一次 → 組 `seal_approve_cap` PTB 給 key server dry-run → 解出 AES 金鑰 → 解密 base → 後端 bake variants → 上傳 quilt
+3. `mint_tokens`(設 quilt + 批次鑄造)
+
+PERMISSIONLESS 維持單筆原子 `launch_collection_with_tokens`。L2 `NftToken` 維持公開(價值在 ownership/provenance,不在 byte 機密)。**定位:緩解,非根絕**(R14)—— 不宣稱阻止已授權 forker 解密後外流;royalty 是鏈上硬軌(D-004)。
+
+**ALLOW_LIST preview**:發布時 client 端從明文場景截浮水印 turntable stills,以公開 blob 上傳、id 記在 `Model3D.preview_blob_ids`,讓 forker 付款前評估。RESTRICTED 私人、無 preview。
 
 #### Sui Kiosk + TransferPolicy 在這個架構裡的角色
 
-**我們不能把 `Access` 放進 Kiosk** — Access 只有 `key`,沒 `store`(soulbound by Move type system,§2.8 設計刻意)。
+> 註(2026-05-31):本小節原文基於已刪除的 `Access` / `Derivative` / `purchase_*_access`(D-029/D-032)。**出貨模型**:`Model3D` 是 **shared object,賣 Seal-gated access,不進 Kiosk**(D-032,所有權不轉移);可 Kiosk-traded 的是 **L2 `NftToken`(`key + store`)**,帶唯一的 `TransferPolicy<NftToken>` + royalty rule(D-036)。下面「第三方 marketplace 強制 royalty」的論點現在套在 `NftToken` 上。
 
-**但 `Model3D` 跟 `Derivative` 都 `has key, store`** — 可以放進 Kiosk。Kiosk 在這個架構解決**第三方 marketplace** 場景:
+Kiosk 解決**第三方 marketplace 強制 royalty** 場景(打到「OpenSea 2023 被 Blur 繞過 royalty」痛點):任何 marketplace 賣 `NftToken` 都得過 `TransferPolicy<NftToken>` 的 `confirm_request`,royalty 鏈上強制、繞不過。詳見 §2.8 + D-032 / D-036 / D-041。
 
-| 場景 | 不用 Kiosk(只用 §2.8) | 用 Kiosk |
-|---|---|---|
-| 在我們自己的 UI 買 access | `purchase_*_access` 自動拆 royalty | 同 |
-| Creator A 把 base `Model3D` 賣給 Creator B(轉移所有權,不是賣 access) | **無法強制 royalty** — 兩人鏈下協議轉移 | **強制 royalty** — TransferPolicy 卡關 |
-| 第三方寫了個 marketplace 賣 `Derivative` access | 我們 protocol 拆分被繞過 | Kiosk rule 強制 |
-| Floor price / 鎖定不可再轉移 | 自己寫 | `floor_price_rule` / `lock_rule` 現成 |
+#### Phase 4 優先級(更新 2026-05-31)
 
-**結論**:`purchase_*_access`(§2.8 內建)解決**我們自家 UI 的金流**;**Kiosk 解決第三方 marketplace 場景**。兩者**互補不衝突**,Kiosk 是真正打到「OpenSea 2023 被 Blur 繞過 royalty」痛點的解法。
-
-#### Phase 4 優先級(更新)
-
-1. **必做**:§2.8 完整 Move struct(`LicenseTerms` + `Derivative` + `Access` + 8 個 entry function)
-2. **Stretch A**:`Model3D` + `Derivative` 註冊 `TransferPolicy<T>` + `royalty_rule` → 第三方 marketplace 也走強制 royalty
-3. **Stretch B**:`is_encrypted=true` + Seal 整合 → 付費內容真的加密
-4. **Stretch C**:Forensic watermark(解密時 inject user ID 進 mesh)
-5. **滿貫**:A + B + C 全做 = Walrus + Seal + Move + Kiosk 四件套 + 誠實面對 DRM 的補救機制
+Seal 內容保護**已在 v9 出貨**(plan-026 / D-074·D-075·D-076,從原 Stretch 提前為已做);Forensic watermark 仍為未來 stretch(OQ-008)。原 §2.8 的 `Access` / `Derivative` / 8-entry 設計已被 D-029 → D-040 的 `NftCollection` / `NftToken` / `launch_collection` 模型取代 —— 出貨棧為 **Walrus + Seal + Move + Kiosk 四件套**。
 
 參考:[Sui Kiosk docs](https://docs.sui.io/standards/kiosk)、[Empowering Creators with Sui Kiosk(Mysten 部落格)](https://www.mystenlabs.com/blog/empowering-creators-with-sui-kiosk)
 

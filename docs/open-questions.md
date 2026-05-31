@@ -450,9 +450,12 @@ Before provisioning any paid VM, spike whether the backend runs on Cloudflare Wo
 
 ## OQ-026: v1.1 Seal `seal_approve` must be redesigned onto the current object graph (spec §3.7 is stale)
 
-**Status**: 🟡 Open — v1.1 design task; direction converged in ideation, not yet plan/ADR.
+**Status**: ✅ Resolved 2026-05-31 — implemented in v9 (plan-026, D-074/D-075/D-076); spec §3.7 rewritten.
 **Surfaced**: 2026-05-30 (content-protection ideation; see `docs/ideation/2026-05-30-content-protection-seal-ideation.md`).
 **Blocking**: nothing for 6/21 (Seal is v1.1). Blocks any v1.1 Seal implementation.
+
+### Resolution (2026-05-31)
+Seal was pulled into the v1 / 6/21 scope (D-074) and **shipped in the v9 republish** (package `0xba1e84ba…`). The converged direction below was realized with two refinements found at implementation: (1) the gate is `seal_approve_cap` (cap holder, named triple-check invariant) + `seal_approve_creator` (RESTRICTED) — NOT a single `seal_approve`; (2) the Seal `id` binds to a client-random `seal_id` made globally unique by a shared `SealIdRegistry` (Resolution G) rather than the object id, because encryption precedes publish (chicken-and-egg). spec §3.7 has been rewritten onto this model; ADRs D-074/D-075/D-076 capture it; the implementation is plan-026 U1–U5. The originally-converged direction (recorded below) held up; only the gate function shape + the id-binding mechanism changed.
 
 ### The drift
 `spec.md §3.7` designs `seal_approve(id, access, target_id, clock, ctx)` against the **deleted `Access` struct** (removed D-029/D-030; `Model3D` made shared by D-032). A `⚠️` annotation was added at §3.7 (2026-05-30) flagging it as stale. Anyone implementing v1.1 Seal from spec §3.7 verbatim would gate on a struct that no longer exists.
