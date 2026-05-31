@@ -55,7 +55,7 @@ import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
-import { thumbSourceForSummary, previewStillUrlForSummary } from '../walrus/aggregator';
+import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
 // plan-026 U5 — Seal decrypt 3-step fork for encrypted ALLOW_LIST bases.
 import { getSealClient } from '../seal/sealClient';
 import {
@@ -1274,7 +1274,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
-                encryptedPreviewUrl={isEncryptedBase && base ? previewStillUrlForSummary(base) : null}
+                encryptedPreviewUrls={isEncryptedBase && base ? previewStillUrlsForSummary(base) : []}
                 previewRef={previewRef}
               />
               <div style={previewSideRail}>

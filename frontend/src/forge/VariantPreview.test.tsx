@@ -23,7 +23,7 @@ describe('VariantPreview — encrypted base (plan-026)', () => {
         selectedIndex={0}
         onSelect={() => {}}
         baseGlbUrl={null}
-        encryptedPreviewUrl="https://agg/v1/blobs/by-quilt-patch-id/preview-1"
+        encryptedPreviewUrls={['https://agg/v1/blobs/by-quilt-patch-id/preview-1']}
       />,
     );
     expect(screen.getByTestId('variant-preview-encrypted-still')).toBeTruthy();
@@ -44,7 +44,7 @@ describe('VariantPreview — encrypted base (plan-026)', () => {
         selectedIndex={0}
         onSelect={() => {}}
         baseGlbUrl="blob:public-base"
-        encryptedPreviewUrl={null}
+        encryptedPreviewUrls={[]}
       />,
     );
     expect(screen.getByTestId('preview-canvas-stub')).toBeTruthy();

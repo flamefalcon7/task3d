@@ -35,6 +35,16 @@ export function previewStillUrlForSummary(
   return first ? `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${first}` : null;
 }
 
+// plan-026 — ALL preview-still URLs (the captured turntable angles, in order).
+// The publish captures DEFAULT_STILL_COUNT evenly-spaced angles; the UI cycles
+// them as a faux-turntable (ideation 2026-05-30: "no interactivity needed, so
+// faux-turntable = cycle the stills"). Empty when there is no preview.
+export function previewStillUrlsForSummary(
+  m: Pick<Model3DSummary, 'previewBlobIds'>,
+): string[] {
+  return (m.previewBlobIds ?? []).map((id) => `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${id}`);
+}
+
 // plan-026 D-075 — render-path selector for a catalog/picker thumbnail.
 // Encrypted bases (ALLOW_LIST) MUST render their public preview still as an
 // <img>, NEVER fetch the ciphertext `glbBlobId` as a GLB. Returns either a

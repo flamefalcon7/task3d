@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import { thumbSourceForSummary } from '../walrus/aggregator';
+import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
+import { TurntablePreview } from '../ux/TurntablePreview';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
 // CollectionCard replaces ModelCard for the grouped Browse view (U5). One
@@ -138,10 +139,10 @@ export function CollectionCard({ collectionId, variants }: Props) {
         {thumb.kind === 'glb' ? (
           <PreviewCanvas glbUrl={thumb.url} />
         ) : thumb.url ? (
-          <img
-            src={thumb.url}
+          <TurntablePreview
+            urls={previewStillUrlsForSummary(first)}
+            testId="collection-card-preview-still"
             alt={`${name} preview`}
-            data-testid="collection-card-preview-still"
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : (

@@ -1,7 +1,8 @@
 import { Link, useParams } from 'react-router-dom';
 import { useModelById } from './hooks';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import { glbUrlForSummary, previewStillUrlForSummary } from '../walrus/aggregator';
+import { glbUrlForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
+import { TurntablePreview } from '../ux/TurntablePreview';
 
 // L1 published-content detail page (`/model/:objectId`). v6 `Model3D` is shared
 // content a creator publishes with license terms — it is NOT sold per-access
@@ -51,7 +52,7 @@ export function ModelDetailPage() {
   // GLB. Render the public preview still (or a placeholder) instead of feeding
   // the ciphertext to Babylon (which hangs on "LOADING BASE MESH…"). The real
   // mesh is only obtainable by paying to fork (the forge decrypt flow).
-  const previewUrl = previewStillUrlForSummary(model);
+  const previewUrls = previewStillUrlsForSummary(model);
 
   return (
     <div
@@ -71,11 +72,10 @@ export function ModelDetailPage() {
           data-testid="preview-canvas-wrap"
         >
           {model.isEncrypted ? (
-            previewUrl ? (
-              <img
-                src={previewUrl}
-                alt=""
-                data-testid="detail-preview-still"
+            previewUrls.length > 0 ? (
+              <TurntablePreview
+                urls={previewUrls}
+                testId="detail-preview-still"
                 style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
               />
             ) : (

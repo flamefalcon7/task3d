@@ -15,6 +15,7 @@ import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanva
 import type { CanvasMode } from '../babylon/modePalette';
 import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
+import { TurntablePreview } from '../ux/TurntablePreview';
 
 const TILE_FALLBACK = '#cccccc';
 
@@ -57,11 +58,11 @@ export interface VariantPreviewProps {
   /**
    * plan-026 — for an ENCRYPTED base there is NO plaintext mesh to live-recolor
    * (it decrypts only after the forker pays). Instead of the misleading
-   * "LOADING BASE MESH…" spinner (which never resolves), show this public
-   * preview still + an honest caption. Colors picked still apply server-side at
-   * bake time, after the base decrypts.
+   * "LOADING BASE MESH…" spinner (which never resolves), cycle the public
+   * preview stills (faux-turntable) + an honest caption. Colors picked still
+   * apply server-side at bake time, after the base decrypts.
    */
-  encryptedPreviewUrl?: string | null;
+  encryptedPreviewUrls?: string[];
   /**
    * plan-017 U3 — imperative dispose/remount handle forwarded to the inner
    * PreviewCanvas so LaunchCollectionPage can free Babylon scene memory
@@ -114,7 +115,7 @@ export function VariantPreview({
   autoRotate,
   partColors,
   baseGlbUrl,
-  encryptedPreviewUrl,
+  encryptedPreviewUrls = [],
   previewRef,
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
@@ -168,16 +169,16 @@ export function VariantPreview({
             autoRotate={autoRotate}
             partColors={partColors}
           />
-        ) : encryptedPreviewUrl ? (
-          // plan-026 — encrypted base: no plaintext mesh to recolor live; show the
-          // public preview still + an honest caption. Picked colors apply at bake.
+        ) : encryptedPreviewUrls.length > 0 ? (
+          // plan-026 — encrypted base: no plaintext mesh to recolor live; cycle the
+          // public preview stills (faux-turntable) + an honest caption. Picked
+          // colors apply at bake.
           <div
             data-testid="variant-preview-encrypted-still"
             style={{ position: 'relative', width: '100%', height: '100%' }}
           >
-            <img
-              src={encryptedPreviewUrl}
-              alt=""
+            <TurntablePreview
+              urls={encryptedPreviewUrls}
               style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             />
             <div
