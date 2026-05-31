@@ -17,6 +17,9 @@ import { TESTNET } from './networkConfig';
 
 const CLOCK_OBJECT_ID = '0x6';
 const PKG = TESTNET.model3dPackageId;
+// D-075 — the shared SealIdRegistry bootstrapped in the v9 `init`. Set to the
+// real object id at the v9 deploy ceremony (see networkConfig).
+const SEAL_ID_REGISTRY_ID = TESTNET.sealIdRegistryId;
 
 /**
  * Default Tripo service-fee: 0.4 SUI (D-034, re-derived plan-013).
@@ -70,8 +73,22 @@ export interface PublishArgs {
    * and pre-v8 bases); the Move bounds tolerate `length 0`.
    */
   partLabels: string[];
-  isEncrypted: boolean;
   license: LicenseTermsInput;
+}
+
+/**
+ * D-075 — args for an ENCRYPTED publish (ALLOW_LIST / RESTRICTED). Adds the Seal
+ * envelope fields over PublishArgs. `is_encrypted` is NOT passed (the contract
+ * derives it from policy); the policy lives in `license.policy` and MUST be
+ * non-PERMISSIONLESS or `publish_encrypted` aborts (ENotEncryptedPolicy).
+ */
+export interface EncryptedPublishArgs extends PublishArgs {
+  /** The Seal-wrapped AES key (EncryptedObject bytes from envelope.encryptBase). */
+  sealedKey: Uint8Array;
+  /** The client's random Seal-identity prefix (recorded + uniqueness-checked on-chain). */
+  sealId: Uint8Array;
+  /** Public preview-still Walrus blob ids (ALLOW_LIST only; [] for RESTRICTED). */
+  previewBlobIds: string[];
 }
 
 /**
@@ -109,9 +126,11 @@ function attachNewLicenseTerms(tx: Transaction, license: LicenseTermsInput): Tra
 }
 
 /**
- * Build the `model3d::publish` PTB — constructs LicenseTerms on-chain then
- * publishes the Model3D as a SHARED object (one wallet popup; D-032). Emits
- * ModelPublished + transfers the Blob to the creator (inside new_model).
+ * Build the `model3d::publish` PTB — the UNENCRYPTED (PERMISSIONLESS) path.
+ * Constructs LicenseTerms on-chain then publishes the Model3D as a SHARED object
+ * (one wallet popup; D-032). `is_encrypted` is derived on-chain from policy
+ * (D-075), so it is no longer a PTB argument. Passing a non-PERMISSIONLESS
+ * license here aborts (ESealFieldsInconsistent) — use buildPublishEncryptedPtb.
  */
 export function buildPublishPtb(args: PublishArgs): TxResult<{ licenseHandle: TransactionResult }> {
   const tx = new Transaction();
@@ -127,7 +146,6 @@ export function buildPublishPtb(args: PublishArgs): TxResult<{ licenseHandle: Tr
       tx.pure.string(args.lineageBlobId),
       tx.pure.string(args.glbBlobId),
       tx.pure.vector('string', args.partLabels),
-      tx.pure.bool(args.isEncrypted),
       licenseHandle,
       tx.object(CLOCK_OBJECT_ID),
     ],
@@ -137,6 +155,48 @@ export function buildPublishPtb(args: PublishArgs): TxResult<{ licenseHandle: Tr
     handles: { licenseHandle },
     metadata: {
       target: `${PKG}::model3d::publish`,
+      expectedEvents: [`${PKG}::model3d::ModelPublished`],
+    },
+  };
+}
+
+/**
+ * D-075 — build the `model3d::publish_encrypted` PTB for an ENCRYPTED
+ * (ALLOW_LIST / RESTRICTED) base. Same one-popup shape as `publish`, plus the
+ * shared `SealIdRegistry` (asserts the seal_id is globally unique — Resolution G)
+ * and the Seal envelope fields. The bytes at `glbBlobId` must be the AES
+ * CIPHERTEXT (from envelope.encryptBase), never the plaintext GLB. `sealedKey` /
+ * `sealId` are passed as `vector<u8>`.
+ */
+export function buildPublishEncryptedPtb(
+  args: EncryptedPublishArgs,
+): TxResult<{ licenseHandle: TransactionResult }> {
+  const tx = new Transaction();
+  const licenseHandle = attachNewLicenseTerms(tx, args.license);
+  tx.moveCall({
+    target: `${PKG}::model3d::publish_encrypted`,
+    arguments: [
+      tx.object(SEAL_ID_REGISTRY_ID),
+      tx.object(args.blobObjectId),
+      tx.pure.string(args.shapeType),
+      tx.pure.string(args.paramsJson),
+      tx.pure.string(args.name),
+      tx.pure.vector('string', args.tags),
+      tx.pure.string(args.lineageBlobId),
+      tx.pure.string(args.glbBlobId),
+      tx.pure.vector('string', args.partLabels),
+      tx.pure.vector('u8', Array.from(args.sealedKey)),
+      tx.pure.vector('u8', Array.from(args.sealId)),
+      tx.pure.vector('string', args.previewBlobIds),
+      licenseHandle,
+      tx.object(CLOCK_OBJECT_ID),
+    ],
+  });
+  return {
+    tx,
+    handles: { licenseHandle },
+    metadata: {
+      target: `${PKG}::model3d::publish_encrypted`,
       expectedEvents: [`${PKG}::model3d::ModelPublished`],
     },
   };

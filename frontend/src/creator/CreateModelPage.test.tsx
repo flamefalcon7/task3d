@@ -35,15 +35,25 @@ vi.mock('../babylon/PreviewCanvas', () => ({
 // the PTB boundary in the right position. Pay-for-API is also mocked since
 // signAndExecute is mocked and we don't need a real Transaction.
 const buildPublishPtbMock = vi.hoisted(() => vi.fn());
+const buildPublishEncryptedPtbMock = vi.hoisted(() => vi.fn());
 const buildPayForApiCallPtbMock = vi.hoisted(() => vi.fn());
 vi.mock('../sui/modelTxBuilders', async () => {
   const actual = await vi.importActual<typeof import('../sui/modelTxBuilders')>('../sui/modelTxBuilders');
   return {
     ...actual,
     buildPublishPtb: buildPublishPtbMock,
+    buildPublishEncryptedPtb: buildPublishEncryptedPtbMock,
     buildPayForApiCallPtb: buildPayForApiCallPtbMock,
   };
 });
+
+// plan-026 U3 — Seal envelope is network-dependent (key servers); mock it so the
+// encrypted publish path is driven without hitting Seal. encryptBase returns a
+// deterministic ciphertext so we can assert the CIPHERTEXT (not the plaintext)
+// reaches uploadBlob.
+const encryptBaseMock = vi.hoisted(() => vi.fn());
+vi.mock('../seal/sealClient', () => ({ getSealClient: () => ({}) }));
+vi.mock('../seal/envelope', () => ({ encryptBase: encryptBaseMock }));
 
 // plan-013 / plan-015 U5 — TaggingCanvas uses Babylon imperative APIs (no
 // WebGL in jsdom). Mock surfaces:
@@ -118,6 +128,18 @@ beforeEach(() => {
     tx: {},
     handles: {},
     metadata: { target: 'stub::publish', expectedEvents: [] },
+  });
+  buildPublishEncryptedPtbMock.mockReset();
+  buildPublishEncryptedPtbMock.mockReturnValue({
+    tx: {},
+    handles: {},
+    metadata: { target: 'stub::publish_encrypted', expectedEvents: [] },
+  });
+  encryptBaseMock.mockReset();
+  encryptBaseMock.mockResolvedValue({
+    ciphertext: new Uint8Array([0xc1, 0xc2, 0xc3]),
+    sealedKey: new Uint8Array([0x5e, 0xa1]),
+    idHex: 'deadbeef',
   });
   buildPayForApiCallPtbMock.mockReset();
   buildPayForApiCallPtbMock.mockReturnValue({
@@ -218,7 +240,7 @@ describe('CreateModelPage', () => {
     expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
   });
 
-  it('offers only Open/Restricted policy options (no allow-list), defaulting to Open (D-040)', async () => {
+  it('offers all three policies (Open/Allow-list/Restricted), defaulting to Open (D-076)', async () => {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
     vi.stubGlobal(
       'fetch',
@@ -238,25 +260,85 @@ describe('CreateModelPage', () => {
     });
     await waitFor(() => expect(screen.getByTestId('confirm-model')).toBeTruthy());
     fireEvent.click(screen.getByTestId('confirm-model'));
-    // plan-015 U1 — framing B removed the preset escape hatch and the SKIP
-    // button; advancing past tagging now requires every part to be named.
     await waitFor(() => expect(screen.getByTestId('continue-tagging')).toBeTruthy());
     await labelAllParts(TAGGING_PART_COUNT_REF.current);
     fireEvent.click(screen.getByTestId('continue-tagging'));
 
-    // Open (2) and Restricted (0) are offered; allow-list (1) is gone.
+    // D-076 re-enabled allow-list (1); all three are offered now.
     const open = screen.getByTestId('policy-2') as HTMLInputElement;
+    const allowList = screen.getByTestId('policy-1') as HTMLInputElement;
     const restricted = screen.getByTestId('policy-0') as HTMLInputElement;
-    expect(screen.queryByTestId('policy-1')).toBeNull();
 
-    // Default is Open (permissionless).
+    // Default is Open (permissionless); no fee-required hint until allow-list.
     expect(open.checked).toBe(true);
+    expect(allowList.checked).toBe(false);
     expect(restricted.checked).toBe(false);
+    expect(screen.queryByTestId('allow-list-fee-hint')).toBeNull();
 
-    // Selecting Restricted updates the choice.
-    fireEvent.click(restricted);
-    expect(restricted.checked).toBe(true);
+    // Selecting Allow-list surfaces the pay-to-fork fee requirement.
+    fireEvent.click(allowList);
+    expect(allowList.checked).toBe(true);
     expect(open.checked).toBe(false);
+    expect(screen.getByTestId('allow-list-fee-hint')).toBeTruthy();
+  });
+
+  it('encrypted publish (allow-list): encrypts the GLB, uploads CIPHERTEXT, routes through publish_encrypted', async () => {
+    TAGGING_PART_COUNT_REF.current = 3;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(3, ['a', 'b', 'c']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Choose allow-list + a positive fork fee.
+    fireEvent.click(screen.getByTestId('policy-1'));
+    fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '1' } });
+
+    uploadBlobMock.mockResolvedValue({ blobId: 'cipher_blob_id', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Sealed Model' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+
+    // Encrypted path: encryptBase ran, the CIPHERTEXT (not plaintext) was uploaded,
+    // and the encrypted PTB builder was used (not the plain one).
+    await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
+    expect(encryptBaseMock).toHaveBeenCalledOnce();
+    // uploadBlob received the mocked ciphertext bytes, never the plaintext GLB.
+    expect(uploadBlobMock.mock.calls[0]![0]).toEqual(new Uint8Array([0xc1, 0xc2, 0xc3]));
+    const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
+      sealedKey: Uint8Array;
+      sealId: Uint8Array;
+      previewBlobIds: string[];
+      license: { policy: number };
+    };
+    expect(encArgs.sealedKey).toEqual(new Uint8Array([0x5e, 0xa1]));
+    expect(encArgs.sealId).toHaveLength(32);
+    expect(encArgs.license.policy).toBe(1);
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
+
+  it('allow-list with zero fork fee is blocked before sign (EAllowListNeedsFee guard)', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Allow-list but leave fee at the default '0'.
+    fireEvent.click(screen.getByTestId('policy-1'));
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Zero Fee' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+
+    // Guarded: neither encryption nor any publish PTB runs.
+    expect(encryptBaseMock).not.toHaveBeenCalled();
+    expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+    expect(uploadBlobMock).not.toHaveBeenCalled();
   });
 
   // ----- plan-015 U1 — Framing-B TaggingStep + partLabels wiring ----------

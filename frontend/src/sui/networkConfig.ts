@@ -58,6 +58,15 @@ export const TESTNET = {
   // address (unchanged from v2/v3). This is NOT the @mysten/kiosk SDK default.
   kioskAppsPackageId:
     '0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d',
+  // D-075 (plan-026 U2) — the shared SealIdRegistry bootstrapped in the v9
+  // `init`. PLACEHOLDER until the v9 republish ceremony: at deploy, bump
+  // `model3dPackageId` to the v9 id AND set this to the registry object id
+  // (read from the publish tx effects — the shared object of type
+  // `<v9>::model3d::SealIdRegistry`). The encrypted publish/forge PTBs read
+  // this; they cannot run end-to-end until both are the real v9 values.
+  // TODO(v9-deploy): replace 0x0 with the bootstrapped registry id.
+  sealIdRegistryId:
+    '0x0000000000000000000000000000000000000000000000000000000000000000',
 } as const;
 
 // Public testnet RPC endpoints. Primary + 1 fallback per U5 spec.

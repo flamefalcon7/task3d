@@ -19,9 +19,13 @@ import { MintButton, type MintStatus } from './MintButton';
 import {
   buildPayForApiCallPtb,
   buildPublishPtb,
+  buildPublishEncryptedPtb,
   TRIPO_FEE_MIST,
   TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
+import { TESTNET } from '../sui/networkConfig';
+import { getSealClient } from '../seal/sealClient';
+import { encryptBase } from '../seal/envelope';
 import { HelpIcon } from '../ux/HelpIcon';
 import { SignConfirmation } from '../ux/SignConfirmation';
 import { useElapsedSeconds } from '../ux/useElapsedSeconds';
@@ -49,14 +53,23 @@ type GenStatus = 'idle' | 'paying' | 'generating' | 'error';
 const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46]; // 'glTF'
 const MAX_GLB_BYTES = 12 * 1024 * 1024;
 
-// D-040 — L1 license policy collapses to two enforced meanings: Open
-// (permissionless, 2) lets anyone who pays the fork fee derive; Restricted (0)
-// is creator-only. ALLOW_LIST (1) is dropped — it has no on-chain address list
-// in v1 and the contract treats any non-permissionless value as creator-only.
+// D-040, amended by D-076 (plan-026) — three enforced policies, with encryption
+// DERIVED from the choice:
+//   - Open (permissionless, 2): public base, anyone who pays the fork fee derives.
+//     Unencrypted.
+//   - Allow-list (1): ENCRYPTED base; anyone may fork but must pay the fork fee to
+//     get the cap that decrypts it (pay-to-fork). Requires fee > 0 (EAllowListNeedsFee).
+//   - Restricted (0): ENCRYPTED base, only the creator can fork/decrypt. Private —
+//     not shown in the public catalog.
 const POLICIES = [
-  { value: 2, label: 'Open', sub: 'Anyone can fork (permissionless)' },
-  { value: 0, label: 'Restricted', sub: 'Only I can fork' },
+  { value: 2, label: 'Open', sub: 'Public — anyone can fork (permissionless)' },
+  { value: 1, label: 'Allow-list', sub: 'Encrypted — pay the fork fee to unlock' },
+  { value: 0, label: 'Restricted', sub: 'Encrypted — only I can fork' },
 ] as const;
+
+// Policy constants (mirror model3d.move). PERMISSIONLESS is the only unencrypted one.
+const POLICY_PERMISSIONLESS = 2;
+const POLICY_ALLOW_LIST = 1;
 
 type PolicyValue = (typeof POLICIES)[number]['value'];
 
@@ -618,6 +631,12 @@ export function CreateModelPage() {
 
   const onMint = useCallback(async () => {
     if (!session || !signer || !glb || !name.trim()) return;
+    // D-076 — ALLOW_LIST is "pay to fork"; a zero fork fee is rejected on-chain
+    // (EAllowListNeedsFee). Guard here so the user gets a clear message pre-sign.
+    if (policy === POLICY_ALLOW_LIST && suiToMist(feeSui) <= 0n) {
+      setMintError('Allow-list requires a fork fee greater than 0 SUI.');
+      return;
+    }
     setMintError(null);
     setMintStatus('uploading');
     try {
@@ -626,10 +645,30 @@ export function CreateModelPage() {
       // Blob object and glb_blob_id come from this one upload. lineage.json is
       // no longer separately persisted (it was never resolved anywhere); the
       // lineage pointer collapses onto the GLB's own blob id.
-      const glbBlob = await uploadBlob(glb, signer);
+      // D-075 — encryption is DERIVED from policy. For an encrypted policy
+      // (ALLOW_LIST / RESTRICTED) we AES-encrypt the GLB under a fresh random
+      // seal_id, upload the CIPHERTEXT (never the plaintext), and publish via
+      // publish_encrypted (records the wrapped key + seal_id; asserts global
+      // seal_id uniqueness). PERMISSIONLESS uploads the plaintext as today.
+      const isEncrypted = policy !== POLICY_PERMISSIONLESS;
+      let glbBlob: { blobId: string; blobObjectId: string };
+      let sealFields: { sealedKey: Uint8Array; sealId: Uint8Array } | null = null;
+      if (isEncrypted) {
+        const sealId = crypto.getRandomValues(new Uint8Array(32));
+        const { ciphertext, sealedKey } = await encryptBase(
+          getSealClient(),
+          TESTNET.model3dPackageId,
+          glb,
+          sealId,
+        );
+        glbBlob = await uploadBlob(ciphertext, signer);
+        sealFields = { sealedKey, sealId };
+      } else {
+        glbBlob = await uploadBlob(glb, signer);
+      }
       setMintStatus('signing');
       const tags = tagsStr.split(',').map((t) => t.trim()).filter(Boolean);
-      const { tx } = buildPublishPtb({
+      const commonArgs = {
         blobObjectId: glbBlob.blobObjectId,
         shapeType: sourceMode,
         paramsJson: JSON.stringify(sourceMode === 'tripo' ? { prompt } : { source: 'upload' }),
@@ -638,15 +677,23 @@ export function CreateModelPage() {
         lineageBlobId: glbBlob.blobId,
         glbBlobId: glbBlob.blobId,
         partLabels,
-        isEncrypted: false,
         license: {
           policy,
           derivativeMintFee: suiToMist(feeSui),
           derivativeRoyaltyBps: royaltyBps,
           commercialUse: true,
-          requireAttribution: policy !== 2,
+          requireAttribution: policy !== POLICY_PERMISSIONLESS,
         },
-      });
+      };
+      const { tx } = isEncrypted
+        ? buildPublishEncryptedPtb({
+            ...commonArgs,
+            sealedKey: sealFields!.sealedKey,
+            sealId: sealFields!.sealId,
+            // U4 will fill this with captured preview-still blob ids (ALLOW_LIST).
+            previewBlobIds: [],
+          })
+        : buildPublishPtb(commonArgs);
       const result = await signAndExecute({ transaction: tx });
       setTxDigest(result.digest);
       setMintStatus('success');
@@ -859,12 +906,20 @@ export function CreateModelPage() {
               </div>
             </fieldset>
             <label>
-              <span style={sectionLabel}>DERIVATIVE MINT FEE (SUI)</span>
+              <span style={sectionLabel}>
+                {policy === POLICY_ALLOW_LIST ? 'FORK FEE (SUI) — REQUIRED' : 'DERIVATIVE MINT FEE (SUI)'}
+              </span>
               <input
+                data-testid="fee-input"
                 value={feeSui}
                 onChange={(e) => setFeeSui(e.target.value)}
                 style={{ ...inputStyle, width: '100%' }}
               />
+              {policy === POLICY_ALLOW_LIST && (
+                <span data-testid="allow-list-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                  Allow-list is pay-to-fork: set a fork fee greater than 0 to unlock the encrypted base.
+                </span>
+              )}
             </label>
             <label>
               <span style={sectionLabel}>DERIVATIVE ROYALTY (BPS, ≤3000)</span>
