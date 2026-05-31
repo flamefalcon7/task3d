@@ -9,13 +9,19 @@ import { useEffect, useState } from 'react';
 // Renders a single <img> carrying the caller's testId so existing surface tests
 // (which assert the still's testid + src) keep passing.
 
+// Target time for one full faux-revolution. The per-frame dwell is derived from
+// this and the frame count, so 3 angles and 12 angles spin at the SAME speed —
+// more frames just look smoother, not faster.
+const REVOLUTION_MS = 1800;
+const MIN_DWELL_MS = 80;
+
 export interface TurntablePreviewProps {
   /** Preview-still URLs in turntable order (e.g. previewStillUrlsForSummary). */
   urls: string[];
   testId?: string;
   alt?: string;
   style?: CSSProperties;
-  /** Frame dwell time (ms). */
+  /** Override the per-frame dwell (ms). Defaults to REVOLUTION_MS / frames. */
   intervalMs?: number;
 }
 
@@ -29,9 +35,10 @@ export function TurntablePreview({
   testId,
   alt = '',
   style,
-  intervalMs = 700,
+  intervalMs,
 }: TurntablePreviewProps) {
   const [i, setI] = useState(0);
+  const dwell = intervalMs ?? Math.max(MIN_DWELL_MS, Math.round(REVOLUTION_MS / Math.max(1, urls.length)));
 
   // Preload every frame so cycling doesn't flash a blank while the next loads.
   useEffect(() => {
@@ -45,9 +52,9 @@ export function TurntablePreview({
   // Cycle — only with ≥2 frames and motion allowed.
   useEffect(() => {
     if (urls.length <= 1 || prefersReducedMotion()) return;
-    const t = setInterval(() => setI((p) => (p + 1) % urls.length), intervalMs);
+    const t = setInterval(() => setI((p) => (p + 1) % urls.length), dwell);
     return () => clearInterval(t);
-  }, [urls, intervalMs]);
+  }, [urls, dwell]);
 
   if (urls.length === 0) return null;
   const src = urls[i % urls.length] ?? urls[0]!;

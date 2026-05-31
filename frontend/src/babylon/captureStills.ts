@@ -17,8 +17,14 @@ import { Tools } from '@babylonjs/core/Misc/tools';
 import type { Engine } from '@babylonjs/core/Engines/engine';
 import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 
-/** Number of turntable angles captured by default (evenly spaced around alpha). */
-export const DEFAULT_STILL_COUNT = 3;
+/**
+ * Number of turntable angles captured by default (evenly spaced around alpha).
+ * 12 gives a smooth faux-turntable; WebP keeps the total small (~5 KB/frame →
+ * ~60 KB for 12, still a rounding error next to the multi-MB ciphertext). The
+ * whole set + the ciphertext ride in ONE Walrus quilt (publish forces a single
+ * quilt via uploadFiles' quiltSize option), so the popup count stays at 3.
+ */
+export const DEFAULT_STILL_COUNT = 12;
 /** Square still resolution (px). Small — these are evaluation thumbnails, not the asset. */
 export const STILL_SIZE = 512;
 /** Visible watermark text (R13). */
@@ -49,7 +55,10 @@ export async function captureStillsWith(
   return stills;
 }
 
-/** Decode a PNG data URL (`data:image/png;base64,....`) to bytes. */
+/** WebP quality for the watermarked stills — small + visually clean for thumbnails. */
+const WEBP_QUALITY = 0.85;
+
+/** Decode a base64 data URL (`data:image/<type>;base64,....`) to bytes. */
 function dataUrlToBytes(dataUrl: string): Uint8Array {
   const comma = dataUrl.indexOf(',');
   const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
@@ -60,10 +69,11 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 }
 
 /**
- * Browser implementation: draw a PNG data URL onto a 2D canvas, stamp the
- * watermark in the lower-right, and return PNG bytes. Browser-only (real canvas).
+ * Browser implementation: draw the screenshot onto a 2D canvas, stamp the
+ * watermark in the lower-right, and return WebP bytes (~4× smaller than PNG for
+ * these 3D-render stills, so we can afford 12 turntable frames). Browser-only.
  */
-export async function watermarkPng(dataUrl: string): Promise<Uint8Array> {
+export async function watermarkStill(dataUrl: string): Promise<Uint8Array> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
     el.onload = () => resolve(el);
@@ -85,7 +95,7 @@ export async function watermarkPng(dataUrl: string): Promise<Uint8Array> {
   ctx.fillText(WATERMARK_TEXT, canvas.width - pad + 1, canvas.height - pad + 1);
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.fillText(WATERMARK_TEXT, canvas.width - pad, canvas.height - pad);
-  return dataUrlToBytes(canvas.toDataURL('image/png'));
+  return dataUrlToBytes(canvas.toDataURL('image/webp', WEBP_QUALITY));
 }
 
 /**
@@ -106,7 +116,7 @@ export async function captureStillsFromScene(
         camera.getScene().render();
         return Tools.CreateScreenshotAsync(engine, camera, { width: STILL_SIZE, height: STILL_SIZE });
       },
-      watermark: watermarkPng,
+      watermark: watermarkStill,
     });
   } finally {
     camera.alpha = startAlpha;

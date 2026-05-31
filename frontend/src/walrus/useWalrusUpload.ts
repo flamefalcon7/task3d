@@ -173,10 +173,21 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   );
 
   const uploadFiles = useCallback(
-    async (files: Uint8Array[], signer: Signer): Promise<UploadResult> => {
+    async (
+      files: Uint8Array[],
+      signer: Signer,
+      // plan-026 — `quiltSize` overrides the default chunk size for THIS call.
+      // The encrypted publish passes files.length to force ONE quilt (ciphertext
+      // + N preview stills in a single register+certify → 3 popups), independent
+      // of the global QUILT_SIZE (which still drives the forker's variant bake +
+      // its BatchProgressPanel popup math). Safe per the OOM post-mortem: chunking
+      // doesn't reduce encoder memory; the gate is TOTAL bytes, not chunk count.
+      opts?: { quiltSize?: number },
+    ): Promise<UploadResult> => {
       if (!files || files.length === 0) {
         throw new Error('useWalrusUpload: files array must contain at least one Uint8Array');
       }
+      const chunkSize = Math.max(1, opts?.quiltSize ?? QUILT_SIZE);
 
       setError(null);
       setStatus('uploading');
@@ -184,7 +195,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
       setBatchIndex(0);
       setTxDigests([]);
 
-      const total = Math.ceil(files.length / QUILT_SIZE);
+      const total = Math.ceil(files.length / chunkSize);
       setBatchTotal(total);
 
       const startedAt = performance.now();
@@ -211,7 +222,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
         for (let i = 0; i < total; i++) {
           currentBatchIndex = i;
           setBatchIndex(i);
-          const chunk = files.slice(i * QUILT_SIZE, (i + 1) * QUILT_SIZE);
+          const chunk = files.slice(i * chunkSize, (i + 1) * chunkSize);
           // Identifier zero-pad MUST be set per-chunk (not globally) because
           // @mysten/walrus@1.1.7 sorts lex within each quilt's encodeQuilt
           // call. Within a chunk of up to QUILT_SIZE=4, pad-width 2 is

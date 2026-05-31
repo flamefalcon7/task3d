@@ -407,6 +407,10 @@ describe('CreateModelPage', () => {
     expect(files[0]).toEqual(new Uint8Array([0xc1, 0xc2, 0xc3])); // ciphertext first
     expect(files[1]).toEqual(new Uint8Array([0x11]));
     expect(files[2]).toEqual(new Uint8Array([0x22]));
+    // Forced into ONE quilt (quiltSize === file count) so the publish stays at
+    // ~3 popups even with 12 turntable frames.
+    const uploadOpts = uploadFilesMock.mock.calls[0]![2] as { quiltSize?: number } | undefined;
+    expect(uploadOpts?.quiltSize).toBe(files.length);
     const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
       previewBlobIds: string[];
       glbBlobId: string;

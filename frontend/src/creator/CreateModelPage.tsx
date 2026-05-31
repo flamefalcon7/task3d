@@ -677,7 +677,11 @@ export function CreateModelPage() {
         // patchIds preserve input order: [0] = ciphertext (→ glb_blob_id, fetched
         // by-quilt-patch-id), [1..] = preview stills. 1 ciphertext + ≤3 stills
         // stays within QUILT_SIZE (4) = one quilt.
-        const quilt = await uploadFiles([ciphertext, ...stills], signer);
+        // Force ONE quilt for [ciphertext + all preview stills] so the encrypted
+        // publish stays at ~3 wallet popups no matter how many turntable angles
+        // (12) we capture — overrides the global QUILT_SIZE for this call only.
+        const quiltFiles = [ciphertext, ...stills];
+        const quilt = await uploadFiles(quiltFiles, signer, { quiltSize: quiltFiles.length });
         glbBlob = {
           blobId: quilt.patchIds[0]!,
           blobObjectId: quilt.blobObjects[0]!.blobObjectId,
