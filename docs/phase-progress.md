@@ -1,6 +1,23 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 11:25pm GMT+8 (Upload-path segmentation SHIPPED — Option A2 name-keyed swap, D-077; 5-reviewer pass applied)
+## Last Updated: 2026-06-01 (Encrypted-base LIVE variant authoring — "unlock-first" reorder; double-charge bug caught+fixed)
+
+### Where we are (read this first after compact)
+Two forge features shipped this session on branch **`feat/upload-segmentation`** (stacked on the unmerged `feat/seal-content-protection`; NONE merged to main yet):
+1. **Upload-path segmentation** (Option A2 / D-077) — see block below.
+2. **Encrypted-base live variant authoring** ("unlock-first") — NEW, just done.
+
+**Encrypted live authoring (the user's "nft creator can't see recolored variants" problem):** forking an encrypted base used to make the creator color BLIND (decrypt happened at the very end). Reordered to **unlock-first**: pay fork fee + decrypt UP FRONT (new `onUnlock`), then author every variant on the LIVE decrypted mesh (WYSIWYG), then `onMintEncrypted` bakes+mints. Split the old monolithic `onLaunchEncrypted`; gated the editor behind an "Unlock to design" panel (`needsUnlock = isEncryptedBase && !unlockedCap`). **No contract/backend change** — reuses `launch_collection` + `mint_tokens` + Seal helpers, just reordered; same total sigs (2 unlock + 2 mint). Key enabler: `VariantPreview.displayGlbUrl` already prefers the mesh, so setting `baseGlb`=plaintext makes the existing live UI "just work".
+- **Review caught a real HIGH bug + fixed**: `onUnlock` step1 (pay+cap, on-chain) then decrypt (fallible). If decrypt failed after step1, retry **double-charged** the fork fee. Fixed with `pendingCapRef` — resume from the paid cap, re-run only the free decrypt dry-run. Tested.
+- Commits: `c7292ca` (feature) + `e121a5f` (double-charge fix). Tests: frontend **833** green, `tsc -b` = 32 baseline (the 32 are pre-existing errors in edgesGradientSweep/landing/some .test files — NOT mine; my files are clean). Backend 136.
+- **Verification**: unit tests cover the gate + unlock→live→mint wiring + idempotent retry (Seal seam mocked). `/launch` is sign-in gated so agent-browser can't drive it → the real wallet arc (unlock 2 sigs incl. SessionKey → author live → mint) is **user-run in real Chrome+Slush**. NOTE: 2 of 3 review subagents hit socket/infra errors; the races reviewer completed and cross-covered correctness/adversarial turf (re-entrancy guarded, re-pick blocked by busy, no plaintext-download leak, mint-without-unlock guarded).
+
+### Next concrete step
+User wallet-tests the encrypted unlock→author→mint arc in real Chrome. Then decide merge (seal → upload-segmentation stacked → main) and/or demo/deck.
+
+---
+
+## Older: 2026-05-31 / 11:25pm GMT+8 (Upload-path segmentation SHIPPED — Option A2 name-keyed swap, D-077; 5-reviewer pass applied)
 
 ### Where we are (read this first after compact)
 The "OPEN QUESTION — segmentation on Upload path" below is **RESOLVED + BUILT**. Uploaded GLBs can now be tagged + per-part recolored — but safely, via **Option A2 (ADR D-077)**: the backend recolors by **material name** (order-independent) instead of array position, closing a latent silent-miscolor hole (browser tags by Babylon mesh order; backend recolored by gltf-transform material order — these diverge for arbitrary uploads). All on a NEW branch **`feat/upload-segmentation`** (branched off `feat/seal-content-protection`, which is still unmerged → this stacks on it).
