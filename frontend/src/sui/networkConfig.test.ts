@@ -24,6 +24,7 @@ describe('networkConfig.ts ↔ contracts/networks/testnet.json parity (R4 / C-00
     expect(TESTNET.publisherId).toBe(testnetJson.publisher_id);
     expect(TESTNET.transferPolicyId).toBe(testnetJson.transfer_policy_id);
     expect(TESTNET.transferPolicyCapId).toBe(testnetJson.transfer_policy_cap_id);
+    expect(TESTNET.sealIdRegistryId).toBe(testnetJson.seal_id_registry_id);
     expect(TESTNET.deployerAddress).toBe(testnetJson.deployer_address);
     expect(TESTNET.kioskAppsPackageId).toBe(testnetJson.kiosk_apps_package_id);
   });

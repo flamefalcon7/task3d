@@ -44,13 +44,13 @@ export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x9e673aa768928a5bd8f5e4e1c1538b3bffd8a0f8e0cd7b2cba6939b796ff892c',
+    '0xba1e84ba2889b540defc11245955d3c6650a99f5251e5ee4faf69dc98a876c5c',
   publisherId:
-    '0xd966383845ae5835a70b192270460235d6c8eff3c89e66d631baaaeb301642ec',
+    '0x863582ffed716b541a04e2360019dced4709678f4aea62accccb2ed7607cede0',
   transferPolicyId:
-    '0x308fc8932a6587acb55a51cf89728ed4abaedb690daa8e9e05da21cb1566fe49',
+    '0x81850ced8e3ead1bc4b6008b0c9ade9b8fbb7339c615e0a15b468bffadcb2c44',
   transferPolicyCapId:
-    '0x46ed256d43192ab5a216c1e72804a4021de2ddf6bed17fa237a94171152db052',
+    '0x8b626d922b0a65256d99a83f15b02aa151d577908baa341241669006ffac14f6',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
@@ -59,14 +59,10 @@ export const TESTNET = {
   kioskAppsPackageId:
     '0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d',
   // D-075 (plan-026 U2) — the shared SealIdRegistry bootstrapped in the v9
-  // `init`. PLACEHOLDER until the v9 republish ceremony: at deploy, bump
-  // `model3dPackageId` to the v9 id AND set this to the registry object id
-  // (read from the publish tx effects — the shared object of type
-  // `<v9>::model3d::SealIdRegistry`). The encrypted publish/forge PTBs read
-  // this; they cannot run end-to-end until both are the real v9 values.
-  // TODO(v9-deploy): replace 0x0 with the bootstrapped registry id.
+  // `init` (publish digest 2sFX6yuy…). The encrypted publish/forge PTBs read
+  // this for the seal_id global-uniqueness assert (Resolution G).
   sealIdRegistryId:
-    '0x0000000000000000000000000000000000000000000000000000000000000000',
+    '0xdb6e97f7d319bd06cac18420270a88e754209c47eb3e145ffc01a4bbeeb372e3',
 } as const;
 
 // Public testnet RPC endpoints. Primary + 1 fallback per U5 spec.
