@@ -9,7 +9,7 @@ import {
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
-import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
 import { generate } from '../lib/api';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
@@ -504,6 +504,9 @@ export function CreateModelPage() {
 
   const [glb, setGlb] = useState<Uint8Array | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
+  // plan-026 U4 — handle to the preview canvas so onMint can capture ALLOW_LIST
+  // preview stills from the plaintext scene before the encrypt+upload window.
+  const previewRef = useRef<PreviewCanvasHandle>(null);
   const [confirmed, setConfirmed] = useState(false);
 
   // plan-013 — per-part labels for segmented bases. `tagged` gates the metadata
@@ -653,7 +656,19 @@ export function CreateModelPage() {
       const isEncrypted = policy !== POLICY_PERMISSIONLESS;
       let glbBlob: { blobId: string; blobObjectId: string };
       let sealFields: { sealedKey: Uint8Array; sealId: Uint8Array } | null = null;
+      const previewBlobIds: string[] = [];
       if (isEncrypted) {
+        // U4 — ALLOW_LIST only: capture watermarked preview stills from the
+        // PLAINTEXT scene (before encryption) and upload them as PUBLIC blobs so a
+        // prospective forker can evaluate the base pre-payment. RESTRICTED is
+        // private (off-catalog) and skips previews entirely (R11).
+        if (policy === POLICY_ALLOW_LIST) {
+          const stills = (await previewRef.current?.captureStills()) ?? [];
+          for (const still of stills) {
+            const up = await uploadBlob(still, signer);
+            previewBlobIds.push(up.blobId);
+          }
+        }
         const sealId = crypto.getRandomValues(new Uint8Array(32));
         const { ciphertext, sealedKey } = await encryptBase(
           getSealClient(),
@@ -690,8 +705,8 @@ export function CreateModelPage() {
             ...commonArgs,
             sealedKey: sealFields!.sealedKey,
             sealId: sealFields!.sealId,
-            // U4 will fill this with captured preview-still blob ids (ALLOW_LIST).
-            previewBlobIds: [],
+            // U4 — captured ALLOW_LIST preview stills (empty for RESTRICTED).
+            previewBlobIds,
           })
         : buildPublishPtb(commonArgs);
       const result = await signAndExecute({ transaction: tx });
@@ -838,7 +853,7 @@ export function CreateModelPage() {
         )}
 
         <div style={viewerWellSized}>
-          {haveModel ? <PreviewCanvas glbUrl={glbUrl} /> : <WireframePlaceholder />}
+          {haveModel ? <PreviewCanvas ref={previewRef} glbUrl={glbUrl} /> : <WireframePlaceholder />}
         </div>
 
         {haveModel && sourceMode === 'tripo' && !confirmed && (

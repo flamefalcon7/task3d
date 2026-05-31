@@ -19,6 +19,7 @@ import { BgTogglePill } from './BgTogglePill';
 import { applyCanvasMode } from './applyCanvasMode';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
 import { ModeTogglePill } from './ModeTogglePill';
+import { captureStillsFromScene } from './captureStills';
 
 // plan-015 U2 — accent color hex inlined here so the mode/highlight effect
 // doesn't need to round-trip through the ux/tokens module. Matches
@@ -130,6 +131,12 @@ interface PreviewCanvasProps {
 export interface PreviewCanvasHandle {
   dispose(): void;
   remount(): void;
+  /**
+   * plan-026 U4 — capture `count` watermarked turntable stills from the CURRENT
+   * (plaintext) scene. Returns PNG byte arrays (empty if the engine/camera aren't
+   * ready). MUST be called before `dispose()` / the encrypt+upload window.
+   */
+  captureStills(count?: number): Promise<Uint8Array[]>;
 }
 
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). Engine creation
@@ -203,6 +210,14 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
       remount: () => {
         isDisposedRef.current = false;
         setMounted(true);
+      },
+      // plan-026 U4 — capture watermarked stills from the live scene's
+      // ArcRotateCamera. No-op (empty) if the engine/camera aren't ready.
+      captureStills: async (count?: number) => {
+        const engine = engineRef.current;
+        const camera = sceneRef.current?.activeCamera as ArcRotateCamera | null | undefined;
+        if (!engine || !camera) return [];
+        return captureStillsFromScene(engine, camera, count);
       },
     }),
     [],

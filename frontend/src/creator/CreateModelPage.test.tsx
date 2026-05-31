@@ -25,11 +25,25 @@ vi.mock('../walrus/useWalrusUpload', () => ({
   useWalrusUpload: () => ({ uploadBlob: uploadBlobMock, stage: 'idle', status: 'idle', error: null }),
 }));
 
-vi.mock('../babylon/PreviewCanvas', () => ({
-  PreviewCanvas: ({ glbUrl }: { glbUrl: string | null }) => (
-    <div data-testid="preview-canvas-mock">{glbUrl ?? 'no url'}</div>
-  ),
-}));
+// plan-026 U4 — PreviewCanvas is now ref-driven (captureStills). The mock
+// forwards a ref exposing a stubbed captureStills so the ALLOW_LIST preview path
+// can be driven without Babylon/WebGL.
+const captureStillsMock = vi.hoisted(() => vi.fn(async (): Promise<Uint8Array[]> => []));
+vi.mock('../babylon/PreviewCanvas', () => {
+  const React = require('react') as typeof import('react');
+  return {
+    PreviewCanvas: React.forwardRef(
+      ({ glbUrl }: { glbUrl: string | null }, ref: React.Ref<unknown>) => {
+        React.useImperativeHandle(
+          ref,
+          () => ({ dispose: () => {}, remount: () => {}, captureStills: captureStillsMock }),
+          [],
+        );
+        return <div data-testid="preview-canvas-mock">{glbUrl ?? 'no url'}</div>;
+      },
+    ),
+  };
+});
 
 // plan-013 — capture buildPublishPtb args so we can assert partLabels reach
 // the PTB boundary in the right position. Pay-for-API is also mocked since
@@ -141,6 +155,8 @@ beforeEach(() => {
     sealedKey: new Uint8Array([0x5e, 0xa1]),
     idHex: 'deadbeef',
   });
+  captureStillsMock.mockReset();
+  captureStillsMock.mockResolvedValue([]);
   buildPayForApiCallPtbMock.mockReset();
   buildPayForApiCallPtbMock.mockReturnValue({
     tx: {},
@@ -339,6 +355,64 @@ describe('CreateModelPage', () => {
     expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
     expect(uploadBlobMock).not.toHaveBeenCalled();
+  });
+
+  it('U4: allow-list captures preview stills, uploads them as public blobs, passes their ids', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('policy-1'));
+    fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '2' } });
+
+    captureStillsMock.mockResolvedValue([new Uint8Array([0x11]), new Uint8Array([0x22])]);
+    let n = 0;
+    uploadBlobMock.mockImplementation(async () => ({ blobId: `blob_${n++}`, blobObjectId: '0x' + 'a'.repeat(64) }));
+    signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Previewed' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+
+    await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
+    expect(captureStillsMock).toHaveBeenCalledOnce();
+    // 2 preview stills uploaded first, then the ciphertext = 3 uploads.
+    expect(uploadBlobMock).toHaveBeenCalledTimes(3);
+    expect(uploadBlobMock.mock.calls[0]![0]).toEqual(new Uint8Array([0x11]));
+    expect(uploadBlobMock.mock.calls[1]![0]).toEqual(new Uint8Array([0x22]));
+    const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
+      previewBlobIds: string[];
+      glbBlobId: string;
+    };
+    expect(encArgs.previewBlobIds).toEqual(['blob_0', 'blob_1']);
+    expect(encArgs.glbBlobId).toBe('blob_2');
+  });
+
+  it('U4: restricted publish is encrypted but captures NO preview stills (private)', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('policy-0')); // Restricted
+    captureStillsMock.mockResolvedValue([new Uint8Array([0x11])]);
+    uploadBlobMock.mockResolvedValue({ blobId: 'cipher_blob', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'RESTDIGEST' });
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Private' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+
+    await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
+    expect(captureStillsMock).not.toHaveBeenCalled();
+    expect(uploadBlobMock).toHaveBeenCalledTimes(1); // ciphertext only
+    const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as { previewBlobIds: string[] };
+    expect(encArgs.previewBlobIds).toEqual([]);
   });
 
   // ----- plan-015 U1 — Framing-B TaggingStep + partLabels wiring ----------
