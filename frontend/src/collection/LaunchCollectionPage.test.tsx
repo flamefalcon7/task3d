@@ -78,6 +78,16 @@ vi.mock('../sui/collectionTxBuilders', () => ({
   buildLaunchCollectionWithTokensPtb: (...args: unknown[]) => buildLaunchMock(...args),
 }));
 
+// plan A2 — runBuildVariants headlessly parses the base GLB for per-part material
+// names (real Babylon NullEngine — not jsdom-friendly), so mock it. Default `[]`
+// means "no names" → name-keying does not apply → the build payload stays on the
+// legacy positional path, preserving every existing test's semantics. Tests that
+// exercise the name-keyed payload override the return per-case.
+const extractMaterialNamesMock = vi.fn(async (): Promise<(string | null)[]> => []);
+vi.mock('../babylon/extractMaterialNames', () => ({
+  extractMaterialNames: (...args: unknown[]) => extractMaterialNamesMock(...args),
+}));
+
 // plan-015 U6/U7 — PreviewCanvas mock surfaces mode pill + onPartClick +
 // partColors + highlightedParts so integration tests can verify the
 // page-level wiring without spinning up Babylon. data-* attributes carry
@@ -447,6 +457,103 @@ describe('LaunchCollectionPage', () => {
     const params = JSON.parse(body.variants[0].paramsJson);
     expect(params.palette).toMatchObject({ primary: '#ff0000', accent: '#00ff00' });
     expect(typeof params.texture).toBe('string');
+  });
+
+  it('plan A2 — attaches per-part materialName to the build payload when the base is bijectively named', async () => {
+    // A taggable base: 3 parts, 3 unique material names. The forge derives the
+    // names from the base GLB (mocked here) and attaches them so the backend
+    // swaps by name (order-independent) rather than by positional material order.
+    extractMaterialNamesMock.mockResolvedValueOnce(['mat_a', 'mat_b', 'mat_c']);
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({
+          objectId: '0xnamekey',
+          glbBlobId: 'glb-namekey',
+          partLabels: ['primary', 'primary', 'accent'],
+        }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const buildBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/v1/blobs/')) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      if (init?.body) buildBodies.push(init.body as string);
+      return new Response(
+        JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xnamekey'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(buildBodies.length).toBeGreaterThan(0));
+    const body = JSON.parse(buildBodies[0]!);
+    const pc = body.variants[0].partColors;
+    expect(pc).toHaveLength(3);
+    // The material name rides each entry, in partLabels order.
+    expect(pc.map((p: { materialName?: string }) => p.materialName)).toEqual([
+      'mat_a',
+      'mat_b',
+      'mat_c',
+    ]);
+  });
+
+  it('plan A2 — omits materialName (positional fallback) when the base names are not unique', async () => {
+    // Two parts sharing a material name → name-keying is ambiguous → the forge
+    // must NOT attach materialName, leaving the legacy positional path intact.
+    extractMaterialNamesMock.mockResolvedValueOnce(['dup', 'dup']);
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({
+          objectId: '0xdupname',
+          glbBlobId: 'glb-dupname',
+          partLabels: ['primary', 'accent'],
+        }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const buildBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/v1/blobs/')) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      if (init?.body) buildBodies.push(init.body as string);
+      return new Response(
+        JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xdupname'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(buildBodies.length).toBeGreaterThan(0));
+    const body = JSON.parse(buildBodies[0]!);
+    const pc = body.variants[0].partColors;
+    expect(pc).toHaveLength(2);
+    expect(pc[0].materialName).toBeUndefined();
+    expect(pc[1].materialName).toBeUndefined();
   });
 
   it('F7 — typed 422 part_count_mismatch surfaces a human-readable message (materialCount vs partColorsCount)', async () => {

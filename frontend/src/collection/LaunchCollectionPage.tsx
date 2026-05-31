@@ -55,6 +55,8 @@ import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
+import { extractMaterialNames } from '../babylon/extractMaterialNames';
+import { allNamesUniqueNonEmpty } from '../babylon/partMaterials';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
 // plan-026 U5 — Seal decrypt 3-step fork for encrypted ALLOW_LIST bases.
 import { getSealClient } from '../seal/sealClient';
@@ -515,12 +517,30 @@ export function LaunchCollectionPage() {
         textureId: undefined as unknown as undefined,
       }));
     };
+    // plan A2 — derive each part's material name from the base GLB using the SAME
+    // Babylon loader + filter as the tagging step, so index i lines up with
+    // partLabels[i]. Attach `materialName` so the backend swaps by name (order-
+    // independent) instead of by gltf-transform's positional material order,
+    // which can diverge from the browser's part order for arbitrary uploads.
+    // Only when the base is bijective + uniquely named (taggable upload / Tripo);
+    // otherwise fall back to the legacy positional path (no materialName).
+    let materialNames: (string | null)[] = [];
+    try {
+      materialNames = await extractMaterialNames(effectiveBaseGlb);
+    } catch {
+      materialNames = [];
+    }
+    const nameKeyingApplies =
+      partLabels.length > 0 &&
+      materialNames.length === partLabels.length &&
+      allNamesUniqueNonEmpty(materialNames);
     const buildReq: CollectionBuildRequest = {
       baseGlbBase64: bytesToBase64(effectiveBaseGlb),
       variants: editorState.variants.map((row) => {
-        const partColors = resolvePartColors(row.palette).map((pc) => ({
+        const partColors = resolvePartColors(row.palette).map((pc, i) => ({
           baseColorRgb: pc.baseColorRgb,
           textureId: row.textureId,
+          ...(nameKeyingApplies ? { materialName: materialNames[i] as string } : {}),
         }));
         return {
           partColors,
