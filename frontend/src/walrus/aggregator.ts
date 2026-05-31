@@ -19,6 +19,38 @@ export function glbUrlForSummary(
   return `${WALRUS_AGGREGATOR}/v1/blobs/${m.blobId}`;
 }
 
+// plan-026 D-075 — resolve the URL of an encrypted ALLOW_LIST base's FIRST
+// public preview still (a watermarked image captured at publish). Returns null
+// when there is no preview (PERMISSIONLESS, or a malformed encrypted record) —
+// callers fall back to the 3D PreviewCanvas. NEVER point this at `glbBlobId`,
+// which holds AES ciphertext for an encrypted base.
+export function previewStillUrlForSummary(
+  m: Pick<Model3DSummary, 'previewBlobIds'>,
+): string | null {
+  const first = m.previewBlobIds?.[0];
+  return first ? `${WALRUS_AGGREGATOR}/v1/blobs/${first}` : null;
+}
+
+// plan-026 D-075 — render-path selector for a catalog/picker thumbnail.
+// Encrypted bases (ALLOW_LIST) MUST render their public preview still as an
+// <img>, NEVER fetch the ciphertext `glbBlobId` as a GLB. Returns either a
+// `{ kind: 'glb', url }` for the live 3D mesh (PERMISSIONLESS + legacy) or a
+// `{ kind: 'preview', url }` still. An encrypted base with no still resolves to
+// `{ kind: 'preview', url: null }` so the caller shows a placeholder (it must
+// still NOT fall through to the ciphertext GLB).
+export type ThumbSource =
+  | { kind: 'glb'; url: string }
+  | { kind: 'preview'; url: string | null };
+
+export function thumbSourceForSummary(
+  m: Pick<Model3DSummary, 'patchId' | 'glbBlobId' | 'blobId' | 'isEncrypted' | 'previewBlobIds'>,
+): ThumbSource {
+  if (m.isEncrypted) {
+    return { kind: 'preview', url: previewStillUrlForSummary(m) };
+  }
+  return { kind: 'glb', url: glbUrlForSummary(m) };
+}
+
 // L2 NftToken GLB resolution (U11, D-035): a token binds a quilt patch, so its
 // drivable variant is the by-quilt-patch-id slice. `blobId` is the /track
 // ?blob= dev hatch only — a raw standalone blob to drive before any real token

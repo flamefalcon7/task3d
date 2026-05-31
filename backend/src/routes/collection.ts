@@ -9,12 +9,18 @@ import {
   PartCountMismatchError,
 } from '../lib/gltf-material-swap.js';
 import type { JwtSigner } from '../lib/jwt.js';
+import { createCapVerifier, type CapVerifier } from '../sui/capVerifier.js';
 
 export interface CollectionRouteDeps {
   // JWT is REQUIRED for this route (KTD-7). Unlike /api/generate's prompt
   // mode, every Forge build call is creator-attributable so we always
   // demand an authenticated session. Tests can inject a stub signer.
   jwt?: JwtSigner;
+  // plan-026 U5 — on-chain cap-ownership verifier for the encrypted-base path.
+  // Lazily defaulted to the JSON-RPC-backed verifier on first encrypted request
+  // (so the unencrypted path + tests that never go encrypted never construct an
+  // RPC client). Tests inject a stub.
+  capVerifier?: CapVerifier;
 }
 
 // SEC-001: reject oversized requests BEFORE @gltf-transform/core allocates
@@ -54,8 +60,10 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
         401,
       );
     }
+    let walletAddress: string;
     try {
-      await deps.jwt.verifySession(token);
+      const claims = await deps.jwt.verifySession(token);
+      walletAddress = claims.sub;
     } catch {
       return c.json({ error: 'auth_invalid', message: 'Invalid or expired session token' }, 401);
     }
@@ -72,7 +80,37 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
       return c.json({ error: 'invalid_params', issues: parsed.error.issues }, 400);
     }
 
-    const { baseGlbBase64, variants } = parsed.data;
+    const { baseGlbBase64, variants, encryptedBase } = parsed.data;
+    // plan-026 U5 — ENCRYPTED-BASE HARDENING. When the forked base is encrypted
+    // (the request carries `encryptedBase`), the bytes in `baseGlbBase64` are
+    // the forker's DECRYPTED plaintext. We treat this request as sensitive:
+    //   - NO request-body logging (this handler logs nothing; do NOT add a
+    //     `console.log(body)` here — that would leak the plaintext base).
+    //   - NO plaintext persistence: `baseGlb` / `swapped` are in-memory only,
+    //     returned in the response, then GC'd — nothing is written to disk.
+    //   - JWT-OWNS-CAP check: the wallet must own the in-flight cap, proving it
+    //     paid the step-1 fork fee. A scraper with a valid JWT but no cap is
+    //     rejected, so the bake can't launder an un-paid decrypt.
+    // The unencrypted path skips all of this (its base is already public).
+    if (encryptedBase) {
+      const verifier = deps.capVerifier ?? createCapVerifier();
+      const owns = await verifier.verifyCapOwnership({
+        capId: encryptedBase.capId,
+        ownerAddress: walletAddress,
+        collectionId: encryptedBase.collectionId,
+      });
+      if (!owns) {
+        return c.json(
+          {
+            error: 'cap_not_owned',
+            message:
+              'The authenticated wallet does not own the collection cap for this encrypted base. Pay the fork fee first.',
+          },
+          403,
+        );
+      }
+    }
+
     const baseGlb = Uint8Array.from(Buffer.from(baseGlbBase64, 'base64'));
 
     try {
@@ -103,6 +141,13 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === 'no_material_in_base_glb') {
         return c.json({ error: 'no_material_in_base_glb' }, 422);
+      }
+      // plan-026 U5 — for an encrypted base, suppress the raw gltf-transform
+      // error text (it can echo fragments of the decrypted mesh) — return a
+      // bare error code. The unencrypted path keeps the verbose message for
+      // debugging public bases.
+      if (encryptedBase) {
+        return c.json({ error: 'glb_parse_failed' }, 422);
       }
       // Treat anything else from gltf-transform as a malformed base GLB.
       return c.json({ error: 'glb_parse_failed', message }, 422);

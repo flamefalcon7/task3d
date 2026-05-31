@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { Hono } from 'hono';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { buildCollectionRoute } from './collection.js';
 import type { JwtSigner, SessionClaims } from '../lib/jwt.js';
+import type { CapVerifier } from '../sui/capVerifier.js';
+
+const JWT_WALLET =
+  '0x0000000000000000000000000000000000000000000000000000000000000001';
 
 // --- Test scaffolding ------------------------------------------------------
 
@@ -16,7 +20,7 @@ const stubJwt: JwtSigner = {
   async verifySession(token: string): Promise<SessionClaims> {
     if (token !== 'valid') throw new Error('bad token');
     return {
-      sub: '0x0000000000000000000000000000000000000000000000000000000000000001',
+      sub: JWT_WALLET,
       iat: 1,
       exp: Math.floor(Date.now() / 1000) + 3600,
     };
@@ -261,5 +265,99 @@ describe('POST /api/collection/build — plan-013 part_count_mismatch', () => {
     expect(body.error).toBe('part_count_mismatch');
     expect(body.materialCount).toBe(1);
     expect(body.partColorsCount).toBe(3);
+  });
+});
+
+// --- plan-026 U5 — encrypted-base hardening (JWT-owns-cap) -----------------
+
+describe('POST /api/collection/build — encrypted-base hardening', () => {
+  const CAP_ID = '0xca9000000000000000000000000000000000000000000000000000000000001';
+  const COLLECTION_ID =
+    '0xc011000000000000000000000000000000000000000000000000000000000001';
+
+  function appWith(verifier: CapVerifier): Hono {
+    const a = new Hono();
+    a.route('/api/collection', buildCollectionRoute({ jwt: stubJwt, capVerifier: verifier }));
+    return a;
+  }
+
+  it('bakes when the JWT wallet owns the in-flight cap (AE2 — paid forker)', async () => {
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const verify = vi.fn().mockResolvedValue(true);
+    const a = appWith({ verifyCapOwnership: verify });
+    const res = await a.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' }],
+        encryptedBase: { capId: CAP_ID, collectionId: COLLECTION_ID },
+      }),
+    });
+    expect(res.status).toBe(200);
+    // The verifier was called with the JWT wallet as the expected owner.
+    expect(verify).toHaveBeenCalledWith({
+      capId: CAP_ID,
+      ownerAddress: JWT_WALLET,
+      collectionId: COLLECTION_ID,
+    });
+    const body = (await res.json()) as { variants: Array<{ glbBase64: string }> };
+    expect(body.variants).toHaveLength(1);
+  });
+
+  it('rejects when the JWT wallet does NOT own the cap (403 cap_not_owned)', async () => {
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const verify = vi.fn().mockResolvedValue(false);
+    const a = appWith({ verifyCapOwnership: verify });
+    const res = await a.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' }],
+        encryptedBase: { capId: CAP_ID, collectionId: COLLECTION_ID },
+      }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('cap_not_owned');
+  });
+
+  it('does NOT consult the cap verifier on the unencrypted path (regression)', async () => {
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const verify = vi.fn().mockResolvedValue(false); // would reject if called
+    const a = appWith({ verifyCapOwnership: verify });
+    const res = await a.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' }],
+        // no encryptedBase
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the raw parse-error message for an encrypted base (no plaintext leak)', async () => {
+    const verify = vi.fn().mockResolvedValue(true);
+    const a = appWith({ verifyCapOwnership: verify });
+    // A malformed (non-GLB) base triggers the gltf-transform parse failure path.
+    const garbage = Buffer.from('not a glb at all').toString('base64');
+    const res = await a.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64: garbage,
+        variants: [{ partColors: [{ baseColorRgb: [1, 0, 0, 1] }], paramsJson: '{}' }],
+        encryptedBase: { capId: CAP_ID, collectionId: COLLECTION_ID },
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; message?: string };
+    expect(body.error).toBe('glb_parse_failed');
+    // The verbose `message` (which could echo decrypted bytes) is omitted.
+    expect(body.message).toBeUndefined();
   });
 });

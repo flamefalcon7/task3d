@@ -65,6 +65,14 @@ function jsonToSummary(
     derivativeRoyaltyBps: Number(
       ((json.license ?? {}) as Record<string, unknown>).derivative_royalty_bps ?? 0,
     ),
+    // plan-026 D-075 — policy + Seal flags (default to PERMISSIONLESS / public
+    // for pre-v9 objects; see useModelIndex.nodeToSummary for the same mapping).
+    policy: Number(((json.license ?? {}) as Record<string, unknown>).policy ?? 2),
+    isEncrypted: Boolean(json.is_encrypted ?? false),
+    previewBlobIds: (Array.isArray(json.preview_blob_ids)
+      ? (json.preview_blob_ids as unknown[])
+      : []
+    ).map((b) => String(b)),
   };
 }
 

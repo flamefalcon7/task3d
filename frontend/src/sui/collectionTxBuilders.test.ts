@@ -17,11 +17,15 @@ import {
   buildLaunchCollectionWithTokensPtb,
   buildSetRegisterFeePtb,
   buildMintNftTokenPtb,
+  buildMintTokensPtb,
+  buildSealApproveCapPtb,
   buildRegisterIntegrationPtb,
   type LaunchCollectionArgs,
   type LaunchCollectionWithTokensArgs,
   type SetRegisterFeeArgs,
   type MintNftTokenArgs,
+  type MintTokensArgs,
+  type SealApproveCapArgs,
   type RegisterIntegrationArgs,
 } from './collectionTxBuilders';
 
@@ -171,6 +175,76 @@ describe('buildMintNftTokenPtb', () => {
 
   it('takes no splitCoins (no price/payment at mint)', () => {
     const { tx } = buildMintNftTokenPtb(MINT_ARGS);
+    expect(
+      tx.getData().commands.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins'),
+    ).toBe(false);
+  });
+});
+
+// === mint_tokens (plan-026 D-076 — step 3 of the encrypted 3-step fork) ===
+const MINT_TOKENS_ARGS: MintTokensArgs = {
+  capId: FAKE_CAP,
+  collectionId: FAKE_COLLECTION,
+  quiltBlobId: 'quiltPostBake',
+  tokenNames: ['Racer #1', 'Racer #2'],
+  tokenPatchIds: ['patch01', 'patch02'],
+};
+describe('buildMintTokensPtb', () => {
+  it('emits one mint_tokens call (cap, collection, quilt, names, patches) declaring NftTokenMinted', () => {
+    const { tx, metadata } = buildMintTokensPtb(MINT_TOKENS_ARGS);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('mint_tokens');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Arity: cap, collection, quilt_blob_id, token_names, token_patch_ids (5).
+    // The two vectors are one arg each regardless of N.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(5);
+    expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::NftTokenMinted`]);
+  });
+
+  it('takes no splitCoins (the fork fee was paid in step-1 launch_collection)', () => {
+    const { tx } = buildMintTokensPtb(MINT_TOKENS_ARGS);
+    expect(
+      tx.getData().commands.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins'),
+    ).toBe(false);
+  });
+
+  it('throws before signing when names and patch ids differ in length (mirrors EBatchLenMismatch)', () => {
+    expect(() =>
+      buildMintTokensPtb({ ...MINT_TOKENS_ARGS, tokenNames: ['a', 'b'], tokenPatchIds: ['one'] }),
+    ).toThrow(/same length/);
+  });
+});
+
+// === seal_approve_cap (plan-026 D-075 — key-server dry-run gate) ===
+const SEAL_APPROVE_ARGS: SealApproveCapArgs = {
+  id: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+  capId: FAKE_CAP,
+  collectionId: FAKE_COLLECTION,
+  baseModelId: FAKE_MODEL,
+};
+describe('buildSealApproveCapPtb', () => {
+  it('emits one seal_approve_cap call (id, cap, collection, model) with NO events', () => {
+    const { tx, metadata } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('seal_approve_cap');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Arity: id (pure vector<u8>), cap, collection, model (4).
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(4);
+    // Dry-run-only gate: no on-chain effect, so no declared events.
+    expect(metadata.expectedEvents).toEqual([]);
+  });
+
+  it('builds the id as a pure vector<u8>, not an object ref', () => {
+    const { tx } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
+    // The first arg is a pure input (vector<u8>); object args would be Object inputs.
+    const inputs = tx.getData().inputs;
+    expect(inputs.some((i) => (i as { $kind?: string }).$kind === 'Pure')).toBe(true);
+  });
+
+  it('takes no splitCoins (a gasless dry-run gate)', () => {
+    const { tx } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
     expect(
       tx.getData().commands.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins'),
     ).toBe(false);

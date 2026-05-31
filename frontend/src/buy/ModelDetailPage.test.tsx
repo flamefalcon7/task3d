@@ -45,6 +45,9 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     glbBlobId: 'glb_demo',
     derivativeMintFee: '250000000', // 0.25 SUI
     derivativeRoyaltyBps: 500,
+    policy: 2,
+    isEncrypted: false,
+    previewBlobIds: [],
     ...overrides,
   };
 }

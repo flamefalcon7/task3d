@@ -55,7 +55,21 @@ import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import { thumbSourceForSummary } from '../walrus/aggregator';
+// plan-026 U5 — Seal decrypt 3-step fork for encrypted ALLOW_LIST bases.
+import { getSealClient } from '../seal/sealClient';
+import {
+  createSession,
+  activateSession,
+  getCachedSession,
+} from '../seal/sessionKey';
+import {
+  launchEncryptedCollection,
+  decryptEncryptedBase,
+  mintEncryptedTokens,
+  parseSealedKeyFromObject,
+  PACKAGE_ID,
+} from './encryptedFork';
 import {
   buttonOutline,
   buttonPrimary,
@@ -79,6 +93,11 @@ type Phase =
   | 'building-variants'
   | 'uploading'
   | 'signing'
+  // plan-026 U5 — encrypted ALLOW_LIST 3-step fork interstitials:
+  //   'launching-cap' — step 1 (pay fee → mint cap, one popup)
+  //   'decrypting'    — step 2 (SessionKey sign + key-server decrypt + bake)
+  | 'launching-cap'
+  | 'decrypting'
   | 'success'
   | 'error';
 
@@ -436,6 +455,18 @@ export function LaunchCollectionPage() {
     // for legacy bases). Switching between bases of different label shapes
     // is rare during a launch session but supported via this reset.
     setEditorState(newVariantEditorState(deriveUniqueLabels(model.partLabels)));
+    // plan-026 U5 — encrypted ALLOW_LIST base: the `glb_blob_id` holds AES
+    // CIPHERTEXT, not a public GLB. We CANNOT fetch a usable base mesh here —
+    // decryption requires the forker to first pay (step 1 mints the cap) and
+    // sign a SessionKey (step 2). So we skip the base download entirely; the
+    // forker authors variants against the public preview still until they
+    // commit. The decrypt + bake happens inside onLaunch's 3-step path.
+    if (model.isEncrypted) {
+      setBaseGlb(null);
+      if (!collectionName) setCollectionName(`${model.name} variants`);
+      setPhase('editing-variants');
+      return;
+    }
     // UX-G1 fix — distinct phase so the launch button label reads
     // "DOWNLOADING BASE MESH…" instead of the misleading "BUILDING 1 VARIANTS"
     // (we haven't built anything yet; we're just fetching the base GLB from
@@ -454,8 +485,18 @@ export function LaunchCollectionPage() {
     }
   }, [collectionName]);
 
-  const runBuildVariants = useCallback(async (): Promise<Uint8Array[]> => {
-    if (!session || !baseGlb || !base) throw new Error('build: session + base GLB required');
+  const runBuildVariants = useCallback(async (
+    // plan-026 U5 — the encrypted path decrypts the plaintext base inside
+    // onLaunch (after step 1) and passes it here; the public path omits it and
+    // we fall back to the state `baseGlb` fetched at pick time.
+    baseGlbOverride?: Uint8Array,
+    // plan-026 U5 — the in-flight cap + collection so the backend can verify the
+    // JWT wallet owns the cap before baking decrypted plaintext (hardening).
+    // Present only on the encrypted path.
+    encryptedBase?: { capId: string; collectionId: string },
+  ): Promise<Uint8Array[]> => {
+    const effectiveBaseGlb = baseGlbOverride ?? baseGlb;
+    if (!session || !effectiveBaseGlb || !base) throw new Error('build: session + base GLB required');
     // plan-013 U7 — resolve each variant's label→hex palette into the
     // backend's positional `partColors[]` by mapping `base.partLabels[i]` to
     // `row.palette[label]`. Missing palette entries (e.g., a base whose
@@ -475,7 +516,7 @@ export function LaunchCollectionPage() {
       }));
     };
     const buildReq: CollectionBuildRequest = {
-      baseGlbBase64: bytesToBase64(baseGlb),
+      baseGlbBase64: bytesToBase64(effectiveBaseGlb),
       variants: editorState.variants.map((row) => {
         const partColors = resolvePartColors(row.palette).map((pc) => ({
           baseColorRgb: pc.baseColorRgb,
@@ -486,6 +527,9 @@ export function LaunchCollectionPage() {
           paramsJson: JSON.stringify({ palette: row.palette, texture: row.textureId }),
         };
       }),
+      // plan-026 U5 — only sent on the encrypted path; triggers backend
+      // hardening (no body log, no plaintext persist, JWT-owns-cap check).
+      ...(encryptedBase ? { encryptedBase } : {}),
     };
     const res = await fetch('/api/collection/build', {
       method: 'POST',
@@ -640,22 +684,153 @@ export function LaunchCollectionPage() {
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
+  // plan-026 U5 — encrypted ALLOW_LIST 3-step fork. PERMISSIONLESS stays on the
+  // atomic onLaunch above; this path runs ONLY when the picked base is
+  // encrypted (base.isEncrypted). It needs TWO wallet signatures (step-1 launch
+  // + the SessionKey personal message), which cannot be driven in agent-browser
+  // — see CLAUDE.md Frontend Verification Protocol; unit tests mock the seam.
+  const onLaunchEncrypted = useCallback(async () => {
+    if (launchingRef.current) return;
+    if (!session || !signer || !base) return;
+    setMemoryRecheckSignal((n) => n + 1);
+    launchingRef.current = true;
+    setErrorMsg(null);
+    previewRef.current?.dispose();
+
+    // Wallet-signing wrapper shared by step 1 + step 3: signs+executes a PTB and
+    // returns the digest, surfacing a FailedTransaction as a thrown error.
+    const signAndExecute = async (tx: Parameters<typeof signer.signAndExecuteTransaction>[0]['transaction']): Promise<string> => {
+      const res = await signer.signAndExecuteTransaction({ transaction: tx, client: suiClient });
+      if (res.$kind === 'FailedTransaction') {
+        throw new Error(
+          `Tx failed (${res.FailedTransaction.digest}): ${res.FailedTransaction.status?.error?.message ?? 'unknown'}`,
+        );
+      }
+      return res.Transaction.digest;
+    };
+
+    try {
+      // ---- STEP 1 — cap-issuing launch_collection (fee paid, empty quilt) ----
+      setPhase('launching-cap');
+      const launch = await launchEncryptedCollection({
+        modelId: base.objectId,
+        feeMist: BigInt(base.derivativeMintFee || '0'),
+        signAndExecute,
+        fetchObjectChanges: async (digest) => {
+          // Wait for finality so getTransactionBlock's objectChanges resolve.
+          await suiClient.waitForTransaction({ digest });
+          const tb = await suiClient.getTransactionBlock({
+            digest,
+            options: { showObjectChanges: true },
+          });
+          return (tb.objectChanges ?? []) as ReadonlyArray<{
+            type?: string;
+            objectType?: string;
+            objectId?: string;
+          }>;
+        },
+      });
+
+      // ---- STEP 2 — SessionKey sign + key-server decrypt + bake ----
+      setPhase('decrypting');
+      // Reuse a cached SessionKey within its short TTL so a retry doesn't
+      // re-prompt; otherwise create one and sign its personal message.
+      let sessionKey = getCachedSession(session.address, PACKAGE_ID);
+      if (!sessionKey) {
+        const pending = await createSession(session.address, PACKAGE_ID, suiClient as never);
+        const { signature } = await signer.signPersonalMessage(pending.personalMessage);
+        sessionKey = await activateSession(pending, PACKAGE_ID, signature);
+      }
+
+      // Read the encrypted base's sealed_key lazily (omitted from the catalog
+      // summary because it is a few hundred bytes per model).
+      const modelResp = await suiClient.getObject({
+        id: base.objectId,
+        options: { showContent: true },
+      });
+      const sealedKey = parseSealedKeyFromObject(modelResp);
+
+      const plaintextGlb = await decryptEncryptedBase({
+        sealClient: getSealClient(),
+        sessionKey,
+        sealedKey,
+        ciphertextBlobId: base.glbBlobId,
+        capId: launch.capId,
+        collectionId: launch.collectionId,
+        baseModelId: base.objectId,
+        buildTxBytes: (tx) =>
+          tx.build({ client: suiClient as never, onlyTransactionKind: true }),
+      });
+
+      // Feed the DECRYPTED plaintext to the existing bake — no raw-download
+      // affordance is ever rendered for these bytes (R9). The cap + collection
+      // travel along so the backend can verify the JWT wallet owns the cap.
+      setPhase('building-variants');
+      const swapped = await runBuildVariants(plaintextGlb, {
+        capId: launch.capId,
+        collectionId: launch.collectionId,
+      });
+
+      setPhase('uploading');
+      const upload = await uploadFiles(swapped, signer as never);
+      if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
+
+      // ---- STEP 3 — mint_tokens (set quilt + batch-mint) ----
+      setPhase('signing');
+      const name = collectionName.trim() || `${base.name} variants`;
+      const tokenNames = swapped.map((_, i) => `${name} #${i + 1}`);
+      const tokenPatchIds = swapped.map((_, i) => upload.patchIds[i] ?? '');
+      const digest = await mintEncryptedTokens({
+        capId: launch.capId,
+        collectionId: launch.collectionId,
+        quiltBlobId: upload.blobIds[0],
+        tokenNames,
+        tokenPatchIds,
+        signAndExecute,
+      });
+      setTxDigest(digest);
+      setPhase('success');
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setPhase('error');
+    } finally {
+      launchingRef.current = false;
+      previewRef.current?.remount();
+    }
+  }, [session, signer, base, runBuildVariants, uploadFiles, collectionName, suiClient]);
+
+  // plan-026 U5 — the picked base's encryption decides the launch handler +
+  // labels. Encrypted ALLOW_LIST bases run the 3-step decrypt fork; everything
+  // else stays on the atomic path.
+  const isEncryptedBase = base?.isEncrypted ?? false;
+
   const busy =
     phase === 'downloading-base' ||
     phase === 'building-variants' ||
     phase === 'uploading' ||
-    phase === 'signing';
+    phase === 'signing' ||
+    phase === 'launching-cap' ||
+    phase === 'decrypting';
 
   const launchLabel = (() => {
     if (phase === 'downloading-base') return '— DOWNLOADING BASE MESH…';
+    if (phase === 'launching-cap') return '— STEP 1 · APPROVE FORK FEE…';
+    if (phase === 'decrypting') return '— STEP 2 · SIGN + DECRYPT BASE…';
     if (phase === 'building-variants') return `— BUILDING ${editorState.variants.length} VARIANTS`;
     if (phase === 'uploading') {
-      if (uploadStage === 'awaiting-register') return 'Step 1 of 3 — approve Walrus register…';
-      if (uploadStage === 'awaiting-certify') return 'Step 2 of 3 — approve Walrus certify…';
+      if (uploadStage === 'awaiting-register') return 'Approve Walrus register…';
+      if (uploadStage === 'awaiting-certify') return 'Approve Walrus certify…';
       return 'Uploading variants to Walrus…';
     }
-    if (phase === 'signing') return `Step 3 of 3 — approve launch (collection + ${editorState.variants.length} tokens)…`;
+    if (phase === 'signing') {
+      return isEncryptedBase
+        ? `— STEP 3 · APPROVE MINT (${editorState.variants.length} tokens)…`
+        : `Step 3 of 3 — approve launch (collection + ${editorState.variants.length} tokens)…`;
+    }
     if (phase === 'success') return 'LAUNCHED';
+    if (isEncryptedBase) {
+      return `FORK + DECRYPT (${editorState.variants.length} TOKENS) →`;
+    }
     return `LAUNCH COLLECTION (${editorState.variants.length} TOKENS) →`;
   })();
 
@@ -981,8 +1156,30 @@ export function LaunchCollectionPage() {
                           PreviewCanvas; PreviewCanvas's default BgTogglePill is
                           itself a <button>, producing a hydration-error nested
                           <button>-in-<button> (caught in dev console). The pill
-                          also reads as visual noise on a ~150 px thumbnail. */}
-                      <PreviewCanvas glbUrl={glbUrlForSummary(m)} bgToggle={false} />
+                          also reads as visual noise on a ~150 px thumbnail.
+                          plan-026 — encrypted ALLOW_LIST bases render the public
+                          preview still (an <img>), NEVER the ciphertext as a GLB. */}
+                      {(() => {
+                        const thumb = thumbSourceForSummary(m);
+                        if (thumb.kind === 'glb') {
+                          return <PreviewCanvas glbUrl={thumb.url} bgToggle={false} />;
+                        }
+                        return thumb.url ? (
+                          <img
+                            src={thumb.url}
+                            alt={`${m.name || 'model'} preview`}
+                            data-testid={`base-option-still-${m.objectId}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <span
+                            data-testid={`base-option-locked-${m.objectId}`}
+                            style={{ ...monoLabel, color: 'rgba(255,255,255,0.5)' }}
+                          >
+                            ENCRYPTED
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div style={baseOptionBody}>
                       <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
@@ -1153,18 +1350,26 @@ export function LaunchCollectionPage() {
                 />
               )}
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* plan-026 — PREVIEW VARIANTS needs the plaintext base mesh, which
+                  doesn't exist until an encrypted base is decrypted (post-pay).
+                  Hide it entirely for encrypted bases; the forker evaluates from
+                  the public still and authors palettes blind until FORK + DECRYPT. */}
+              {!isEncryptedBase && (
+                <button
+                  type="button"
+                  onClick={() => void onPreview()}
+                  disabled={busy}
+                  data-testid="preview-button"
+                  style={buttonOutline}
+                >
+                  {previewLabel}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => void onPreview()}
-                disabled={busy}
-                data-testid="preview-button"
-                style={buttonOutline}
-              >
-                {previewLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => void onLaunch()}
+                // plan-026 U5 — encrypted ALLOW_LIST bases run the 3-step
+                // decrypt fork; everything else stays on the atomic path.
+                onClick={() => void (isEncryptedBase ? onLaunchEncrypted() : onLaunch())}
                 // plan-016 code-review hotfix — gate on !signer too so the
                 // button is HTML-disabled (not just silently no-op via the
                 // click handler) when test mode has a missing/invalid key.
@@ -1176,7 +1381,21 @@ export function LaunchCollectionPage() {
                 {launchLabel}
               </button>
             </div>
-            <p style={launchHelper}>SIGNS 3× · PAYS GAS · MINTS L2</p>
+            <p style={launchHelper}>
+              {isEncryptedBase
+                ? 'ENCRYPTED BASE · SIGNS 4× (FORK FEE · SESSION · WALRUS · MINT) · DECRYPTS CLIENT-SIDE'
+                : 'SIGNS 3× · PAYS GAS · MINTS L2'}
+            </p>
+            {isEncryptedBase && (
+              <p
+                style={{ ...launchHelper, textTransform: 'none', letterSpacing: '0.5px', color: tokens.color.muted }}
+                data-testid="encrypted-base-notice"
+              >
+                This base is encrypted — you author palettes from the public preview
+                stills above. The real mesh is decrypted in your browser only after you
+                pay the fork fee; there is no download.
+              </p>
+            )}
             {/* plan-017 U4 — Multi-quilt scope. When N > QUILT_SIZE, the
                 user signs 2K+1 transactions instead of the single-quilt 3.
                 BatchProgressPanel surfaces the quilt structure honestly so

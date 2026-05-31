@@ -70,6 +70,15 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const license = (json.license ?? {}) as Record<string, unknown>;
   const derivativeMintFee = String(license.derivative_mint_fee ?? '0');
   const derivativeRoyaltyBps = Number(license.derivative_royalty_bps ?? 0);
+  // plan-026 D-075 — policy + Seal flags. Pre-v9 objects carry no `is_encrypted`
+  // / `preview_blob_ids` and (typically) no explicit policy → default to
+  // PERMISSIONLESS (2) / false / [] so legacy public bases render unchanged.
+  const policy = Number(license.policy ?? 2);
+  const isEncrypted = Boolean(json.is_encrypted ?? false);
+  const rawPreviewBlobIds = Array.isArray(json.preview_blob_ids)
+    ? (json.preview_blob_ids as unknown[])
+    : [];
+  const previewBlobIds = rawPreviewBlobIds.map((b) => String(b));
   const creator = String(json.creator ?? '');
   const shapeType = String(json.shape_type ?? '');
   const paramsJson = String(json.params_json ?? '');
@@ -107,7 +116,21 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     glbBlobId,
     derivativeMintFee,
     derivativeRoyaltyBps,
+    policy,
+    isEncrypted,
+    previewBlobIds,
   };
+}
+
+// plan-026 D-075 — RESTRICTED bases are PRIVATE: excluded from the public
+// catalog entirely (no preview, creator-only, no external evaluator per R11).
+// Filtering here — at the single indexer source that feeds BOTH BrowsePage and
+// LaunchCollectionPage's fork picker — guarantees a RESTRICTED base never
+// surfaces in browse OR as a forkable base. ALLOW_LIST (1) + PERMISSIONLESS (2)
+// stay visible. Defaults to keep on a missing policy (legacy → public).
+const POLICY_RESTRICTED = 0;
+function isCatalogVisible(m: Model3DSummary): boolean {
+  return m.policy !== POLICY_RESTRICTED;
 }
 
 function readCache(): Model3DSummary[] | null {
@@ -182,9 +205,13 @@ export function useModelIndex(options: UseModelIndexOptions = {}): UseModelIndex
     void fetchIndex();
   }, [fetchIndex]);
 
+  // plan-026 D-075 — drop RESTRICTED (private) bases before the tag filter so
+  // they appear neither in browse nor in the fork picker. Applied at the
+  // derivation (not just at fetch) so cached entries are covered too.
+  const visible = allModels.filter(isCatalogVisible);
   const models = tagFilter
-    ? allModels.filter((m) => m.tags.includes(tagFilter))
-    : allModels;
+    ? visible.filter((m) => m.tags.includes(tagFilter))
+    : visible;
 
   return { models, loading, error, refetch: () => void fetchIndex() };
 }
