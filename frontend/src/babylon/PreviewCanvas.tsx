@@ -217,6 +217,10 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         const engine = engineRef.current;
         const camera = sceneRef.current?.activeCamera as ArcRotateCamera | null | undefined;
         if (!engine || !camera) return [];
+        // Re-frame the camera tightly to the mesh first so the thumbnail shows
+        // the model FILLING the frame — not tiny in a sea of background —
+        // regardless of wherever the user left the on-screen orbit/zoom.
+        if (meshesRef.current.length > 0) frameCameraToMeshes(camera, meshesRef.current);
         return captureStillsFromScene(engine, camera, count);
       },
     }),

@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { useModelById } from './hooks';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import { glbUrlForSummary, previewStillUrlForSummary } from '../walrus/aggregator';
 
 // L1 published-content detail page (`/model/:objectId`). v6 `Model3D` is shared
 // content a creator publishes with license terms — it is NOT sold per-access
@@ -47,6 +47,11 @@ export function ModelDetailPage() {
   }
 
   const aggregatorUrl = glbUrlForSummary(model);
+  // plan-026 — an encrypted base's `glbBlobId` is AES CIPHERTEXT, NOT a loadable
+  // GLB. Render the public preview still (or a placeholder) instead of feeding
+  // the ciphertext to Babylon (which hangs on "LOADING BASE MESH…"). The real
+  // mesh is only obtainable by paying to fork (the forge decrypt flow).
+  const previewUrl = previewStillUrlForSummary(model);
 
   return (
     <div
@@ -65,17 +70,51 @@ export function ModelDetailPage() {
           style={{ aspectRatio: '1', background: '#15171b', borderRadius: 8, overflow: 'hidden' }}
           data-testid="preview-canvas-wrap"
         >
-          <PreviewCanvas glbUrl={aggregatorUrl} />
+          {model.isEncrypted ? (
+            previewUrl ? (
+              <img
+                src={previewUrl}
+                alt=""
+                data-testid="detail-preview-still"
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+              />
+            ) : (
+              <div
+                data-testid="detail-encrypted-placeholder"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  padding: 16,
+                  fontSize: 13,
+                  opacity: 0.7,
+                }}
+              >
+                Encrypted base — fork to unlock the mesh.
+              </div>
+            )
+          ) : (
+            <PreviewCanvas glbUrl={aggregatorUrl} />
+          )}
         </div>
-        <a
-          href={aggregatorUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 12, marginTop: 8, display: 'block' }}
-          data-testid="walrus-link"
-        >
-          Walrus blob: {model.glbBlobId || model.blobId}
-        </a>
+        {model.isEncrypted ? (
+          <div style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }} data-testid="encrypted-blob-note">
+            Encrypted base — the Walrus blob holds ciphertext; pay the fork fee to decrypt.
+          </div>
+        ) : (
+          <a
+            href={aggregatorUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 12, marginTop: 8, display: 'block' }}
+            data-testid="walrus-link"
+          >
+            Walrus blob: {model.glbBlobId || model.blobId}
+          </a>
+        )}
       </div>
       <div>
         <h2 style={{ marginTop: 0 }} data-testid="model-name">

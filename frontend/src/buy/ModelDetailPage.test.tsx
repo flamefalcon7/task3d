@@ -72,6 +72,32 @@ describe('ModelDetailPage', () => {
     expect(terms.textContent).toMatch(/5\.00%/);
   });
 
+  it('encrypted base: renders the preview still, NEVER feeds the ciphertext to Babylon (plan-026)', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ isEncrypted: true, policy: 1, glbBlobId: 'cipher-patch', previewBlobIds: ['prev-1'] }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xENC');
+    // Public preview still, NOT the 3D canvas (which hangs forever on ciphertext).
+    expect(screen.getByTestId('detail-preview-still')).toBeTruthy();
+    expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
+    // The misleading "open the GLB" link is replaced with an honest encrypted note.
+    expect(screen.getByTestId('encrypted-blob-note')).toBeTruthy();
+    expect(screen.queryByTestId('walrus-link')).toBeNull();
+  });
+
+  it('encrypted base with no preview still → placeholder, still no canvas', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ isEncrypted: true, policy: 0, glbBlobId: 'cipher', previewBlobIds: [] }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xENC2');
+    expect(screen.getByTestId('detail-encrypted-placeholder')).toBeTruthy();
+    expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
+  });
+
   it('routes to /launch via the fork CTA for a forkable model', () => {
     useModelByIdMock.mockReturnValue({ model: makeModel(), loading: false, error: null });
     renderAt('/model/0xMODEL');
