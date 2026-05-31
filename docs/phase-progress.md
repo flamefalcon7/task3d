@@ -1,6 +1,32 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 3:35pm GMT+8 (Seal content protection → **plan-026 100% COMPLETE**; v9 live; all 7 units + deploy shipped)
+## Last Updated: 2026-05-31 / 9:00pm GMT+8 (Seal v1 SHIPPED + LIVE-VERIFIED + post-ship UX polish; one open question)
+
+### Where we are (read this first after compact)
+plan-026 (Seal content protection) is **functionally complete, deployed to v9 testnet, and end-to-end LIVE-verified** (headless round-trip: encrypt→quilt upload→publish_encrypted→launch_collection→SessionKey→**live key servers released the key**→decrypt→byte-exact GLB). All on branch `feat/seal-content-protection` (NOT merged to main). Frontend **810 tests / tsc 32 baseline**, Move **79**, backend **128**.
+
+**Post-ship UX fixes done this session (all committed, browser-tested by user):**
+- 9-popup publish → **one quilt = 3 popups** (`uploadFiles` `quiltSize` override).
+- `ModelDetailPage` + `VariantPreview` (fork page) were feeding the **ciphertext to Babylon** → "LOADING BASE MESH…" forever; now render the preview still / honest placeholder for encrypted bases. Full surface sweep done (catalog/detail/fork/market/forge all handle `isEncrypted`).
+- **Faux-turntable**: `TurntablePreview` cycles all preview stills (was showing only the first). Revolution-based speed (~1.8s/rev).
+- Preview stills: PNG→**WebP**, **8 frames** (= the contract cap `MAX_PREVIEW_BLOBS=8`; lockstep guard test added — do NOT raise past 8 without bumping the on-chain const + redeploy). 512px kept.
+- Fee copy de-jargoned ("UNLOCK PRICE" / "what people pay you to unlock your model…").
+- Tooling: `frontend/scripts/seal-roundtrip.ts` (re-run before demo: `cd frontend && ../backend/node_modules/.bin/tsx scripts/seal-roundtrip.ts`). `docs/seal-live-verification-checklist.md`.
+
+### OPEN QUESTION (awaiting user) — segmentation on Upload path
+User asked why an **uploaded** GLB has no segmentation. Answer: mesh_segmentation is a **Tripo-only** step (D-033 — Upload bypasses Tripo by design), so uploaded GLBs get `partLabels=[]` and no per-part coloring; the tagging step is gated to `sourceMode === 'tripo'`. I OFFERED an enhancement: for uploaded **multi-material** GLBs (like the user's pickup-truck, which Tripo had segmented), read the GLB's existing materials as parts and enable tagging/per-part coloring **without Tripo**. **User has not answered yet.** If yes: (1) verify the truck GLB's material count, (2) enable TaggingStep for upload mode when material count > 1, (3) derive partLabels from the GLB. This is a NEW feature (multi-file) — confirm before building.
+
+### Other open threads (lower priority)
+- `feat/seal-content-protection` not merged to main (awaiting user's merge/PR call).
+- Demo video + pitch deck (the user's original priority; Seal is now a live on-chain differentiator for the Walrus track).
+- Tripo account is OUT OF CREDITS (top up before demoing the prompt→3D path; or demo via Upload).
+
+### v9 ids (live testnet)
+package `0xba1e84ba…876c5c` · SealIdRegistry `0xdb6e97f7…372e3` (shared) · Publisher `0x863582ff…cede0` · TransferPolicy `0x81850ced…2c44` · UpgradeCap `0xfbda72ec…c88d`. After pulling: `pnpm --dir shared build` (else +17 stale-dist tsc errors). Deployer `0x3116881c…` = active sui/walrus CLI addr (28 SUI + 1.31 WAL).
+
+---
+
+## Older: 2026-05-31 / 3:35pm GMT+8 (Seal content protection → **plan-026 100% COMPLETE**; v9 live; all 7 units + deploy shipped)
 
 ### plan-026 status: DONE ✅ (17 commits on `feat/seal-content-protection`)
 All 7 units + the D0 gate + the v9 deploy shipped & merged. **Frontend 801/801 · backend 128/128 · Move 79/79 · tsc 32 baseline (frontend, zero new) · backend tsc 0.**
