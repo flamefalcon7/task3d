@@ -9,6 +9,7 @@ import {
   NoMaterialInBaseGlbError,
   PartCountMismatchError,
   MaterialNameNotFoundError,
+  AmbiguousMaterialNameError,
 } from './gltf-material-swap.js';
 import type { TextureId } from '@overflow2026/shared';
 
@@ -463,6 +464,43 @@ describe('swapMaterial', () => {
       const mat1HasTex = flags[names.indexOf('mat_1')];
       expect(mat0HasTex).toBe(true);
       expect(mat1HasTex).toBe(false);
+    });
+
+    it('throws AmbiguousMaterialNameError when a targeted name matches 2+ materials', async () => {
+      // Defense-in-depth: the forge gates on unique names, but swapMaterial is an
+      // exported lib boundary. A base with two materials sharing a name must NOT
+      // silently last-write-wins (→ wrong-part color); it fails loud instead.
+      const doc = new Document();
+      const buffer = doc.createBuffer();
+      const pos = doc
+        .createAccessor('POSITION')
+        .setType('VEC3')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]) as any)
+        .setBuffer(buffer);
+      const idx = doc
+        .createAccessor('INDICES')
+        .setType('SCALAR')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .setArray(new Uint16Array([0, 1, 2]) as any)
+        .setBuffer(buffer);
+      // Two distinct materials, SAME name 'dup'.
+      const m0 = doc.createMaterial('dup').setBaseColorFactor([1, 1, 1, 1]);
+      const m1 = doc.createMaterial('dup').setBaseColorFactor([1, 1, 1, 1]);
+      const p0 = doc.createPrimitive().setMode(4).setAttribute('POSITION', pos).setIndices(idx).setMaterial(m0);
+      const p1 = doc.createPrimitive().setMode(4).setAttribute('POSITION', pos).setIndices(idx).setMaterial(m1);
+      const mesh = doc.createMesh('m').addPrimitive(p0).addPrimitive(p1);
+      const node = doc.createNode('n').setMesh(mesh);
+      doc.getRoot().setDefaultScene(doc.createScene('s').addChild(node));
+      const base = await new NodeIO().writeBinary(doc);
+
+      await expect(
+        swapMaterial(
+          base,
+          { partColors: [{ baseColorRgb: [1, 0, 0, 1], materialName: 'dup' }] },
+          async () => new Uint8Array(),
+        ),
+      ).rejects.toBeInstanceOf(AmbiguousMaterialNameError);
     });
   });
 

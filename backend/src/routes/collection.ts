@@ -8,6 +8,7 @@ import {
   loadBundledTexture,
   PartCountMismatchError,
   MaterialNameNotFoundError,
+  AmbiguousMaterialNameError,
 } from '../lib/gltf-material-swap.js';
 import type { JwtSigner } from '../lib/jwt.js';
 import { createCapVerifier, type CapVerifier } from '../sui/capVerifier.js';
@@ -147,6 +148,15 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
           encryptedBase
             ? { error: 'material_name_not_found' }
             : { error: 'material_name_not_found', materialName: err.materialName },
+          422,
+        );
+      }
+      // plan A2 — a targeted material name matched 2+ materials in the base.
+      if (err instanceof AmbiguousMaterialNameError) {
+        return c.json(
+          encryptedBase
+            ? { error: 'ambiguous_material_name' }
+            : { error: 'ambiguous_material_name', materialName: err.materialName },
           422,
         );
       }

@@ -64,6 +64,22 @@ export class MaterialNameNotFoundError extends Error {
   }
 }
 
+// plan A2 (D-077) — fires on the name-keyed path when a targeted `materialName`
+// matches MORE THAN ONE material in the base GLB. By-name resolution would be
+// ambiguous; recoloring "the" material with that name could silently hit the
+// wrong one (the exact silent-miscolor class name-keying exists to prevent), so
+// the swap fails loud (route 422 `ambiguous_material_name`). The forge gates on
+// unique names (`allNamesUniqueNonEmpty`) so this is a defense-in-depth guard at
+// the lib boundary for any other / future caller of swapMaterial.
+export class AmbiguousMaterialNameError extends Error {
+  readonly materialName: string;
+  constructor(materialName: string) {
+    super(`ambiguous_material_name: more than one material named '${materialName}' in base GLB`);
+    this.name = 'AmbiguousMaterialNameError';
+    this.materialName = materialName;
+  }
+}
+
 export async function loadBundledTexture(id: TextureId): Promise<Uint8Array> {
   const candidate = path.join(TEXTURES_DIR, `${id}.png`);
   const resolved = path.resolve(candidate);
@@ -146,12 +162,26 @@ export async function swapMaterial(
   const nameKeyed =
     spec.partColors.length > 0 && spec.partColors.every((p) => p.materialName != null);
   if (nameKeyed) {
-    const byName = new Map(materials.map((m) => [m.getName(), m]));
+    // Build name → material, tracking collisions. Two materials sharing a name
+    // make by-name resolution ambiguous; rather than let Map last-write-wins
+    // silently pick one (and skip the other), we record the collision and fail
+    // loud if a partColors entry actually targets that name.
+    const byName = new Map<string, (typeof materials)[number]>();
+    const ambiguous = new Set<string>();
+    for (const m of materials) {
+      const n = m.getName();
+      if (byName.has(n)) ambiguous.add(n);
+      else byName.set(n, m);
+    }
     for (let i = 0; i < spec.partColors.length; i++) {
       const partSpec = spec.partColors[i]!;
-      const target = byName.get(partSpec.materialName!);
+      const name = partSpec.materialName!;
+      if (ambiguous.has(name)) {
+        throw new AmbiguousMaterialNameError(name);
+      }
+      const target = byName.get(name);
       if (!target) {
-        throw new MaterialNameNotFoundError(partSpec.materialName!);
+        throw new MaterialNameNotFoundError(name);
       }
       await applyPart(target, partSpec, i);
     }

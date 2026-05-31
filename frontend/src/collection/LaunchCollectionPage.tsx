@@ -527,7 +527,12 @@ export function LaunchCollectionPage() {
     let materialNames: (string | null)[] = [];
     try {
       materialNames = await extractMaterialNames(effectiveBaseGlb);
-    } catch {
+    } catch (e) {
+      // Don't swallow silently: a NullEngine parse failure on a multi-part base
+      // drops us to the positional swap, which is only safe for Tripo-aligned
+      // bases. Surface it so the degradation is at least diagnosable.
+      // eslint-disable-next-line no-console
+      console.warn('runBuildVariants: extractMaterialNames failed; falling back to positional swap', e);
       materialNames = [];
     }
     const nameKeyingApplies =
@@ -574,6 +579,7 @@ export function LaunchCollectionPage() {
           error?: string;
           materialCount?: number;
           partColorsCount?: number;
+          materialName?: string;
         };
         if (body.error === 'part_count_mismatch') {
           throw new Error(
@@ -581,8 +587,29 @@ export function LaunchCollectionPage() {
               `Try picking a different base, or regenerate this one — Tripo's segmentation can drift across runs.`,
           );
         }
+        // plan A2 — name-keyed swap envelopes. A part's material name didn't
+        // resolve, or matched more than one material in the base.
+        if (body.error === 'material_name_not_found') {
+          throw new Error(
+            `Couldn't match a part to the base mesh` +
+              `${body.materialName ? ` (part "${body.materialName}")` : ''}. ` +
+              `Try picking a different base, or regenerate this one.`,
+          );
+        }
+        if (body.error === 'ambiguous_material_name') {
+          throw new Error(
+            `This base has parts that share the same material name` +
+              `${body.materialName ? ` ("${body.materialName}")` : ''}, so they can't be ` +
+              `recolored separately. Try a different base.`,
+          );
+        }
       } catch (parseOrTyped) {
-        if (parseOrTyped instanceof Error && parseOrTyped.message.startsWith('Base mesh has')) {
+        if (
+          parseOrTyped instanceof Error &&
+          (parseOrTyped.message.startsWith('Base mesh has') ||
+            parseOrTyped.message.startsWith("Couldn't match a part") ||
+            parseOrTyped.message.startsWith('This base has parts'))
+        ) {
           throw parseOrTyped;
         }
         // JSON.parse failure (raw text body): fall through.

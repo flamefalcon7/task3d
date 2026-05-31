@@ -556,6 +556,52 @@ describe('LaunchCollectionPage', () => {
     expect(pc[1].materialName).toBeUndefined();
   });
 
+  it('plan A2 — omits materialName (positional fallback) on fork-time drift (extracted names length ≠ partLabels length)', async () => {
+    // The base published 3 partLabels, but a fresh parse at fork time yields only
+    // 2 material names (e.g. blob/loader drift). nameKeyingApplies must fail on the
+    // length guard and fall back to positional rather than misalign names↔labels.
+    extractMaterialNamesMock.mockResolvedValueOnce(['m0', 'm1']); // length 2 ≠ 3
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({
+          objectId: '0xdrift2',
+          glbBlobId: 'glb-drift2',
+          partLabels: ['primary', 'primary', 'accent'],
+        }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const buildBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/v1/blobs/')) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      if (init?.body) buildBodies.push(init.body as string);
+      return new Response(
+        JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xdrift2'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('preview-button'));
+    });
+
+    await waitFor(() => expect(buildBodies.length).toBeGreaterThan(0));
+    const body = JSON.parse(buildBodies[0]!);
+    const pc = body.variants[0].partColors;
+    expect(pc).toHaveLength(3);
+    expect(pc.every((p: { materialName?: string }) => p.materialName === undefined)).toBe(true);
+  });
+
   it('F7 — typed 422 part_count_mismatch surfaces a human-readable message (materialCount vs partColorsCount)', async () => {
     useModelIndexMock.mockReturnValue({
       models: [

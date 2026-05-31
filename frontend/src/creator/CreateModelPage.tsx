@@ -918,6 +918,10 @@ export function CreateModelPage() {
 
         {haveModel && sourceMode === 'tripo' && confirmed && !tagged && (
           <TaggingStep
+            // key={glbUrl} forces a fresh mount per GLB so per-GLB state (labels,
+            // materialNames, loaded, skippedRef) can't leak across a regenerate/
+            // re-upload that swaps glbUrl without toggling `tagged`.
+            key={glbUrl}
             glbUrl={glbUrl}
             glbSizeBytes={glb?.byteLength ?? 0}
             disabled={genBusy}
@@ -935,6 +939,10 @@ export function CreateModelPage() {
             partLabels=[] behavior for those uploads. */}
         {haveModel && sourceMode === 'upload' && !tagged && (
           <TaggingStep
+            // Fresh mount per uploaded GLB (see Tripo mount above) — a second
+            // file pick mid-tagging must reset labels/loaded/skippedRef so the
+            // auto-skip + naming evaluate against the NEW base only.
+            key={glbUrl}
             glbUrl={glbUrl}
             glbSizeBytes={glb?.byteLength ?? 0}
             autoSkipIfNotTaggable
