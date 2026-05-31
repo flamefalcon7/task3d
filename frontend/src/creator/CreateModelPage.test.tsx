@@ -21,8 +21,15 @@ vi.mock('../auth/useSession', () => ({
 }));
 
 const uploadBlobMock = vi.fn();
+const uploadFilesMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
-  useWalrusUpload: () => ({ uploadBlob: uploadBlobMock, stage: 'idle', status: 'idle', error: null }),
+  useWalrusUpload: () => ({
+    uploadBlob: uploadBlobMock,
+    uploadFiles: uploadFilesMock,
+    stage: 'idle',
+    status: 'idle',
+    error: null,
+  }),
 }));
 
 // plan-026 U4 — PreviewCanvas is now ref-driven (captureStills). The mock
@@ -136,6 +143,14 @@ beforeEach(() => {
   useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   signAndExecuteMock.mockReset();
   uploadBlobMock.mockReset();
+  uploadFilesMock.mockReset();
+  // Default quilt result: 1 file (ciphertext only) → 1 patch id. Tests with
+  // preview stills override this to return more patch ids (input order).
+  uploadFilesMock.mockResolvedValue({
+    blobIds: ['quilt_blob'],
+    blobObjects: [{ blobId: 'quilt_blob', blobObjectId: '0x' + 'a'.repeat(64) }],
+    patchIds: ['patch_cipher'],
+  });
   signTxMock.mockReset();
   buildPublishPtbMock.mockReset();
   buildPublishPtbMock.mockReturnValue({
@@ -310,19 +325,20 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('policy-1'));
     fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '1' } });
 
-    uploadBlobMock.mockResolvedValue({ blobId: 'cipher_blob_id', blobObjectId: '0x' + 'a'.repeat(64) });
     signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Sealed Model' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
 
-    // Encrypted path: encryptBase ran, the CIPHERTEXT (not plaintext) was uploaded,
-    // and the encrypted PTB builder was used (not the plain one).
+    // Encrypted path: encryptBase ran, the ciphertext + previews go up as ONE
+    // Walrus quilt (ciphertext is file [0], never the plaintext GLB), and the
+    // encrypted PTB builder was used (not the plain one). No standalone uploadBlob.
     await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
     expect(encryptBaseMock).toHaveBeenCalledOnce();
-    // uploadBlob received the mocked ciphertext bytes, never the plaintext GLB.
-    expect(uploadBlobMock.mock.calls[0]![0]).toEqual(new Uint8Array([0xc1, 0xc2, 0xc3]));
+    expect(uploadFilesMock).toHaveBeenCalledOnce();
+    expect(uploadFilesMock.mock.calls[0]![0][0]).toEqual(new Uint8Array([0xc1, 0xc2, 0xc3]));
+    expect(uploadBlobMock).not.toHaveBeenCalled();
     const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
       sealedKey: Uint8Array;
       sealId: Uint8Array;
@@ -355,9 +371,10 @@ describe('CreateModelPage', () => {
     expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
     expect(uploadBlobMock).not.toHaveBeenCalled();
+    expect(uploadFilesMock).not.toHaveBeenCalled();
   });
 
-  it('U4: allow-list captures preview stills, uploads them as public blobs, passes their ids', async () => {
+  it('U4: allow-list quilts the ciphertext + preview stills in ONE upload; passes their patch ids', async () => {
     TAGGING_PART_COUNT_REF.current = 1;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
@@ -369,8 +386,12 @@ describe('CreateModelPage', () => {
     fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '2' } });
 
     captureStillsMock.mockResolvedValue([new Uint8Array([0x11]), new Uint8Array([0x22])]);
-    let n = 0;
-    uploadBlobMock.mockImplementation(async () => ({ blobId: `blob_${n++}`, blobObjectId: '0x' + 'a'.repeat(64) }));
+    // Quilt returns one patch id per file, in input order: ciphertext, then stills.
+    uploadFilesMock.mockResolvedValue({
+      blobIds: ['quilt_blob'],
+      blobObjects: [{ blobId: 'quilt_blob', blobObjectId: '0x' + 'a'.repeat(64) }],
+      patchIds: ['patch_cipher', 'patch_still_1', 'patch_still_2'],
+    });
     signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Previewed' } });
     await act(async () => {
@@ -379,16 +400,19 @@ describe('CreateModelPage', () => {
 
     await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
     expect(captureStillsMock).toHaveBeenCalledOnce();
-    // 2 preview stills uploaded first, then the ciphertext = 3 uploads.
-    expect(uploadBlobMock).toHaveBeenCalledTimes(3);
-    expect(uploadBlobMock.mock.calls[0]![0]).toEqual(new Uint8Array([0x11]));
-    expect(uploadBlobMock.mock.calls[1]![0]).toEqual(new Uint8Array([0x22]));
+    // ONE quilt upload (not 3 standalone): [ciphertext, still1, still2] in order.
+    expect(uploadFilesMock).toHaveBeenCalledOnce();
+    expect(uploadBlobMock).not.toHaveBeenCalled();
+    const files = uploadFilesMock.mock.calls[0]![0] as Uint8Array[];
+    expect(files[0]).toEqual(new Uint8Array([0xc1, 0xc2, 0xc3])); // ciphertext first
+    expect(files[1]).toEqual(new Uint8Array([0x11]));
+    expect(files[2]).toEqual(new Uint8Array([0x22]));
     const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
       previewBlobIds: string[];
       glbBlobId: string;
     };
-    expect(encArgs.previewBlobIds).toEqual(['blob_0', 'blob_1']);
-    expect(encArgs.glbBlobId).toBe('blob_2');
+    expect(encArgs.glbBlobId).toBe('patch_cipher'); // ciphertext patch → glb_blob_id
+    expect(encArgs.previewBlobIds).toEqual(['patch_still_1', 'patch_still_2']);
   });
 
   it('U4: restricted publish is encrypted but captures NO preview stills (private)', async () => {
@@ -401,7 +425,6 @@ describe('CreateModelPage', () => {
 
     fireEvent.click(screen.getByTestId('policy-0')); // Restricted
     captureStillsMock.mockResolvedValue([new Uint8Array([0x11])]);
-    uploadBlobMock.mockResolvedValue({ blobId: 'cipher_blob', blobObjectId: '0x' + 'a'.repeat(64) });
     signAndExecuteMock.mockResolvedValue({ digest: 'RESTDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Private' } });
     await act(async () => {
@@ -410,7 +433,9 @@ describe('CreateModelPage', () => {
 
     await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
     expect(captureStillsMock).not.toHaveBeenCalled();
-    expect(uploadBlobMock).toHaveBeenCalledTimes(1); // ciphertext only
+    // One quilt holding ONLY the ciphertext (no preview stills).
+    expect(uploadFilesMock).toHaveBeenCalledOnce();
+    expect(uploadFilesMock.mock.calls[0]![0]).toHaveLength(1);
     const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as { previewBlobIds: string[] };
     expect(encArgs.previewBlobIds).toEqual([]);
   });

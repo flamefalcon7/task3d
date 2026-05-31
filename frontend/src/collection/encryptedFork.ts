@@ -164,7 +164,10 @@ export async function decryptEncryptedBase(
   });
   const txBytes = await args.buildTxBytes(tx);
   const fetchBytes = args.fetchBytes ?? defaultFetchBytes;
-  const ciphertextUrl = `${WALRUS_AGGREGATOR}/v1/blobs/${args.ciphertextBlobId}`;
+  // The ciphertext is a QUILT PATCH (co-located with the preview stills in one
+  // Walrus quilt at publish — single upload, ~3 popups), so it resolves via the
+  // by-quilt-patch-id endpoint, not /v1/blobs/<standalone-id>.
+  const ciphertextUrl = `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${args.ciphertextBlobId}`;
   return decryptBaseGlb({
     client: args.sealClient,
     sealedKey: args.sealedKey,

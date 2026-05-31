@@ -527,7 +527,7 @@ export function CreateModelPage() {
 
   const { session, clearSession } = useSession();
   const account = useCurrentAccount();
-  const { uploadBlob, stage: uploadStage } = useWalrusUpload();
+  const { uploadBlob, uploadFiles, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const suiClient = useSuiClient();
   const signer = useDappKitSigner(account?.address ?? null);
@@ -656,19 +656,14 @@ export function CreateModelPage() {
       const isEncrypted = policy !== POLICY_PERMISSIONLESS;
       let glbBlob: { blobId: string; blobObjectId: string };
       let sealFields: { sealedKey: Uint8Array; sealId: Uint8Array } | null = null;
-      const previewBlobIds: string[] = [];
+      let previewBlobIds: string[] = [];
       if (isEncrypted) {
-        // U4 — ALLOW_LIST only: capture watermarked preview stills from the
-        // PLAINTEXT scene (before encryption) and upload them as PUBLIC blobs so a
-        // prospective forker can evaluate the base pre-payment. RESTRICTED is
-        // private (off-catalog) and skips previews entirely (R11).
-        if (policy === POLICY_ALLOW_LIST) {
-          const stills = (await previewRef.current?.captureStills()) ?? [];
-          for (const still of stills) {
-            const up = await uploadBlob(still, signer);
-            previewBlobIds.push(up.blobId);
-          }
-        }
+        // ALLOW_LIST captures watermarked preview stills from the PLAINTEXT scene
+        // (before encryption) so a prospective forker can evaluate the base pre-
+        // payment (R6/R12); RESTRICTED is private (off-catalog) and skips previews
+        // entirely (R11).
+        const stills =
+          policy === POLICY_ALLOW_LIST ? ((await previewRef.current?.captureStills()) ?? []) : [];
         const sealId = crypto.getRandomValues(new Uint8Array(32));
         const { ciphertext, sealedKey } = await encryptBase(
           getSealClient(),
@@ -676,7 +671,18 @@ export function CreateModelPage() {
           glb,
           sealId,
         );
-        glbBlob = await uploadBlob(ciphertext, signer);
+        // ONE Walrus quilt holding the ciphertext + all preview stills → a SINGLE
+        // upload (register + certify), not N+1 standalone uploads. Keeps the
+        // encrypted publish at the same ~3 wallet popups as a public publish.
+        // patchIds preserve input order: [0] = ciphertext (→ glb_blob_id, fetched
+        // by-quilt-patch-id), [1..] = preview stills. 1 ciphertext + ≤3 stills
+        // stays within QUILT_SIZE (4) = one quilt.
+        const quilt = await uploadFiles([ciphertext, ...stills], signer);
+        glbBlob = {
+          blobId: quilt.patchIds[0]!,
+          blobObjectId: quilt.blobObjects[0]!.blobObjectId,
+        };
+        previewBlobIds = quilt.patchIds.slice(1);
         sealFields = { sealedKey, sealId };
       } else {
         glbBlob = await uploadBlob(glb, signer);
@@ -922,7 +928,7 @@ export function CreateModelPage() {
             </fieldset>
             <label>
               <span style={sectionLabel}>
-                {policy === POLICY_ALLOW_LIST ? 'FORK FEE (SUI) — REQUIRED' : 'DERIVATIVE MINT FEE (SUI)'}
+                {policy === POLICY_ALLOW_LIST ? 'UNLOCK PRICE (SUI) — REQUIRED' : 'DERIVATIVE MINT FEE (SUI)'}
               </span>
               <input
                 data-testid="fee-input"
@@ -932,7 +938,7 @@ export function CreateModelPage() {
               />
               {policy === POLICY_ALLOW_LIST && (
                 <span data-testid="allow-list-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                  Allow-list is pay-to-fork: set a fork fee greater than 0 to unlock the encrypted base.
+                  What people pay you to unlock your model and make their own version of it. Must be more than 0 SUI.
                 </span>
               )}
             </label>

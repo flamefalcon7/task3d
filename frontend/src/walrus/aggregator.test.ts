@@ -13,7 +13,7 @@ import {
 describe('previewStillUrlForSummary', () => {
   it('returns the first preview blob as an aggregator URL', () => {
     expect(previewStillUrlForSummary({ previewBlobIds: ['still-1', 'still-2'] })).toBe(
-      `${WALRUS_AGGREGATOR}/v1/blobs/still-1`,
+      `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/still-1`,
     );
   });
 
@@ -40,7 +40,7 @@ describe('thumbSourceForSummary', () => {
       isEncrypted: true,
       previewBlobIds: ['preview-1'],
     });
-    expect(t).toEqual({ kind: 'preview', url: `${WALRUS_AGGREGATOR}/v1/blobs/preview-1` });
+    expect(t).toEqual({ kind: 'preview', url: `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/preview-1` });
     // The ciphertext blob id must NOT appear in the resolved url.
     expect(t.url).not.toContain('glb-ciphertext-or-mesh');
   });

@@ -137,7 +137,9 @@ describe('CollectionCard', () => {
       ],
     });
     const still = screen.getByTestId('collection-card-preview-still') as HTMLImageElement;
-    expect(still.src).toContain('/v1/blobs/still-1');
+    // Previews are quilt patches (co-located with the ciphertext in one quilt) →
+    // resolved via by-quilt-patch-id, never the ciphertext blob.
+    expect(still.src).toContain('/v1/blobs/by-quilt-patch-id/still-1');
     expect(still.src).not.toContain('cipher-blob');
     // No GLB canvas rendered for an encrypted base.
     expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();

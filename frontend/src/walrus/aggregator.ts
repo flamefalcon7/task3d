@@ -24,11 +24,15 @@ export function glbUrlForSummary(
 // when there is no preview (PERMISSIONLESS, or a malformed encrypted record) —
 // callers fall back to the 3D PreviewCanvas. NEVER point this at `glbBlobId`,
 // which holds AES ciphertext for an encrypted base.
+//
+// `previewBlobIds` are QUILT PATCH ids: the ciphertext + all preview stills are
+// co-located in ONE Walrus quilt at publish (so an encrypted publish is a single
+// upload, ~3 popups), so previews resolve via the by-quilt-patch-id endpoint.
 export function previewStillUrlForSummary(
   m: Pick<Model3DSummary, 'previewBlobIds'>,
 ): string | null {
   const first = m.previewBlobIds?.[0];
-  return first ? `${WALRUS_AGGREGATOR}/v1/blobs/${first}` : null;
+  return first ? `${WALRUS_AGGREGATOR}/v1/blobs/by-quilt-patch-id/${first}` : null;
 }
 
 // plan-026 D-075 — render-path selector for a catalog/picker thumbnail.
