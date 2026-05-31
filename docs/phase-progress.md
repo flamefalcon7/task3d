@@ -1,6 +1,39 @@
 # Phase Progress
 
-## Last Updated: 2026-05-30 / 12:40am GMT+8 (Walrus read-path CDN — **METHOD A KILLED, PIVOTED TO METHOD B (Worker); non-blocking prep done, awaiting human Cloudflare steps**)
+## Last Updated: 2026-05-31 / 1:30pm GMT+8 (Seal content protection → **moved into v1 / 6/21 scope**; D0+U1+U2 SHIPPED, U3 next)
+
+### Hackathon Tracker
+- Days to submission (6/21): **22 of 38** · demo day (7/20–21): 51 · winners (8/27): 89
+
+### Current Phase
+Phase 4 — executing **plan-026 (Seal content protection)** via `/ce-work` on branch `feat/seal-content-protection`.
+
+### What happened / decisions
+- User decided to **pull Seal content protection from post-6/21 v1.1 INTO the v1 / 6/21 submission**, FULL feature (option A). Rationale: Walrus-track differentiator; the demo is a **recorded video** so the testnet key-server no-SLA risk is neutralized (re-take until decrypt succeeds). → **D-074**.
+- **D-075** (Seal architecture) + **D-076** (amends D-040). Key implementation refinement surfaced mid-build: the plan's `id = [model_id][nonce]` binding is a **chicken-and-egg** (object id doesn't exist until publish, but encryption precedes publish) — resolved as **Resolution G**: client-random `seal_id` + a shared `SealIdRegistry` that enforces global uniqueness (defeats the copy attack), keeping encrypted publish ONE transaction.
+
+### Completed this session
+- **D0** (`77cc703`): ADRs D-074/075/076, amended D-040 status, re-framed plan-026 off its "post-6/21" labels.
+- **U1** (merged `c5dd1c2`): `frontend/src/seal/{sealClient,envelope,sessionKey}.ts` + tests; `@mysten/seal@1.1.3` (peer `^2.16.2` exact). Envelope = AES-256-GCM + Seal-wrapped key. 21/21 vitest, 0 new tsc errors. (Built in an isolated worktree, reviewed, merged, worktree cleaned up.)
+- **U2** (`01484ba`): Move v9 republish surface — `Model3D` gains `sealed_key`/`seal_id`/`preview_blob_ids`/`seal_version`; `is_encrypted` derived from policy; `SealIdRegistry` (bootstrapped in `init`); `publish_encrypted` (registry-unique); `seal_approve_cap` (named triple-check) + `seal_approve_creator` + version tripwire; `validate_seal_publish` (ALLOW_LIST⇒fee>0); D-040 gate amended (only RESTRICTED creator-only); `mint_tokens` (batch + post-bake quilt). **79/79 `sui move test`** (64 existing unbroken + 15 new).
+
+### In Progress
+- **U3** (task #4, in_progress): encrypted publish flow + re-expose ALLOW_LIST in `/create` (`frontend/src/creator/CreateModelPage.tsx`, `modelTxBuilders.ts`, `useWalrusUpload.ts`). Then U4 (preview stills), U5 (forker decrypt + catalog + backend hardening), U6 (landing guard tests), U7 (spec §3.7 rewrite + close OQ-026).
+
+### Next Concrete Step
+Implement U3: replace the hardcoded `isEncrypted:false` (CreateModelPage.tsx:641) with policy-derived; route encrypted publishes through `encryptBase` → `publish_encrypted` PTB (now takes the `SealIdRegistry` + `sealed_key`/`seal_id`/`preview_blob_ids`); re-add ALLOW_LIST to the policy selector with the fee>0 requirement.
+
+### ⚠️ Deploy handoff (blocks end-to-end verification, NOT code)
+The Move changes are a **fresh v9 republish** — they need an on-chain `sui client publish` ceremony (user's keys/gas) to produce the new package id, which then wires into `contracts/networks/testnet.json` + `frontend/src/sui/networkConfig.ts` (+ the bootstrapped `SealIdRegistry` object id, discoverable from the publish tx). U3/U5 code can be written + unit-tested now; the live encrypted publish/decrypt verification waits on this ceremony. Existing v8 public models stay on v8, untouched.
+
+### Notes for next session
+- Seal testnet key servers (2-of-3, threshold 2): `0x73d05d62…356db75`, `0xf5d14a81…591623c8` (hardcoded in `sealClient.ts` with provenance).
+- The U1→U5 chain assumes the app passes its shared Sui client into `getSealClient`/SessionKey (the modules default to a `SuiJsonRpcClient` for tests).
+- Untracked `frontend/public/models/tusk3d/walrus-tusk.glb` still deliberately unstaged.
+
+---
+
+## Older: 2026-05-30 / 12:40am GMT+8 (Walrus read-path CDN — **METHOD A KILLED, PIVOTED TO METHOD B (Worker); non-blocking prep done, awaiting human Cloudflare steps**)
 
 ### What happened this session
 User asked to discuss the Walrus read-path CDN (plan-018 / D-069). While prepping to implement Method A (proxied CNAME + Cache Rule), an empirical probe killed it:
