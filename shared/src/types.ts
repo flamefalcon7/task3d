@@ -97,6 +97,20 @@ export interface Model3DSummary {
   glbBlobId: string;           // D-037 — standalone Walrus blob id of the GLB mesh ('' if absent)
   derivativeMintFee: string;   // license.derivative_mint_fee (u64 MIST as string) — derive fee an nft creator pays to fork
   derivativeRoyaltyBps: number;// license.derivative_royalty_bps (u16, ≤3000 per D-004) snapshotted into L2 collections
+  // plan-026 D-075 — L1 license policy: 0 RESTRICTED · 1 ALLOW_LIST · 2
+  // PERMISSIONLESS. Drives catalog visibility + the fork path: RESTRICTED is
+  // excluded from the public catalog entirely (private); ALLOW_LIST routes the
+  // 3-step encrypted fork; PERMISSIONLESS is the unchanged atomic path. Defaults
+  // to PERMISSIONLESS (2) for pre-v9 objects whose JSON carries no policy.
+  policy: number;
+  // plan-026 D-075 — derived on-chain from policy (encrypted ⇔ policy ≠
+  // PERMISSIONLESS). When true, `glbBlobId` holds AES CIPHERTEXT, not a public
+  // GLB — NEVER fetch it as a mesh; render `previewBlobIds` stills instead.
+  isEncrypted: boolean;
+  // plan-026 U4/D-075 — public Walrus blob ids of the watermarked preview stills
+  // captured at publish (ALLOW_LIST only; empty for RESTRICTED + PERMISSIONLESS).
+  // The pre-payment evaluation affordance for an encrypted ALLOW_LIST base.
+  previewBlobIds: string[];
 }
 
 // --- Phase 3 Collection Forge types (plan-003 KTD-5, U3, U5) --------------
@@ -198,6 +212,21 @@ export const collectionBuildRequestSchema = z.object({
     )
     .min(1)
     .max(16),
+  // plan-026 D-075 / U5 — encrypted-base hardening hint. Present ONLY when the
+  // forked base is encrypted (ALLOW_LIST): the forker has already paid + minted
+  // the soulbound NftCollectionCreatorCap (step 1), and the decrypted plaintext
+  // is now transiting this endpoint for the material-swap bake (step 2). The
+  // backend treats a request carrying this as sensitive — no body logging, no
+  // plaintext persistence — and verifies the submitting JWT's wallet actually
+  // OWNS `capId` (a non-owner who scraped the ciphertext can't bake). Omitted
+  // for the unencrypted path, which keeps its existing behavior untouched.
+  encryptedBase: z
+    .object({
+      // 0x-prefixed Sui object ids of the in-flight cap + collection.
+      capId: z.string().regex(/^0x[0-9a-fA-F]+$/),
+      collectionId: z.string().regex(/^0x[0-9a-fA-F]+$/),
+    })
+    .optional(),
 });
 
 export type CollectionBuildRequest = z.infer<typeof collectionBuildRequestSchema>;

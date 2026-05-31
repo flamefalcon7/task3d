@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import { thumbSourceForSummary } from '../walrus/aggregator';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
 // CollectionCard replaces ModelCard for the grouped Browse view (U5). One
@@ -115,7 +115,10 @@ export function CollectionCard({ collectionId, variants }: Props) {
   const first = variants[0]!;
   const name = collectionNameFromVariants(variants);
   const variantCount = variants.length;
-  const previewUrl = glbUrlForSummary(first);
+  // plan-026 D-075 — encrypted ALLOW_LIST bases render their public preview
+  // still (an <img>), NEVER the ciphertext glb_blob_id as a 3D GLB.
+  // PERMISSIONLESS + legacy bases render the live mesh as before.
+  const thumb = thumbSourceForSummary(first);
   // A v6 L1 Model3D is standalone content with no collection_id, so Browse
   // buckets it under an `_orphan:<objectId>` group key (see groupByCollection).
   // Those have no /collection page to resolve — route them to the existing L1
@@ -129,8 +132,26 @@ export function CollectionCard({ collectionId, variants }: Props) {
         {/* One Babylon canvas per card. Browsers cap WebGL contexts at
             ~8-16 per page — if the marketplace grows past ~6 cards, later
             cards will render black. Tracked as a Phase 5 follow-up
-            (IntersectionObserver lazy-mount, or shared-engine thumbnails). */}
-        <PreviewCanvas glbUrl={previewUrl} />
+            (IntersectionObserver lazy-mount, or shared-engine thumbnails).
+            plan-026 — encrypted ALLOW_LIST bases render the public still
+            instead (no GLB mesh exists publicly). */}
+        {thumb.kind === 'glb' ? (
+          <PreviewCanvas glbUrl={thumb.url} />
+        ) : thumb.url ? (
+          <img
+            src={thumb.url}
+            alt={`${name} preview`}
+            data-testid="collection-card-preview-still"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : (
+          <span
+            data-testid="collection-card-preview-locked"
+            style={{ ...monoLabel, color: 'rgba(255,255,255,0.5)' }}
+          >
+            ENCRYPTED
+          </span>
+        )}
         <span data-testid="collection-card-badge" style={badgeStyle}>
           {variantCount} variant{variantCount === 1 ? '' : 's'}
         </span>

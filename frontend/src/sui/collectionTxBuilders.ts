@@ -89,6 +89,35 @@ export interface LaunchCollectionWithTokensArgs {
   tokenPatchIds: string[];
 }
 
+export interface MintTokensArgs {
+  /** Soulbound `NftCollectionCreatorCap` ID issued by step-1 `launch_collection`. */
+  capId: string;
+  /** Shared `NftCollection` ID (created empty in step 1; quilt set here). */
+  collectionId: string;
+  /** D-076 — the post-bake Walrus quilt blob id (unknown at launch; variants
+   *  are baked in step 2 AFTER the base decrypts). Length-bounded by
+   *  MAX_BLOB_ID_LEN on chain. */
+  quiltBlobId: string;
+  /** Token display names; index-aligned with `tokenPatchIds`. ≤128 B each. */
+  tokenNames: string[];
+  /** Quilt-patch ids each minted token binds; index-aligned with `tokenNames`. */
+  tokenPatchIds: string[];
+}
+
+export interface SealApproveCapArgs {
+  /** The FULL Seal identity the EncryptedObject was sealed under
+   *  (`[seal_id prefix][nonce]`) — recovered via `EncryptedObject.parse().id`,
+   *  NOT the on-chain `model.seal_id` prefix alone. On-chain `seal_approve_cap`
+   *  asserts `is_prefix(model.seal_id, id)`, which this full id satisfies. */
+  id: Uint8Array;
+  /** Soulbound `NftCollectionCreatorCap` ID (proves the forker paid to fork). */
+  capId: string;
+  /** Shared `NftCollection` ID the cap authorizes. */
+  collectionId: string;
+  /** The encrypted base `Model3D` object id this collection derives from. */
+  baseModelId: string;
+}
+
 export interface RegisterIntegrationArgs {
   /** Shared `NftCollection` ID being integrated against. */
   collectionId: string;
@@ -228,6 +257,93 @@ export function buildMintNftTokenPtb(
     metadata: {
       target: `${PKG}::model3d::mint_nft_token`,
       expectedEvents: [`${PKG}::model3d::NftTokenMinted`],
+    },
+  };
+}
+
+/**
+ * D-076 — STEP 3 of the encrypted ALLOW_LIST 3-step fork:
+ * `mint_tokens(cap, collection: &mut, quilt_blob_id, token_names, token_patch_ids, ctx)`.
+ * Cap-gated. Sets the collection's post-bake quilt blob id (unknown at the
+ * step-1 `launch_collection` because the variants are baked AFTER the base is
+ * decrypted in step 2) and batch-mints one plain owned `NftToken` per index-
+ * aligned (name, patch) pair, emitting one `NftTokenMinted` each. PERMISSIONLESS
+ * keeps the atomic `launch_collection_with_tokens` (its base is public, so its
+ * quilt is baked before launch — no split needed).
+ *
+ * Mirrors `buildLaunchCollectionWithTokensPtb`'s arg style: objects via
+ * `tx.object`, the quilt id via `tx.pure.string`, the parallel name/patch
+ * vectors via `tx.pure.vector('string', …)`. Guards the length mismatch
+ * client-side (Move aborts `EBatchLenMismatch`) to fail before signing.
+ */
+export function buildMintTokensPtb(
+  args: MintTokensArgs,
+): TxResult<Record<string, never>> {
+  if (args.tokenNames.length !== args.tokenPatchIds.length) {
+    throw new Error(
+      `buildMintTokensPtb: tokenNames (${args.tokenNames.length}) and ` +
+        `tokenPatchIds (${args.tokenPatchIds.length}) must be the same length`,
+    );
+  }
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PKG}::model3d::mint_tokens`,
+    arguments: [
+      tx.object(args.capId),
+      tx.object(args.collectionId),
+      tx.pure.string(args.quiltBlobId),
+      tx.pure.vector('string', args.tokenNames),
+      tx.pure.vector('string', args.tokenPatchIds),
+    ],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      target: `${PKG}::model3d::mint_tokens`,
+      expectedEvents: [`${PKG}::model3d::NftTokenMinted`],
+    },
+  };
+}
+
+/**
+ * D-075 — the Seal key-server DRY-RUN gate, built as `txBytes` for
+ * `SealClient.decrypt` (NOT signed/executed). `seal_approve_cap(id, cap,
+ * collection, model)` is `entry` (invokable in the dry-run PTB) but not
+ * `public`; the key servers dry-run it against the latest package version and
+ * release key shares iff it does NOT abort. Its named triple-check invariant is:
+ *   cap.collection_id == id(collection)  ∧  collection.base_model_id == id(model)
+ *   ∧  is_prefix(model.seal_id, id)      ∧  model.seal_version == VERSION
+ *
+ * `id` MUST be the FULL Seal identity (`[seal_id][nonce]`) the EncryptedObject
+ * was sealed under — recover it via `EncryptedObject.parse(sealedKey).id`
+ * (the on-chain `model.seal_id` is only the prefix; the nonce is lost there).
+ *
+ * Callers build `txBytes` with `tx.build({ client, onlyTransactionKind: true })`
+ * (a transaction KIND, not a full tx — no gas/sender) and pass it to
+ * `decryptKey(client, sealedKey, sessionKey, txBytes)`. This builder returns the
+ * unbuilt `Transaction` so callers can build against their own client.
+ */
+export function buildSealApproveCapPtb(
+  args: SealApproveCapArgs,
+): TxResult<Record<string, never>> {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PKG}::model3d::seal_approve_cap`,
+    arguments: [
+      tx.pure.vector('u8', Array.from(args.id)),
+      tx.object(args.capId),
+      tx.object(args.collectionId),
+      tx.object(args.baseModelId),
+    ],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      // No on-chain effect: this is a dry-run-only gate (key servers invoke it).
+      target: `${PKG}::model3d::seal_approve_cap`,
+      expectedEvents: [],
     },
   };
 }

@@ -93,6 +93,43 @@ describe('useModelIndex', () => {
     expect(result.current.models.map((m) => m.objectId)).toEqual(['0xa', '0xc']);
   });
 
+  it('maps policy / is_encrypted / preview_blob_ids; defaults to public for legacy objects', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(graphqlResponse([
+      // ALLOW_LIST encrypted base with previews.
+      makeNode({
+        address: '0xenc',
+        json: {
+          license: { policy: 1, derivative_mint_fee: '250000000', derivative_royalty_bps: 500 },
+          is_encrypted: true,
+          preview_blob_ids: ['p1', 'p2'],
+        },
+      }),
+      // Legacy node with no policy/seal fields → PERMISSIONLESS / public.
+      makeNode({ address: '0xlegacy' }),
+    ])));
+    const { result } = renderHook(() => useModelIndex());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const enc = result.current.models.find((m) => m.objectId === '0xenc')!;
+    expect(enc).toMatchObject({ policy: 1, isEncrypted: true, previewBlobIds: ['p1', 'p2'] });
+    const legacy = result.current.models.find((m) => m.objectId === '0xlegacy')!;
+    expect(legacy).toMatchObject({ policy: 2, isEncrypted: false, previewBlobIds: [] });
+  });
+
+  it('excludes RESTRICTED (policy 0) bases from the catalog entirely (private)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(graphqlResponse([
+      makeNode({ address: '0xpublic', json: { license: { policy: 2 } } }),
+      makeNode({ address: '0xallow', json: { license: { policy: 1 }, is_encrypted: true } }),
+      makeNode({ address: '0xrestricted', json: { license: { policy: 0 }, is_encrypted: true } }),
+    ])));
+    const { result } = renderHook(() => useModelIndex());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const ids = result.current.models.map((m) => m.objectId);
+    expect(ids).toContain('0xpublic');
+    expect(ids).toContain('0xallow');
+    // RESTRICTED is off-catalog — it appears neither in browse nor the fork picker.
+    expect(ids).not.toContain('0xrestricted');
+  });
+
   it('refetch re-issues the GraphQL request', async () => {
     const fetchMock = vi.fn().mockResolvedValue(graphqlResponse([makeNode()]));
     vi.stubGlobal('fetch', fetchMock);

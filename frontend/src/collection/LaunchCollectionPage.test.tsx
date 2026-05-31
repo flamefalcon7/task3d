@@ -179,6 +179,9 @@ function summary(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     glbBlobId: 'glb-base-1',
     derivativeMintFee: '250000000', // 0.25 SUI
     derivativeRoyaltyBps: 500,
+    policy: 2,
+    isEncrypted: false,
+    previewBlobIds: [],
     ...overrides,
   };
 }
@@ -1289,5 +1292,77 @@ describe('LaunchCollectionPage', () => {
     // previewRef.dispose() — only the first invocation gets through.
     expect(previewMockState.disposeCalls).toBe(1);
     expect(previewMockState.remountCalls).toBe(1);
+  });
+});
+
+// plan-026 U5 — encrypted ALLOW_LIST base, pre-sign UI assertions only. The
+// two wallet signatures (step-1 launch + the SessionKey personal message) can't
+// be driven in jsdom/agent-browser, so the live decrypt arc is the user's
+// manual real-Slush step; here we assert the page routes + renders correctly up
+// to (and not past) the first signature.
+describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => {
+  const encBase = () =>
+    summary({
+      objectId: '0xenc',
+      name: 'Sealed Car',
+      isEncrypted: true,
+      policy: 1, // ALLOW_LIST
+      glbBlobId: 'cipher-blob', // AES ciphertext — must NEVER be fetched as a GLB
+      previewBlobIds: ['still-1'],
+    });
+
+  it('AE1: renders the public preview STILL (an <img>) for an encrypted base, never the ciphertext as a GLB', () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+    const still = screen.getByTestId('base-option-still-0xenc') as HTMLImageElement;
+    expect(still).toBeTruthy();
+    expect(still.src).toContain('still-1');
+    // The ciphertext blob id must NOT be rendered as a GLB anywhere.
+    expect(still.src).not.toContain('cipher-blob');
+  });
+
+  it('AE1: picking an encrypted base does NOT fetch the ciphertext as a base GLB', async () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    const fetchMock = vi.fn(async (_url: string) => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    // No aggregator fetch for the ciphertext base — the decrypt happens later,
+    // post-payment, inside onLaunchEncrypted. Forker evaluates from the still only.
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes('cipher-blob'))).toBe(false);
+  });
+
+  it('surfaces the encrypted-base notice, hides PREVIEW VARIANTS, and labels the launch FORK + DECRYPT', async () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    expect(screen.getByTestId('encrypted-base-notice')).toBeTruthy();
+    // PREVIEW VARIANTS needs the plaintext mesh → hidden for encrypted bases.
+    expect(screen.queryByTestId('preview-button')).toBeNull();
+    expect(screen.getByTestId('launch-button').textContent).toMatch(/FORK \+ DECRYPT/);
+  });
+
+  it('regression: a PERMISSIONLESS base keeps the GLB thumbnail, PREVIEW button, and LAUNCH COLLECTION label', async () => {
+    // Default summary() is PERMISSIONLESS — assert the encrypted branch did not
+    // bleed into the public path.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    renderPage();
+    // GLB thumbnail (PreviewCanvas mock), not a still <img>.
+    expect(screen.queryByTestId('base-option-still-0xbase1')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    expect(screen.queryByTestId('encrypted-base-notice')).toBeNull();
+    expect(screen.getByTestId('preview-button')).toBeTruthy();
+    expect(screen.getByTestId('launch-button').textContent).toMatch(/LAUNCH COLLECTION/);
   });
 });

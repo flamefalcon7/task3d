@@ -32,6 +32,9 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     glbBlobId: 'glb-1',
     derivativeMintFee: '0',
     derivativeRoyaltyBps: 0,
+    policy: 2,
+    isEncrypted: false,
+    previewBlobIds: [],
     ...overrides,
   };
 }
@@ -115,5 +118,46 @@ describe('CollectionCard', () => {
     const url = stub.getAttribute('data-glb-url') ?? '';
     expect(url).toContain('/v1/blobs/blob-xyz');
     expect(url).not.toContain('by-quilt-patch-id');
+  });
+
+  // plan-026 D-075 — encrypted ALLOW_LIST card renders the public preview still
+  // (an <img>), NEVER the ciphertext glb_blob_id as a 3D GLB.
+  it('renders the preview still for an encrypted ALLOW_LIST base, not a GLB canvas', () => {
+    renderCard({
+      collectionId: '_orphan:0xenc',
+      variants: [
+        makeModel({
+          objectId: '0xenc',
+          patchId: '',
+          isEncrypted: true,
+          policy: 1,
+          glbBlobId: 'cipher-blob',
+          previewBlobIds: ['still-1'],
+        }),
+      ],
+    });
+    const still = screen.getByTestId('collection-card-preview-still') as HTMLImageElement;
+    expect(still.src).toContain('/v1/blobs/still-1');
+    expect(still.src).not.toContain('cipher-blob');
+    // No GLB canvas rendered for an encrypted base.
+    expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
+  });
+
+  it('shows an ENCRYPTED placeholder for an encrypted base with no preview still', () => {
+    renderCard({
+      collectionId: '_orphan:0xenc2',
+      variants: [
+        makeModel({
+          objectId: '0xenc2',
+          patchId: '',
+          isEncrypted: true,
+          policy: 1,
+          glbBlobId: 'cipher-blob',
+          previewBlobIds: [],
+        }),
+      ],
+    });
+    expect(screen.getByTestId('collection-card-preview-locked')).toBeTruthy();
+    expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
   });
 });

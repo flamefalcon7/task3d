@@ -50,6 +50,9 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     glbBlobId: 'glb-1',
     derivativeMintFee: '0',
     derivativeRoyaltyBps: 0,
+    policy: 2,
+    isEncrypted: false,
+    previewBlobIds: [],
     ...overrides,
   };
 }
