@@ -1944,7 +1944,7 @@ Keep the backend material-swap for the 6/21 submission. Post-submission, move th
 
 ## D-040: Enforce L1 license policy — RESTRICTED vs PERMISSIONLESS (fresh v7 republish)
 
-**Status**: Accepted
+**Status**: Accepted (Amended by D-076 — ALLOW_LIST re-enabled + split fork gate, 2026-05-31)
 **Date**: 2026-05-21
 **Phase**: 4
 
@@ -3333,6 +3333,114 @@ Separately, the domain actually purchased is **`tusk3d.space`** (Namecheap, 2026
 
 ---
 
+## D-074: Seal content protection moved into v1 (6/21 submission scope)
+
+**Status**: Accepted
+**Date**: 2026-05-31
+**Phase**: 4
+
+### Context
+Content protection via Mysten Seal was scoped post-6/21 (v1.1) in the original ideation/brainstorm/plan-026 chain (see `docs/ideation/2026-05-30-content-protection-seal-ideation.md`). Re-evaluated against the hackathon track: this is the **Walrus track**, and Seal is Mysten's own Walrus-native threshold-encryption layer. Demonstrating Seal + Walrus together is depth on exactly the axis the track rewards, and it closes the standing honesty gap where `is_encrypted` is decorative (only ever `false`, never checked). The demo is a **recorded video** (made after the feature lands), which neutralizes the main risk against shipping Seal for the demo — a live key-server outage reading as a product bug — because a recording can be re-taken until decrypt succeeds.
+
+### Decision
+Pull the full plan-026 feature forward into the **v1 / 6/21 submission** scope. Build all seven plan-026 units (not the thinner "deny→allow demo slice"): fresh package republish with `seal_approve`, envelope encryption, policy-derived encryption, the ALLOW_LIST 3-step fork, preview stills, backend hardening, and the doc updates. User decision 2026-05-31 ("it's a plus for integrating seal … move this part to v1"), full scope ("A").
+
+### Rationale
+- Strongest on-track differentiator: "store on Walrus **and** enforce paid access cryptographically with Seal."
+- Recorded demo removes the live-failure risk that made v1.1 deferral prudent.
+- 21 days of runway remain at decision time; user judged it affordable alongside deck/demo polish.
+
+### Alternatives Considered
+- **Keep post-6/21 (v1.1)** — rejected: forgoes a track-aligned differentiator while time remains.
+- **Demo-grade slice only (plan-026 scope B)** — rejected by user in favor of the full feature done-done (no second pass later).
+
+### Consequences
+- ✅ Seal integration is demonstrable in the 6/21 submission, deepening the Walrus-stack story.
+- ⚠️ Multi-unit build (new dependency + fresh republish + frontend/backend/contract) competing with deck/demo time; the fresh republish destabilizes the demo arc and requires full re-verification on the new package id.
+- ⚠️ Testnet Seal key servers have no SLA; mitigated by the recorded demo + explicit "testnet infrastructure" UI framing (plan-026 Risk Analysis).
+- 🔮 Mainnet key-server provider relationship required before any 8/27 mainnet move (tracked separately).
+
+### Related
+- Plan: `docs/plans/2026-05-30-026-feat-v1.1-seal-content-protection-plan.md` (re-framed to v1).
+- Origin: `docs/brainstorms/2026-05-30-v1.1-seal-content-protection-requirements.md`.
+- Decisions: D-075 (architecture), D-076 (amends D-040), D-073 (read-path CDN — untouched: Seal gates the key, not the bytes).
+
+---
+
+## D-075: Seal integration architecture — envelope encryption, fresh republish, policy-derived encryption
+
+**Status**: Accepted
+**Date**: 2026-05-31
+**Phase**: 4
+
+### Context
+Encrypting an L1 base for ALLOW_LIST/RESTRICTED policies must (a) not bloat the Walrus blob past the 35/46 MB encoder OOM cliff (mesh decimation was declined — see `project_walrus_encoder_constraints`), (b) gate decryption on-chain without a stale-package bypass, and (c) survive a future package upgrade without silently relaxing the gate.
+
+### Decision
+- **Envelope encryption**: AES-256-GCM the GLB with a random 256-bit key; Seal-encrypt only the 32-byte key. Ciphertext ≈ plaintext size (stays clear of the OOM cliff); Seal's documented large-payload pattern. Seal `id = [model_id_bytes][nonce]` (inner bytes only — Seal namespaces the packageId itself).
+- **Fresh package republish (v9)**, not a compatible upgrade — same reasoning as D-040: a compatible upgrade leaves the old ungated bytecode permanently callable at the old id, so an enforcement/encryption change must republish. Republishing also lets new fields be added directly to the `Model3D` struct (no dynamic-field workaround). Existing v8 public models stay on v8, untouched (no migration; all existing content is public).
+- **New `Model3D` struct fields**: `sealed_key` (Seal-wrapped AES key), `preview_blob_ids` (public preview stills), `seal_version` (package version at publish). The encrypted GLB reuses `glb_blob_id` (now AES-ciphertext when encrypted); `is_encrypted` tells the client which read path to take.
+- **Policy-derived encryption**: in `new_model`, `is_encrypted = (license.policy != POLICY_PERMISSIONLESS)`, fixed at publish — closes the decorative-flag gap. No post-publish policy transition.
+- **`seal_approve` gating** (non-`public entry`, side-effect-side-free, dry-run by key servers, abort = deny):
+  - `seal_approve_cap` — ALLOW_LIST: a **named triple-check invariant** — `cap.collection_id == id(collection)` ∧ `collection.base_model_id == id(model)` ∧ `id starts_with id(model)` — plus `seal_version == VERSION`. Each check isolation-tested. Prevents a valid cap unlocking another model's ciphertext (the canonical Seal binding pitfall).
+  - `seal_approve_creator` — RESTRICTED: `id` prefix-bound + `ctx.sender() == model.creator` + `seal_version == VERSION`.
+- **`seal_version` binding**: package version stored at publish and asserted in `seal_approve`, so a future v9+ upgrade cannot silently relax the gate over already-encrypted models. Rides the gas-free key-server dry-run.
+- **Ciphertext on the existing public CDN** (D-073 read path untouched) — Seal gates the key, not the bytes.
+- **Backend bake retained, with hardening**: the decrypted base transits the JWT-authed backend over TLS for material-swap exactly as public bases do today; the forker gets no download button. For encrypted-base requests the backend must not log the request body, must not persist plaintext, and must verify the submitting JWT's wallet holds the in-flight cap. (Refines origin R9: "no raw download" = no forker-facing download, not "plaintext never leaves the browser.")
+- **Testnet key servers**: 2-of-3 Mysten independent (Open mode), threshold 2 — tolerates one outage, no API key. Mainnet provider deferred.
+
+### Alternatives Considered
+- **Seal-encrypt the whole GLB** — rejected: bloats bytes against the OOM cliff; Seal docs recommend envelope for large payloads.
+- **Compatible upgrade with dynamic fields** — rejected: stale-package bypass (D-040 reasoning) + more storage complexity than a republish.
+- **Move material-swap fully in-browser** (no backend bake) — deferred (plan-026 "Deferred to Follow-Up"); revisit only if the backend trust boundary becomes a concern.
+
+### Consequences
+- ✅ Paid-fork enforcement is cryptographic, not honor-system; the base is unscrapeable without paying.
+- ✅ Walrus blob stays ~plaintext-sized; D-073 read path and the public-NFT social-currency story are unchanged.
+- ⚠️ Fresh v9 republish — new package id wired into `testnet.json` + `networkConfig.ts`; demo arc re-verified end-to-end.
+- ⚠️ ALLOW_LIST fork becomes a 3-step (non-atomic) flow (see D-076); larger Move + frontend surface.
+- 🔮 Accepted limits (mitigate, not prevent): an authorized forker re-uploading the decrypted base; a public L2 variant revealing base topology. Royalty is the hard on-chain rail.
+
+### Related
+- Plan: `docs/plans/2026-05-30-026-feat-v1.1-seal-content-protection-plan.md` (High-Level Technical Design, Key Technical Decisions).
+- spec.md §3.7 (rewritten in plan-026 U7, replacing the stale `Access`-based design — OQ-026).
+- Decisions: D-074 (scope), D-076 (fork-gate split), D-040 (republish precedent), D-032 (`Model3D` shared), D-029/D-030 (`Access` deleted), D-004 (royalty cap), D-073 (read CDN).
+
+---
+
+## D-076: Amend D-040 — split fork gate + re-enable ALLOW_LIST in the UI
+
+**Status**: Accepted (Amends D-040)
+**Date**: 2026-05-31
+**Phase**: 4
+
+### Context
+D-040 dropped ALLOW_LIST from the `/create` UI and collapsed it to creator-only on-chain (fail-safe), because v1 had no address-allowlist semantics. Seal (D-075) gives ALLOW_LIST a real, enforceable meaning — "pay the derive fee to get the cap that decrypts the base" — so it must return as a first-class policy. Additionally, the encrypted ALLOW_LIST fork cannot stay atomic: the cap (minted by `launch_collection`) is needed to decrypt the base, but decryption must precede the variant bake that the token mint consumes.
+
+### Decision
+- **Re-enable ALLOW_LIST** in the `/create` policy selector (reverses the D-040 UI drop). On-chain it now means non-creator-forkable, fee-gated, encrypted.
+- **`ALLOW_LIST ⇒ derivative_mint_fee > 0`** — new on-chain assert at publish (`EAllowListNeedsFee`). With no on-chain address allowlist in v1, ALLOW_LIST's only meaning is "pay to fork"; `fee = 0` would let anyone get a cap free and decrypt, making it logically identical to PERMISSIONLESS-with-pointless-encryption. The "free fork, earn via royalty" strategy belongs in PERMISSIONLESS (royalty applies there regardless of policy). *(Revisit if a future curated-address allowlist makes free-but-gated forking meaningful.)*
+- **Split the fork surface**: keep an atomic `launch_collection_with_tokens` for PERMISSIONLESS (one popup, unchanged); add a cap-issuing `launch_collection` (no tokens) + a separate `mint_tokens(collection, quilt_blob_id, token_patch_ids)` for the encrypted ALLOW_LIST 3-step flow (cap → decrypt/bake → mint).
+- **Amend the D-040 gate** so ALLOW_LIST permits fee-paying non-creator forks; RESTRICTED stays creator-only. **RESTRICTED is excluded from the public catalog entirely** (private; no external evaluator → no preview).
+
+### Alternatives Considered
+- **Keep ALLOW_LIST collapsed to creator-only** — rejected: Seal makes the pay-to-fork semantics real and enforceable; leaving it dropped wastes the capability.
+- **Allow `fee = 0` ALLOW_LIST** — rejected: logically identical to PERMISSIONLESS + pointless encryption (see Decision).
+- **Keep the atomic one-tx launch** — rejected: decryption must precede the bake the mint consumes, so the atomic path cannot stand for encrypted forks. PERMISSIONLESS retains it.
+
+### Consequences
+- ✅ ALLOW_LIST is a real, enforceable, fee-gated policy again, end to end.
+- ⚠️ Behavior change: ALLOW_LIST becomes non-creator-forkable and reappears in the UI; tested for both the allow and still-deny (RESTRICTED) cases.
+- ⚠️ Larger Move surface (two fork entry points) + a 3-step frontend flow with an added SessionKey personal-message signature.
+- 🔮 A future curated on-chain allowlist would reopen the `fee > 0` assert.
+
+### Related
+- **Amends D-040** (status updated to `Accepted (Amended by D-076)`); follows the Decision Reversal Protocol.
+- Decisions: D-074 (scope), D-075 (architecture).
+- Plan: `docs/plans/2026-05-30-026-feat-v1.1-seal-content-protection-plan.md` U2/U3/U5.
+
+---
+
 # Reserved Decision Numbers
 
-D-074 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-077 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
