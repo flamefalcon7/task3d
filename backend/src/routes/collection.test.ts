@@ -268,6 +268,56 @@ describe('POST /api/collection/build — plan-013 part_count_mismatch', () => {
   });
 });
 
+// --- plan A2 — name-keyed swap envelope ------------------------------------
+
+describe('POST /api/collection/build — plan A2 material_name_not_found', () => {
+  it('returns 422 material_name_not_found (with the name) when a name-keyed entry does not resolve', async () => {
+    // The fixture base has ONE material named 'base'. A name-keyed partColors
+    // entry that names a non-existent material must fail loudly (422) rather
+    // than silently miscolor — the whole point of name-keying.
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const res = await app.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [
+          {
+            partColors: [{ baseColorRgb: [1, 0, 0, 1], materialName: 'ghost' }],
+            paramsJson: '{}',
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; materialName?: string };
+    expect(body.error).toBe('material_name_not_found');
+    // Public base → the offending name is echoed for debugging.
+    expect(body.materialName).toBe('ghost');
+  });
+
+  it('bakes by material name regardless of array order (public path)', async () => {
+    // 1-material base named 'base'; name-keying it succeeds and returns a GLB.
+    const baseGlbBase64 = await buildBaseGlbBase64();
+    const res = await app.request('/api/collection/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer valid' },
+      body: JSON.stringify({
+        baseGlbBase64,
+        variants: [
+          {
+            partColors: [{ baseColorRgb: [0, 1, 0, 1], materialName: 'base' }],
+            paramsJson: '{}',
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { variants: Array<{ glbBase64: string }> };
+    expect(body.variants).toHaveLength(1);
+  });
+});
+
 // --- plan-026 U5 — encrypted-base hardening (JWT-owns-cap) -----------------
 
 describe('POST /api/collection/build — encrypted-base hardening', () => {

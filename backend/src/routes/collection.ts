@@ -7,6 +7,7 @@ import {
   swapMaterial,
   loadBundledTexture,
   PartCountMismatchError,
+  MaterialNameNotFoundError,
 } from '../lib/gltf-material-swap.js';
 import type { JwtSigner } from '../lib/jwt.js';
 import { createCapVerifier, type CapVerifier } from '../sui/capVerifier.js';
@@ -135,6 +136,17 @@ export function buildCollectionRoute(deps: CollectionRouteDeps) {
             materialCount: err.materialCount,
             partColorsCount: err.partColorsCount,
           },
+          422,
+        );
+      }
+      // plan A2 — name-keyed swap could not resolve a material name. Suppress
+      // the offending name for an encrypted base (it can echo a fragment of the
+      // decrypted mesh); echo it for public bases to aid debugging.
+      if (err instanceof MaterialNameNotFoundError) {
+        return c.json(
+          encryptedBase
+            ? { error: 'material_name_not_found' }
+            : { error: 'material_name_not_found', materialName: err.materialName },
           422,
         );
       }

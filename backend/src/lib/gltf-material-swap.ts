@@ -50,6 +50,20 @@ export class PartCountMismatchError extends Error {
   }
 }
 
+// plan A2 (upload segmentation) — surfaces on the NAME-KEYED swap path when a
+// partColors entry's `materialName` does not resolve to any material in the base
+// GLB. The route layer turns this into a 422 `material_name_not_found`. Unlike
+// the positional path's silent miscolor risk on order drift, an unresolved name
+// fails LOUDLY rather than coloring the wrong part.
+export class MaterialNameNotFoundError extends Error {
+  readonly materialName: string;
+  constructor(materialName: string) {
+    super(`material_name_not_found: no material named '${materialName}' in base GLB`);
+    this.name = 'MaterialNameNotFoundError';
+    this.materialName = materialName;
+  }
+}
+
 export async function loadBundledTexture(id: TextureId): Promise<Uint8Array> {
   const candidate = path.join(TEXTURES_DIR, `${id}.png`);
   const resolved = path.resolve(candidate);
@@ -98,6 +112,54 @@ export async function swapMaterial(
   if (materials.length === 0) {
     throw new NoMaterialInBaseGlbError();
   }
+
+  // Apply one partColors entry to one material: set the diffuse base color
+  // factor, and (TINT mode) only override the baseColorTexture when a textureId
+  // is supplied — otherwise the material's existing baked PBR texture is kept
+  // and the factor multiplies it. `idx` only names the created texture.
+  const applyPart = async (
+    target: (typeof materials)[number],
+    partSpec: VariantMaterialSpec['partColors'][number],
+    idx: number,
+  ): Promise<void> => {
+    target.setBaseColorFactor(partSpec.baseColorRgb);
+    if (partSpec.textureId) {
+      const pngBytes = await textureLoader(partSpec.textureId);
+      const tex = doc
+        .createTexture(`variant_${idx}_${partSpec.textureId}`)
+        .setImage(pngBytes)
+        .setMimeType('image/png');
+      target.setBaseColorTexture(tex);
+    }
+    // No `else` branch — preserving the material's existing baseColorTexture
+    // is the TINT-mode contract. Setting it to null would strip baked PBR.
+  };
+
+  // plan A2 — NAME-KEYED path. When every partColors entry carries a
+  // `materialName`, map each entry to the material with that glTF name instead
+  // of by array position. This is order-independent: it does NOT depend on
+  // gltf-transform's listMaterials() order matching the browser's Babylon mesh
+  // order, which is the divergence that silently miscolors arbitrary uploaded
+  // GLBs on the positional path. The forge only sends materialName for bijective
+  // bases whose names are unique + non-empty, so the by-name lookup is
+  // unambiguous; an unresolved name fails loudly (MaterialNameNotFoundError).
+  const nameKeyed =
+    spec.partColors.length > 0 && spec.partColors.every((p) => p.materialName != null);
+  if (nameKeyed) {
+    const byName = new Map(materials.map((m) => [m.getName(), m]));
+    for (let i = 0; i < spec.partColors.length; i++) {
+      const partSpec = spec.partColors[i]!;
+      const target = byName.get(partSpec.materialName!);
+      if (!target) {
+        throw new MaterialNameNotFoundError(partSpec.materialName!);
+      }
+      await applyPart(target, partSpec, i);
+    }
+    return io.writeBinary(doc);
+  }
+
+  // Legacy / Tripo POSITIONAL path. partColors[i] → materials[i]; requires a
+  // length match (drift surfaces as PartCountMismatchError → 422).
   if (spec.partColors.length !== materials.length) {
     throw new PartCountMismatchError(materials.length, spec.partColors.length);
   }
@@ -109,17 +171,7 @@ export async function swapMaterial(
       // noUncheckedIndexedAccess.
       throw new PartCountMismatchError(materials.length, spec.partColors.length);
     }
-    target.setBaseColorFactor(partSpec.baseColorRgb);
-    if (partSpec.textureId) {
-      const pngBytes = await textureLoader(partSpec.textureId);
-      const tex = doc
-        .createTexture(`variant_${i}_${partSpec.textureId}`)
-        .setImage(pngBytes)
-        .setMimeType('image/png');
-      target.setBaseColorTexture(tex);
-    }
-    // No `else` branch — preserving the material's existing baseColorTexture
-    // is the TINT-mode contract. Setting it to null would strip baked PBR.
+    await applyPart(target, partSpec, i);
   }
   return io.writeBinary(doc);
 }

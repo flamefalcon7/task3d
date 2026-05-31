@@ -8,6 +8,7 @@ import {
   TexturePathEscapeError,
   NoMaterialInBaseGlbError,
   PartCountMismatchError,
+  MaterialNameNotFoundError,
 } from './gltf-material-swap.js';
 import type { TextureId } from '@overflow2026/shared';
 
@@ -123,6 +124,18 @@ async function readMaterialTextureFlags(glb: Uint8Array): Promise<boolean[]> {
     .getRoot()
     .listMaterials()
     .map((m) => m.getBaseColorTexture() !== null);
+}
+
+async function readMaterialColorsByName(
+  glb: Uint8Array,
+): Promise<Record<string, [number, number, number, number]>> {
+  const io = new NodeIO();
+  const doc = await io.readBinary(glb);
+  const out: Record<string, [number, number, number, number]> = {};
+  for (const m of doc.getRoot().listMaterials()) {
+    out[m.getName()] = Array.from(m.getBaseColorFactor()) as [number, number, number, number];
+  }
+  return out;
 }
 
 async function readMeshTopology(glb: Uint8Array): Promise<{ verts: number; indices: number }> {
@@ -328,6 +341,129 @@ describe('swapMaterial', () => {
         async () => new Uint8Array(),
       ),
     ).rejects.toBeInstanceOf(PartCountMismatchError);
+  });
+
+  // plan A2 (upload segmentation) — NAME-KEYED swap path. When every partColors
+  // entry carries a `materialName`, the entry is applied to the material with
+  // that name regardless of its position in either array. These tests pin the
+  // order-independence that closes the silent-miscolor hole for arbitrary
+  // uploaded GLBs (Babylon mesh order ≠ gltf-transform material order).
+  describe('name-keyed (plan A2)', () => {
+    it('applies each entry by material name, independent of array order', async () => {
+      // 4-material base (mat_0..mat_3). The partColors array is in REVERSE name
+      // order — so a positional swap would miscolor every part. Name-keying must
+      // land each color on the material whose name it names.
+      const base = await makeFixtureGlb({
+        materialColors: [
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+        ],
+      });
+      const out = await swapMaterial(
+        base,
+        {
+          partColors: [
+            { baseColorRgb: [1, 1, 0, 1], materialName: 'mat_3' }, // yellow → mat_3
+            { baseColorRgb: [0, 0, 1, 1], materialName: 'mat_2' }, // blue → mat_2
+            { baseColorRgb: [0, 1, 0, 1], materialName: 'mat_1' }, // green → mat_1
+            { baseColorRgb: [1, 0, 0, 1], materialName: 'mat_0' }, // red → mat_0
+          ],
+        },
+        async () => new Uint8Array(),
+      );
+      const byName = await readMaterialColorsByName(out);
+      expect(byName['mat_0']).toEqual([1, 0, 0, 1]);
+      expect(byName['mat_1']).toEqual([0, 1, 0, 1]);
+      expect(byName['mat_2']).toEqual([0, 0, 1, 1]);
+      expect(byName['mat_3']).toEqual([1, 1, 0, 1]);
+    });
+
+    it('throws MaterialNameNotFoundError when a name does not resolve', async () => {
+      const base = await makeFixtureGlb({ materialColors: [[1, 1, 1, 1], [1, 1, 1, 1]] });
+      await expect(
+        swapMaterial(
+          base,
+          { partColors: [{ baseColorRgb: [1, 0, 0, 1], materialName: 'nope' }] },
+          async () => new Uint8Array(),
+        ),
+      ).rejects.toBeInstanceOf(MaterialNameNotFoundError);
+    });
+
+    it('does NOT enforce the positional length check (subset color by name)', async () => {
+      // A single-entry name-keyed spec on a 4-material base would throw
+      // PartCountMismatchError on the positional path. Name-keying colors only
+      // the named material and leaves the rest untouched.
+      const base = await makeFixtureGlb({
+        materialColors: [
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+          [1, 1, 1, 1],
+        ],
+      });
+      const out = await swapMaterial(
+        base,
+        { partColors: [{ baseColorRgb: [0, 1, 0, 1], materialName: 'mat_1' }] },
+        async () => new Uint8Array(),
+      );
+      const byName = await readMaterialColorsByName(out);
+      expect(byName['mat_1']).toEqual([0, 1, 0, 1]);
+      expect(byName['mat_0']).toEqual([1, 1, 1, 1]);
+      expect(byName['mat_2']).toEqual([1, 1, 1, 1]);
+    });
+
+    it('is byte-equivalent to the positional path when names are aligned (Tripo-identical)', async () => {
+      const spec: Array<[number, number, number, number]> = [
+        [1, 0, 0, 1],
+        [0, 1, 0, 1],
+        [0, 0, 1, 1],
+        [1, 1, 0, 1],
+      ];
+      const white: Array<[number, number, number, number]> = [
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+        [1, 1, 1, 1],
+      ];
+      const posOut = await swapMaterial(
+        await makeFixtureGlb({ materialColors: white }),
+        { partColors: spec.map((c) => ({ baseColorRgb: c })) },
+        async () => new Uint8Array(),
+      );
+      const nameOut = await swapMaterial(
+        await makeFixtureGlb({ materialColors: white }),
+        { partColors: spec.map((c, i) => ({ baseColorRgb: c, materialName: `mat_${i}` })) },
+        async () => new Uint8Array(),
+      );
+      // Same per-material colors → the name path is a faithful superset of the
+      // positional path for aligned (Tripo-shaped) inputs.
+      expect(await readMaterialColorsByName(nameOut)).toEqual(
+        await readMaterialColorsByName(posOut),
+      );
+    });
+
+    it('honors TINT-mode texture override on the name-keyed path', async () => {
+      const base = await makeFixtureGlb({
+        materialColors: [[1, 1, 1, 1], [1, 1, 1, 1]],
+      });
+      const out = await swapMaterial(base, {
+        partColors: [
+          { baseColorRgb: [0, 0, 1, 1], textureId: 'gold', materialName: 'mat_0' },
+          { baseColorRgb: [1, 1, 0, 1], materialName: 'mat_1' },
+        ],
+      });
+      const flags = await readMaterialTextureFlags(out);
+      // mat_0 gets the override texture; mat_1 has none (no baked seed here).
+      const io = new NodeIO();
+      const doc = await io.readBinary(out);
+      const names = doc.getRoot().listMaterials().map((m) => m.getName());
+      const mat0HasTex = flags[names.indexOf('mat_0')];
+      const mat1HasTex = flags[names.indexOf('mat_1')];
+      expect(mat0HasTex).toBe(true);
+      expect(mat1HasTex).toBe(false);
+    });
   });
 
   it('round-trips base64 without corrupting bytes', async () => {

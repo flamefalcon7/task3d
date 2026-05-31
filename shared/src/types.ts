@@ -155,10 +155,21 @@ export const MAX_PARTS_FE = 64;
 // is per-part optional; if absent for a given part, the swap pipeline keeps
 // THAT material's existing baseColorTexture and only sets baseColorFactor
 // (TINT mode: factor × baked texture).
+//
+// plan A2 (upload segmentation) — `materialName` is an OPTIONAL order-independent
+// key. When EVERY partColors entry carries one, the backend swap maps each entry
+// to the material with that glTF `materials[].name` instead of by array position.
+// This decouples the recolor from the (divergent) Babylon-mesh-order vs
+// gltf-transform-material-order problem that bites arbitrary uploaded GLBs. When
+// absent (legacy bases, Tripo-without-names), the backend falls back to the
+// positional `partColors[i] → materials[i]` path. The forge attaches it only for
+// bijective bases whose part material names are unique + non-empty (see
+// frontend extractMaterialNames). NOT persisted on-chain — transport-only.
 export interface VariantMaterialSpec {
   partColors: Array<{
     baseColorRgb: [number, number, number, number];
     textureId?: TextureId;
+    materialName?: string;
   }>;
 }
 
@@ -182,6 +193,10 @@ export const collectionBuildRequestSchema = z.object({
             z.object({
               baseColorRgb: z.tuple([z.number(), z.number(), z.number(), z.number()]),
               textureId: z.enum(TEXTURE_LIBRARY).optional(),
+              // plan A2 — optional name-keyed swap anchor (see VariantMaterialSpec).
+              // Generous length cap (material names aren't on-chain; this is just a
+              // lookup key) — wide enough for UUID-suffixed exporter names.
+              materialName: z.string().min(1).max(256).optional(),
             }),
           )
           .min(1)
