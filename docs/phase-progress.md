@@ -1,6 +1,10 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 1:30pm GMT+8 (Seal content protection → **moved into v1 / 6/21 scope**; D0+U1+U2 SHIPPED, U3 next)
+## Last Updated: 2026-05-31 / 2:20pm GMT+8 (Seal content protection → **v1 / 6/21 scope**; D0+U1+U2+U3+U4 SHIPPED, U5 next)
+
+### Quick status (this session, branch `feat/seal-content-protection`)
+Commits: `77cc703` D0 (ADRs) · `c5dd1c2` U1 (Seal client) · `01484ba` U2 (Move v9, 79/79) · `1ca5fc9` U3 (encrypted publish + ALLOW_LIST) · `6a38385` U4 (preview stills). Frontend suite **765/765**, tsc baseline **32** (zero new). **Remaining: U5** (forker decrypt 3-step + catalog RESTRICTED-exclusion + backend hardening — the largest unit, demo climax) · **U6** (landing guard tests — has a product decision: whether to surface Seal on the landing) · **U7** (rewrite spec §3.7 onto cap/creator/registry + close OQ-026 — pure docs). Live encrypted publish/decrypt verification is gated on the **v9 deploy ceremony** (see below).
+
 
 ### Hackathon Tracker
 - Days to submission (6/21): **22 of 38** · demo day (7/20–21): 51 · winners (8/27): 89
