@@ -19,12 +19,16 @@ import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 
 /**
  * Number of turntable angles captured by default (evenly spaced around alpha).
- * 12 gives a smooth faux-turntable; WebP keeps the total small (~5 KB/frame →
- * ~60 KB for 12, still a rounding error next to the multi-MB ciphertext). The
- * whole set + the ciphertext ride in ONE Walrus quilt (publish forces a single
- * quilt via uploadFiles' quiltSize option), so the popup count stays at 3.
+ * WebP keeps each frame ~5 KB (~40 KB for 8, a rounding error next to the
+ * multi-MB ciphertext); the whole set + the ciphertext ride in ONE Walrus quilt
+ * (publish forces a single quilt via uploadFiles' quiltSize option), so the
+ * popup count stays at 3.
+ *
+ * ⚠️ LOCKSTEP: must stay ≤ the contract's `MAX_PREVIEW_BLOBS` (model3d.move = 8).
+ * Exceeding it aborts `ETooManyPreviews` (code 44) in `validate_seal_publish` at
+ * publish. Raising this past 8 requires bumping that on-chain const + a redeploy.
  */
-export const DEFAULT_STILL_COUNT = 12;
+export const DEFAULT_STILL_COUNT = 8;
 /** Square still resolution (px). Small — these are evaluation thumbnails, not the asset. */
 export const STILL_SIZE = 512;
 /** Visible watermark text (R13). */

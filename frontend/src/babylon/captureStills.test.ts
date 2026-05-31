@@ -1,5 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { captureStillsWith } from './captureStills';
+import { captureStillsWith, DEFAULT_STILL_COUNT } from './captureStills';
+
+// Lockstep guard: capturing more preview stills than the contract's
+// MAX_PREVIEW_BLOBS aborts ETooManyPreviews (code 44) at publish. Keep this in
+// sync with contracts/model3d/sources/model3d.move (MAX_PREVIEW_BLOBS).
+const CONTRACT_MAX_PREVIEW_BLOBS = 8;
+describe('DEFAULT_STILL_COUNT ↔ contract cap', () => {
+  it('never exceeds the on-chain MAX_PREVIEW_BLOBS', () => {
+    expect(DEFAULT_STILL_COUNT).toBeLessThanOrEqual(CONTRACT_MAX_PREVIEW_BLOBS);
+  });
+});
 
 describe('captureStillsWith', () => {
   it('captures N stills at evenly-spaced alphas and watermarks each, preserving order', async () => {
