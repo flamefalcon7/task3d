@@ -8,8 +8,13 @@ All 7 units + the D0 gate + the v9 deploy shipped & merged. **Frontend 801/801 �
 - Branch `feat/seal-content-protection` is **not yet merged to `main`** — awaiting the live wallet round-trip + user's merge call.
 - Note for reruns: after pulling, run `pnpm --dir shared build` (the +17 tsc errors otherwise are just stale `shared/dist`, which is gitignored).
 
-### ⚠️ ONE manual step before the demo recording (user's, wallet-gated)
-The decrypt path needs real Slush signatures (can't drive in agent-browser). Do one real testnet round-trip: **ALLOW_LIST encrypted publish → forker pays → SessionKey sign → decrypt → derive → mint**. This is the only thing not verified against live Seal key servers (the `seal_approve_cap` txBytes acceptance + step-1 `objectChanges` id extraction). If it works, the feature is demo-ready; if a key server is flaky, re-take the recording.
+### ✅ LIVE end-to-end verification PASSED (2026-05-31, headless)
+The full round-trip was verified against live testnet + live Seal key servers via a headless Node script (`frontend/scripts/seal-roundtrip.ts`, run with the deployer keypair — no wallet popups): encrypt → Walrus quilt upload (walrus CLI) → `publish_encrypted` on-chain → `launch_collection` (pay-to-fork) → SessionKey sign → **`seal_approve_cap` dry-run → key servers RELEASED the AES key** → fetch ciphertext by-quilt-patch-id → AES-GCM decrypt → **byte-exact match to the original GLB**. The previously-unverified bit (live key-server release on a real `seal_approve_cap`) is now PROVEN. Re-run anytime: `cd frontend && ../backend/node_modules/.bin/tsx scripts/seal-roundtrip.ts`.
+
+### Remaining (optional, lower-value)
+- A real **browser + Slush** run of `/create`→fork (manual checklist Part B in `docs/seal-live-verification-checklist.md`) would additionally confirm the UI wiring live — but the UI is unit-tested and the crypto/contract/key-server path is now headlessly proven, so this is UI-confidence only, not feature-confidence.
+- `feat/seal-content-protection` not yet merged to `main` (awaiting merge call).
+- Demo recording: warm up the round-trip script once before recording (testnet key servers have no SLA).
 
 ### ⚠️ Live verification still pending (user's manual step — wallet-gated)
 The decrypt path needs real Slush signatures (can't drive in agent-browser). Untested-against-live-key-servers: the exact `seal_approve_cap` txBytes acceptance + step-1 `objectChanges` id extraction (forkerDecrypt/encryptedFork report §7). Do one real ALLOW_LIST encrypted publish + forker decrypt round-trip on testnet before the demo recording.
