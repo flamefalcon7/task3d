@@ -3442,6 +3442,43 @@ D-040 dropped ALLOW_LIST from the `/create` UI and collapsed it to creator-only 
 
 ---
 
+## D-077: Upload-path part segmentation via name-keyed material swap (Option A2)
+
+**Status**: Accepted
+**Date**: 2026-05-31
+**Phase**: 4
+
+### Context
+Per-part tagging + per-part recoloring was Tripo-only; uploaded GLBs (D-033) skipped tagging and published with `part_labels = []`. Extending tagging to uploads exposed a latent correctness trap: the browser derives parts by **Babylon mesh order** (`TaggingCanvas` filter `getTotalVertices()>0`) while the backend recolors by **gltf-transform `listMaterials()` order** (`backend/src/lib/gltf-material-swap.ts`, `materials[i] ← partColors[i]`). These coincide only under the invariant Tripo's segmenter authors (1 node = 1 mesh = 1 unique material, materials[] in node order). For an arbitrary upload they can diverge — equal-count-but-reordered yields **silent wrong-part coloring** (worse than a hard error).
+
+### Decision
+Recolor by **material name** instead of array position. Add an optional `materialName` to each `partColors` entry (transport-only, not on-chain); when every entry carries one, the backend maps each entry to the material with that glTF `materials[].name` (order-independent), else it keeps the legacy positional path. The forge derives names from the base GLB via a headless Babylon parse (`extractMaterialNames`, same loader + filter as tagging, so order matches `part_labels`) and attaches them only when the base is **taggable**: > 1 part, ≤ `MAX_PARTS` (64), and part material names are unique + non-empty (so name-keying is unambiguous). Uploaded GLBs route through the existing `TaggingStep`, which **auto-skips** to the metadata form (legacy `part_labels = []`) when the base isn't taggable.
+
+### Rationale
+- Closes the silent-miscolor hole completely for any name-keyable base — recolor no longer depends on cross-library ordering parity.
+- **Byte-identical to the positional path for Tripo** (names already align); also hardens the existing forge path against Tripo segmentation drift.
+- No Move/contract change, no republish — `part_labels` stays positional; the name anchor lives only in the off-chain build transport.
+- Material `name` is a key both libraries read from the same glTF field — Babylon `material.name` == gltf-transform `getName()` for our GLBs (verified on `pickup-truck.glb`, 14 parts).
+
+### Alternatives Considered
+- **A1 — browser-only Tripo-signature gate** (no backend change): rejected — leaves a residual silent-miscolor hole when a Tripo GLB is round-tripped through Blender (names preserved, materials[] reordered).
+- **B — canonical cross-library part ordering refactor**: rejected — larger blast radius on the shipped Tripo flow with submission-window regression risk; name-keying achieves the same safety with a contained change.
+- **Backend node-order traversal** (match Babylon by walking renderable nodes): rejected — still diverges from Babylon for nested-hierarchy GLBs; name-keying is hierarchy-independent.
+
+### Consequences
+- ✅ Uploaded multi-material GLBs with unique part names are taggable + correctly recolorable per part.
+- ✅ Tripo path unchanged (positional path retained for legacy/un-named bases; name path is a faithful superset).
+- ⚠️ Forge build does one extra headless Babylon (NullEngine) parse of the base GLB to derive names; if that parse fails, it falls back to positional (the pre-existing behavior).
+- ⚠️ Uploads with duplicate/empty material names or > 64 parts are (deliberately) not taggable — they keep the single-color legacy treatment; a future enhancement could disambiguate by mesh identity.
+- 🔮 If a future flow needs to recolor non-bijective bases, the name map would need a per-mesh (not per-material) anchor.
+
+### Related
+- Plan: `docs/plans/2026-05-30-...` (upload segmentation, Option A2) — built on branch `feat/upload-segmentation`.
+- Constraints: D-033 (GLB upload source), `MAX_PARTS` lockstep (`model3d.move` ↔ `shared/src/types.ts MAX_PARTS_FE`).
+- spec.md: forge material-swap contract.
+
+---
+
 # Reserved Decision Numbers
 
-D-077 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-078 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
