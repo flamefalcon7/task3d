@@ -17,6 +17,11 @@ const suiClientMock = {
   core: {
     executeTransaction: vi.fn().mockResolvedValue({ digest: '0xexec-digest' }),
   },
+  // plan A — onUnlock reads the encrypted base's sealed_key via getObject;
+  // parseSealedKeyFromObject is mocked, so the shape doesn't matter.
+  getObject: vi.fn().mockResolvedValue({ data: {} }),
+  waitForTransaction: vi.fn().mockResolvedValue({}),
+  getTransactionBlock: vi.fn().mockResolvedValue({ objectChanges: [] }),
 };
 vi.mock('@mysten/dapp-kit', () => ({
   useSuiClient: () => suiClientMock,
@@ -83,9 +88,28 @@ vi.mock('../sui/collectionTxBuilders', () => ({
 // means "no names" → name-keying does not apply → the build payload stays on the
 // legacy positional path, preserving every existing test's semantics. Tests that
 // exercise the name-keyed payload override the return per-case.
-const extractMaterialNamesMock = vi.fn(async (): Promise<(string | null)[]> => []);
+const extractMaterialNamesMock = vi.fn(async (..._args: unknown[]): Promise<(string | null)[]> => []);
 vi.mock('../babylon/extractMaterialNames', () => ({
   extractMaterialNames: (...args: unknown[]) => extractMaterialNamesMock(...args),
+}));
+
+// plan A — encrypted unlock/mint seam. The real wallet signatures + key-server
+// decrypt can't run in jsdom, so mock the seam to drive onUnlock/onMintEncrypted.
+const launchEncryptedCollectionMock = vi.fn();
+const decryptEncryptedBaseMock = vi.fn();
+const mintEncryptedTokensMock = vi.fn();
+vi.mock('../seal/sealClient', () => ({ getSealClient: () => ({}) }));
+vi.mock('../seal/sessionKey', () => ({
+  createSession: vi.fn(async () => ({ personalMessage: new Uint8Array([1]) })),
+  activateSession: vi.fn(async () => ({})),
+  getCachedSession: vi.fn(() => null),
+}));
+vi.mock('./encryptedFork', () => ({
+  launchEncryptedCollection: (...a: unknown[]) => launchEncryptedCollectionMock(...a),
+  decryptEncryptedBase: (...a: unknown[]) => decryptEncryptedBaseMock(...a),
+  mintEncryptedTokens: (...a: unknown[]) => mintEncryptedTokensMock(...a),
+  parseSealedKeyFromObject: () => new Uint8Array([0x5e]),
+  PACKAGE_ID: '0xpkg',
 }));
 
 // plan-015 U6/U7 — PreviewCanvas mock surfaces mode pill + onPartClick +
@@ -212,6 +236,12 @@ beforeEach(() => {
   useModelIndexMock.mockReturnValue({ models: [summary()], loading: false, error: null, refetch: vi.fn() });
   uploadFilesMock.mockReset();
   signAndExecuteMock.mockReset();
+  signPersonalMessageMock.mockReset();
+  launchEncryptedCollectionMock.mockReset();
+  decryptEncryptedBaseMock.mockReset();
+  mintEncryptedTokensMock.mockReset();
+  extractMaterialNamesMock.mockReset();
+  extractMaterialNamesMock.mockResolvedValue([]);
   buildLaunchMock.mockReset();
   buildLaunchMock.mockReturnValue({ tx: {}, handles: {}, metadata: {} });
   previewMockState.reset();
@@ -1489,7 +1519,9 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     expect(calls.some((u) => u.includes('cipher-blob'))).toBe(false);
   });
 
-  it('surfaces the encrypted-base notice, hides PREVIEW VARIANTS, and labels the launch FORK + DECRYPT', async () => {
+  // plan A — "unlock-first": before unlock, the blind color editor is gone; only
+  // the unlock gate shows. After unlock the live editor + MINT button appear.
+  it('PRE-UNLOCK: shows the unlock gate and hides the color editor + mint button', async () => {
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
     renderPage();
@@ -1497,10 +1529,84 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
       fireEvent.click(screen.getByTestId('base-option-0xenc'));
     });
     await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
-    expect(screen.getByTestId('encrypted-base-notice')).toBeTruthy();
-    // PREVIEW VARIANTS needs the plaintext mesh → hidden for encrypted bases.
+    expect(screen.getByTestId('unlock-gate')).toBeTruthy();
+    expect(screen.getByTestId('unlock-button').textContent).toMatch(/UNLOCK TO DESIGN/);
+    // No blind authoring: the color editor, PREVIEW, mint button, and the
+    // "unlocked" notice are all absent until the base is unlocked.
+    expect(screen.queryByTestId('collection-name-input')).toBeNull();
     expect(screen.queryByTestId('preview-button')).toBeNull();
-    expect(screen.getByTestId('launch-button').textContent).toMatch(/FORK \+ DECRYPT/);
+    expect(screen.queryByTestId('launch-button')).toBeNull();
+    expect(screen.queryByTestId('encrypted-base-notice')).toBeNull();
+  });
+
+  it('UNLOCK: paying + decrypting reveals the live editor (collection name + MINT button)', async () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
+    decryptEncryptedBaseMock.mockResolvedValue(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    // Unlocked: gate gone, live editor present, button now mints.
+    await waitFor(() => expect(screen.queryByTestId('unlock-gate')).toBeNull());
+    expect(screen.getByTestId('collection-name-input')).toBeTruthy();
+    expect(screen.getByTestId('preview-button')).toBeTruthy();
+    expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/);
+    expect(screen.getByTestId('encrypted-base-notice').textContent).toMatch(/Unlocked/);
+    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
+    expect(decryptEncryptedBaseMock).toHaveBeenCalledOnce();
+  });
+
+  it('MINT: after unlock, minting passes the stored cap to the build + mint_tokens', async () => {
+    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
+    decryptEncryptedBaseMock.mockResolvedValue(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    mintEncryptedTokensMock.mockResolvedValue('0xmintdigest');
+    uploadFilesMock.mockResolvedValue({
+      blobIds: ['quilt'],
+      blobObjects: [{ blobId: 'quilt', blobObjectId: '0xq' }],
+      patchIds: ['p0'],
+    });
+    const buildBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1]), { status: 200 });
+        if (init?.body) buildBodies.push(init.body as string);
+        return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+    );
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+    await waitFor(() => expect(mintEncryptedTokensMock).toHaveBeenCalled());
+    // The build request carried the unlocked cap (encrypted-base hardening), and
+    // mint_tokens received the same stored cap + collection.
+    const buildBody = JSON.parse(buildBodies[buildBodies.length - 1]!);
+    expect(buildBody.encryptedBase).toEqual({ capId: '0xcap', collectionId: '0xcol' });
+    expect(mintEncryptedTokensMock.mock.calls[0]![0]).toMatchObject({
+      capId: '0xcap',
+      collectionId: '0xcol',
+    });
   });
 
   it('regression: a PERMISSIONLESS base keeps the GLB thumbnail, PREVIEW button, and LAUNCH COLLECTION label', async () => {

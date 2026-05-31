@@ -379,6 +379,12 @@ export function LaunchCollectionPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [base, setBase] = useState<Model3DSummary | null>(null);
   const [baseGlb, setBaseGlb] = useState<Uint8Array | null>(null);
+  // plan A — encrypted "unlock-first" flow. Once the forker pays the fork fee
+  // (mints the cap + empty collection) and decrypts the base, we hold the cap +
+  // collection here and `baseGlb` holds the decrypted plaintext, so the rest of
+  // the authoring UI renders LIVE (identical to a public base). null = locked
+  // (encrypted base not yet unlocked); irrelevant for public bases.
+  const [unlockedCap, setUnlockedCap] = useState<{ capId: string; collectionId: string } | null>(null);
   const [collectionName, setCollectionName] = useState('');
   const [registerFeeSui, setRegisterFeeSui] = useState('0');
   const [editorState, setEditorState] = useState<VariantEditorState>(newVariantEditorState);
@@ -452,6 +458,11 @@ export function LaunchCollectionPage() {
     // plan-015 U8 — clear locks when switching bases; preserving them
     // would carry forward lock indices into a different variant array.
     setLockedIndices(new Set());
+    // plan A — re-lock: a freshly picked base is never unlocked yet, and the
+    // previous base's decrypted plaintext must not leak into the new authoring
+    // session. Both reset here (encrypted branch keeps baseGlb null; the public
+    // branch overwrites baseGlb with the fetched mesh below).
+    setUnlockedCap(null);
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -731,22 +742,18 @@ export function LaunchCollectionPage() {
     }
   }, [session, signer, base, baseGlb, runBuildVariants, uploadFiles, collectionName, registerFeeSui, suiClient]);
 
-  // plan-026 U5 — encrypted ALLOW_LIST 3-step fork. PERMISSIONLESS stays on the
-  // atomic onLaunch above; this path runs ONLY when the picked base is
-  // encrypted (base.isEncrypted). It needs TWO wallet signatures (step-1 launch
-  // + the SessionKey personal message), which cannot be driven in agent-browser
-  // — see CLAUDE.md Frontend Verification Protocol; unit tests mock the seam.
-  const onLaunchEncrypted = useCallback(async () => {
-    if (launchingRef.current) return;
-    if (!session || !signer || !base) return;
-    setMemoryRecheckSignal((n) => n + 1);
-    launchingRef.current = true;
-    setErrorMsg(null);
-    previewRef.current?.dispose();
-
-    // Wallet-signing wrapper shared by step 1 + step 3: signs+executes a PTB and
-    // returns the digest, surfacing a FailedTransaction as a thrown error.
-    const signAndExecute = async (tx: Parameters<typeof signer.signAndExecuteTransaction>[0]['transaction']): Promise<string> => {
+  // plan A — encrypted ALLOW_LIST fork, "unlock-first" two-action flow (replaces
+  // the old monolithic onLaunchEncrypted). PERMISSIONLESS stays on the atomic
+  // onLaunch above. onUnlock (pay + decrypt) and onMintEncrypted (bake + mint)
+  // each take wallet signatures and cannot be driven in agent-browser — see
+  // CLAUDE.md Frontend Verification Protocol; unit tests mock the seam.
+  //
+  // Wallet-signing wrapper shared by the encrypted unlock (step 1 launch) + mint
+  // (mint_tokens): signs+executes a PTB and returns the digest, surfacing a
+  // FailedTransaction as a thrown error.
+  const signAndExecutePtb = useCallback(
+    async (tx: Parameters<NonNullable<typeof signer>['signAndExecuteTransaction']>[0]['transaction']): Promise<string> => {
+      if (!signer) throw new Error('No signer');
       const res = await signer.signAndExecuteTransaction({ transaction: tx, client: suiClient });
       if (res.$kind === 'FailedTransaction') {
         throw new Error(
@@ -754,7 +761,22 @@ export function LaunchCollectionPage() {
         );
       }
       return res.Transaction.digest;
-    };
+    },
+    [signer, suiClient],
+  );
+
+  // plan A — UNLOCK (encrypted bases, ~2 signatures): pay the fork fee (mints the
+  // cap + empty collection), then SessionKey-sign + key-server decrypt the base.
+  // On success the plaintext lands in `baseGlb` and the cap/collection in
+  // `unlockedCap`, so the rest of the authoring UI renders LIVE (WYSIWYG per-part
+  // recolor) — no more blind coloring against the public still. The bake + mint
+  // happen later in onMintEncrypted using the held plaintext (no re-decrypt).
+  const onUnlock = useCallback(async () => {
+    if (launchingRef.current) return;
+    if (!session || !signer || !base) return;
+    setMemoryRecheckSignal((n) => n + 1);
+    launchingRef.current = true;
+    setErrorMsg(null);
 
     try {
       // ---- STEP 1 — cap-issuing launch_collection (fee paid, empty quilt) ----
@@ -762,7 +784,7 @@ export function LaunchCollectionPage() {
       const launch = await launchEncryptedCollection({
         modelId: base.objectId,
         feeMist: BigInt(base.derivativeMintFee || '0'),
-        signAndExecute,
+        signAndExecute: signAndExecutePtb,
         fetchObjectChanges: async (digest) => {
           // Wait for finality so getTransactionBlock's objectChanges resolve.
           await suiClient.waitForTransaction({ digest });
@@ -778,7 +800,7 @@ export function LaunchCollectionPage() {
         },
       });
 
-      // ---- STEP 2 — SessionKey sign + key-server decrypt + bake ----
+      // ---- SessionKey sign + key-server decrypt ----
       setPhase('decrypting');
       // Reuse a cached SessionKey within its short TTL so a retry doesn't
       // re-prompt; otherwise create one and sign its personal message.
@@ -809,31 +831,57 @@ export function LaunchCollectionPage() {
           tx.build({ client: suiClient as never, onlyTransactionKind: true }),
       });
 
-      // Feed the DECRYPTED plaintext to the existing bake — no raw-download
-      // affordance is ever rendered for these bytes (R9). The cap + collection
+      // Unlocked: hold the plaintext + cap and return to LIVE authoring. No
+      // raw-download affordance is ever rendered for these bytes (R9).
+      setBaseGlb(plaintextGlb);
+      setUnlockedCap({ capId: launch.capId, collectionId: launch.collectionId });
+      setPhase('editing-variants');
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setPhase('error');
+    } finally {
+      launchingRef.current = false;
+    }
+  }, [session, signer, base, suiClient, signAndExecutePtb]);
+
+  // plan A — MINT (encrypted bases, ~2 signatures: Walrus + mint_tokens). Runs
+  // AFTER the base is unlocked: bakes the authored variants from the held
+  // plaintext, uploads the quilt, and batch-mints. Reuses the cap/collection from
+  // onUnlock — no second decrypt.
+  const onMintEncrypted = useCallback(async () => {
+    if (launchingRef.current) return;
+    if (!session || !signer || !base) return;
+    if (!unlockedCap || !baseGlb) {
+      setErrorMsg('Unlock the base before minting.');
+      return;
+    }
+    setMemoryRecheckSignal((n) => n + 1);
+    launchingRef.current = true;
+    setErrorMsg(null);
+    previewRef.current?.dispose();
+
+    try {
+      // Bake the authored palettes onto the held plaintext. The cap + collection
       // travel along so the backend can verify the JWT wallet owns the cap.
       setPhase('building-variants');
-      const swapped = await runBuildVariants(plaintextGlb, {
-        capId: launch.capId,
-        collectionId: launch.collectionId,
-      });
+      const swapped = await runBuildVariants(baseGlb, unlockedCap);
 
       setPhase('uploading');
       const upload = await uploadFiles(swapped, signer as never);
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
-      // ---- STEP 3 — mint_tokens (set quilt + batch-mint) ----
+      // ---- mint_tokens (set quilt + batch-mint) ----
       setPhase('signing');
       const name = collectionName.trim() || `${base.name} variants`;
       const tokenNames = swapped.map((_, i) => `${name} #${i + 1}`);
       const tokenPatchIds = swapped.map((_, i) => upload.patchIds[i] ?? '');
       const digest = await mintEncryptedTokens({
-        capId: launch.capId,
-        collectionId: launch.collectionId,
+        capId: unlockedCap.capId,
+        collectionId: unlockedCap.collectionId,
         quiltBlobId: upload.blobIds[0],
         tokenNames,
         tokenPatchIds,
-        signAndExecute,
+        signAndExecute: signAndExecutePtb,
       });
       setTxDigest(digest);
       setPhase('success');
@@ -844,12 +892,16 @@ export function LaunchCollectionPage() {
       launchingRef.current = false;
       previewRef.current?.remount();
     }
-  }, [session, signer, base, runBuildVariants, uploadFiles, collectionName, suiClient]);
+  }, [session, signer, base, unlockedCap, baseGlb, runBuildVariants, uploadFiles, collectionName, signAndExecutePtb]);
 
   // plan-026 U5 — the picked base's encryption decides the launch handler +
   // labels. Encrypted ALLOW_LIST bases run the 3-step decrypt fork; everything
   // else stays on the atomic path.
   const isEncryptedBase = base?.isEncrypted ?? false;
+  // plan A — encrypted bases are "locked" until the forker pays + decrypts. The
+  // authoring editor + live preview are gated behind the unlock; the public path
+  // is never locked.
+  const needsUnlock = isEncryptedBase && !unlockedCap;
 
   const busy =
     phase === 'downloading-base' ||
@@ -859,10 +911,16 @@ export function LaunchCollectionPage() {
     phase === 'launching-cap' ||
     phase === 'decrypting';
 
+  // plan A — UNLOCK button label (encrypted, pre-unlock). Owns the
+  // launching-cap / decrypting phases (the 2 unlock signatures).
+  const unlockLabel = (() => {
+    if (phase === 'launching-cap') return '— APPROVE FORK FEE…';
+    if (phase === 'decrypting') return '— SIGN + DECRYPT BASE…';
+    return `UNLOCK TO DESIGN — PAY ${mistToSui(base?.derivativeMintFee ?? '0')} SUI + DECRYPT →`;
+  })();
+
   const launchLabel = (() => {
     if (phase === 'downloading-base') return '— DOWNLOADING BASE MESH…';
-    if (phase === 'launching-cap') return '— STEP 1 · APPROVE FORK FEE…';
-    if (phase === 'decrypting') return '— STEP 2 · SIGN + DECRYPT BASE…';
     if (phase === 'building-variants') return `— BUILDING ${editorState.variants.length} VARIANTS`;
     if (phase === 'uploading') {
       if (uploadStage === 'awaiting-register') return 'Approve Walrus register…';
@@ -871,12 +929,12 @@ export function LaunchCollectionPage() {
     }
     if (phase === 'signing') {
       return isEncryptedBase
-        ? `— STEP 3 · APPROVE MINT (${editorState.variants.length} tokens)…`
+        ? `— APPROVE MINT (${editorState.variants.length} tokens)…`
         : `Step 3 of 3 — approve launch (collection + ${editorState.variants.length} tokens)…`;
     }
     if (phase === 'success') return 'LAUNCHED';
     if (isEncryptedBase) {
-      return `FORK + DECRYPT (${editorState.variants.length} TOKENS) →`;
+      return `MINT COLLECTION (${editorState.variants.length} TOKENS) →`;
     }
     return `LAUNCH COLLECTION (${editorState.variants.length} TOKENS) →`;
   })();
@@ -1267,6 +1325,58 @@ export function LaunchCollectionPage() {
               <strong>{(base.derivativeRoyaltyBps / 100).toFixed(2)}%</strong> resale royalty back to them.
             </p>
 
+            {/* plan A — encrypted base UNLOCK gate. Until the forker pays + decrypts
+                there is no plaintext mesh to color against, so we DON'T render the
+                blind color editor; we show the public still + an unlock CTA. After
+                onUnlock, `unlockedCap` is set and the full live editor renders below. */}
+            {needsUnlock && (
+              <div
+                data-testid="unlock-gate"
+                style={{
+                  display: 'flex',
+                  gap: 20,
+                  alignItems: 'flex-start',
+                  padding: 16,
+                  border: tokens.border.primary,
+                  background: tokens.color.paperPure,
+                  marginBottom: 16,
+                }}
+              >
+                {(() => {
+                  const stills = base ? previewStillUrlsForSummary(base) : [];
+                  return stills[0] ? (
+                    <img
+                      src={stills[0]}
+                      alt={`${base.name || 'model'} preview`}
+                      data-testid="unlock-gate-still"
+                      style={{ width: 180, height: 180, objectFit: 'cover', border: tokens.border.primary }}
+                    />
+                  ) : (
+                    <div style={{ ...monoLabel, color: tokens.color.hint }}>ENCRYPTED</div>
+                  );
+                })()}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                  <span style={{ ...monoLabel, color: tokens.color.ink }}>— ENCRYPTED BASE · LOCKED</span>
+                  <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px', lineHeight: 1.5 }}>
+                    Unlock this base to design your collection on the real mesh. Unlocking pays the{' '}
+                    <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> fork fee and decrypts the base in
+                    your browser (2 signatures). Then you recolor each variant live — what you see is what mints.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void onUnlock()}
+                    disabled={busy || !signer}
+                    data-testid="unlock-button"
+                    style={buttonPrimary}
+                  >
+                    {unlockLabel}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!needsUnlock && (
+            <>
             <div style={formGrid}>
               <label>
                 <span style={sectionLabel}>COLLECTION NAME</span>
@@ -1321,7 +1431,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
-                encryptedPreviewUrls={isEncryptedBase && base ? previewStillUrlsForSummary(base) : []}
+                encryptedPreviewUrls={isEncryptedBase && !unlockedCap && base ? previewStillUrlsForSummary(base) : []}
                 previewRef={previewRef}
               />
               <div style={previewSideRail}>
@@ -1398,11 +1508,11 @@ export function LaunchCollectionPage() {
                 />
               )}
             <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              {/* plan-026 — PREVIEW VARIANTS needs the plaintext base mesh, which
-                  doesn't exist until an encrypted base is decrypted (post-pay).
-                  Hide it entirely for encrypted bases; the forker evaluates from
-                  the public still and authors palettes blind until FORK + DECRYPT. */}
-              {!isEncryptedBase && (
+              {/* plan A — PREVIEW VARIANTS needs the plaintext base mesh. For a
+                  public base it's always present; for an encrypted base it exists
+                  only AFTER unlock (decrypt). So show it whenever the base isn't
+                  locked. */}
+              {(!isEncryptedBase || unlockedCap) && (
                 <button
                   type="button"
                   onClick={() => void onPreview()}
@@ -1415,9 +1525,9 @@ export function LaunchCollectionPage() {
               )}
               <button
                 type="button"
-                // plan-026 U5 — encrypted ALLOW_LIST bases run the 3-step
-                // decrypt fork; everything else stays on the atomic path.
-                onClick={() => void (isEncryptedBase ? onLaunchEncrypted() : onLaunch())}
+                // plan A — encrypted bases mint from the already-unlocked plaintext
+                // (onMintEncrypted); public bases stay on the atomic onLaunch path.
+                onClick={() => void (isEncryptedBase ? onMintEncrypted() : onLaunch())}
                 // plan-016 code-review hotfix — gate on !signer too so the
                 // button is HTML-disabled (not just silently no-op via the
                 // click handler) when test mode has a missing/invalid key.
@@ -1431,7 +1541,7 @@ export function LaunchCollectionPage() {
             </div>
             <p style={launchHelper}>
               {isEncryptedBase
-                ? 'ENCRYPTED BASE · SIGNS 4× (FORK FEE · SESSION · WALRUS · MINT) · DECRYPTS CLIENT-SIDE'
+                ? 'ENCRYPTED BASE · UNLOCKED · SIGNS 2× (WALRUS · MINT) · PAYS GAS'
                 : 'SIGNS 3× · PAYS GAS · MINTS L2'}
             </p>
             {isEncryptedBase && (
@@ -1439,9 +1549,8 @@ export function LaunchCollectionPage() {
                 style={{ ...launchHelper, textTransform: 'none', letterSpacing: '0.5px', color: tokens.color.muted }}
                 data-testid="encrypted-base-notice"
               >
-                This base is encrypted — you author palettes from the public preview
-                stills above. The real mesh is decrypted in your browser only after you
-                pay the fork fee; there is no download.
+                Unlocked — you're designing on the decrypted mesh in your browser. What
+                you see is what mints; there is no download.
               </p>
             )}
             {/* plan-017 U4 — Multi-quilt scope. When N > QUILT_SIZE, the
@@ -1475,6 +1584,8 @@ export function LaunchCollectionPage() {
                   </span>
                 </div>
               )}
+            </>
+            )}
           </section>
         )}
 
