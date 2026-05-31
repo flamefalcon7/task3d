@@ -1,6 +1,32 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 9:00pm GMT+8 (Seal v1 SHIPPED + LIVE-VERIFIED + post-ship UX polish; one open question)
+## Last Updated: 2026-05-31 / 11:25pm GMT+8 (Upload-path segmentation SHIPPED — Option A2 name-keyed swap, D-077; 5-reviewer pass applied)
+
+### Where we are (read this first after compact)
+The "OPEN QUESTION — segmentation on Upload path" below is **RESOLVED + BUILT**. Uploaded GLBs can now be tagged + per-part recolored — but safely, via **Option A2 (ADR D-077)**: the backend recolors by **material name** (order-independent) instead of array position, closing a latent silent-miscolor hole (browser tags by Babylon mesh order; backend recolored by gltf-transform material order — these diverge for arbitrary uploads). All on a NEW branch **`feat/upload-segmentation`** (branched off `feat/seal-content-protection`, which is still unmerged → this stacks on it).
+
+**What shipped (6 commits 57a8f58..4759d44):**
+- **U1** name-keyed backend swap + `materialName` optional transport field (`gltf-material-swap.ts`, `shared/types.ts`, route 422s `material_name_not_found` / `ambiguous_material_name`).
+- **U2** forge derives per-part material names headlessly (`extractMaterialNames.ts` NullEngine) + `partMaterials.ts` pure helpers (single source of "what is a part" / taggability); `runBuildVariants` attaches names when the base is bijective+unique.
+- **U3** uploads route through the existing `TaggingStep` (file pick = the confirm); auto-skips to metadata (`partLabels=[]`) when not taggable (1 part / dup names / >64); `TaggingCanvas.onLoaded` now reports `{partCount, materialNames}`.
+- **U4** ADR D-077 + `verify-material-name-parity.mjs` (PROVED Babylon `material.name` == gltf-transform `getName()` on pickup-truck: 14 unique `Material_tripo_part_N`, set+order equal — the core A2 assumption).
+- **review fixes** (5-reviewer pass): dup-name backend guard (no silent last-write-wins), `key={glbUrl}` on TaggingStep (re-upload stale-state), frontend surfaces the new 422s, warn (not swallow) on extract failure, fork-time-drift test.
+
+**Tests/build:** backend **136** green, frontend **830** green, `tsc -b` clean (delete stale `*.tsbuildinfo` if it shows phantom 32/33 — clean build = 0). Move untouched (no contract change, no republish).
+
+**Verification status:** core safety verified headlessly (parity script + order-independence unit test). The post-sign-in upload→tag→publish→fork→recolor arc is **wallet-gated** (agent-browser can't sign), so it's a **user-run check** — the user should drive it in real Chrome+Slush before the demo.
+
+### Deferred review findings (tracked in open-questions OQ-027/028 — acceptable for hackathon)
+- Babylon↔gltf-transform name parity verified on ONE Tripo file; multi-primitive-per-mesh / other-exporter GLBs not corpus-tested (dup-material case IS guarded; unreferenced-extra-material is benign/uncolored).
+- `TaggingStep` shows "LOADING PARTS…" forever if a magic-valid GLB fails Babylon parse (no onLoadError path) — pre-existing for Tripo, more reachable via upload.
+- `extractMaterialNames` real-NullEngine path covered by the manual parity script, not a CI test.
+
+### Next concrete step
+User decision: (a) drive the wallet-gated upload→fork→recolor arc in real Chrome to confirm end-to-end, and/or (b) merge plan — `feat/seal-content-protection` then `feat/upload-segmentation` (stacked) to main, and/or (c) back to demo video + pitch deck.
+
+---
+
+## Older: 2026-05-31 / 9:00pm GMT+8 (Seal v1 SHIPPED + LIVE-VERIFIED + post-ship UX polish; one open question)
 
 ### Where we are (read this first after compact)
 plan-026 (Seal content protection) is **functionally complete, deployed to v9 testnet, and end-to-end LIVE-verified** (headless round-trip: encrypt→quilt upload→publish_encrypted→launch_collection→SessionKey→**live key servers released the key**→decrypt→byte-exact GLB). All on branch `feat/seal-content-protection` (NOT merged to main). Frontend **810 tests / tsc 32 baseline**, Move **79**, backend **128**.
@@ -13,7 +39,7 @@ plan-026 (Seal content protection) is **functionally complete, deployed to v9 te
 - Fee copy de-jargoned ("UNLOCK PRICE" / "what people pay you to unlock your model…").
 - Tooling: `frontend/scripts/seal-roundtrip.ts` (re-run before demo: `cd frontend && ../backend/node_modules/.bin/tsx scripts/seal-roundtrip.ts`). `docs/seal-live-verification-checklist.md`.
 
-### OPEN QUESTION (awaiting user) — segmentation on Upload path
+### ~~OPEN QUESTION~~ → RESOLVED + BUILT (see top block: Option A2 / D-077, branch `feat/upload-segmentation`)
 User asked why an **uploaded** GLB has no segmentation. Answer: mesh_segmentation is a **Tripo-only** step (D-033 — Upload bypasses Tripo by design), so uploaded GLBs get `partLabels=[]` and no per-part coloring; the tagging step is gated to `sourceMode === 'tripo'`. I OFFERED an enhancement: for uploaded **multi-material** GLBs (like the user's pickup-truck, which Tripo had segmented), read the GLB's existing materials as parts and enable tagging/per-part coloring **without Tripo**. **User has not answered yet.** If yes: (1) verify the truck GLB's material count, (2) enable TaggingStep for upload mode when material count > 1, (3) derive partLabels from the GLB. This is a NEW feature (multi-file) — confirm before building.
 
 ### Other open threads (lower priority)

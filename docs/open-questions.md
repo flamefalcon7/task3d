@@ -475,3 +475,29 @@ Run a v1.1 Seal `ce-brainstorm` → `ce-plan` that locks: the `seal_approve` sig
 
 ### Blocker level
 🟡 Open — v1.1 only; must precede any Seal code.
+
+---
+
+## OQ-027: Upload-segmentation (A2/D-077) — Babylon↔gltf-transform name parity verified on only one GLB
+
+**Status**: 🟡 Open (non-blocking) — surfaced 2026-05-31 by the 5-reviewer pass on `feat/upload-segmentation`.
+**Blocking**: nothing for 6/21. The shipped feature is safe for the verified population (Tripo-shaped + bijective-unique-named uploads).
+
+### The gap
+Option A2 (D-077) recolors by material name, assuming Babylon's `material.name` (forge `extractMaterialNames`) equals gltf-transform's `getName()` (backend swap). This is **empirically verified on exactly one file** (`pickup-truck.glb`, Tripo, 14 parts) via `frontend/scripts/verify-material-name-parity.mjs`. Other exporters (Blender multi-slot, multi-primitive-per-mesh, shared-material scenes) are not corpus-tested. The dangerous sub-case (two parts sharing a material → duplicate name) is now **guarded both ends** (forge `isUploadTaggable` rejects dup names at tag time → auto-skip; backend `AmbiguousMaterialNameError` 422). The remaining cases degrade benignly (unreferenced extra material left uncolored) or fail loud (unresolved name 422).
+
+### To resolve (if pursued)
+Run the parity script across a corpus of real-world exporter GLBs; if a divergence surfaces, either tighten `isUploadTaggable` or add a fork-time assertion binding `partLabels[i]` to a material identity. Consider wiring a synthetic-GLB `extractMaterialNames` test into CI (currently only the manual script exercises the real NullEngine path).
+
+---
+
+## OQ-028: Upload TaggingStep wedges on a magic-valid-but-unparseable GLB
+
+**Status**: 🟡 Open (low severity) — surfaced 2026-05-31 (correctness reviewer).
+**Blocking**: nothing for 6/21.
+
+### The gap
+`TaggingStep` only leaves the "LOADING PARTS…" state when `TaggingCanvas.onLoaded` fires, which happens only on a successful `LoadAssetContainerAsync`. A GLB that passes `isValidGlb` (glTF magic + ≤12 MB) but fails Babylon parse (corrupt/unsupported geometry) leaves the user stuck — no auto-skip, no Continue, no error. Pre-existing for the Tripo path; more reachable now that uploads route through the same step.
+
+### To resolve (if pursued)
+Add an `onLoadError` callback from `TaggingCanvas`; on the upload route, treat a load failure as either auto-skip (`partLabels=[]`) or a surfaced "couldn't read this model" error with a re-pick affordance.
