@@ -3,7 +3,14 @@
 ## Last Updated: 2026-05-31 / 2:20pm GMT+8 (Seal content protection → **v1 / 6/21 scope**; D0+U1+U2+U3+U4 SHIPPED, U5 next)
 
 ### Quick status (this session, branch `feat/seal-content-protection`)
-Commits: `77cc703` D0 (ADRs) · `c5dd1c2` U1 (Seal client) · `01484ba` U2 (Move v9, 79/79) · `1ca5fc9` U3 (encrypted publish + ALLOW_LIST) · `6a38385` U4 (preview stills). Frontend suite **765/765**, tsc baseline **32** (zero new). **Remaining: U5** (forker decrypt 3-step + catalog RESTRICTED-exclusion + backend hardening — the largest unit, demo climax) · **U6** (landing guard tests — has a product decision: whether to surface Seal on the landing) · **U7** (rewrite spec §3.7 onto cap/creator/registry + close OQ-026 — pure docs). Live encrypted publish/decrypt verification is gated on the **v9 deploy ceremony** (see below).
+Commits: `77cc703` D0 (ADRs) · `c5dd1c2` U1 (Seal client) · `01484ba` U2 (Move v9, 79/79) · `1ca5fc9` U3 (encrypted publish + ALLOW_LIST) · `6a38385` U4 (preview stills) · `8c785ac` **v9 DEPLOYED to testnet**. Frontend suite **765/765**, tsc baseline **32** (zero new). **Remaining: U5** (forker decrypt 3-step + catalog RESTRICTED-exclusion + backend hardening — the largest unit, demo climax) · **U6** (landing guard tests — has a product decision: whether to surface Seal on the landing) · **U7** (rewrite spec §3.7 onto cap/creator/registry + close OQ-026 — pure docs).
+
+### ✅ v9 LIVE on testnet (publish/ensure_collection_policy succeeded 2026-05-31)
+The publish side now runs against a real contract — the deploy gate is CLEARED. v9 ids (in `testnet.json` + `networkConfig.ts`):
+- package `0xba1e84ba…876c5c` · Publisher `0x863582ff…cede0` · **SealIdRegistry `0xdb6e97f7…372e3`** (shared, init-bootstrapped — Resolution G confirmed working) · TransferPolicy `0x81850ced…2c44` (+cap `0x8b626d92…14f6`, royalty-only) · UpgradeCap `0xfbda72ec…c88d`
+- publish digest `2sFX6yuy…` · bootstrap digest `6LDJwf9z…` · supersedes v8 `0x9e673aa7…` (abandoned)
+- The CLI deployer (`0x3116881c…`) is the active testnet address with ~28 SUI gas. Published.toml regenerated to v9.
+Next live validation (deferred to U5 / browser + wallet): a real ALLOW_LIST encrypted publish (proves U1–U4 against live Seal key servers) and the forker decrypt round-trip.
 
 
 ### Hackathon Tracker
