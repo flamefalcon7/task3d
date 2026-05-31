@@ -55,6 +55,14 @@ export interface VariantPreviewProps {
    */
   baseGlbUrl?: string | null;
   /**
+   * plan-026 — for an ENCRYPTED base there is NO plaintext mesh to live-recolor
+   * (it decrypts only after the forker pays). Instead of the misleading
+   * "LOADING BASE MESH…" spinner (which never resolves), show this public
+   * preview still + an honest caption. Colors picked still apply server-side at
+   * bake time, after the base decrypts.
+   */
+  encryptedPreviewUrl?: string | null;
+  /**
    * plan-017 U3 — imperative dispose/remount handle forwarded to the inner
    * PreviewCanvas so LaunchCollectionPage can free Babylon scene memory
    * during the Walrus upload window.
@@ -106,6 +114,7 @@ export function VariantPreview({
   autoRotate,
   partColors,
   baseGlbUrl,
+  encryptedPreviewUrl,
   previewRef,
 }: VariantPreviewProps) {
   // Resolve a blob URL only for the currently-selected variant — sidesteps the
@@ -159,6 +168,33 @@ export function VariantPreview({
             autoRotate={autoRotate}
             partColors={partColors}
           />
+        ) : encryptedPreviewUrl ? (
+          // plan-026 — encrypted base: no plaintext mesh to recolor live; show the
+          // public preview still + an honest caption. Picked colors apply at bake.
+          <div
+            data-testid="variant-preview-encrypted-still"
+            style={{ position: 'relative', width: '100%', height: '100%' }}
+          >
+            <img
+              src={encryptedPreviewUrl}
+              alt=""
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: '6px 8px',
+                fontSize: 11,
+                textAlign: 'center',
+                background: 'rgba(0,0,0,0.55)',
+              }}
+            >
+              Encrypted base — pick colors now; they apply when you pay to fork & it decrypts.
+            </div>
+          </div>
         ) : (
           <div style={placeholderText} data-testid="variant-preview-placeholder">
             — LOADING BASE MESH…
