@@ -1,11 +1,15 @@
 # Phase Progress
 
-## Last Updated: 2026-05-31 / 3:10pm GMT+8 (Seal content protection → **FUNCTIONALLY COMPLETE**; v9 live; only U6 landing-positioning decision left)
+## Last Updated: 2026-05-31 / 3:35pm GMT+8 (Seal content protection → **plan-026 100% COMPLETE**; v9 live; all 7 units + deploy shipped)
 
-### plan-026 status: DONE except one product decision
-All implementation units shipped + merged on `feat/seal-content-protection`. Commits incl. `8c785ac` v9 deploy · `d827ab4`/`5ce364b` U5 (forker decrypt + catalog + backend) merged from worktree. **Frontend 800/800 · backend 128/128 · Move 79/79 · tsc 32 baseline (frontend, zero new — the 17 transient errors were stale `shared/dist`, fixed by `pnpm --dir shared build`; dist is gitignored) · backend tsc 0.**
-- ✅ U1 Seal client · ✅ U2 Move v9 · ✅ U3 encrypted publish + ALLOW_LIST · ✅ U4 preview stills · ✅ **v9 deployed** · ✅ U5 forker decrypt 3-step + catalog RESTRICTED-exclusion + backend cap-verify · ✅ U7 spec §3.7 + OQ-026.
-- 🟡 **U6 = a single product decision**: whether to surface Seal on the LANDING. The 3 landing guards (`ActorCards.test`/`LifecycleStrip.test` AC-3) forbid `access`/`seal`/`derivative` as "unshipped". Seal is now SHIPPED → the `\bseal\b` guard is stale; `access`+`derivative` stay valid. If we add an honest Seal beat (mitigation framing, R14) → relax only `\bseal\b` + add copy. If not → U6 is a no-op (guards pass; the /create + /forge Seal copy is already honest). AWAITING USER CALL.
+### plan-026 status: DONE ✅ (17 commits on `feat/seal-content-protection`)
+All 7 units + the D0 gate + the v9 deploy shipped & merged. **Frontend 801/801 · backend 128/128 · Move 79/79 · tsc 32 baseline (frontend, zero new) · backend tsc 0.**
+- ✅ U1 Seal client · ✅ U2 Move v9 (79/79) · ✅ U3 encrypted publish + ALLOW_LIST · ✅ U4 preview stills · ✅ **v9 deployed to testnet** (`8c785ac`) · ✅ U5 forker decrypt 3-step + catalog RESTRICTED-exclusion + backend cap-verify (`d827ab4`) · ✅ U7 spec §3.7 + OQ-026 · ✅ U6 honest Seal beat on the modelCreator landing card (`7a3a62c`, R14 mitigation framing, browser-verified desktop).
+- Branch `feat/seal-content-protection` is **not yet merged to `main`** — awaiting the live wallet round-trip + user's merge call.
+- Note for reruns: after pulling, run `pnpm --dir shared build` (the +17 tsc errors otherwise are just stale `shared/dist`, which is gitignored).
+
+### ⚠️ ONE manual step before the demo recording (user's, wallet-gated)
+The decrypt path needs real Slush signatures (can't drive in agent-browser). Do one real testnet round-trip: **ALLOW_LIST encrypted publish → forker pays → SessionKey sign → decrypt → derive → mint**. This is the only thing not verified against live Seal key servers (the `seal_approve_cap` txBytes acceptance + step-1 `objectChanges` id extraction). If it works, the feature is demo-ready; if a key server is flaky, re-take the recording.
 
 ### ⚠️ Live verification still pending (user's manual step — wallet-gated)
 The decrypt path needs real Slush signatures (can't drive in agent-browser). Untested-against-live-key-servers: the exact `seal_approve_cap` txBytes acceptance + step-1 `objectChanges` id extraction (forkerDecrypt/encryptedFork report §7). Do one real ALLOW_LIST encrypted publish + forker decrypt round-trip on testnet before the demo recording.
