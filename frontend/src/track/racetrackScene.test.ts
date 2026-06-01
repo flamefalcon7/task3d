@@ -71,6 +71,8 @@ const M = vi.hoisted(() => {
     shadowGeneratorCtor: vi.fn(),
     shadowAddCaster: vi.fn(),
     pbrMaterialCtor: vi.fn(),
+    ssao2Ctor: vi.fn(),
+    ssao2Dispose: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -345,6 +347,18 @@ vi.mock('@babylonjs/core', () => {
       M.defaultRenderingPipelineDispose();
     }
   }
+  // Plan-028 U4 — SSAO pipeline. Tracks construction (with the camera) and
+  // disposal so the teardown test can assert it runs before scene.dispose().
+  class SSAO2RenderingPipeline {
+    totalStrength = 0;
+    radius = 0;
+    constructor(...args: unknown[]) {
+      M.ssao2Ctor(...args);
+    }
+    dispose() {
+      M.ssao2Dispose();
+    }
+  }
   class StandardMaterial {
     diffuseColor: unknown;
     specularColor: unknown;
@@ -524,6 +538,7 @@ vi.mock('@babylonjs/core', () => {
     DirectionalLight,
     HemisphericLight,
     ShadowGenerator,
+    SSAO2RenderingPipeline,
     StandardMaterial,
     PBRMaterial,
     Texture,
@@ -563,6 +578,8 @@ beforeEach(() => {
   M.shadowGeneratorCtor.mockClear();
   M.shadowAddCaster.mockClear();
   M.pbrMaterialCtor.mockClear();
+  M.ssao2Ctor.mockClear();
+  M.ssao2Dispose.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
@@ -887,6 +904,36 @@ describe('createRacetrackScene', () => {
       expect(mat!.albedoTexture).not.toBeNull();
       expect(mat!.bumpTexture).not.toBeNull();
     }
+  });
+
+  // ─── Plan-028 U4: SSAO ambient occlusion (perf-gated) ───
+  // Note: SSAO_ENABLED is a compile-time kill-switch (a module const), not a
+  // runtime option, so the disabled branch isn't unit-tested — flipping it is a
+  // manual one-line edit for perf tuning, and adding API surface purely to test
+  // a constant isn't worth it. The on-path + dispose below cover the wiring.
+
+  it('U4 — constructs SSAO2RenderingPipeline once over the chase camera', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(M.ssao2Ctor).toHaveBeenCalledTimes(1);
+    // ctor args: (name, scene, ratio, [camera]). The 4th arg carries the camera
+    // so SSAO attaches to the same camera as the DefaultRenderingPipeline.
+    const cams = M.ssao2Ctor.mock.calls[0]![3] as unknown[];
+    expect(Array.isArray(cams)).toBe(true);
+    expect(cams[0]).toBe(M.state.lastCamera);
+  });
+
+  it('U4 — disposes the SSAO pipeline during scene dispose', async () => {
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    handles.dispose();
+    expect(M.ssao2Dispose).toHaveBeenCalledTimes(1);
   });
 
   it('dispose() tears down scene + engine', async () => {

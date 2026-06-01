@@ -38,6 +38,7 @@ import {
   PhysicsShapeType,
   Scene,
   ShadowGenerator,
+  SSAO2RenderingPipeline,
   StandardMaterial,
   Texture,
   TransformNode,
@@ -276,6 +277,14 @@ const SHADOW_BIAS = 0.002; // nudges shadow acne off the extruded road ribbon
 const ASPHALT_METALLIC = 0.0;
 const ASPHALT_ROUGHNESS = 0.55; // slight sheen — wet-ish race asphalt
 const GRASS_ROUGHNESS = 0.95; // matte
+// Plan-028 U4 — SSAO ambient occlusion. The heaviest item; behind SSAO_ENABLED
+// (D4) so it can be killed in one edit if fps drops on the demo machine. `ratio`
+// is a REQUIRED 3rd ctor arg (render-target scale, perf vs. quality); strength
+// and radius are feel knobs tuned in-browser (U6).
+const SSAO_ENABLED = true;
+const SSAO_RATIO = 0.75; // render-target scale
+const SSAO_STRENGTH = 1.0; // occlusion darkness (totalStrength)
+const SSAO_RADIUS = 2.0; // sample radius in world units
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
 // Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
 // 0.45 puts the sun just above the horizon for visible directional warmth;
@@ -813,6 +822,17 @@ export async function createRacetrackScene(
   renderPipeline.imageProcessing.exposure = TONE_EXPOSURE;
   renderPipeline.imageProcessing.contrast = TONE_CONTRAST;
 
+  // Plan-028 U4 — SSAO ambient occlusion over the chase camera. Coexists with
+  // the DefaultRenderingPipeline above (both register as named pipelines on the
+  // same PostProcessRenderPipelineManager). Perf-gated by SSAO_ENABLED; the
+  // 3rd ctor arg is the required render-target ratio, cameras are the 4th arg.
+  let ssaoPipeline: SSAO2RenderingPipeline | null = null;
+  if (SSAO_ENABLED) {
+    ssaoPipeline = new SSAO2RenderingPipeline('ssao', scene, SSAO_RATIO, [camera]);
+    ssaoPipeline.totalStrength = SSAO_STRENGTH;
+    ssaoPipeline.radius = SSAO_RADIUS;
+  }
+
   // Plan-006 U8 — intro orbit observer state. introOrbitDone fires the
   // onOrbitComplete callback exactly once when the elapsed orbit time
   // exceeds the configured duration. introOrbitStartAlpha snapshots the
@@ -1228,6 +1248,9 @@ export async function createRacetrackScene(
       // it from the camera explicitly so a carousel switch doesn't leak
       // the post-process render targets onto the next scene.
       renderPipeline.dispose();
+      // Plan-028 U4 — drop SSAO render targets before scene teardown so a
+      // carousel switch doesn't leak them onto the next scene.
+      ssaoPipeline?.dispose();
       skidMarks.dispose();
       tireSmoke.dispose();
       carContainer.dispose();
