@@ -3367,6 +3367,7 @@ Pull the full plan-026 feature forward into the **v1 / 6/21 submission** scope. 
 
 ---
 
+<!-- D-078 (2026-06-01) partially reverses the decrypt-gate clause below: seal_approve gates on the soulbound AccessEntitlement, not the NftCollectionCreatorCap. Envelope encryption, SealIdRegistry Resolution-G binding, and fresh-republish discipline are RETAINED. -->
 ## D-075: Seal integration architecture — envelope encryption, fresh republish, policy-derived encryption
 
 **Status**: Accepted
@@ -3411,7 +3412,7 @@ Encrypting an L1 base for ALLOW_LIST/RESTRICTED policies must (a) not bloat the 
 
 ## D-076: Amend D-040 — split fork gate + re-enable ALLOW_LIST in the UI
 
-**Status**: Accepted (Amends D-040)
+**Status**: Accepted (Amends D-040; **Amended by D-078** — the `ALLOW_LIST ⇒ fee > 0` invariant moved from derive fee to `access_fee`, and the cap-as-decrypt-gate it introduced is superseded by the entitlement gate)
 **Date**: 2026-05-31
 **Phase**: 4
 
@@ -3479,6 +3480,49 @@ Recolor by **material name** instead of array position. Add an optional `materia
 
 ---
 
+## D-078: Paid-access entitlement — split fork fee into buy-access (once) + derive fee (per-launch); move decrypt gate cap → entitlement
+
+**Status**: Accepted (Amends D-076; partially reverses the decrypt-gate clause of D-074/D-075)
+**Date**: 2026-06-01
+**Phase**: 4 (v1.1 Seal, plan-027)
+
+### Context
+D-074/075/076 folded "access to decrypt an encrypted base" into the per-collection fork cap: the only way to decrypt an ALLOW_LIST base was to call `launch_collection` (pay the derive fee, mint the cap), and `seal_approve_cap` gated decryption on that cap. Two pains: (1) a creator who already forked a base is charged the derive fee **again** every time they launch another collection — and just to *preview*, since preview needs the paid plaintext; (2) there was **no consumer path** to pay-to-view a premium base, so the documented "N buyers pay access" Walrus/Seal story (spec §3.7) was unimplementable. Origin: `docs/brainstorms/2026-06-01-paid-access-entitlement-split-requirements.md`.
+
+### Decision
+- **Access is a one-time, soulbound `AccessEntitlement` on L1** (`key`-only, no `store`; fields `model_id`, `holder`), minted by a new `purchase_access(model, payment)` entry that routes a new **`access_fee`** to the base creator. Permanent; a duplicate purchase by the same wallet aborts (`EAlreadyHasEntitlement`, dedup table on `Model3D`). It is **L1 entitlement framing, not "L3 Access"** — a direct relationship with the base and a precondition to forking, not a tier stacked on derivatives.
+- **The decrypt gate moves from the cap to the entitlement.** `seal_approve_cap` is **deleted**; new `seal_approve_entitlement(id, &AccessEntitlement, &Model3D, ctx)` gates on `entitlement.model_id == id(model)` ∧ `entitlement.holder == sender` ∧ `is_prefix(seal_id, id)` ∧ `seal_version == VERSION` (modeled on the single-object `seal_approve_creator`, not the cap triple-check). The cap retains collection authority (register fee / `mint_tokens`) but no longer decrypts.
+- **Two independent fees on `LicenseTerms`:** `access_fee` (the pay-to-access gate) + `derivative_mint_fee` (per-launch). The D-076 invariant **moves from derive to access**: `ALLOW_LIST ⇒ access_fee > 0`; the derive fee **may now be 0**.
+- **One entitlement serves both** a consumer (view-in-app) and a creator (free decrypt to fork). Unlock becomes a **free** entitlement-gated decrypt; the derive fee is charged at mint. ALLOW_LIST launch is entitlement-gated on-chain: legacy `launch_collection`/`launch_collection_with_tokens` now **reject** ALLOW_LIST (`EEntitlementRequired`); the new `launch_collection_with_entitlement` is the only ALLOW_LIST launch path (closes the free-fork bypass now that derive may be 0).
+- **`VERSION` bumped 1 → 2** (fail-closed tripwire for abandoned v9 objects). Ships as a **fresh republish (v10)**, not an upgrade (gate relocation must not leave old bytecode callable — D-040 rule). Existing v9 testnet objects are abandoned (no migration).
+- **Policy scoping:** access purchase is ALLOW_LIST-only; PERMISSIONLESS is public (no entitlement); RESTRICTED stays creator-only (not purchasable).
+
+### Honesty boundaries (recorded so the pitch does not overclaim)
+- The consumer in-app "no download" is **UX friction, not DRM** — plaintext GLB bytes reach the browser heap after decryption; a technical user can extract them. True DRM is out of scope for v1.
+- `LicenseTerms` (incl. `access_fee`) is **immutable post-publish** in v1 (no setter), so there is no creator-side fee-change race against a buyer.
+- The **economics consequence is intended**: once a buyer holds the entitlement they have the plaintext for the access fee alone, so the **access fee is the content gate** and the **derive fee is a per-launch provenance/convenience charge** (may be 0). Creators price the access fee as the primary value capture.
+
+### Alternatives Considered
+- **Keep the cap as the decrypt gate (status quo)** — rejected: it is exactly the double-charge + no-consumer-path problem this decision exists to fix.
+- **Frontend-only "cap-reuse" stopgap** (detect an existing cap, skip re-pay) — rejected: doesn't add a consumer path and leaves the economics conflated; superseded by the real entitlement.
+- **Thread `Option<&AccessEntitlement>` through `launch_collection_internal`** — rejected: not a valid Move type (references can't live in `Option`/structs). Resolved by rejecting ALLOW_LIST in the legacy entries + a dedicated entitlement entry.
+- **Transferable / time-limited / subscription access** — deferred; entitlement is soulbound + permanent for v1.
+
+### Consequences
+- ✅ Revives a demonstrable "pay-to-access premium 3D content" story (consumer view) — the Walrus-track pitch payload — and stops charging a returning creator to preview/re-launch.
+- ✅ Decrypt access decoupled from launching; the cap keeps its legitimate register-fee/integration role.
+- ⚠️ Fresh v10 republish (abandons v9 objects); new `seal_approve` first-arg source (entitlement) is a never-live-verified Seal seam — must pass a post-deploy Part-A pre-flight (sender from SessionKey + wrong-sender denied).
+- ⚠️ One `buyers` table per `Model3D` (incl. PERMISSIONLESS, which never uses it) — cheap.
+- 🔮 A future transferable/expiring entitlement would reopen the soulbound + immutability choices.
+
+### Related
+- **Amends D-076** (the `ALLOW_LIST ⇒ fee > 0` invariant moves derive → access; derive may now be 0).
+- **Partially reverses D-074/D-075** (the cap-as-decrypt-gate clause only; envelope encryption, `SealIdRegistry` Resolution-G binding, fresh-republish discipline all retained).
+- Plan: `docs/plans/2026-06-01-027-feat-access-entitlement-split-plan.md`. Origin: `docs/brainstorms/2026-06-01-paid-access-entitlement-split-requirements.md`.
+- Revives the soulbound-receipt shape of the deleted `Access` struct (D-002/D-029/D-032, spec §3.7).
+
+---
+
 # Reserved Decision Numbers
 
-D-078 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-079 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
