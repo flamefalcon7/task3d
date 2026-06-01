@@ -66,6 +66,7 @@ const M = vi.hoisted(() => {
     defaultRenderingPipelineCtor: vi.fn(),
     defaultRenderingPipelineDispose: vi.fn(),
     skyMaterialCtor: vi.fn(),
+    cubeTextureCreateFromPrefiltered: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -115,6 +116,16 @@ const M = vi.hoisted(() => {
         radius: number;
         fov: number;
         target: { x: number; y: number; z: number; copyFrom: ReturnType<typeof vi.fn> };
+      },
+      // Plan-028 U1 — capture the render pipeline instance so exposure/contrast
+      // (and bloom) assignments can be read back in assertions.
+      lastRenderPipeline: null as null | {
+        imageProcessing: {
+          toneMappingEnabled: boolean;
+          toneMappingType: number;
+          exposure: number;
+          contrast: number;
+        };
       },
     },
   };
@@ -220,6 +231,14 @@ vi.mock('@babylonjs/core', () => {
     onKeyboardObservable = { add: vi.fn() };
     render = vi.fn();
     dispose = vi.fn();
+    // Plan-028 U1 — IBL: SUT assigns scene.environmentTexture + environmentIntensity.
+    environmentTexture: unknown = null;
+    environmentIntensity = 0;
+    // Plan-028 U5 — fog: SUT assigns fogMode (numeric literal 2 = FOGMODE_EXP2),
+    // fogDensity, fogColor. Plain settable fields; no statics on the mock.
+    fogMode = 0;
+    fogDensity = 0;
+    fogColor: unknown = null;
     constructor(...args: unknown[]) {
       M.sceneCtor(...args);
       M.state.lastScene = this;
@@ -266,9 +285,17 @@ vi.mock('@babylonjs/core', () => {
     bloomWeight = 0;
     bloomKernel = 0;
     fxaaEnabled = false;
-    imageProcessing = { toneMappingEnabled: false, toneMappingType: 0 };
+    // Plan-028 U1 — exposure/contrast added so the SUT's read-back assignments
+    // have keys to land on (was toneMapping-only).
+    imageProcessing = {
+      toneMappingEnabled: false,
+      toneMappingType: 0,
+      exposure: 0,
+      contrast: 0,
+    };
     constructor(...args: unknown[]) {
       M.defaultRenderingPipelineCtor(...args);
+      M.state.lastRenderPipeline = this as unknown as typeof M.state.lastRenderPipeline;
     }
     dispose() {
       M.defaultRenderingPipelineDispose();
@@ -297,6 +324,17 @@ vi.mock('@babylonjs/core', () => {
     uScale = 1;
     vScale = 1;
     constructor(public url: string, _scene: unknown) {}
+  }
+  // Plan-028 U1 — CubeTexture for IBL. The SUT calls the static
+  // CreateFromPrefilteredData(url, scene) and assigns the result to
+  // scene.environmentTexture. The spy lets tests assert the load happened and
+  // (by overriding the implementation) exercise the graceful-degradation path.
+  class CubeTexture {
+    constructor(public url: string, _scene: unknown) {}
+    static CreateFromPrefilteredData(url: string, scene: unknown) {
+      M.cubeTextureCreateFromPrefiltered(url, scene);
+      return new CubeTexture(url, scene);
+    }
   }
   const MeshBuilder = {
     CreateGround: (...args: unknown[]) => {
@@ -420,6 +458,7 @@ vi.mock('@babylonjs/core', () => {
     HemisphericLight,
     StandardMaterial,
     Texture,
+    CubeTexture,
     Color3,
     MeshBuilder,
     PhysicsAggregate,
@@ -450,12 +489,14 @@ beforeEach(() => {
   M.defaultRenderingPipelineCtor.mockClear();
   M.defaultRenderingPipelineDispose.mockClear();
   M.skyMaterialCtor.mockClear();
+  M.cubeTextureCreateFromPrefiltered.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
   M.state.lastTransformNode = null;
   M.state.lastCarBody = null;
   M.state.lastCamera = null;
+  M.state.lastRenderPipeline = null;
   skidMarksSpy.ctor.mockClear();
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
@@ -632,6 +673,55 @@ describe('createRacetrackScene', () => {
     dev_skipIntro: true,
     });
     expect(M.state.lastEngine?.runRenderLoop).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Plan-028 U1: IBL environment + tonemap exposure ───
+
+  it('U1 — loads the prefiltered .env and assigns scene.environmentTexture', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(M.cubeTextureCreateFromPrefiltered).toHaveBeenCalledTimes(1);
+    expect(M.cubeTextureCreateFromPrefiltered.mock.calls[0]![0]).toBe(
+      '/textures/env/environment.env',
+    );
+    // The returned cube texture is assigned to environmentTexture and a
+    // positive global IBL intensity is set (PBR car can pick up reflections).
+    expect(M.state.lastScene?.environmentTexture).not.toBeNull();
+    expect(M.state.lastScene!.environmentIntensity).toBeGreaterThan(0);
+  });
+
+  it('U1 — sets tonemap exposure + contrast on the render pipeline', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    // Both lifted above the ACES-default of 1.0 so midtones are no longer
+    // crushed (exposure) and the lift keeps its punch (contrast).
+    expect(M.state.lastRenderPipeline!.imageProcessing.exposure).toBeGreaterThan(0);
+    expect(M.state.lastRenderPipeline!.imageProcessing.contrast).toBeGreaterThan(0);
+  });
+
+  it('U1 — degrades gracefully when the .env loader throws (scene still builds)', async () => {
+    // Real Babylon fails a bad .env inside the async loader, not via throw —
+    // but the try/catch guards the synchronous construct path. Force the
+    // synchronous static to throw and assert the scene still finishes building
+    // and the render loop still starts (no blanked canvas).
+    M.cubeTextureCreateFromPrefiltered.mockImplementationOnce(() => {
+      throw new Error('env fetch failed');
+    });
+    const handles = await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(handles).toBeDefined();
+    expect(M.state.lastEngine?.runRenderLoop).toHaveBeenCalledTimes(1);
+    // environmentTexture stays null (IBL absent) but the scene is alive.
+    expect(M.state.lastScene?.environmentTexture).toBeNull();
   });
 
   it('dispose() tears down scene + engine', async () => {

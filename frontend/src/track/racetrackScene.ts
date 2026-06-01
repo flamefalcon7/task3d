@@ -25,6 +25,7 @@
 import {
   ArcRotateCamera,
   Color3,
+  CubeTexture,
   DefaultRenderingPipeline,
   Engine,
   HemisphericLight,
@@ -246,6 +247,15 @@ const TARGET_CAR_LENGTH = 2.8;
 const BLOOM_THRESHOLD = 0.7;
 const BLOOM_WEIGHT = 0.3;
 const BLOOM_KERNEL = 64;
+// Plan-028 U1 (D-079) — image-based lighting + tonemap. The car GLB exports
+// PBR materials; with no scene.environmentTexture they have nothing to reflect
+// and render near-black — the single biggest cause of the "scene looks dark"
+// complaint. environment.env is Babylon's official prefiltered environment
+// (prefiltered = has the roughness mip-chain PBR diffuse/rough IBL needs).
+const ENV_TEXTURE_PATH = '/textures/env/environment.env';
+const ENV_INTENSITY = 1.0; // scene.environmentIntensity — global IBL strength
+const TONE_EXPOSURE = 1.1; // imageProcessing.exposure — lifts ACES-crushed midtones
+const TONE_CONTRAST = 1.2; // imageProcessing.contrast — restores punch after the exposure lift
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
 // Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
 // 0.45 puts the sun just above the horizon for visible directional warmth;
@@ -329,6 +339,25 @@ export async function createRacetrackScene(
 
   // 2. Light
   new HemisphericLight('light', new Vector3(0, 1, 0), scene);
+
+  // Plan-028 U1 — image-based lighting. Setting scene.environmentTexture from a
+  // prefiltered .env makes PBR surfaces (the car especially) pick up reflections
+  // and diffuse IBL — the single biggest fix for "the car looks black."
+  // CreateFromPrefilteredData returns synchronously (the file fetch is async but
+  // needs no ready callback for assignment); a missing/invalid .env fails inside
+  // the async loader — surfaced on console — not as a throw. The try/catch guards
+  // the synchronous construction path, and a bad asset degrades gracefully (PBR
+  // unlit) rather than blanking the scene, mirroring the createFoliage posture.
+  try {
+    scene.environmentTexture = CubeTexture.CreateFromPrefilteredData(
+      ENV_TEXTURE_PATH,
+      scene,
+    );
+    scene.environmentIntensity = ENV_INTENSITY;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[racetrack] environment texture load failed, continuing without IBL', err);
+  }
 
   // Plan-006 U3 — SkyMaterial atmospheric sky on a large skybox cube.
   // Replaces the flat clearColor (kept as fallback for the frame before
@@ -722,6 +751,10 @@ export async function createRacetrackScene(
   // literal here so the test mock can stay shape-only (no enum import).
   renderPipeline.imageProcessing.toneMappingEnabled = true;
   renderPipeline.imageProcessing.toneMappingType = 1; // ImageProcessingConfiguration.TONEMAPPING_ACES
+  // Plan-028 U1 — exposure + contrast so ACES no longer crushes the midtones
+  // (the other half of the "scene looks dark" complaint, alongside IBL above).
+  renderPipeline.imageProcessing.exposure = TONE_EXPOSURE;
+  renderPipeline.imageProcessing.contrast = TONE_CONTRAST;
 
   // Plan-006 U8 — intro orbit observer state. introOrbitDone fires the
   // onOrbitComplete callback exactly once when the elapsed orbit time
