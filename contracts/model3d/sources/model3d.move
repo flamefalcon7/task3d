@@ -50,10 +50,12 @@ const POLICY_PERMISSIONLESS: u8 = 2;
 // asserted in `seal_approve_*`. A future COMPATIBLE upgrade that changes the gate
 // logic MUST bump VERSION; already-encrypted models carry the OLD version and then
 // fail `seal_approve` (fail-CLOSED) rather than being silently re-gated by the new
-// rule. It is a tripwire forcing a conscious migration, NOT seamless versioning —
-// for this single republish it is inert at 1. The check rides the gas-free
+// rule. It is a tripwire forcing a conscious migration, NOT seamless versioning.
+// plan-027 bumps it 1→2 (the decrypt-gate relocation from the cap to the
+// AccessEntitlement is a logic change): every abandoned v9 object carries the
+// OLD version and fails seal_approve (fail-CLOSED). The check rides the gas-free
 // key-server dry-run.
-const VERSION: u64 = 1;
+const VERSION: u64 = 2;
 
 // Bounds for the Seal envelope fields (defensive, matching the module's
 // validate-everything posture). `sealed_key` is the Seal-wrapped 32-byte AES key
@@ -152,14 +154,20 @@ const ENotEncryptedPolicy:   u64 = 46;
 // D-075 — `seal_id` already recorded in the SealIdRegistry (global-uniqueness
 // guard that defeats the copy attack — see D-075 Resolution G).
 const ESealIdReused:         u64 = 47;
-// D-075 — seal_approve_cap named TRIPLE-CHECK invariant (each isolation-tested;
-// distinct codes so a test pins exactly which leg denied).
-const ECapCollectionMismatch:  u64 = 48; // cap.collection_id != id(collection)
-const ECollectionModelMismatch:u64 = 49; // collection.base_model_id != id(model)
+// Codes 48 (ECapCollectionMismatch) + 49 (ECollectionModelMismatch) retired with
+// the seal_approve_cap path (plan-027 — decrypt gate relocated to AccessEntitlement).
+// Not reused — abort codes are part of the on-chain ABI history.
 const EIdPrefixMismatch:       u64 = 50; // Seal id not prefixed by model.seal_id
 const ESealVersionMismatch:    u64 = 51; // model.seal_version != VERSION
 // D-075 — seal_approve_creator: caller is not the base creator (RESTRICTED).
 const ENotBaseCreator:         u64 = 52;
+// plan-027 — paid access entitlement split.
+const EInsufficientAccessFee:  u64 = 53; // purchase_access payment < access_fee
+const ENotPurchasable:         u64 = 54; // purchase_access / entitlement entry on a non-ALLOW_LIST base
+const EAlreadyHasEntitlement:  u64 = 55; // wallet already holds an entitlement for this model
+const EEntitlementModelMismatch: u64 = 56; // entitlement.model_id != id(model)
+const ENotEntitlementHolder:   u64 = 57; // entitlement.holder != ctx.sender()
+const EEntitlementRequired:    u64 = 58; // ALLOW_LIST launch attempted via a non-entitlement entry
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -200,6 +208,11 @@ public struct LicenseTerms has store, copy, drop {
     derivative_royalty_bps: u16,
     commercial_use: bool,
     require_attribution: bool,
+    // plan-027 — one-time access fee a buyer pays via `purchase_access` to mint a
+    // soulbound AccessEntitlement (gates Seal decryption). Distinct from
+    // derivative_mint_fee (per-launch). ALLOW_LIST requires access_fee > 0 at
+    // publish (EAllowListNeedsFee, meaning shifted from derive→access).
+    access_fee: u64,
 }
 
 // `has key, store`. Published as a SHARED object by `publish` (D-032) — sells
@@ -250,6 +263,12 @@ public struct Model3D has key, store {
     seal_version: u64,
     license: LicenseTerms,
     created_at_ms: u64,
+    // plan-027 — duplicate-purchase guard for `purchase_access`. A wallet present
+    // here already holds an AccessEntitlement for this model, so a re-purchase
+    // (double-click / dropped-connection retry) aborts EAlreadyHasEntitlement
+    // rather than minting a second entitlement and charging twice. The Table
+    // value is unit `true` (set membership).
+    buyers: Table<address, bool>,
 }
 
 // D-075 — singleton registry of every `seal_id` ever used, bootstrapped once in
@@ -321,6 +340,18 @@ public struct NftCollectionCreatorCap has key {
     collection_id: ID,
 }
 
+// plan-027 — soulbound, permanent receipt of paid access to an ALLOW_LIST base.
+// `has key` ONLY (no `store`) → cannot be wrapped, Kiosk-placed, or
+// `public_transfer`'d; the only exit is `transfer::transfer(x, ctx.sender())`
+// from inside this module (mirrors NftCollectionCreatorCap). Gates Seal
+// decryption via `seal_approve_entitlement` and authorizes an ALLOW_LIST launch
+// via `launch_collection_with_entitlement`.
+public struct AccessEntitlement has key {
+    id: UID,
+    model_id: ID,
+    holder: address,
+}
+
 // Fork B — a tradeable token minted from an `NftCollection` by its cap holder.
 // `key + store` so it can be Kiosk-`place`'d (like `Model3D`) and resold under
 // its OWN per-type `TransferPolicy<NftToken>` (created once by
@@ -361,6 +392,17 @@ public struct CollectionLaunched has copy, drop {
     collection_id: ID,
     base_model_id: ID,
     nft_creator: address,
+}
+
+// plan-027 — emitted by `purchase_access` when a buyer pays the access fee on an
+// ALLOW_LIST base and receives a soulbound AccessEntitlement. The indexer reads
+// this to surface the buyer's owned-access set; `paid` is the access fee routed
+// to the base creator.
+public struct AccessPurchased has copy, drop {
+    entitlement_id: ID,
+    model_id: ID,
+    buyer: address,
+    paid: u64,
 }
 
 // D-029 — emitted by `mint_nft_token`. The L2 analog of `ModelPublished`:
@@ -457,12 +499,16 @@ public entry fun ensure_collection_policy(publisher: &Publisher, ctx: &mut TxCon
 
 // === LicenseTerms constructor ===
 
+// plan-027 — `access_fee` is appended as the LAST param (after the original five)
+// to minimize positional churn across the many call sites. It is the one-time
+// pay-to-decrypt price; ALLOW_LIST requires it > 0 at publish.
 public fun new_license_terms(
     policy: u8,
     derivative_mint_fee: u64,
     derivative_royalty_bps: u16,
     commercial_use: bool,
     require_attribution: bool,
+    access_fee: u64,
 ): LicenseTerms {
     LicenseTerms {
         policy,
@@ -470,6 +516,7 @@ public fun new_license_terms(
         derivative_royalty_bps,
         commercial_use,
         require_attribution,
+        access_fee,
     }
 }
 
@@ -501,6 +548,8 @@ public fun license_policy(license: &LicenseTerms): u8 { license.policy }
 public fun license_derivative_royalty_bps(license: &LicenseTerms): u16 {
     license.derivative_royalty_bps
 }
+// plan-027 — one-time access fee (mist) for `purchase_access`.
+public fun license_access_fee(license: &LicenseTerms): u64 { license.access_fee }
 
 // === D-029 — NftCollection / cap accessors ===
 
@@ -577,10 +626,13 @@ public(package) fun validate_seal_publish(
     preview_blob_ids: &vector<String>,
     license: &LicenseTerms,
 ) {
-    // D-076 — ALLOW_LIST requires a positive derive fee (pay-to-fork is its only
-    // v1 meaning; fee == 0 collapses it to PERMISSIONLESS + pointless encryption).
+    // plan-027 (amends D-076) — the ALLOW_LIST fee gate moves derive→access: the
+    // ACCESS fee is now the content gate (pay-to-decrypt), so ALLOW_LIST requires
+    // access_fee > 0. The derive fee may now be 0 (it became a per-launch
+    // provenance/convenience charge, no longer the content gate). fee == 0 access
+    // would collapse ALLOW_LIST to PERMISSIONLESS + pointless encryption.
     assert!(
-        license.policy != POLICY_ALLOW_LIST || license.derivative_mint_fee > 0,
+        license.policy != POLICY_ALLOW_LIST || license.access_fee > 0,
         EAllowListNeedsFee,
     );
     // D-075 — Seal envelope field bounds.
@@ -674,6 +726,8 @@ public(package) fun new_model(
         seal_version: VERSION,
         license,
         created_at_ms: clock.timestamp_ms(),
+        // plan-027 — empty at publish; populated by `purchase_access`.
+        buyers: table::new(ctx),
     };
     event::emit(ModelPublished {
         model_id: object::id(&model),
@@ -818,6 +872,58 @@ public entry fun ensure_creator_kiosk(ctx: &mut TxContext) {
     personal_kiosk::transfer_to_sender(personal_cap, ctx);
 }
 
+// === plan-027 — paid access entitlement (purchase_access) ===
+
+// A buyer pays the one-time access fee on an ALLOW_LIST base and receives a
+// soulbound, permanent `AccessEntitlement` that gates Seal decryption. The fee
+// routes to the base creator (mirroring launch_collection_internal's coin
+// handling). `&mut Model3D` is required to mutate the duplicate-purchase guard
+// (`buyers`); the model is a shared object, so the `&mut` is acceptable.
+//
+// RESTRICTED / PERMISSIONLESS are NOT purchasable (ENotPurchasable) — RESTRICTED
+// decrypts only via the creator gate, PERMISSIONLESS is plaintext (no gate).
+public entry fun purchase_access(
+    model: &mut Model3D,
+    mut payment: Coin<SUI>,
+    ctx: &mut TxContext,
+) {
+    assert!(model.license.policy == POLICY_ALLOW_LIST, ENotPurchasable);
+    let buyer = ctx.sender();
+    // Duplicate-purchase guard (idempotency teeth): a wallet already holding an
+    // entitlement for this model cannot re-purchase (no second charge / mint).
+    assert!(!model.buyers.contains(buyer), EAlreadyHasEntitlement);
+    let fee = model.license.access_fee;
+    assert!(coin::value(&payment) >= fee, EInsufficientAccessFee);
+    // Read the model id + creator BEFORE the `&mut model.buyers` borrow below.
+    let model_id = object::id(model);
+    let creator = model.creator;
+
+    // Route the access fee to the base creator; refund any remainder; destroy a
+    // zero remainder (zero-coin hygiene).
+    if (fee > 0) {
+        let fee_coin = coin::split(&mut payment, fee, ctx);
+        transfer::public_transfer(fee_coin, creator);
+    };
+    if (coin::value(&payment) == 0) {
+        coin::destroy_zero(payment);
+    } else {
+        transfer::public_transfer(payment, buyer);
+    };
+
+    model.buyers.add(buyer, true);
+
+    let entitlement = AccessEntitlement {
+        id: object::new(ctx),
+        model_id,
+        holder: buyer,
+    };
+    let entitlement_id = object::id(&entitlement);
+    event::emit(AccessPurchased { entitlement_id, model_id, buyer, paid: fee });
+    // Soulbound: plain `transfer`, NOT `public_transfer` (AccessEntitlement has
+    // `key` only, no `store`).
+    transfer::transfer(entitlement, buyer);
+}
+
 // === D-029 — NFT collection layer (launch_collection, pay-to-derive Fork A) ===
 
 // An nft creator derives an `NftCollection` from a base `Model3D`. Pay-to-derive
@@ -919,6 +1025,34 @@ public entry fun launch_collection(
     quilt_blob_id: String,
     ctx: &mut TxContext,
 ) {
+    // plan-027 (U3b) — ALLOW_LIST launch MUST go through
+    // `launch_collection_with_entitlement` (the entitlement-gated entry); this
+    // bare entry is PERMISSIONLESS (RESTRICTED still hits the internal
+    // creator-only gate). Closes the free-fork bypass hole: without this assert a
+    // wallet could fork an ALLOW_LIST base for free (derive fee may now be 0)
+    // without ever buying access.
+    assert!(model.license.policy != POLICY_ALLOW_LIST, EEntitlementRequired);
+    let (collection, cap) = launch_collection_internal(model, payment, quilt_blob_id, ctx);
+    transfer::share_object(collection);
+    transfer::transfer(cap, ctx.sender());
+}
+
+// plan-027 (U3b) — the entitlement-gated ALLOW_LIST launch (mint step-1 for the
+// 3-step encrypted fork). The caller proves access by passing the soulbound
+// AccessEntitlement they bought via `purchase_access`. ALLOW_LIST-only by
+// construction (ENotPurchasable on any other policy — PERMISSIONLESS uses the
+// bare `launch_collection`, RESTRICTED the creator gate). The derive fee is
+// charged inside `launch_collection_internal` (may be 0 post-plan-027).
+public entry fun launch_collection_with_entitlement(
+    model: &Model3D,
+    entitlement: &AccessEntitlement,
+    payment: Coin<SUI>,
+    quilt_blob_id: String,
+    ctx: &mut TxContext,
+) {
+    assert!(model.license.policy == POLICY_ALLOW_LIST, ENotPurchasable);
+    assert!(entitlement.model_id == object::id(model), EEntitlementModelMismatch);
+    assert!(entitlement.holder == ctx.sender(), ENotEntitlementHolder);
     let (collection, cap) = launch_collection_internal(model, payment, quilt_blob_id, ctx);
     transfer::share_object(collection);
     transfer::transfer(cap, ctx.sender());
@@ -1063,6 +1197,10 @@ public entry fun launch_collection_with_tokens(
     token_patch_ids: vector<String>,
     ctx: &mut TxContext,
 ) {
+    // plan-027 (U3b) — PERMISSIONLESS-only atomic path. ALLOW_LIST must route
+    // through `launch_collection_with_entitlement` + `mint_tokens` (the 3-step
+    // encrypted fork), so reject ALLOW_LIST here to keep the bypass hole closed.
+    assert!(model.license.policy != POLICY_ALLOW_LIST, EEntitlementRequired);
     assert!(
         vector::length(&token_names) == vector::length(&token_patch_ids),
         EBatchLenMismatch,
@@ -1173,20 +1311,22 @@ fun is_prefix(prefix: &vector<u8>, word: &vector<u8>): bool {
     true
 }
 
-// ALLOW_LIST — holder of the soulbound cap for a collection derived from THIS
-// model. NAMED TRIPLE-CHECK INVARIANT (each leg isolation-tested, distinct abort
-// codes): (1) cap authorizes this collection, (2) this collection derives from
-// this model, (3) the Seal id is prefix-bound to this model's seal_id — plus the
-// seal_version tripwire. Dropping any leg lets a valid cap unlock the wrong
+// plan-027 — ALLOW_LIST decrypt gate, relocated from the per-collection cap to
+// the per-buyer AccessEntitlement (the cap no longer decrypts — its only role is
+// now collection authority / register fee). Single-object gate (like
+// seal_approve_creator) so a never-launched consumer can decrypt: (1) the
+// entitlement is bound to THIS model, (2) the caller IS the entitlement holder,
+// (3) the Seal id is prefix-bound to this model's seal_id — plus the
+// seal_version tripwire. Dropping any leg lets one buyer unlock another model's
 // ciphertext (the canonical Seal binding pitfall).
-entry fun seal_approve_cap(
+entry fun seal_approve_entitlement(
     id: vector<u8>,
-    cap: &NftCollectionCreatorCap,
-    collection: &NftCollection,
+    entitlement: &AccessEntitlement,
     model: &Model3D,
+    ctx: &TxContext,
 ) {
-    assert!(cap.collection_id == object::id(collection), ECapCollectionMismatch);
-    assert!(collection.base_model_id == object::id(model), ECollectionModelMismatch);
+    assert!(entitlement.model_id == object::id(model), EEntitlementModelMismatch);
+    assert!(entitlement.holder == ctx.sender(), ENotEntitlementHolder);
     assert!(is_prefix(&model.seal_id, &id), EIdPrefixMismatch);
     assert!(model.seal_version == VERSION, ESealVersionMismatch);
 }
@@ -1225,6 +1365,14 @@ entry fun seal_approve_creator(
 #[test_only] public fun collection_launched_base_model_id(e: &CollectionLaunched): ID { e.base_model_id }
 #[test_only] public fun collection_launched_nft_creator(e: &CollectionLaunched): address { e.nft_creator }
 
+// plan-027 — AccessPurchased accessors + AccessEntitlement field accessors (test-only).
+#[test_only] public fun access_purchased_entitlement_id(e: &AccessPurchased): ID { e.entitlement_id }
+#[test_only] public fun access_purchased_model_id(e: &AccessPurchased): ID { e.model_id }
+#[test_only] public fun access_purchased_buyer(e: &AccessPurchased): address { e.buyer }
+#[test_only] public fun access_purchased_paid(e: &AccessPurchased): u64 { e.paid }
+#[test_only] public fun entitlement_model_id(e: &AccessEntitlement): ID { e.model_id }
+#[test_only] public fun entitlement_holder(e: &AccessEntitlement): address { e.holder }
+
 // === Test-only helpers ===
 
 // `init` is private (Sui runtime enforces it runs exactly once at publish);
@@ -1256,7 +1404,11 @@ public fun destroy_model_for_testing(model: Model3D) {
         seal_version: _,
         license: _,
         created_at_ms: _,
+        buyers,
     } = model;
+    // plan-027 — Table<address, bool>: bool has `drop`, so a populated table can
+    // be dropped directly (mirrors destroy_seal_id_registry_for_testing).
+    buyers.drop();
     object::delete(id);
 }
 
@@ -1286,13 +1438,21 @@ public fun set_seal_version_for_testing(model: &mut Model3D, v: u64) {
 // so the sibling test module can exercise the gate assertions directly (abort
 // codes propagate unchanged for `expected_failure`).
 #[test_only]
-public fun seal_approve_cap_for_testing(
+public fun seal_approve_entitlement_for_testing(
     id: vector<u8>,
-    cap: &NftCollectionCreatorCap,
-    collection: &NftCollection,
+    entitlement: &AccessEntitlement,
     model: &Model3D,
+    ctx: &TxContext,
 ) {
-    seal_approve_cap(id, cap, collection, model)
+    seal_approve_entitlement(id, entitlement, model, ctx)
+}
+
+// plan-027 — AccessEntitlement has `key` only (no `drop`), so tests that take it
+// from an inbox need a destructor.
+#[test_only]
+public fun destroy_entitlement_for_testing(e: AccessEntitlement) {
+    let AccessEntitlement { id, model_id: _, holder: _ } = e;
+    object::delete(id);
 }
 
 #[test_only]
