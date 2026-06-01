@@ -67,6 +67,9 @@ const M = vi.hoisted(() => {
     defaultRenderingPipelineDispose: vi.fn(),
     skyMaterialCtor: vi.fn(),
     cubeTextureCreateFromPrefiltered: vi.fn(),
+    directionalLightCtor: vi.fn(),
+    shadowGeneratorCtor: vi.fn(),
+    shadowAddCaster: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -127,6 +130,15 @@ const M = vi.hoisted(() => {
           contrast: number;
         };
       },
+      // Plan-028 U2 — capture light + shadow + receiver instances for assertions.
+      lastHemiLight: null as null | { intensity: number },
+      lastShadowGenerator: null as null | {
+        useBlurExponentialShadowMap: boolean;
+        darkness: number;
+        bias: number;
+      },
+      lastGround: null as null | { receiveShadows: boolean },
+      lastRoadRibbon: null as null | { receiveShadows: boolean },
     },
   };
 });
@@ -269,8 +281,31 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class HemisphericLight {
+    // Plan-028 U2 — SUT now drops this to a fill intensity.
+    intensity = 1;
     constructor(...args: unknown[]) {
       M.hemisphericLightCtor(...args);
+      M.state.lastHemiLight = this;
+    }
+  }
+  // Plan-028 U2 — directional key light. SUT sets its intensity; it is the
+  // light a ShadowGenerator is built against.
+  class DirectionalLight {
+    intensity = 0;
+    constructor(...args: unknown[]) {
+      M.directionalLightCtor(...args);
+    }
+  }
+  // Plan-028 U2 — shadow generator. addShadowCaster is a shared spy so tests can
+  // assert exactly the car geometry parts (not __root__) were registered.
+  class ShadowGenerator {
+    useBlurExponentialShadowMap = false;
+    darkness = 0;
+    bias = 0;
+    addShadowCaster = M.shadowAddCaster;
+    constructor(...args: unknown[]) {
+      M.shadowGeneratorCtor(...args);
+      M.state.lastShadowGenerator = this;
     }
   }
   // Plan-006 U2 — DefaultRenderingPipeline mock. The SUT reads back
@@ -339,7 +374,10 @@ vi.mock('@babylonjs/core', () => {
   const MeshBuilder = {
     CreateGround: (...args: unknown[]) => {
       M.meshBuilderCreateGround(...args);
-      return { material: null, position: new M.Vec3Mock() };
+      // Plan-028 U2 — receiveShadows captured so the receiver assertion can read it.
+      const ground = { material: null, position: new M.Vec3Mock(), receiveShadows: false };
+      M.state.lastGround = ground;
+      return ground;
     },
     CreateBox: (...args: unknown[]) => {
       M.meshBuilderCreateBox(...args);
@@ -351,7 +389,11 @@ vi.mock('@babylonjs/core', () => {
     },
     ExtrudeShape: (name: string, _opts: unknown, _scene: unknown) => {
       M.meshBuilderExtrudeShape(name, _opts, _scene);
-      return { material: null };
+      // Plan-028 U2 — road-ribbon receiveShadows captured for the receiver
+      // assertion; the center-stripe shares the shape harmlessly.
+      const mesh = { material: null, position: new M.Vec3Mock(), receiveShadows: false };
+      if (name === 'road-ribbon') M.state.lastRoadRibbon = mesh;
+      return mesh;
     },
     CreatePlane: (name: string, _opts: unknown, _scene: unknown) => {
       M.meshBuilderCreatePlane(name, _opts, _scene);
@@ -455,7 +497,9 @@ vi.mock('@babylonjs/core', () => {
     Scene,
     ArcRotateCamera,
     DefaultRenderingPipeline,
+    DirectionalLight,
     HemisphericLight,
+    ShadowGenerator,
     StandardMaterial,
     Texture,
     CubeTexture,
@@ -490,6 +534,9 @@ beforeEach(() => {
   M.defaultRenderingPipelineDispose.mockClear();
   M.skyMaterialCtor.mockClear();
   M.cubeTextureCreateFromPrefiltered.mockClear();
+  M.directionalLightCtor.mockClear();
+  M.shadowGeneratorCtor.mockClear();
+  M.shadowAddCaster.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
@@ -497,6 +544,10 @@ beforeEach(() => {
   M.state.lastCarBody = null;
   M.state.lastCamera = null;
   M.state.lastRenderPipeline = null;
+  M.state.lastHemiLight = null;
+  M.state.lastShadowGenerator = null;
+  M.state.lastGround = null;
+  M.state.lastRoadRibbon = null;
   skidMarksSpy.ctor.mockClear();
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
@@ -722,6 +773,72 @@ describe('createRacetrackScene', () => {
     expect(M.state.lastEngine?.runRenderLoop).toHaveBeenCalledTimes(1);
     // environmentTexture stays null (IBL absent) but the scene is alive.
     expect(M.state.lastScene?.environmentTexture).toBeNull();
+  });
+
+  // ─── Plan-028 U2: directional light + contact shadows ───
+
+  it('U2 — adds one DirectionalLight (the key) and drops the hemispheric to fill', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(M.directionalLightCtor).toHaveBeenCalledTimes(1);
+    // Hemispheric is now ambient fill: a positive intensity strictly below the
+    // Babylon default of 1.0 (so the directional light dominates).
+    expect(M.state.lastHemiLight!.intensity).toBeGreaterThan(0);
+    expect(M.state.lastHemiLight!.intensity).toBeLessThan(1);
+  });
+
+  it('U2 — builds one ShadowGenerator (blur-exponential) against the directional light', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(M.shadowGeneratorCtor).toHaveBeenCalledTimes(1);
+    // ctor args: (mapSize, light). Map size is a positive power-of-two-ish int.
+    expect(M.shadowGeneratorCtor.mock.calls[0]![0]).toBeGreaterThan(0);
+    expect(M.state.lastShadowGenerator!.useBlurExponentialShadowMap).toBe(true);
+  });
+
+  it('U2 — registers every car geometry part as a shadow caster (not __root__)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    // The mock GLB has 1 vertex-less root + 2 geometry meshes. Only the two
+    // geometry parts are cast — matching the carParts vertex filter.
+    expect(M.shadowAddCaster).toHaveBeenCalledTimes(2);
+    const cast = M.shadowAddCaster.mock.calls.map((c) => c[0]);
+    expect(cast).toContain(M.state.lastCarContainer!.meshes[1]);
+    expect(cast).toContain(M.state.lastCarContainer!.meshes[2]);
+    expect(cast).not.toContain(M.state.lastCarContainer!.meshes[0]); // __root__
+  });
+
+  it('U2 — road ribbon and safety ground receive shadows', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    expect(M.state.lastGround!.receiveShadows).toBe(true);
+    expect(M.state.lastRoadRibbon!.receiveShadows).toBe(true);
+  });
+
+  it('U2 — adds no new per-frame observer (the "exactly 3" invariant holds)', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    // Lights + shadows are static; this guards against accidentally wiring a
+    // per-frame observer (which would break the chase-cam / input / lap-tick
+    // ordinal assumptions across the U1/U3 input tests).
+    expect(
+      M.state.lastScene?.onBeforeRenderObservable.add,
+    ).toHaveBeenCalledTimes(3);
   });
 
   it('dispose() tears down scene + engine', async () => {

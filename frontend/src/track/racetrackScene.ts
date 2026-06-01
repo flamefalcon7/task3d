@@ -27,6 +27,7 @@ import {
   Color3,
   CubeTexture,
   DefaultRenderingPipeline,
+  DirectionalLight,
   Engine,
   HemisphericLight,
   KeyboardEventTypes,
@@ -35,6 +36,7 @@ import {
   PhysicsAggregate,
   PhysicsShapeType,
   Scene,
+  ShadowGenerator,
   StandardMaterial,
   Texture,
   TransformNode,
@@ -256,6 +258,15 @@ const ENV_TEXTURE_PATH = '/textures/env/environment.env';
 const ENV_INTENSITY = 1.0; // scene.environmentIntensity — global IBL strength
 const TONE_EXPOSURE = 1.1; // imageProcessing.exposure — lifts ACES-crushed midtones
 const TONE_CONTRAST = 1.2; // imageProcessing.contrast — restores punch after the exposure lift
+// Plan-028 U2 — directional key light + contact shadows. The painted SkyMaterial
+// sun emits no light into the scene; this DirectionalLight is the real key (the
+// HemisphericLight drops to ambient fill), and the ShadowGenerator grounds the
+// car with a contact shadow — the single biggest "modern game" cue.
+const DIR_LIGHT_INTENSITY = 2.2; // directional key-light strength
+const HEMI_LIGHT_INTENSITY = 0.5; // hemispheric drops to fill (was an implicit 1.0 = flat ambient)
+const SHADOW_MAP_SIZE = 1024; // shadow-map resolution — perf vs. crispness
+const SHADOW_DARKNESS = 0.4; // 0 = pitch-black shadow, 1 = invisible
+const SHADOW_BIAS = 0.002; // nudges shadow acne off the extruded road ribbon
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
 // Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
 // 0.45 puts the sun just above the horizon for visible directional warmth;
@@ -338,7 +349,11 @@ export async function createRacetrackScene(
   scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
 
   // 2. Light
-  new HemisphericLight('light', new Vector3(0, 1, 0), scene);
+  const hemiLight = new HemisphericLight('light', new Vector3(0, 1, 0), scene);
+  // Plan-028 U2 — drop hemispheric to ambient fill so the directional key light
+  // below reads as the dominant source (was an implicit intensity of 1.0, which
+  // produced the flat, formless look).
+  hemiLight.intensity = HEMI_LIGHT_INTENSITY;
 
   // Plan-028 U1 — image-based lighting. Setting scene.environmentTexture from a
   // prefiltered .env makes PBR surfaces (the car especially) pick up reflections
@@ -358,6 +373,29 @@ export async function createRacetrackScene(
     // eslint-disable-next-line no-console
     console.warn('[racetrack] environment texture load failed, continuing without IBL', err);
   }
+
+  // Plan-028 U2 — directional key light aligned to the painted SkyMaterial sun,
+  // plus a ShadowGenerator so the car casts a grounded contact shadow. The sun
+  // direction is derived from the SAME inclination/azimuth the sky shader uses,
+  // so the cast shadow falls consistent with the visible sun. The light vector
+  // points FROM the sun TOWARD the scene (hence the negation of the sun
+  // position). shadowGenerator is referenced again at car-load to register the
+  // car meshes as casters.
+  const sunTheta = Math.PI * (SKY_INCLINATION - 0.5);
+  const sunPhi = 2 * Math.PI * (SKY_AZIMUTH - 0.5);
+  const sunToScene = new Vector3(
+    -Math.cos(sunPhi),
+    -Math.sin(sunPhi) * Math.sin(sunTheta),
+    -Math.sin(sunPhi) * Math.cos(sunTheta),
+  );
+  const dirLight = new DirectionalLight('sun', sunToScene, scene);
+  dirLight.intensity = DIR_LIGHT_INTENSITY;
+  const shadowGenerator = new ShadowGenerator(SHADOW_MAP_SIZE, dirLight);
+  // Blur-exponential shadow map: soft edges, far less acne-prone than a hard
+  // PCF map on the extruded road ribbon. darkness/bias are feel knobs (U6).
+  shadowGenerator.useBlurExponentialShadowMap = true;
+  shadowGenerator.darkness = SHADOW_DARKNESS;
+  shadowGenerator.bias = SHADOW_BIAS;
 
   // Plan-006 U3 — SkyMaterial atmospheric sky on a large skybox cube.
   // Replaces the flat clearColor (kept as fallback for the frame before
@@ -405,6 +443,8 @@ export async function createRacetrackScene(
   grassMat.bumpTexture = grassNormal;
   grassMat.specularColor = new Color3(0.03, 0.03, 0.03);
   safetyGround.material = grassMat;
+  // Plan-028 U2 — the infield/outfield grass receives the car's contact shadow.
+  safetyGround.receiveShadows = true;
   new PhysicsAggregate(safetyGround, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
   // 4. Procedural oval (KTD-7): build control points, sample the
@@ -447,6 +487,8 @@ export async function createRacetrackScene(
   asphaltMat.bumpTexture = asphaltNormal;
   asphaltMat.specularColor = new Color3(0.05, 0.05, 0.05);
   roadRibbon.material = asphaltMat;
+  // Plan-028 U2 — the road surface receives the car's contact shadow.
+  roadRibbon.receiveShadows = true;
   // MESH collider for the road. R-r4b mitigation: if this judders against
   // the car's BOX collider, the safety ground above still catches the car.
   new PhysicsAggregate(roadRibbon, PhysicsShapeType.MESH, { mass: 0 }, scene);
@@ -675,6 +717,8 @@ export async function createRacetrackScene(
     // visually — Tripo + most vehicle GLBs face -Z in their local frame.
     part.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
     part.scaling = new Vector3(carScale, carScale, carScale);
+    // Plan-028 U2 — every geometry part casts a shadow onto the road/grass.
+    shadowGenerator.addShadowCaster(part);
   }
   // U2: spawn on the start/finish line, facing the curve tangent so the
   // first W keypress drives along the track instead of sideways.
