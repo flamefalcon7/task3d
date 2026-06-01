@@ -608,35 +608,45 @@ export async function createRacetrackScene(
   });
   URL.revokeObjectURL(blobUrl);
   carContainer.addAllToScene();
-  // KTD-2: `carContainer.meshes[0]` is typically Babylon's `__root__`
-  // TransformNode (0 vertices), so binding the PhysicsAggregate to it gives
-  // a degenerate bounding box and a useless box collider. Pick the first
-  // mesh that actually carries geometry. Falls back to meshes[0] only for
-  // single-mesh GLBs where the root IS the geometry.
-  const carGeometry =
-    carContainer.meshes.find(
-      (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
-    ) ?? carContainer.meshes[0]!;
-  // KTD-2: parent the geometry to a TransformNode we own and aggregate
-  // physics on the pivot, not the geometry. This isolates the physics
-  // body's transform from any GLB-internal hierarchy (Tripo outputs nest
-  // the mesh several nodes deep with arbitrary rotations).
-  const carPivot = new TransformNode('car-pivot', scene);
-  carGeometry.parent = carPivot;
-  // Align the GLB's local forward axis with the pivot's +Z (the direction
-  // FORWARD_IMPULSE pushes). Without this, the car drives backwards
-  // visually — Tripo + most vehicle GLBs face -Z in their local frame.
-  carGeometry.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
-  // Plan-013 UAT: compute a per-load uniform scale from the union bounding
-  // box so every loaded GLB ends up ~TARGET_CAR_LENGTH long, regardless of
-  // Tripo's non-deterministic native scale. Read BB across all geometry
-  // meshes (after yaw rotation, before scaling) and apply the resulting
-  // scalar. Applied BEFORE PhysicsAggregate so the BOX collider is sized
-  // from the scaled bounding box. Skid mark constants in skidMarks.ts are
-  // intentionally NOT scaled — adjust there separately if their proportion
-  // to the car needs tuning.
+  // A GLB may be MULTI-MESH: Tripo's mesh_segmentation and user GLB uploads
+  // (D-077) split a model into one mesh PER PART (chassis + each wheel, etc.).
+  // We must move EVERY geometry-bearing mesh with the car. The old code
+  // parented only the FIRST vertex-bearing mesh, which left a segmented
+  // truck's other parts orphaned under `__root__` at the native origin/scale —
+  // the player saw a single wheel driving around. `meshes[0]` is typically
+  // Babylon's `__root__` TransformNode (0 vertices); the vertex filter skips
+  // it so the box collider wraps real geometry, not a degenerate root.
+  const carParts = carContainer.meshes.filter(
+    (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
+  );
+  // Fallback for a degenerate container where nothing reports vertices: keep
+  // the old single-mesh behavior so we still render something drivable.
+  if (carParts.length === 0 && carContainer.meshes[0]) {
+    carParts.push(carContainer.meshes[0]);
+  }
+  // Plan-013 UAT: compute a per-load uniform scale from the union bounding box
+  // so every loaded GLB ends up ~TARGET_CAR_LENGTH long, regardless of Tripo's
+  // non-deterministic native scale. Read the union BB across all geometry
+  // meshes from the PRISTINE native layout — BEFORE any reparent/rotate/move —
+  // otherwise a part already shifted to the track position inflates the union
+  // extents and the scale collapses to the safety fallback (1.0). Skid-mark
+  // constants in skidMarks.ts are intentionally NOT scaled.
   const carScale = computeUniformScale(carContainer.meshes, TARGET_CAR_LENGTH);
-  carGeometry.scaling = new Vector3(carScale, carScale, carScale);
+  // KTD-2: parent every part to a TransformNode we own and aggregate physics
+  // on the pivot, not the geometry. This isolates the physics body's transform
+  // from the GLB-internal hierarchy. Segmented parts share one vertex space
+  // with identity node transforms, so applying the SAME yaw + scale to each
+  // keeps them aligned as a single truck. Applied BEFORE PhysicsAggregate so
+  // the BOX collider is sized from the scaled union bounds.
+  const carPivot = new TransformNode('car-pivot', scene);
+  for (const part of carParts) {
+    part.parent = carPivot;
+    // Align the GLB's local forward axis with the pivot's +Z (the direction
+    // FORWARD_IMPULSE pushes). Without this, the car drives backwards
+    // visually — Tripo + most vehicle GLBs face -Z in their local frame.
+    part.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
+    part.scaling = new Vector3(carScale, carScale, carScale);
+  }
   // U2: spawn on the start/finish line, facing the curve tangent so the
   // first W keypress drives along the track instead of sideways.
   carPivot.position = new Vector3(startSample.x, 1, startSample.z);

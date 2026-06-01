@@ -360,12 +360,15 @@ vi.mock('@babylonjs/core', () => {
   const LoadAssetContainerAsync = (...args: unknown[]) => {
     M.loadAssetContainer(...args);
     // Simulate the typical Tripo/Babylon shape: __root__ TransformNode-ish
-    // mesh at index 0 with 0 vertices, real geometry at index 1. KTD-2 says
-    // we must pick the vertex-bearing one.
+    // mesh at index 0 with 0 vertices, real geometry after it. KTD-2 says we
+    // must skip the vertex-less root. Multi-mesh GLBs (segmented trucks:
+    // chassis + wheels as separate meshes — D-077) carry MORE than one
+    // geometry mesh, so the factory returns TWO geometry meshes to prove the
+    // scene parents EVERY part, not just the first.
     // Plan-013 UAT: helper reads computeWorldMatrix + getBoundingInfo to
-    // derive a uniform scale. Return a 2m-cube BB on the geometry mesh so
+    // derive a uniform scale. Return a 2m-cube BB on each geometry mesh so
     // the helper computes scale = TARGET_CAR_LENGTH / 2 = 1.4 in the test.
-    const geometryMesh = {
+    const makeGeometryMesh = () => ({
       position: new M.Vec3Mock(),
       absolutePosition: new M.Vec3Mock(),
       rotate: vi.fn(),
@@ -379,7 +382,9 @@ vi.mock('@babylonjs/core', () => {
         },
       })),
       parent: null as unknown,
-    };
+    });
+    const geometryMesh = makeGeometryMesh();
+    const geometryMesh2 = makeGeometryMesh();
     const meshes = [
       {
         position: new M.Vec3Mock(),
@@ -397,6 +402,7 @@ vi.mock('@babylonjs/core', () => {
         parent: null as unknown,
       },
       geometryMesh,
+      geometryMesh2,
     ];
     const container = {
       meshes,
@@ -673,6 +679,36 @@ describe('createRacetrackScene', () => {
     const geometryMesh = M.state.lastCarContainer!.meshes[1]!;
     expect(rootMesh.parent).toBeNull();
     expect(geometryMesh.parent).toBe(M.state.lastTransformNode);
+  });
+
+  it('parents EVERY geometry part of a multi-mesh GLB to the pivot (segmented-truck fix)', async () => {
+    // Regression: a multi-mesh GLB (Tripo mesh_segmentation / D-077 uploads
+    // split a truck into chassis + wheels as separate meshes) used to render
+    // as a single wheel because only the first vertex-bearing mesh was
+    // parented to the car pivot; the rest stayed orphaned at the native
+    // origin. Both geometry meshes must now follow the car — parented to the
+    // pivot AND scaled — while the vertex-less __root__ is still skipped.
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    const rootMesh = M.state.lastCarContainer!.meshes[0]!;
+    const part1 = M.state.lastCarContainer!.meshes[1]! as unknown as {
+      parent: unknown;
+      scaling: { x: number; y: number; z: number };
+    };
+    const part2 = M.state.lastCarContainer!.meshes[2]! as unknown as {
+      parent: unknown;
+      scaling: { x: number; y: number; z: number };
+    };
+    expect(rootMesh.parent).toBeNull(); // __root__ stays unparented
+    expect(part1.parent).toBe(M.state.lastTransformNode);
+    expect(part2.parent).toBe(M.state.lastTransformNode);
+    // Every part shares the same union-BB-derived uniform scale (2m cube →
+    // TARGET_CAR_LENGTH 2.8 / 2 = 1.4) so the truck stays proportional.
+    expect(part1.scaling.x).toBeCloseTo(1.4, 6);
+    expect(part2.scaling.x).toBeCloseTo(1.4, 6);
   });
 
   it('U1/KTD-2 — physics aggregate binds to the car pivot (TransformNode), not a mesh', async () => {
