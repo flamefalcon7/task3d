@@ -291,14 +291,17 @@ const SSAO_RADIUS = 2.0; // sample radius in world units
 const FOG_DENSITY = 0.006;
 const FOG_COLOR: [number, number, number] = [0.7, 0.78, 0.85]; // hazy sky-horizon blue
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
-// Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
-// 0.45 puts the sun just above the horizon for visible directional warmth;
-// azimuth 0.25 places it forward-right of the chase camera at spawn so the
-// car's GLB picks up rim light from the same angle the player sees.
+// Late-afternoon preset: warm sun, slightly hazy atmosphere. Plan-028 U6 raised
+// inclination 0.45 → 0.58 (sun lifted off the horizon) once the U2 DirectionalLight
+// + ShadowGenerator landed: at 0.45 the derived key light grazed the horizon, so
+// the car's contact shadow stretched long/shallow and the key barely lit the
+// model. 0.58 gives a flatter-to-the-camera key, a readable contact shadow, and
+// still-warm light. azimuth 0.25 places the sun forward-right of the chase camera
+// at spawn so the car picks up rim light from the angle the player sees.
 // Tunables for in-browser tweaking; not asserted in tests (KTD).
 const SKY_TURBIDITY = 3;
 const SKY_LUMINANCE = 0.5;
-const SKY_INCLINATION = 0.45;
+const SKY_INCLINATION = 0.58;
 const SKY_AZIMUTH = 0.25;
 const SKY_RAYLEIGH = 2;
 const SKYBOX_SIZE = 1000;
