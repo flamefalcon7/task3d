@@ -1031,7 +1031,15 @@ public entry fun launch_collection(
     // creator-only gate). Closes the free-fork bypass hole: without this assert a
     // wallet could fork an ALLOW_LIST base for free (derive fee may now be 0)
     // without ever buying access.
-    assert!(model.license.policy != POLICY_ALLOW_LIST, EEntitlementRequired);
+    // plan-027 v11 — relaxed: the base CREATOR may launch their own ALLOW_LIST
+    // base via this legacy entry WITHOUT an entitlement (they own the content;
+    // making them buy access to their own model is the pointless self-pay round
+    // trip). Non-creators are still rejected → must use the entitlement entry, so
+    // the free-fork bypass hole stays closed for everyone but the creator.
+    assert!(
+        model.license.policy != POLICY_ALLOW_LIST || ctx.sender() == model.creator,
+        EEntitlementRequired,
+    );
     let (collection, cap) = launch_collection_internal(model, payment, quilt_blob_id, ctx);
     transfer::share_object(collection);
     transfer::transfer(cap, ctx.sender());
@@ -1200,7 +1208,15 @@ public entry fun launch_collection_with_tokens(
     // plan-027 (U3b) — PERMISSIONLESS-only atomic path. ALLOW_LIST must route
     // through `launch_collection_with_entitlement` + `mint_tokens` (the 3-step
     // encrypted fork), so reject ALLOW_LIST here to keep the bypass hole closed.
-    assert!(model.license.policy != POLICY_ALLOW_LIST, EEntitlementRequired);
+    // plan-027 v11 — relaxed: the base CREATOR may launch their own ALLOW_LIST
+    // base via this legacy entry WITHOUT an entitlement (they own the content;
+    // making them buy access to their own model is the pointless self-pay round
+    // trip). Non-creators are still rejected → must use the entitlement entry, so
+    // the free-fork bypass hole stays closed for everyone but the creator.
+    assert!(
+        model.license.policy != POLICY_ALLOW_LIST || ctx.sender() == model.creator,
+        EEntitlementRequired,
+    );
     assert!(
         vector::length(&token_names) == vector::length(&token_patch_ids),
         EBatchLenMismatch,

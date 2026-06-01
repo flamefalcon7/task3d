@@ -914,8 +914,9 @@ fun launch_collection_restricted_creator_ok() {
 }
 
 // plan-027 (U3b / R9) — the BARE `launch_collection` entry rejects an ALLOW_LIST
-// base (EEntitlementRequired): ALLOW_LIST must route through the entitlement
-// entry. Closes the free-fork bypass hole.
+// base for a NON-CREATOR (EEntitlementRequired): they must route through the
+// entitlement entry. Closes the free-fork bypass hole. (v11 relaxes this for the
+// creator only — see launch_collection_allow_list_creator_ok below.)
 #[test, expected_failure(abort_code = model3d::EEntitlementRequired)]
 fun launch_collection_allow_list_without_entitlement_aborts() {
     let fee: u64 = 1_000_000;
@@ -927,8 +928,38 @@ fun launch_collection_allow_list_without_entitlement_aborts() {
     let model = mint_base_model(&mut system, &clk, license, sc.ctx());
 
     sc.next_tx(NFT_CREATOR);
-    // Bare launch on an ALLOW_LIST base → aborts before any state change.
+    // Non-creator bare launch on an ALLOW_LIST base → aborts before any state change.
     launch_collection(&model, coin::mint_for_testing<SUI>(fee, sc.ctx()), quilt(), sc.ctx());
+
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// plan-027 v11 — the base CREATOR may launch their OWN ALLOW_LIST base via the
+// bare entry without an entitlement (no pointless self-pay for access to their
+// own content). Non-creators are still rejected (test above).
+#[test]
+fun launch_collection_allow_list_creator_ok() {
+    let fee: u64 = 1_000_000;
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_allow_list(), fee, 500, true, true, fee);
+    let model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    // CREATOR launches their own ALLOW_LIST base via the bare entry → succeeds.
+    sc.next_tx(CREATOR);
+    launch_collection(&model, coin::mint_for_testing<SUI>(fee, sc.ctx()), quilt(), sc.ctx());
+
+    sc.next_tx(CREATOR);
+    let collection = sc.take_shared<model3d::NftCollection>();
+    let cap = sc.take_from_sender<model3d::NftCollectionCreatorCap>();
+    assert!(model3d::cap_collection_id(&cap) == object::id(&collection), 900);
+    ts::return_shared(collection);
+    sc.return_to_sender(cap);
 
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
