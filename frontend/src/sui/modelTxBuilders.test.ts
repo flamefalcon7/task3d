@@ -56,6 +56,7 @@ describe('buildPublishPtb', () => {
       derivativeRoyaltyBps: 500,
       commercialUse: true,
       requireAttribution: false,
+      accessFee: 0n,
     },
   };
 
@@ -102,6 +103,8 @@ describe('buildPublishEncryptedPtb', () => {
       derivativeRoyaltyBps: 500,
       commercialUse: true,
       requireAttribution: false,
+      // plan-027 D-078 — ALLOW_LIST requires a non-zero access_fee on-chain.
+      accessFee: 2_000_000n,
     },
   };
 
@@ -150,6 +153,7 @@ describe('type discipline', () => {
         derivativeRoyaltyBps: 0,
         commercialUse: false,
         requireAttribution: false,
+        accessFee: 0n,
       },
     };
     expect(bad).toBeDefined();
@@ -189,7 +193,7 @@ describe('publish PTB reaches live RPC (fake blob → object-resolution error)',
       lineageBlobId: 'l',
       glbBlobId: 'g',
       partLabels: [],
-      license: { policy: 2, derivativeMintFee: 0n, derivativeRoyaltyBps: 0, commercialUse: false, requireAttribution: false },
+      license: { policy: 2, derivativeMintFee: 0n, derivativeRoyaltyBps: 0, commercialUse: false, requireAttribution: false, accessFee: 0n },
     });
     tx.setSender(TESTNET.deployerAddress);
     let err: Error | null = null;

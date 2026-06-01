@@ -1,4 +1,17 @@
 /**
+ * ⚠️ STALE AS OF plan-027 (D-078) — DO NOT RUN UNCHANGED.
+ *
+ * This headless diagnostic exercises the OLD cap-based decrypt gate
+ * (`seal_approve_cap` + `buildSealApproveCapPtb`), which plan-027 DELETED in
+ * favor of the entitlement gate (`seal_approve_entitlement` /
+ * `buildSealApproveEntitlementPtb`). It also pre-dates `access_fee` on
+ * `LicenseTerms`. The rewire (insert a `purchase_access` step, swap the dry-run
+ * builder to the entitlement one, add `accessFee` to the publish license) is
+ * the live Seal-seam re-verification owned by U5 Part A / U10 — NOT U6. Left
+ * in place (outside the `tsc -b` graph; not in CI) so the prior arc is
+ * recoverable; `npx tsx` will fail at the deleted `buildSealApproveCapPtb`
+ * import until that rewire lands. — plan-027 U6
+ *
  * plan-026 — headless end-to-end verification of the Seal encrypted-publish +
  * forker-decrypt round-trip against LIVE testnet + LIVE Seal key servers.
  *

@@ -69,6 +69,10 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
   const glbBlobId = String(json.glb_blob_id ?? '');
   const license = (json.license ?? {}) as Record<string, unknown>;
   const derivativeMintFee = String(license.derivative_mint_fee ?? '0');
+  // plan-027 D-078 — one-time buy-access fee on an ALLOW_LIST base; defaults to
+  // '0' on pre-v10 objects whose license JSON carries no access_fee (parallel to
+  // buy/hooks.ts jsonToSummary).
+  const accessFee = String(license.access_fee ?? '0');
   const derivativeRoyaltyBps = Number(license.derivative_royalty_bps ?? 0);
   // plan-026 D-075 — policy + Seal flags. Pre-v9 objects carry no `is_encrypted`
   // / `preview_blob_ids` and (typically) no explicit policy → default to
@@ -115,6 +119,7 @@ function nodeToSummary(node: GraphQLNode): Model3DSummary | null {
     lineageBlobId,
     glbBlobId,
     derivativeMintFee,
+    accessFee,
     derivativeRoyaltyBps,
     policy,
     isEncrypted,

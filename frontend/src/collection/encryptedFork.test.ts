@@ -13,6 +13,7 @@ import { PACKAGE_ID } from './encryptedFork';
 const CAP_ID = '0xcap';
 const COLLECTION_ID = '0xcoll';
 const MODEL_ID = '0xmodel';
+const ENTITLEMENT_ID = '0xentitlement';
 
 function makeSealedKey(idBytes: Uint8Array): Uint8Array {
   return EncryptedObject.serialize({
@@ -129,15 +130,16 @@ describe('decryptEncryptedBase (step 2)', () => {
       sessionKey: {} as never,
       sealedKey,
       ciphertextBlobId: 'blob-xyz',
-      capId: CAP_ID,
-      collectionId: COLLECTION_ID,
+      // plan-027 D-078 — the decrypt gate is now the soulbound entitlement, not
+      // the per-collection cap.
+      entitlementId: ENTITLEMENT_ID,
       baseModelId: MODEL_ID,
       buildTxBytes,
       fetchBytes,
     });
     expect(Array.from(out)).toEqual(Array.from(plaintext));
     expect(buildTxBytes).toHaveBeenCalledTimes(1);
-    // The key servers were handed the seal_approve_cap txBytes + the sealed key.
+    // The key servers were handed the seal_approve_entitlement txBytes + the sealed key.
     expect(sealClient.decrypt).toHaveBeenCalledWith(
       expect.objectContaining({ data: sealedKey, txBytes: new Uint8Array([0xaa]) }),
     );

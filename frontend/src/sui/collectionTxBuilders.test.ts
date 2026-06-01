@@ -18,14 +18,16 @@ import {
   buildSetRegisterFeePtb,
   buildMintNftTokenPtb,
   buildMintTokensPtb,
-  buildSealApproveCapPtb,
+  buildSealApproveEntitlementPtb,
+  buildPurchaseAccessPtb,
   buildRegisterIntegrationPtb,
   type LaunchCollectionArgs,
   type LaunchCollectionWithTokensArgs,
   type SetRegisterFeeArgs,
   type MintNftTokenArgs,
   type MintTokensArgs,
-  type SealApproveCapArgs,
+  type SealApproveEntitlementArgs,
+  type PurchaseAccessArgs,
   type RegisterIntegrationArgs,
 } from './collectionTxBuilders';
 
@@ -216,39 +218,93 @@ describe('buildMintTokensPtb', () => {
   });
 });
 
-// === seal_approve_cap (plan-026 D-075 — key-server dry-run gate) ===
-const SEAL_APPROVE_ARGS: SealApproveCapArgs = {
+// === seal_approve_entitlement (plan-027 D-078 — entitlement-gated dry-run) ===
+const FAKE_ENTITLEMENT = '0x' + '4'.repeat(64);
+const SEAL_APPROVE_ARGS: SealApproveEntitlementArgs = {
   id: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
-  capId: FAKE_CAP,
-  collectionId: FAKE_COLLECTION,
+  entitlementId: FAKE_ENTITLEMENT,
   baseModelId: FAKE_MODEL,
 };
-describe('buildSealApproveCapPtb', () => {
-  it('emits one seal_approve_cap call (id, cap, collection, model) with NO events', () => {
-    const { tx, metadata } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
+describe('buildSealApproveEntitlementPtb', () => {
+  it('emits one seal_approve_entitlement call (id, entitlement, model) with NO events', () => {
+    const { tx, metadata } = buildSealApproveEntitlementPtb(SEAL_APPROVE_ARGS);
     const calls = moveCalls(tx);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.MoveCall?.function).toBe('seal_approve_cap');
+    expect(calls[0]!.MoveCall?.function).toBe('seal_approve_entitlement');
     expect(calls[0]!.MoveCall?.package).toBe(PKG);
-    // Arity: id (pure vector<u8>), cap, collection, model (4).
-    expect(calls[0]!.MoveCall?.arguments).toHaveLength(4);
+    // plan-027 D-078 — the cap/collection args are GONE; the gate is now
+    // (id, entitlement, model) = 3 args (was 4 with the cap path).
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(3);
     // Dry-run-only gate: no on-chain effect, so no declared events.
     expect(metadata.expectedEvents).toEqual([]);
+    expect(metadata.target).toBe(`${PKG}::model3d::seal_approve_entitlement`);
   });
 
-  it('builds the id as a pure vector<u8>, not an object ref', () => {
-    const { tx } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
-    // The first arg is a pure input (vector<u8>); object args would be Object inputs.
+  it('builds the id as the only Pure input; the entitlement + model are object refs', () => {
+    const { tx } = buildSealApproveEntitlementPtb(SEAL_APPROVE_ARGS);
     const inputs = tx.getData().inputs;
-    expect(inputs.some((i) => (i as { $kind?: string }).$kind === 'Pure')).toBe(true);
+    // Exactly one Pure input — the full seal id (vector<u8>). The on-chain ids
+    // (entitlement, model) must NOT be pure-encoded, or seal_approve_entitlement
+    // would reject them as bytes instead of object refs.
+    const pure = inputs.filter((i) => (i as { $kind?: string }).$kind === 'Pure');
+    expect(pure).toHaveLength(1);
+    // The remaining two inputs are object refs (the entitlement + the base
+    // model). Pre-build they carry the object kind, not Pure.
+    const nonPure = inputs.filter((i) => (i as { $kind?: string }).$kind !== 'Pure');
+    expect(nonPure).toHaveLength(2);
   });
 
   it('takes no splitCoins (a gasless dry-run gate)', () => {
-    const { tx } = buildSealApproveCapPtb(SEAL_APPROVE_ARGS);
+    const { tx } = buildSealApproveEntitlementPtb(SEAL_APPROVE_ARGS);
     expect(
       tx.getData().commands.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins'),
     ).toBe(false);
   });
+
+  // TODO(post-U5-deploy): assert this PTB dry-runs against the live v10 package
+  // (key servers populate ctx.sender() from the SessionKey signer + a
+  // wrong-sender dry-run is denied). Deferred per plan Risks (Seal seam
+  // re-verify in U5 Part A); no network call in unit tests.
+  it.skip('dry-runs against the deployed package (DEFERRED to post-U5 deploy)', () => {});
+});
+
+// === purchase_access (plan-027 D-078 — buy a soulbound AccessEntitlement) ===
+const PURCHASE_ARGS: PurchaseAccessArgs = {
+  modelId: FAKE_MODEL,
+  accessFeeMist: 2_000_000n,
+};
+describe('buildPurchaseAccessPtb', () => {
+  it('splits the access fee from gas then emits purchase_access (model, coin)', () => {
+    const { tx, metadata } = buildPurchaseAccessPtb(PURCHASE_ARGS);
+    const cmds = tx.getData().commands;
+    expect(cmds.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins')).toBe(true);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('purchase_access');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Arity: model (object), coin (split result) = 2.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(2);
+    expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::AccessPurchased`]);
+  });
+
+  it('builds with a zero access fee (splits a zero coin; Move destroy_zero)', () => {
+    expect(() =>
+      buildPurchaseAccessPtb({ modelId: FAKE_MODEL, accessFeeMist: 0n }),
+    ).not.toThrow();
+  });
+
+  it('rejects a string accessFeeMist (compile-time bigint discipline)', () => {
+    const bad: PurchaseAccessArgs = {
+      modelId: FAKE_MODEL,
+      // @ts-expect-error — accessFeeMist must be bigint
+      accessFeeMist: '2000000',
+    };
+    expect(bad).toBeDefined();
+  });
+
+  // TODO(post-U5-deploy): assert this PTB dry-runs against the live v10 package
+  // (target + coin arg resolve). Deferred per plan; no network in unit tests.
+  it.skip('dry-runs against the deployed package (DEFERRED to post-U5 deploy)', () => {});
 });
 
 // === register_integration ===

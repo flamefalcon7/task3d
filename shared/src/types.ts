@@ -96,6 +96,7 @@ export interface Model3DSummary {
   lineageBlobId: string;       // D-015
   glbBlobId: string;           // D-037 — standalone Walrus blob id of the GLB mesh ('' if absent)
   derivativeMintFee: string;   // license.derivative_mint_fee (u64 MIST as string) — derive fee an nft creator pays to fork
+  accessFee: string;           // license.access_fee (u64 MIST as string) — one-time fee a buyer pays for an AccessEntitlement (plan-027 D-078; ALLOW_LIST gate)
   derivativeRoyaltyBps: number;// license.derivative_royalty_bps (u16, ≤3000 per D-004) snapshotted into L2 collections
   // plan-026 D-075 — L1 license policy: 0 RESTRICTED · 1 ALLOW_LIST · 2
   // PERMISSIONLESS. Drives catalog visibility + the fork path: RESTRICTED is

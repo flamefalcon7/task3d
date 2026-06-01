@@ -212,6 +212,7 @@ function summary(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     lineageBlobId: '',
     glbBlobId: 'glb-base-1',
     derivativeMintFee: '250000000', // 0.25 SUI
+    accessFee: '0',
     derivativeRoyaltyBps: 500,
     policy: 2,
     isEncrypted: false,

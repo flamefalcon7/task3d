@@ -49,6 +49,7 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     lineageBlobId: 'lin-1',
     glbBlobId: 'glb-1',
     derivativeMintFee: '0',
+    accessFee: '0',
     derivativeRoyaltyBps: 0,
     policy: 2,
     isEncrypted: false,

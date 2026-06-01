@@ -2,7 +2,7 @@ import type { SealClient, SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import {
   buildLaunchCollectionPtb,
-  buildSealApproveCapPtb,
+  buildSealApproveEntitlementPtb,
   buildMintTokensPtb,
 } from '../sui/collectionTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
@@ -124,11 +124,14 @@ export interface DecryptEncryptedBaseArgs {
   sealedKey: Uint8Array;
   /** The base's `glb_blob_id` — holds AES CIPHERTEXT for an encrypted base. */
   ciphertextBlobId: string;
-  /** Step-1 outputs needed to bind the seal_approve_cap PTB. */
-  capId: string;
-  collectionId: string;
+  /** plan-027 D-078 — the soulbound `AccessEntitlement` id that gates decrypt
+   *  (replaces the old cap/collection binding). The caller proves it bought
+   *  access; the key servers dry-run `seal_approve_entitlement(id, entitlement,
+   *  model)` against it. */
+  entitlementId: string;
+  /** The encrypted base `Model3D` object id the entitlement binds to. */
   baseModelId: string;
-  /** Build the seal_approve_cap PTB into txBytes (onlyTransactionKind). */
+  /** Build the seal_approve_entitlement PTB into txBytes (onlyTransactionKind). */
   buildTxBytes: (tx: Transaction) => Promise<Uint8Array>;
   /** Fetch raw bytes from a Walrus aggregator blob url (defaults to global fetch). */
   fetchBytes?: (url: string) => Promise<Uint8Array>;
@@ -144,22 +147,22 @@ async function defaultFetchBytes(url: string): Promise<Uint8Array> {
 
 /**
  * STEP 2 — recover the FULL Seal identity from the sealed key, build the
- * seal_approve_cap dry-run PTB, decrypt the AES key (with bounded retry for the
- * fresh-object race), fetch the ciphertext, and AES-GCM-decrypt to the plaintext
- * GLB. Returns the plaintext the existing backend bake consumes — there is NO
- * raw-download affordance for these bytes (R9).
+ * seal_approve_entitlement dry-run PTB (plan-027 D-078: entitlement-gated, no
+ * cap), decrypt the AES key (with bounded retry for the fresh-object race),
+ * fetch the ciphertext, and AES-GCM-decrypt to the plaintext GLB. Returns the
+ * plaintext the existing backend bake consumes — there is NO raw-download
+ * affordance for these bytes (R7).
  */
 export async function decryptEncryptedBase(
   args: DecryptEncryptedBaseArgs,
 ): Promise<Uint8Array> {
   // The on-chain model.seal_id is only the PREFIX; the full id (prefix+nonce)
-  // lives inside the EncryptedObject and is what seal_approve_cap's
+  // lives inside the EncryptedObject and is what seal_approve_entitlement's
   // is_prefix(model.seal_id, id) check needs.
   const fullId = recoverFullSealId(args.sealedKey);
-  const { tx } = buildSealApproveCapPtb({
+  const { tx } = buildSealApproveEntitlementPtb({
     id: fullId,
-    capId: args.capId,
-    collectionId: args.collectionId,
+    entitlementId: args.entitlementId,
     baseModelId: args.baseModelId,
   });
   const txBytes = await args.buildTxBytes(tx);

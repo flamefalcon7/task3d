@@ -62,6 +62,11 @@ function jsonToSummary(
     derivativeMintFee: String(
       ((json.license ?? {}) as Record<string, unknown>).derivative_mint_fee ?? '0',
     ),
+    // plan-027 D-078 — one-time buy-access fee on an ALLOW_LIST base; defaults
+    // to '0' on pre-v10 objects whose license JSON carries no access_fee.
+    accessFee: String(
+      ((json.license ?? {}) as Record<string, unknown>).access_fee ?? '0',
+    ),
     derivativeRoyaltyBps: Number(
       ((json.license ?? {}) as Record<string, unknown>).derivative_royalty_bps ?? 0,
     ),

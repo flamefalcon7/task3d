@@ -115,6 +115,27 @@ describe('useModelIndex', () => {
     expect(legacy).toMatchObject({ policy: 2, isEncrypted: false, previewBlobIds: [] });
   });
 
+  it('maps license.access_fee → accessFee (string mist); defaults to "0" when absent', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(graphqlResponse([
+      // plan-027 D-078 — ALLOW_LIST base carrying an access_fee.
+      makeNode({
+        address: '0xpaid',
+        json: {
+          license: { policy: 1, derivative_mint_fee: '0', access_fee: '3000000' },
+          is_encrypted: true,
+        },
+      }),
+      // Legacy node with no license → accessFee defaults to '0'.
+      makeNode({ address: '0xlegacy' }),
+    ])));
+    const { result } = renderHook(() => useModelIndex());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const paid = result.current.models.find((m) => m.objectId === '0xpaid')!;
+    expect(paid.accessFee).toBe('3000000');
+    const legacy = result.current.models.find((m) => m.objectId === '0xlegacy')!;
+    expect(legacy.accessFee).toBe('0');
+  });
+
   it('excludes RESTRICTED (policy 0) bases from the catalog entirely (private)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(graphqlResponse([
       makeNode({ address: '0xpublic', json: { license: { policy: 2 } } }),

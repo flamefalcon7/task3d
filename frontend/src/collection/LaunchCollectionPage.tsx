@@ -846,13 +846,20 @@ export function LaunchCollectionPage() {
       });
       const sealedKey = parseSealedKeyFromObject(modelResp);
 
+      // TODO(U10): the decrypt gate moved from the per-collection cap to the
+      // soulbound AccessEntitlement (plan-027 D-078). U10 rewires this whole
+      // handler to a FREE entitlement-gated unlock (no step-1 payment) and
+      // sources `entitlementId` from useOwnedEntitlements. Until then this stub
+      // keeps the call type-correct + compiling; it is NOT a working decrypt
+      // (the cap is no longer the gate), but the wallet-signed path here is
+      // superseded by U10 before any browser verification.
+      const entitlementId = launch.capId; // TODO(U10): real AccessEntitlement id
       const plaintextGlb = await decryptEncryptedBase({
         sealClient: getSealClient(),
         sessionKey,
         sealedKey,
         ciphertextBlobId: base.glbBlobId,
-        capId: launch.capId,
-        collectionId: launch.collectionId,
+        entitlementId,
         baseModelId: base.objectId,
         buildTxBytes: (tx) =>
           tx.build({ client: suiClient as never, onlyTransactionKind: true }),

@@ -104,18 +104,27 @@ export interface MintTokensArgs {
   tokenPatchIds: string[];
 }
 
-export interface SealApproveCapArgs {
+export interface SealApproveEntitlementArgs {
   /** The FULL Seal identity the EncryptedObject was sealed under
    *  (`[seal_id prefix][nonce]`) — recovered via `EncryptedObject.parse().id`,
-   *  NOT the on-chain `model.seal_id` prefix alone. On-chain `seal_approve_cap`
-   *  asserts `is_prefix(model.seal_id, id)`, which this full id satisfies. */
+   *  NOT the on-chain `model.seal_id` prefix alone. On-chain
+   *  `seal_approve_entitlement` asserts `is_prefix(model.seal_id, id)`, which
+   *  this full id satisfies. */
   id: Uint8Array;
-  /** Soulbound `NftCollectionCreatorCap` ID (proves the forker paid to fork). */
-  capId: string;
-  /** Shared `NftCollection` ID the cap authorizes. */
-  collectionId: string;
-  /** The encrypted base `Model3D` object id this collection derives from. */
+  /** plan-027 D-078 — soulbound `AccessEntitlement` ID (proves the caller bought
+   *  access). This REPLACES the cap as the decrypt gate. */
+  entitlementId: string;
+  /** The encrypted base `Model3D` object id the entitlement binds to. */
   baseModelId: string;
+}
+
+export interface PurchaseAccessArgs {
+  /** Shared ALLOW_LIST `Model3D` object id to buy access to. */
+  modelId: string;
+  /** The base's `license.access_fee` in MIST. Split from gas; the Move side
+   *  refunds any excess to the buyer. A per-base value read from
+   *  `Model3DSummary.accessFee`, not a builder constant. */
+  accessFeeMist: bigint;
 }
 
 export interface RegisterIntegrationArgs {
@@ -307,13 +316,16 @@ export function buildMintTokensPtb(
 }
 
 /**
- * D-075 — the Seal key-server DRY-RUN gate, built as `txBytes` for
- * `SealClient.decrypt` (NOT signed/executed). `seal_approve_cap(id, cap,
- * collection, model)` is `entry` (invokable in the dry-run PTB) but not
+ * plan-027 D-078 — the Seal key-server DRY-RUN gate, built as `txBytes` for
+ * `SealClient.decrypt` (NOT signed/executed). REPLACES the deleted
+ * `seal_approve_cap`: the decrypt gate now hangs off the soulbound
+ * `AccessEntitlement`, not the per-collection cap, so a consumer who never
+ * launched a collection can still decrypt. `seal_approve_entitlement(id,
+ * entitlement, model)` is `entry` (invokable in the dry-run PTB) but not
  * `public`; the key servers dry-run it against the latest package version and
- * release key shares iff it does NOT abort. Its named triple-check invariant is:
- *   cap.collection_id == id(collection)  ∧  collection.base_model_id == id(model)
- *   ∧  is_prefix(model.seal_id, id)      ∧  model.seal_version == VERSION
+ * release key shares iff it does NOT abort. Its invariant is:
+ *   entitlement.model_id == id(model)  ∧  entitlement.holder == sender
+ *   ∧  is_prefix(model.seal_id, id)    ∧  model.seal_version == VERSION
  *
  * `id` MUST be the FULL Seal identity (`[seal_id][nonce]`) the EncryptedObject
  * was sealed under — recover it via `EncryptedObject.parse(sealedKey).id`
@@ -324,16 +336,15 @@ export function buildMintTokensPtb(
  * `decryptKey(client, sealedKey, sessionKey, txBytes)`. This builder returns the
  * unbuilt `Transaction` so callers can build against their own client.
  */
-export function buildSealApproveCapPtb(
-  args: SealApproveCapArgs,
+export function buildSealApproveEntitlementPtb(
+  args: SealApproveEntitlementArgs,
 ): TxResult<Record<string, never>> {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PKG}::model3d::seal_approve_cap`,
+    target: `${PKG}::model3d::seal_approve_entitlement`,
     arguments: [
       tx.pure.vector('u8', Array.from(args.id)),
-      tx.object(args.capId),
-      tx.object(args.collectionId),
+      tx.object(args.entitlementId),
       tx.object(args.baseModelId),
     ],
   });
@@ -342,8 +353,36 @@ export function buildSealApproveCapPtb(
     handles: {},
     metadata: {
       // No on-chain effect: this is a dry-run-only gate (key servers invoke it).
-      target: `${PKG}::model3d::seal_approve_cap`,
+      target: `${PKG}::model3d::seal_approve_entitlement`,
       expectedEvents: [],
+    },
+  };
+}
+
+/**
+ * plan-027 D-078 — `purchase_access(model: &mut Model3D, payment: Coin<SUI>,
+ * ctx)`. A consumer/forker buys one-time access to an ALLOW_LIST base: pays
+ * `access_fee` to the base creator and receives a soulbound `AccessEntitlement`.
+ * The fee is split from gas (`tx.splitCoins(tx.gas, [accessFeeMist])`); the Move
+ * side refunds any excess to the buyer and idempotency-guards a double purchase.
+ * Mirrors `buildLaunchCollectionPtb`'s split-from-gas shape (caller passes only
+ * `accessFeeMist`, not a pre-split coin). Emits `AccessPurchased`.
+ */
+export function buildPurchaseAccessPtb(
+  args: PurchaseAccessArgs,
+): TxResult<Record<string, never>> {
+  const tx = new Transaction();
+  const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(args.accessFeeMist)]);
+  tx.moveCall({
+    target: `${PKG}::model3d::purchase_access`,
+    arguments: [tx.object(args.modelId), coin!],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      target: `${PKG}::model3d::purchase_access`,
+      expectedEvents: [`${PKG}::model3d::AccessPurchased`],
     },
   };
 }

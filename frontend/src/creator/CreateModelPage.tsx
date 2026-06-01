@@ -746,6 +746,12 @@ export function CreateModelPage() {
           derivativeRoyaltyBps: royaltyBps,
           commercialUse: true,
           requireAttribution: policy !== POLICY_PERMISSIONLESS,
+          // TODO(U7): wire a real access-fee input. U7 adds the ALLOW_LIST
+          // access-fee field + the flipped client guard (access_fee > 0 for
+          // ALLOW_LIST). Stubbed 0n here so the new_license_terms PTB compiles
+          // against the plan-027 ABI; an ALLOW_LIST publish with access_fee == 0
+          // aborts on-chain (EAllowListNeedsFee) until U7 lands.
+          accessFee: 0n,
         },
       };
       const { tx } = isEncrypted

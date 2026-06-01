@@ -44,6 +44,7 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
     lineageBlobId: 'walrus_blob_lineage',
     glbBlobId: 'glb_demo',
     derivativeMintFee: '250000000', // 0.25 SUI
+    accessFee: '0',
     derivativeRoyaltyBps: 500,
     policy: 2,
     isEncrypted: false,

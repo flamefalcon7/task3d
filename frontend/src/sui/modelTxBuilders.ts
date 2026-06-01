@@ -47,6 +47,13 @@ export interface LicenseTermsInput {
   derivativeRoyaltyBps: number; // u16; ≤3000 (D-004)
   commercialUse: boolean;
   requireAttribution: boolean;
+  /**
+   * plan-027 D-078 — the one-time buy-access fee (MIST) a consumer/forker pays
+   * via `purchase_access` to mint an `AccessEntitlement`. Required > 0 for
+   * ALLOW_LIST publishes (on-chain `EAllowListNeedsFee`); 0 for everything else.
+   * LAST positional arg of `new_license_terms` (matches the Move signature).
+   */
+  accessFee: bigint;
 }
 
 export interface PayForApiCallArgs {
@@ -121,6 +128,8 @@ function attachNewLicenseTerms(tx: Transaction, license: LicenseTermsInput): Tra
       tx.pure.u16(license.derivativeRoyaltyBps),
       tx.pure.bool(license.commercialUse),
       tx.pure.bool(license.requireAttribution),
+      // plan-027 D-078 — access_fee is the LAST arg of new_license_terms.
+      tx.pure.u64(license.accessFee),
     ],
   });
 }
