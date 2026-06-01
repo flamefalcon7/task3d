@@ -330,9 +330,10 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
-    // Choose allow-list + a positive fork fee.
+    // Choose allow-list + a positive access (unlock) fee. plan-027: the publish
+    // gate is on access_fee now, not the derive fee.
     fireEvent.click(screen.getByTestId('policy-1'));
-    fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '1' } });
+    fireEvent.change(screen.getByTestId('access-fee-input'), { target: { value: '1' } });
 
     signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Sealed Model' } });
@@ -360,7 +361,7 @@ describe('CreateModelPage', () => {
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
   });
 
-  it('allow-list with zero fork fee is blocked before sign (EAllowListNeedsFee guard)', async () => {
+  it('plan-027 U7: allow-list with empty access (unlock) fee is blocked before sign (EAllowListNeedsFee guard)', async () => {
     TAGGING_PART_COUNT_REF.current = 1;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
@@ -368,14 +369,17 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
-    // Allow-list but leave fee at the default '0'.
+    // Allow-list but leave the access (unlock) fee empty — the gate is now on
+    // access_fee, not the derive fee (which may be 0).
     fireEvent.click(screen.getByTestId('policy-1'));
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Zero Fee' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
 
-    // Guarded: neither encryption nor any publish PTB runs.
+    // Guarded: the access-fee error fires; neither encryption nor any publish
+    // PTB runs.
+    expect(screen.getByText(/unlock price greater than 0/i)).toBeTruthy();
     expect(encryptBaseMock).not.toHaveBeenCalled();
     expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
@@ -392,7 +396,8 @@ describe('CreateModelPage', () => {
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
     fireEvent.click(screen.getByTestId('policy-1'));
-    fireEvent.change(screen.getByTestId('fee-input'), { target: { value: '2' } });
+    // plan-027: a positive access (unlock) fee satisfies the publish gate.
+    fireEvent.change(screen.getByTestId('access-fee-input'), { target: { value: '2' } });
 
     captureStillsMock.mockResolvedValue([new Uint8Array([0x11]), new Uint8Array([0x22])]);
     // Quilt returns one patch id per file, in input order: ciphertext, then stills.
@@ -451,6 +456,82 @@ describe('CreateModelPage', () => {
     expect(uploadFilesMock.mock.calls[0]![0]).toHaveLength(1);
     const encArgs = buildPublishEncryptedPtbMock.mock.calls[0]![0] as { previewBlobIds: string[] };
     expect(encArgs.previewBlobIds).toEqual([]);
+  });
+
+  // ----- plan-027 U7 — access-fee input + flipped publish guard -----------
+
+  it('U7: access-fee input renders ONLY for ALLOW_LIST (not PERMISSIONLESS)', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Default policy is Open (permissionless, 2) → no access-fee input.
+    expect(screen.queryByTestId('access-fee-input')).toBeNull();
+
+    // Allow-list → access-fee input appears.
+    fireEvent.click(screen.getByTestId('policy-1'));
+    expect(screen.getByTestId('access-fee-input')).toBeTruthy();
+
+    // Back to Open → access-fee input gone again.
+    fireEvent.click(screen.getByTestId('policy-2'));
+    expect(screen.queryByTestId('access-fee-input')).toBeNull();
+  });
+
+  it('U7: ALLOW_LIST with a positive access fee and derive fee 0 publishes; license carries accessFee>0, derivativeMintFee=0', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Allow-list, access fee 3 SUI, leave the derive fee at its default '0'.
+    fireEvent.click(screen.getByTestId('policy-1'));
+    fireEvent.change(screen.getByTestId('access-fee-input'), { target: { value: '3' } });
+    // derive fee input is left at '0' (the default) — now allowed for ALLOW_LIST.
+
+    signAndExecuteMock.mockResolvedValue({ digest: 'ACCDIGEST' });
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Priced Base' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+
+    // Guard passes → the encrypted publish PTB is built with a license carrying
+    // accessFee = 3 SUI (mist) and derivativeMintFee = 0.
+    await waitFor(() => expect(buildPublishEncryptedPtbMock).toHaveBeenCalled());
+    const license = (
+      buildPublishEncryptedPtbMock.mock.calls[0]![0] as {
+        license: { policy: number; accessFee: bigint; derivativeMintFee: bigint };
+      }
+    ).license;
+    expect(license.policy).toBe(1);
+    expect(license.accessFee).toBe(3_000_000_000n);
+    expect(license.derivativeMintFee).toBe(0n);
+  });
+
+  it('U7: policy flip ALLOW_LIST → PERMISSIONLESS → ALLOW_LIST clears the access-fee value', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Enter a value under ALLOW_LIST.
+    fireEvent.click(screen.getByTestId('policy-1'));
+    fireEvent.change(screen.getByTestId('access-fee-input'), { target: { value: '5' } });
+    expect((screen.getByTestId('access-fee-input') as HTMLInputElement).value).toBe('5');
+
+    // Flip away (PERMISSIONLESS) — input unmounts and the value is reset.
+    fireEvent.click(screen.getByTestId('policy-2'));
+    expect(screen.queryByTestId('access-fee-input')).toBeNull();
+
+    // Return to ALLOW_LIST — the input is back and empty (stale value cleared).
+    fireEvent.click(screen.getByTestId('policy-1'));
+    expect((screen.getByTestId('access-fee-input') as HTMLInputElement).value).toBe('');
   });
 
   // ----- plan-015 U1 — Framing-B TaggingStep + partLabels wiring ----------

@@ -557,6 +557,11 @@ export function CreateModelPage() {
   const [tagsStr, setTagsStr] = useState('');
   const [policy, setPolicy] = useState<PolicyValue>(2);
   const [feeSui, setFeeSui] = useState('0');
+  // plan-027 U7 (D-078) — the ALLOW_LIST one-time buy-access fee (SUI). Shown
+  // only for ALLOW_LIST; required > 0 (on-chain EAllowListNeedsFee — the gate
+  // moved from derive-fee to access-fee in plan-027). Reset to '' when policy
+  // flips away from ALLOW_LIST so a stale value can't ride into publish.
+  const [accessFeeSui, setAccessFeeSui] = useState('');
   const [royaltyBps, setRoyaltyBps] = useState(500);
 
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
@@ -598,6 +603,15 @@ export function CreateModelPage() {
   const mintElapsed = useElapsedSeconds(
     mintStatus === 'uploading' || mintStatus === 'signing',
   );
+
+  // plan-027 U7 — policy change resets the access-fee when leaving ALLOW_LIST.
+  // The access fee can only be charged on ALLOW_LIST (purchase_access asserts
+  // POLICY_ALLOW_LIST), so a value entered under ALLOW_LIST must not silently
+  // ride into a PERMISSIONLESS/RESTRICTED publish if the creator switches back.
+  const onPolicyChange = useCallback((next: PolicyValue) => {
+    setPolicy(next);
+    if (next !== POLICY_ALLOW_LIST) setAccessFeeSui('');
+  }, []);
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
@@ -672,10 +686,13 @@ export function CreateModelPage() {
 
   const onMint = useCallback(async () => {
     if (!session || !signer || !glb || !name.trim()) return;
-    // D-076 — ALLOW_LIST is "pay to fork"; a zero fork fee is rejected on-chain
-    // (EAllowListNeedsFee). Guard here so the user gets a clear message pre-sign.
-    if (policy === POLICY_ALLOW_LIST && suiToMist(feeSui) <= 0n) {
-      setMintError('Allow-list requires a fork fee greater than 0 SUI.');
+    // plan-027 D-078 — the publish fee gate moved derive→access. ALLOW_LIST now
+    // requires access_fee > 0 (on-chain EAllowListNeedsFee); the derive fee may
+    // be 0. Mirror the on-chain assert here so the user gets a clear message
+    // pre-sign instead of an abort after the Walrus upload + encrypt window.
+    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) {
+      setMintError('Allow-list requires an unlock price greater than 0 SUI.');
+      setMintStatus('error');
       return;
     }
     setMintError(null);
@@ -746,12 +763,10 @@ export function CreateModelPage() {
           derivativeRoyaltyBps: royaltyBps,
           commercialUse: true,
           requireAttribution: policy !== POLICY_PERMISSIONLESS,
-          // TODO(U7): wire a real access-fee input. U7 adds the ALLOW_LIST
-          // access-fee field + the flipped client guard (access_fee > 0 for
-          // ALLOW_LIST). Stubbed 0n here so the new_license_terms PTB compiles
-          // against the plan-027 ABI; an ALLOW_LIST publish with access_fee == 0
-          // aborts on-chain (EAllowListNeedsFee) until U7 lands.
-          accessFee: 0n,
+          // plan-027 U7 (D-078) — the one-time buy-access fee. Only meaningful
+          // for ALLOW_LIST (purchase_access asserts the policy + access_fee>0);
+          // accessFeeSui is held at '' for non-ALLOW_LIST so suiToMist → 0n.
+          accessFee: suiToMist(accessFeeSui),
         },
       };
       const { tx } = isEncrypted
@@ -770,7 +785,7 @@ export function CreateModelPage() {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, royaltyBps, partLabels, signAndExecute]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute]);
 
   if (!session) {
     return (
@@ -988,7 +1003,7 @@ export function CreateModelPage() {
                       name="policy"
                       data-testid={`policy-${p.value}`}
                       checked={policy === p.value}
-                      onChange={() => setPolicy(p.value)}
+                      onChange={() => onPolicyChange(p.value)}
                       style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                     />
                     <span style={{ ...monoLabel, color: tokens.color.ink }}>{p.label}</span>
@@ -999,9 +1014,31 @@ export function CreateModelPage() {
                 ))}
               </div>
             </fieldset>
+            {/* plan-027 U7 (D-078) — ALLOW_LIST now charges a one-time buy-access
+                fee (the content gate, required > 0) plus an OPTIONAL per-launch
+                derive fee. The unlock-price role moved off the derive-fee input
+                onto this access-fee input; the derive-fee input below is now
+                plain-optional for ALLOW_LIST. */}
+            {policy === POLICY_ALLOW_LIST && (
+              <label>
+                <span style={sectionLabel}>UNLOCK PRICE (SUI) — REQUIRED</span>
+                <input
+                  data-testid="access-fee-input"
+                  value={accessFeeSui}
+                  onChange={(e) => setAccessFeeSui(e.target.value)}
+                  placeholder="e.g. 1"
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+                <span data-testid="access-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                  One-time price to unlock this model (buy access). Buyers pay this once to view and fork it. Must be more than 0 SUI.
+                </span>
+              </label>
+            )}
             <label>
               <span style={sectionLabel}>
-                {policy === POLICY_ALLOW_LIST ? 'UNLOCK PRICE (SUI) — REQUIRED' : 'DERIVATIVE MINT FEE (SUI)'}
+                {policy === POLICY_ALLOW_LIST
+                  ? 'DERIVATIVE MINT FEE (SUI) — OPTIONAL'
+                  : 'DERIVATIVE MINT FEE (SUI)'}
               </span>
               <input
                 data-testid="fee-input"
@@ -1011,7 +1048,7 @@ export function CreateModelPage() {
               />
               {policy === POLICY_ALLOW_LIST && (
                 <span data-testid="allow-list-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                  What people pay you to unlock your model and make their own version of it. Must be more than 0 SUI.
+                  Optional per-launch fee a forker pays when minting a collection from your model. May be 0.
                 </span>
               )}
             </label>
