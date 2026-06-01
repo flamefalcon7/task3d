@@ -217,18 +217,21 @@ Implementation directories (`backend/`, `frontend/`, etc.) will be created in Ph
 
 ## 🎯 Core Architecture
 
-**Three-tier Composable Creator Economy** (see `docs/spec.md` §1.7, §2.8):
+**Composable Creator Economy — L1 content (+ access entitlement) → L2 collection** (see `docs/spec.md` §1.7, §2.8; D-029, D-078):
 
 ```
-L1  Model3D       — Creator publishes base content to Walrus, sets LicenseTerms
-                    policy: restricted / allow_list / permissionless
-L2  Derivative    — Other creators fork base into series (1-layer max),
-                    base_royalty_bps snapshot at mint, ≤ 30% cap
-L3  Access        — Soulbound receipt of paid access (`key` only, no `store`)
-                    Used in seal_approve to gate Seal-encrypted content
+L1  Model3D            — Creator publishes base content to Walrus, sets LicenseTerms:
+    + AccessEntitlement   policy (restricted / allow_list / permissionless) + access_fee
+                          + derivative_mint_fee. AccessEntitlement is a one-time, soulbound
+                          receipt (`key` only, no `store`) minted by purchase_access; it gates
+                          seal_approve_entitlement decryption — an L1 entitlement, NOT a 3rd tier
+                          (D-078; the old "L3 Access" framing is retired).
+L2  NftCollection      — A forker who HOLDS the entitlement launches a collection (pays the
+    + NftToken            per-launch derive fee, holds a soulbound NftCollectionCreatorCap) and
+                          mints tradeable NftTokens. 1-layer max; base_royalty_bps snapshot ≤ 30% cap.
 ```
 
-**Not** an NFT collection. `Model3D` is content — one creator publishes, N buyers pay access. `Access` is a soulbound receipt. `Derivative` is composable IP.
+`Model3D` is content — one creator publishes; N buyers pay the **access_fee once** for a permanent soulbound `AccessEntitlement` (consumer view + the precondition to forking). The **derive_fee** is a separate per-launch charge to mint an L2 collection. Access gating lives on the **entitlement**, not the collection cap (D-078 moved it off the cap).
 
 ---
 

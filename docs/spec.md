@@ -1005,17 +1005,23 @@ entry fun seal_approve(id: vector<u8>, wl: &Whitelist, ctx: &TxContext) {
 
 **`seal_approve` gate**(non-public entry,key server dry-run、無 gas、abort = 拒絕):
 
+> **D-078 更新(plan-027)**:解密 gate 從 per-collection cap 搬到 L1 **`AccessEntitlement`**(soulbound、一次購買、永久)。`seal_approve_cap` 已刪;消費者不必 launch collection 也能解密觀看。
+
 | policy | 函式 | 檢查 |
 |---|---|---|
-| ALLOW_LIST | `seal_approve_cap(id, cap, collection, model)` | **具名三重檢查不變式**:`cap.collection_id == id(collection)` ∧ `collection.base_model_id == id(model)` ∧ `is_prefix(model.seal_id, id)`,外加 `seal_version == VERSION` tripwire |
+| ALLOW_LIST | `seal_approve_entitlement(id, entitlement, model, ctx)` | `entitlement.model_id == id(model)` ∧ `entitlement.holder == sender` ∧ `is_prefix(model.seal_id, id)` ∧ `seal_version == VERSION` tripwire(單物件 gate,模仿 `seal_approve_creator`,不需 collection) |
 | RESTRICTED | `seal_approve_creator(id, model, ctx)` | `is_prefix(model.seal_id, id)` ∧ `sender == model.creator` ∧ version |
 
 **Seal id 綁定(Resolution G)**:object id 在 publish 才生成、但加密在 publish 前(雞生蛋),所以不能直接綁 object id;client 隨機選的 `seal_id` 又可被複製。改用 client 隨機 `seal_id`、`id = [seal_id][nonce]` 加密,並在發布時用一個 shared `SealIdRegistry`(`init` bootstrap)assert `seal_id` 全域唯一才記錄 → 提供等效且不可偽造的綁定,擋住「複製受害者 `seal_id` 來解其密文」的攻擊。
 
-**3-step ALLOW_LIST fork**(加密 base 的解密必須先於 variant bake,所以原子單筆做不到):
-1. `launch_collection`(付 fee)→ soulbound cap
-2. SessionKey 簽一次 → 組 `seal_approve_cap` PTB 給 key server dry-run → 解出 AES 金鑰 → 解密 base → 後端 bake variants → 上傳 quilt
+**買存取(D-078,fork 的前置 + 消費者觀看)**:`purchase_access`(付 **access_fee**,ALLOW_LIST 強制 > 0)→ soulbound `AccessEntitlement`(一次、永久;`Model3D.buyers` 表擋重複購買)。同一張 entitlement 同時服務「消費者 in-app 觀看」與「creator fork 的解密前置」。
+
+**ALLOW_LIST fork(D-078:unlock 解密免費、derive fee 改在 mint 收)**:
+1. SessionKey 簽一次 → `seal_approve_entitlement` PTB dry-run(憑 entitlement,**免費**)→ 解出 AES 金鑰 → 解密 base → 後端 bake variants → 上傳 quilt
+2. `launch_collection_with_entitlement`(付 **per-launch derive fee**,may be 0)→ collection + soulbound cap(cap 在 mint 才生成)
 3. `mint_tokens`(設 quilt + 批次鑄造)
+
+> derive fee 可為 0;legacy `launch_collection`/`launch_collection_with_tokens` 對 ALLOW_LIST 一律 abort(`EEntitlementRequired`)→ 杜絕「沒買存取就免費 fork」的繞過洞。
 
 PERMISSIONLESS 維持單筆原子 `launch_collection_with_tokens`。L2 `NftToken` 維持公開(價值在 ownership/provenance,不在 byte 機密)。**定位:緩解,非根絕**(R14)—— 不宣稱阻止已授權 forker 解密後外流;royalty 是鏈上硬軌(D-004)。
 

@@ -1,30 +1,31 @@
 # Phase Progress
 
-## Last Updated: 2026-06-01 (plan-027 paid-access entitlement split — contract + frontend infra shipped; PAUSED for user v10 deploy)
+## Last Updated: 2026-06-01 (plan-027 paid-access entitlement split — ALL 11 units shipped + v10 DEPLOYED; pending user real-Slush demo arc)
 
 ### Where we are (read this first after compact)
-Executing **plan-027** (`docs/plans/2026-06-01-027-feat-access-entitlement-split-plan.md`, D-078) on a NEW branch **`feat/access-entitlement-split`** (off `feat/upload-segmentation`; the prior stack is linear, 37 commits ahead of main, none merged). This splits the fork fee into a one-time soulbound **AccessEntitlement** (gates Seal decrypt) + a per-launch derive fee; moves the decrypt gate from the cap to the entitlement.
+**plan-027 COMPLETE** (`docs/plans/2026-06-01-027-feat-access-entitlement-split-plan.md`, D-078) on branch **`feat/access-entitlement-split`** (off `feat/upload-segmentation`; linear, none merged to main). All 11 units done + committed; v10 contract **deployed to testnet**. Splits the fork fee into a one-time soulbound **AccessEntitlement** (gates Seal decrypt, L1 entitlement) + a per-launch derive fee; decrypt gate moved cap→entitlement.
 
-**DONE + committed this session (7 of 11 units):**
-- **U1–U4 contract** (`b7f14ba`): `purchase_access` + `AccessEntitlement` (soulbound, dup-guard via `Model3D.buyers`), `access_fee` on LicenseTerms (ALLOW_LIST⇒access_fee>0, derive may be 0), `seal_approve_entitlement` replaces deleted `seal_approve_cap`, `VERSION 1→2`, `launch_collection_with_entitlement` (legacy launch entries reject ALLOW_LIST → no bypass). **87 move tests green.**
-- **U6** (`c3ffb53`): `accessFee` on Model3DSummary + mappers; `buildSealApproveEntitlementPtb` (replaces cap), `buildPurchaseAccessPtb`; shared `seal/decryptAndView.ts` helper; decryptEncryptedBase takes entitlementId.
-- **U9** (`cc4c074`): `useOwnedEntitlements` hook (owned AccessEntitlement query, mirrors useOwnedTokens).
-- **U7** (`4f8c4b9`): CreateModelPage access-fee input + flipped publish guard + policy-flip reset.
-- **U11 partial**: D-078 ADR captured + D-076/075 cross-refs. (spec §3.7 + CLAUDE.md relabel still TODO — finish after U8/U10.)
-- Frontend: `tsc -b` = **32 baseline** (zero new), all touched test files green.
+**v10 deploy (live testnet):** package `0x01baf4fc457047d6ae6d818063feca20038eb2d878ecae7ec9b0d1dd259cd065` (publish `Ckpi288e…`, bootstrap `BJYZrgyC…`); publisher `0xa01e054f…`, SealIdRegistry `0x051c7ec1…`, TransferPolicy<NftToken> `0xd151395b…` (+cap `0xfc0198a5…`), upgradeCap `0x19664fa5…`. Supersedes v9 `0xba1e84ba…`. Wired in `testnet.json` + `networkConfig.ts`; parity test green.
 
-### Next concrete step
-**USER runs U5 — the v10 fresh republish** (`sui client publish` from `contracts/model3d/`; needs deployer key + gas — I can't run it). Then send me the new package_id + publisher + SealIdRegistry + TransferPolicy ids + digests; I wire `testnet.json` + `networkConfig.ts` + re-bootstrap `ensure_collection_policy`, then run **Seal Part A pre-flight** (buyer-variable `seal_approve_entitlement` dry-run accepted + wrong-sender denied — the one never-live-verified seam).
+**All 11 units committed:**
+- **U1–U4 contract** (`b7f14ba`): purchase_access + AccessEntitlement (soulbound, dup-guard via Model3D.buyers), access_fee (ALLOW_LIST⇒access_fee>0, derive may be 0), seal_approve_entitlement replaces seal_approve_cap, VERSION 1→2, launch_collection_with_entitlement (legacy entries reject ALLOW_LIST → no bypass). **87 move tests green.**
+- **U9** (`cc4c074`) useOwnedEntitlements · **U6** (`c3ffb53`) ABI types+PTB builders+decryptAndView · **U7** (`4f8c4b9`) create-page access fee.
+- **U5** (`06dfbc3`) v10 republish + wiring.
+- **U10** (`de62b77`) /launch catalog (launchable ∪ locked) + FREE entitlement decrypt at unlock + derive-fee-at-mint via launch_collection_with_entitlement.
+- **U8** (`4b2b707`) /model/:id buy-access + 9-state in-app consumer view, no-download.
+- **U11** (`<this commit>`): D-078 ADR + spec §3.7 entitlement-gate rewrite + CLAUDE.md L1/L2 relabel.
+- **Full frontend suite: 860 tests green, tsc 32 baseline (zero new).**
 
-### Blocked on U5 (do AFTER deploy)
-- **U8** ModelDetailPage — buy-access + consumer view (9-state table, no-download, decrypt via `decryptViaEntitlement`).
-- **U10** LaunchCollectionPage — free entitlement decrypt at unlock (drop pay-at-unlock), /launch catalog (launchable ∪ locked cards), derive fee at mint via `launch_collection_with_entitlement`. (U6 left a `// TODO(U10)` stub in onUnlock's entitlementId source.)
-- **U11 finish** — spec §3.7 rewrite + CLAUDE.md L1/L2/L3 relabel (access = L1 entitlement, drop "L3 Access").
-- Browser-verify the buy→view→fork demo arc in real Chrome+Slush; demo-arc dress rehearsal before any cut-line decision.
+### Next concrete step (USER — wallet-gated, can't be agent-driven)
+Real-Slush **demo-arc dress rehearsal** in your Chrome+Slush: (1) /create an ALLOW_LIST base w/ access_fee>0; (2) /model/:id buy access → in-app view renders the mesh; (3) /launch → base appears launchable → free unlock-decrypt → author variants → mint (pays derive fee). This is also the live confirmation of the `seal_approve_entitlement` buyer-variable dry-run (the one seam unit tests mock). Report back any failure.
+
+### Open / deferred
+- Backend cap-hardening (`encryptedBase` JWT-owns-cap check) was dropped from the encrypted mint build call — the cap no longer exists at bake time; on-chain entitlement assert is the authority now. Backend still accepts the optional field (nothing breaks). Follow-up could re-harden via entitlement-id. (U10 deviation.)
+- Not merged to main yet (linear stack: seal → upload-seg → entitlement-split). Merge decision + demo/deck pending.
 
 ### Notes for next session
-- Move can't express `Option<&AccessEntitlement>` (no refs in Option/structs) — that's why ALLOW_LIST enforcement is "reject in legacy entries + dedicated entitlement entry," not a threaded optional. Don't re-litigate.
-- The 7-reviewer doc-review on plan-027 already fixed the bypass hole, the Seal over-claim (gated on Part A), the cut-line order (protect U8 render), the dup-purchase guard. Findings are baked into the plan + D-078.
+- Move can't express `Option<&AccessEntitlement>` (no refs in Option/structs) — ALLOW_LIST enforcement is "reject in legacy entries + dedicated entitlement entry." Don't re-litigate.
+- The Seal "buyer-variable dry-run" worry is largely de-risked: v9's deleted seal_approve_cap ALSO gated on a buyer-held owned soulbound object (the cap) and key servers accepted it; seal_approve_entitlement is the same shape.
 - `npx tsc` via RTK proxy emits spurious TS6046/5069 — use `./node_modules/.bin/tsc -b` directly for the real 32 baseline.
 
 ---
