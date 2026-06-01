@@ -61,6 +61,18 @@ const networkBadge: CSSProperties = {
   padding: '2px 6px',
 };
 
+const disconnectButton: CSSProperties = {
+  fontFamily: tokens.font.mono,
+  fontSize: 10,
+  letterSpacing: '1px',
+  textTransform: 'uppercase',
+  color: tokens.color.muted,
+  background: 'transparent',
+  border: `1px solid ${tokens.color.muted}`,
+  padding: '2px 6px',
+  cursor: 'pointer',
+};
+
 function truncateAddress(address: string): string {
   if (address.length <= 12) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -116,33 +128,36 @@ export function TopNav() {
       </div>
 
       <div style={rightCluster}>
-        {address ? (
-          // Clicking the wallet pill disconnects (dapp-side) so the user can
-          // switch accounts/wallets — the masthead had no disconnect affordance
-          // before (the only Disconnect button lived in SignInButton, off-nav).
+        <span
+          style={
+            TEST_WALLET_ENABLED && address
+              ? { ...walletPill, color: tokens.color.accent }
+              : walletPill
+          }
+          data-testid="wallet-pill"
+          // plan-016 code-review hotfix — only emit data-test-wallet when
+          // the flag is actually active (Vite constant-folds the flag, so an
+          // unconditional attribute would leak the feature's existence).
+          {...(TEST_WALLET_ENABLED ? { 'data-test-wallet': 'true' } : {})}
+        >
+          {address
+            ? `${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)}`
+            : 'NO WALLET'}
+        </span>
+        {/* Explicit, labelled Disconnect — the masthead had no disconnect
+            affordance before (the only one lived in SignInButton, off-nav, and
+            only when fully signed in). Covers signed-in AND connected-but-not-
+            -signed-in states so the user can always switch wallets. */}
+        {address && (
           <button
             type="button"
             onClick={() => disconnect()}
-            title="Click to disconnect / switch wallet"
-            style={{
-              ...(TEST_WALLET_ENABLED
-                ? { ...walletPill, color: tokens.color.accent }
-                : walletPill),
-              cursor: 'pointer',
-              background: 'transparent',
-            }}
-            data-testid="wallet-pill"
-            // plan-016 code-review hotfix — only emit data-test-wallet when
-            // the flag is actually active (Vite constant-folds the flag, so an
-            // unconditional attribute would leak the feature's existence).
-            {...(TEST_WALLET_ENABLED ? { 'data-test-wallet': 'true' } : {})}
+            title="Disconnect / switch wallet"
+            data-testid="disconnect-wallet"
+            style={disconnectButton}
           >
-            {`${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)} ⏏`}
+            DISCONNECT
           </button>
-        ) : (
-          <span style={walletPill} data-testid="wallet-pill">
-            NO WALLET
-          </span>
         )}
         {!isLanding && (
           <span style={networkBadge} data-testid="network-badge">
