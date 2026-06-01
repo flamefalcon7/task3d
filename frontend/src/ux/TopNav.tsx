@@ -78,7 +78,7 @@ export function NavGuard() {
 
 export function TopNav() {
   const location = useLocation();
-  const { address } = useSession();
+  const { address, disconnect } = useSession();
 
   // S7 (plan-022): on the landing route the editorial <Masthead /> owns the
   // "Tusk3D" wordmark and the "TESTNET EDITION" tag. Suppress the TopNav
@@ -116,26 +116,34 @@ export function TopNav() {
       </div>
 
       <div style={rightCluster}>
-        <span
-          style={
-            TEST_WALLET_ENABLED && address
-              ? { ...walletPill, color: tokens.color.accent }
-              : walletPill
-          }
-          data-testid="wallet-pill"
-          // plan-016 code-review hotfix — only emit data-test-wallet when
-          // the flag is actually active. The pre-hotfix code emitted
-          // data-test-wallet="false" unconditionally because Vite constant-
-          // folds TEST_WALLET_ENABLED at build time. That leaked the
-          // attribute *name* into prod DOM, a minor info-disclosure of
-          // feature existence. Gating with a JS condition keeps the prod
-          // bundle attribute-free when the flag is unset.
-          {...(TEST_WALLET_ENABLED ? { 'data-test-wallet': 'true' } : {})}
-        >
-          {address
-            ? `${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)}`
-            : 'NO WALLET'}
-        </span>
+        {address ? (
+          // Clicking the wallet pill disconnects (dapp-side) so the user can
+          // switch accounts/wallets — the masthead had no disconnect affordance
+          // before (the only Disconnect button lived in SignInButton, off-nav).
+          <button
+            type="button"
+            onClick={() => disconnect()}
+            title="Click to disconnect / switch wallet"
+            style={{
+              ...(TEST_WALLET_ENABLED
+                ? { ...walletPill, color: tokens.color.accent }
+                : walletPill),
+              cursor: 'pointer',
+              background: 'transparent',
+            }}
+            data-testid="wallet-pill"
+            // plan-016 code-review hotfix — only emit data-test-wallet when
+            // the flag is actually active (Vite constant-folds the flag, so an
+            // unconditional attribute would leak the feature's existence).
+            {...(TEST_WALLET_ENABLED ? { 'data-test-wallet': 'true' } : {})}
+          >
+            {`${TEST_WALLET_ENABLED ? 'TEST ' : ''}${truncateAddress(address)} ⏏`}
+          </button>
+        ) : (
+          <span style={walletPill} data-testid="wallet-pill">
+            NO WALLET
+          </span>
+        )}
         {!isLanding && (
           <span style={networkBadge} data-testid="network-badge">
             TESTNET
