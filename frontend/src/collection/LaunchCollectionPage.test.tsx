@@ -99,8 +99,13 @@ vi.mock('./useOwnedEntitlements', () => ({
   useOwnedEntitlements: () => ownedEntitlementsMock,
 }));
 const decryptViaEntitlementMock = vi.fn();
+// Contract v11 — the BASE CREATOR forking their OWN encrypted base unlocks via the
+// creator gate (no entitlement). Mocked alongside the entitlement decrypt so the
+// creator-own-base unlock can be driven without a wallet or live key servers.
+const decryptViaCreatorMock = vi.fn();
 vi.mock('../seal/decryptAndView', () => ({
   decryptViaEntitlement: (...a: unknown[]) => decryptViaEntitlementMock(...a),
+  decryptViaCreator: (...a: unknown[]) => decryptViaCreatorMock(...a),
 }));
 
 // plan A2 — runBuildVariants headlessly parses the base GLB for per-part material
@@ -262,6 +267,7 @@ beforeEach(() => {
   decryptEncryptedBaseMock.mockReset();
   mintEncryptedTokensMock.mockReset();
   decryptViaEntitlementMock.mockReset();
+  decryptViaCreatorMock.mockReset();
   ownedEntitlementsMock.modelIds = new Set<string>();
   ownedEntitlementsMock.entitlementByModel = new Map<string, string>();
   extractMaterialNamesMock.mockReset();
@@ -1678,7 +1684,8 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (entitlement-gated)
     expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
     expect(launchEncryptedCollectionMock.mock.calls[0]![0]).toMatchObject({
       modelId: '0xenc',
-      entitlementId: '0xent-enc',
+      // Contract v11 — a FORKER (non-creator) routes through the entitlement gate.
+      launchAuth: { kind: 'entitlement', entitlementId: '0xent-enc' },
       feeMist: BigInt(encBase().derivativeMintFee), // 0.25 SUI from the base summary
     });
     // mint_tokens consumes the cap + collection that launch just created.
@@ -1788,5 +1795,135 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (entitlement-gated)
     expect(screen.queryByTestId('encrypted-base-notice')).toBeNull();
     expect(screen.getByTestId('preview-button')).toBeTruthy();
     expect(screen.getByTestId('launch-button').textContent).toMatch(/LAUNCH COLLECTION/);
+  });
+});
+
+// Contract v11 — the BASE CREATOR can fork their OWN ALLOW_LIST base for free:
+// it appears launchable (not locked) even with NO entitlement; unlock decrypts via
+// the creator gate (seal_approve_creator, no entitlement, no pay); mint uses the
+// LEGACY `launch_collection` (creator mode, no entitlement arg).
+describe('LaunchCollectionPage — creator forks their OWN encrypted ALLOW_LIST base (contract v11)', () => {
+  // An encrypted ALLOW_LIST base CREATED by the signed-in wallet (creator === ADDR),
+  // with NO entitlement held.
+  const ownEncBase = (overrides: Partial<Model3DSummary> = {}) =>
+    summary({
+      objectId: '0xown',
+      name: 'My Sealed Car',
+      creator: ADDR, // the signed-in wallet IS the creator
+      isEncrypted: true,
+      policy: 1, // ALLOW_LIST
+      glbBlobId: 'cipher-own', // AES ciphertext
+      previewBlobIds: ['still-own'],
+      ...overrides,
+    });
+
+  it('catalog: the wallet OWN encrypted base with NO entitlement is launchable (not a locked card)', () => {
+    useModelIndexMock.mockReturnValue({ models: [ownEncBase()], loading: false, error: null, refetch: vi.fn() });
+    // No entitlement held; the wallet is the creator, so it is still launchable.
+    renderPage();
+    expect(screen.getByTestId('base-option-0xown')).toBeTruthy();
+    expect(screen.queryByTestId('base-option-locked-card-0xown')).toBeNull();
+  });
+
+  it('UNLOCK own base: decryptViaCreator is called (NOT decryptViaEntitlement), no entitlement lookup, no pay PTB', async () => {
+    useModelIndexMock.mockReturnValue({ models: [ownEncBase()], loading: false, error: null, refetch: vi.fn() });
+    // No entitlement in the owned set — the creator gate must not need one.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    decryptViaCreatorMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xown'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    await waitFor(() => expect(screen.queryByTestId('unlock-gate')).toBeNull());
+    // Unlocked: live editor + mint button present.
+    expect(screen.getByTestId('collection-name-input')).toBeTruthy();
+    expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/);
+    // The creator gate ran; the entitlement gate did NOT.
+    expect(decryptViaCreatorMock).toHaveBeenCalledOnce();
+    expect(decryptViaCreatorMock.mock.calls[0]![0]).toMatchObject({ address: ADDR });
+    // No entitlementId is threaded through the creator decrypt.
+    expect(decryptViaCreatorMock.mock.calls[0]![0]).not.toHaveProperty('entitlementId');
+    expect(decryptViaEntitlementMock).not.toHaveBeenCalled();
+    // No on-chain charge at unlock.
+    expect(launchEncryptedCollectionMock).not.toHaveBeenCalled();
+    expect(buildLaunchMock).not.toHaveBeenCalled();
+    expect(mintEncryptedTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('MINT own base: launchEncryptedCollection uses creator mode (legacy launch, no entitlement) + mint_tokens', async () => {
+    useModelIndexMock.mockReturnValue({ models: [ownEncBase()], loading: false, error: null, refetch: vi.fn() });
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    decryptViaCreatorMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
+    launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
+    mintEncryptedTokensMock.mockResolvedValue('0xmintdigest');
+    uploadFilesMock.mockResolvedValue({
+      blobIds: ['quilt'],
+      blobObjects: [{ blobId: 'quilt', blobObjectId: '0xq' }],
+      patchIds: ['p0'],
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1]), { status: 200 });
+        return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+    );
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xown'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('unlock-button'));
+    });
+    await waitFor(() => expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+    await waitFor(() => expect(mintEncryptedTokensMock).toHaveBeenCalled());
+    // Creator mode — the legacy launch (no entitlement arg) issues the cap.
+    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
+    expect(launchEncryptedCollectionMock.mock.calls[0]![0]).toMatchObject({
+      modelId: '0xown',
+      launchAuth: { kind: 'creator' },
+      feeMist: BigInt(ownEncBase().derivativeMintFee),
+    });
+    // No entitlementId leaks into the creator launch args.
+    expect(launchEncryptedCollectionMock.mock.calls[0]![0].launchAuth).not.toHaveProperty('entitlementId');
+    // mint_tokens consumes the cap + collection the legacy launch created.
+    expect(mintEncryptedTokensMock.mock.calls[0]![0]).toMatchObject({
+      capId: '0xcap',
+      collectionId: '0xcol',
+    });
+  });
+
+  it('regression: a non-creator encrypted base with NO entitlement is still locked (creator-only path does not leak)', () => {
+    // creator !== ADDR and no entitlement → locked card, not launchable.
+    const other = summary({
+      objectId: '0xother',
+      creator: '0xsomeoneelse',
+      isEncrypted: true,
+      policy: 1,
+      glbBlobId: 'cipher-other',
+      previewBlobIds: ['still-other'],
+    });
+    useModelIndexMock.mockReturnValue({ models: [other], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+    expect(screen.queryByTestId('base-option-0xother')).toBeNull();
+    expect(screen.getByTestId('base-option-locked-card-0xother')).toBeTruthy();
   });
 });

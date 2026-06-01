@@ -1,6 +1,7 @@
 import type { SealClient, SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import {
+  buildLaunchCollectionPtb,
   buildLaunchCollectionWithEntitlementPtb,
   buildSealApproveEntitlementPtb,
   buildSealApproveCreatorPtb,
@@ -65,12 +66,27 @@ export function extractLaunchIds(
   return { capId: cap.objectId, collectionId: collection.objectId };
 }
 
+/**
+ * Which on-chain launch entry STEP 1 routes through — the authority that lets the
+ * caller fork this ENCRYPTED base. ONLY the launch PTB differs between the two; the
+ * digest → objectChanges → {cap, collection} arc is identical:
+ *   - `entitlement` — a FORKER who bought access: routes through the cap-issuing
+ *     `launch_collection_with_entitlement(model, entitlement, payment, quilt="")`
+ *     (the bare `launch_collection` rejects ALLOW_LIST for non-creators).
+ *   - `creator` — the BASE CREATOR forking their OWN ALLOW_LIST base for free:
+ *     routes through the LEGACY `launch_collection(model, payment, quilt="")`,
+ *     which the republished contract (v11) now lets the creator call WITHOUT an
+ *     entitlement (non-creators still rejected). No entitlement object is threaded.
+ */
+export type LaunchAuth =
+  | { kind: 'entitlement'; entitlementId: string }
+  | { kind: 'creator' };
+
 export interface LaunchEncryptedCollectionArgs {
   modelId: string;
-  /** plan-027 D-078 — the caller's soulbound `AccessEntitlement` id for this
-   *  base. The entitlement-gated launch entry asserts the caller holds it; the
-   *  bare `launch_collection` rejects ALLOW_LIST bases. */
-  entitlementId: string;
+  /** The launch authority: an entitlement (forker who bought access) or the
+   *  creator gate (base creator forking their own ALLOW_LIST base for free). */
+  launchAuth: LaunchAuth;
   feeMist: bigint;
   /** Sign + execute the launch PTB (wallet). Returns the tx digest. */
   signAndExecute: (tx: Transaction) => Promise<string>;
@@ -81,22 +97,33 @@ export interface LaunchEncryptedCollectionArgs {
 }
 
 /**
- * STEP 1 — call cap-issuing `launch_collection_with_entitlement(model,
- * entitlement, payment≥fee, quilt="")` (plan-027 D-078). The quilt is empty
- * because the variants aren't baked until after the base decrypts; `mint_tokens`
- * sets the real one. Returns the new cap + collection ids parsed from the
- * effects. The derive fee is charged HERE (at mint), not at the free unlock.
+ * STEP 1 — cap-issuing launch with an EMPTY quilt (the variants aren't baked until
+ * after the base decrypts; `mint_tokens` sets the real one). The launch entry is
+ * chosen by `launchAuth`: the entitlement-gated `launch_collection_with_entitlement`
+ * for a forker who bought access, or the LEGACY `launch_collection` for the base
+ * creator forking their OWN base for free (contract v11 lets the creator call the
+ * legacy entry without an entitlement). Returns the new cap + collection ids parsed
+ * from the effects. The derive fee is charged HERE (at mint), not at the free unlock.
  */
 export async function launchEncryptedCollection(
   args: LaunchEncryptedCollectionArgs,
 ): Promise<LaunchResult> {
-  const { tx } = buildLaunchCollectionWithEntitlementPtb({
-    modelId: args.modelId,
-    entitlementId: args.entitlementId,
-    feeMist: args.feeMist,
-    // D-076 — empty quilt at launch; mint_tokens (step 3) sets the real one.
-    quiltBlobId: '',
-  });
+  const { tx } =
+    args.launchAuth.kind === 'creator'
+      ? // CREATOR forking their own ALLOW_LIST base for free — legacy entry, no
+        // entitlement. D-076 — empty quilt at launch; mint_tokens sets the real one.
+        buildLaunchCollectionPtb({
+          modelId: args.modelId,
+          feeMist: args.feeMist,
+          quiltBlobId: '',
+        })
+      : buildLaunchCollectionWithEntitlementPtb({
+          modelId: args.modelId,
+          entitlementId: args.launchAuth.entitlementId,
+          feeMist: args.feeMist,
+          // D-076 — empty quilt at launch; mint_tokens (step 3) sets the real one.
+          quiltBlobId: '',
+        });
   const digest = await args.signAndExecute(tx);
   const changes = await args.fetchObjectChanges(digest);
   const { capId, collectionId } = extractLaunchIds(changes);

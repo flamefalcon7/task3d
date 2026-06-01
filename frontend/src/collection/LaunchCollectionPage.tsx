@@ -52,7 +52,7 @@ import {
 } from '../forge/harmonics';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
 import { useOwnedEntitlements } from './useOwnedEntitlements';
-import { decryptViaEntitlement } from '../seal/decryptAndView';
+import { decryptViaEntitlement, decryptViaCreator } from '../seal/decryptAndView';
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
@@ -385,6 +385,12 @@ export function LaunchCollectionPage() {
   // (encrypted base not yet decrypted); irrelevant for public bases. The
   // derive-fee payment + cap mint now happen at MINT (onMintEncrypted), not here.
   const [unlockedEntitlementId, setUnlockedEntitlementId] = useState<string | null>(null);
+  // Contract v11 — set true when the BASE CREATOR unlocked their OWN encrypted base
+  // via the creator gate (no entitlement). Distinguishes the creator unlock from
+  // both "not yet unlocked" (false + null entitlement) and the forker entitlement
+  // unlock (non-null entitlement). Mint reads it to route through the LEGACY launch
+  // instead of the entitlement-gated launch.
+  const [unlockedAsCreator, setUnlockedAsCreator] = useState(false);
   const [collectionName, setCollectionName] = useState('');
   const [registerFeeSui, setRegisterFeeSui] = useState('0');
   const [editorState, setEditorState] = useState<VariantEditorState>(newVariantEditorState);
@@ -442,10 +448,20 @@ export function LaunchCollectionPage() {
     modelIds: ownedEntitlementModelIds,
     entitlementByModel,
   } = useOwnedEntitlements(session?.address);
+  // Contract v11 — the BASE CREATOR can fork their OWN ALLOW_LIST base for free:
+  // they view/decrypt via the creator gate (seal_approve_creator, no entitlement)
+  // and launch via the LEGACY `launch_collection` (the republished contract lets
+  // the creator call it without an entitlement; non-creators still rejected). So a
+  // creator's own encrypted base is launchable even with no entitlement held.
+  const isOwnBase = useCallback(
+    (m: Model3DSummary): boolean =>
+      !!session?.address && m.creator === session.address,
+    [session?.address],
+  );
   const isLaunchable = useCallback(
     (m: Model3DSummary): boolean =>
-      !m.isEncrypted || ownedEntitlementModelIds.has(m.objectId),
-    [ownedEntitlementModelIds],
+      !m.isEncrypted || ownedEntitlementModelIds.has(m.objectId) || isOwnBase(m),
+    [ownedEntitlementModelIds, isOwnBase],
   );
 
   // Plan-013 UAT polish: writeFilesFlow has two non-popup phases (encoding
@@ -482,6 +498,7 @@ export function LaunchCollectionPage() {
     // authoring session. Both reset here (encrypted branch keeps baseGlb null;
     // the public branch overwrites baseGlb with the fetched mesh below).
     setUnlockedEntitlementId(null);
+    setUnlockedAsCreator(false);
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -798,12 +815,17 @@ export function LaunchCollectionPage() {
   const onUnlock = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base) return;
-    const entitlementId = entitlementByModel.get(base.objectId);
-    if (!entitlementId) {
+    // Contract v11 — the BASE CREATOR unlocking their OWN encrypted base decrypts
+    // via the creator gate (seal_approve_creator: sender == model.creator), with NO
+    // entitlement. A forker who bought access decrypts via their held entitlement.
+    const ownBase = isOwnBase(base);
+    const entitlementId = ownBase ? undefined : entitlementByModel.get(base.objectId);
+    if (!ownBase && !entitlementId) {
       // Defensive: the catalog only surfaces an encrypted base as launchable when
-      // the wallet holds its entitlement, so this is a should-not-happen guard
-      // (e.g. the entitlement set went stale mid-session). Point the forker at the
-      // buy-access page instead of firing a decrypt that deterministically aborts.
+      // the wallet holds its entitlement OR is the creator, so this is a
+      // should-not-happen guard (e.g. the entitlement set went stale mid-session).
+      // Point the forker at the buy-access page instead of firing a decrypt that
+      // deterministically aborts.
       setErrorMsg('You don’t hold access to this base yet — buy access on its model page first.');
       setPhase('error');
       return;
@@ -814,21 +836,34 @@ export function LaunchCollectionPage() {
     setPhase('decrypting');
 
     try {
-      // FREE decrypt — no on-chain payment. decryptViaEntitlement encapsulates
-      // the SessionKey sign (≤1 popup) + the entitlement-gated key-server dry-run
-      // + the AES-GCM decrypt, and returns the plaintext GLB bytes.
-      const { plaintext } = await decryptViaEntitlement({
-        model: base,
-        entitlementId,
-        suiClient: suiClient as never,
-        signPersonalMessage: signer.signPersonalMessage,
-        address: session.address,
-      });
+      // FREE decrypt — no on-chain payment. The creator gate (decryptViaCreator)
+      // and the entitlement gate (decryptViaEntitlement) each encapsulate the
+      // SessionKey sign (≤1 popup) + the key-server dry-run + the AES-GCM decrypt,
+      // and return the plaintext GLB bytes. ONLY the seal_approve gate differs.
+      const { plaintext } = ownBase
+        ? await decryptViaCreator({
+            model: base,
+            suiClient: suiClient as never,
+            signPersonalMessage: signer.signPersonalMessage,
+            address: session.address,
+          })
+        : await decryptViaEntitlement({
+            model: base,
+            entitlementId: entitlementId!,
+            suiClient: suiClient as never,
+            signPersonalMessage: signer.signPersonalMessage,
+            address: session.address,
+          });
 
-      // Unlocked: hold the plaintext + the gating entitlement and return to LIVE
-      // authoring. No raw-download affordance is ever rendered for these bytes (R7).
+      // Unlocked: hold the plaintext + record WHICH gate was used (creator vs
+      // entitlement) so mint routes through the matching launch entry. No
+      // raw-download affordance is ever rendered for these bytes (R7).
       setBaseGlb(plaintext);
-      setUnlockedEntitlementId(entitlementId);
+      if (ownBase) {
+        setUnlockedAsCreator(true);
+      } else {
+        setUnlockedEntitlementId(entitlementId!);
+      }
       setPhase('editing-variants');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
@@ -836,7 +871,7 @@ export function LaunchCollectionPage() {
     } finally {
       launchingRef.current = false;
     }
-  }, [session, signer, base, suiClient, entitlementByModel]);
+  }, [session, signer, base, suiClient, entitlementByModel, isOwnBase]);
 
   // plan-027 U10 / D-078 — MINT (encrypted bases). Runs AFTER the free unlock, and
   // is where the DERIVE FEE is charged (no charge happened at unlock). Sequence
@@ -853,7 +888,9 @@ export function LaunchCollectionPage() {
   const onMintEncrypted = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base) return;
-    if (!unlockedEntitlementId || !baseGlb) {
+    // Unlocked iff EITHER the creator gate fired (own base) OR an entitlement gate
+    // fired (forker). Both produce `baseGlb` plaintext; the launch entry differs.
+    if ((!unlockedEntitlementId && !unlockedAsCreator) || !baseGlb) {
       setErrorMsg('Unlock the base before minting.');
       return;
     }
@@ -871,13 +908,17 @@ export function LaunchCollectionPage() {
       const upload = await uploadFiles(swapped, signer as never);
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
-      // 2 — entitlement-gated launch: pay the derive fee + mint the cap + empty
-      // collection. The bare launch_collection rejects ALLOW_LIST (D-078 U3b), so
-      // the encrypted fork MUST go through launch_collection_with_entitlement.
+      // 2 — launch: pay the derive fee + mint the cap + empty collection. The
+      // launch ENTRY depends on who is forking: the BASE CREATOR forking their OWN
+      // base uses the LEGACY `launch_collection` (contract v11 lets the creator call
+      // it without an entitlement); a forker uses `launch_collection_with_entitlement`
+      // (the bare entry rejects ALLOW_LIST for non-creators, D-078 U3b).
       setPhase('launching-cap');
       const launch = await launchEncryptedCollection({
         modelId: base.objectId,
-        entitlementId: unlockedEntitlementId,
+        launchAuth: unlockedAsCreator
+          ? { kind: 'creator' }
+          : { kind: 'entitlement', entitlementId: unlockedEntitlementId! },
         feeMist: BigInt(base.derivativeMintFee || '0'),
         signAndExecute: signAndExecutePtb,
         fetchObjectChanges: async (digest) => {
@@ -917,16 +958,18 @@ export function LaunchCollectionPage() {
       launchingRef.current = false;
       previewRef.current?.remount();
     }
-  }, [session, signer, base, unlockedEntitlementId, baseGlb, runBuildVariants, uploadFiles, collectionName, signAndExecutePtb, suiClient]);
+  }, [session, signer, base, unlockedEntitlementId, unlockedAsCreator, baseGlb, runBuildVariants, uploadFiles, collectionName, signAndExecutePtb, suiClient]);
 
   // plan-026 U5 — the picked base's encryption decides the launch handler +
   // labels. Encrypted ALLOW_LIST bases run the entitlement-gated decrypt fork;
   // everything else stays on the atomic path.
   const isEncryptedBase = base?.isEncrypted ?? false;
   // plan-027 U10 — encrypted bases are "locked" until the forker decrypts (a
-  // FREE entitlement-gated unlock). The authoring editor + live preview are gated
-  // behind the unlock; the public path is never locked.
-  const needsUnlock = isEncryptedBase && !unlockedEntitlementId;
+  // FREE unlock). The authoring editor + live preview are gated behind the unlock;
+  // the public path is never locked. Contract v11 — an encrypted base is "unlocked"
+  // once EITHER gate fired: a held entitlement (forker) OR the creator gate (own base).
+  const isEncryptedUnlocked = !!unlockedEntitlementId || unlockedAsCreator;
+  const needsUnlock = isEncryptedBase && !isEncryptedUnlocked;
 
   const busy =
     phase === 'downloading-base' ||
@@ -1498,7 +1541,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
-                encryptedPreviewUrls={isEncryptedBase && !unlockedEntitlementId && base ? previewStillUrlsForSummary(base) : []}
+                encryptedPreviewUrls={isEncryptedBase && !isEncryptedUnlocked && base ? previewStillUrlsForSummary(base) : []}
                 previewRef={previewRef}
               />
               <div style={previewSideRail}>
@@ -1579,7 +1622,7 @@ export function LaunchCollectionPage() {
                   public base it's always present; for an encrypted base it exists
                   only AFTER unlock (decrypt). So show it whenever the base isn't
                   locked. */}
-              {(!isEncryptedBase || unlockedEntitlementId) && (
+              {(!isEncryptedBase || isEncryptedUnlocked) && (
                 <button
                   type="button"
                   onClick={() => void onPreview()}

@@ -10,6 +10,32 @@ import {
 } from './encryptedFork';
 import { PACKAGE_ID } from './encryptedFork';
 
+// Spy on the PTB builders so we can assert which launch ENTRY `launchEncryptedCollection`
+// routes through (entitlement vs legacy creator) WITHOUT introspecting the built
+// Transaction — `tx.getData()` trips a valibot dual-instance check in this file's
+// import graph (it pulls @mysten/seal). The real builders still run (spy delegates
+// to importActual), so the returned tx is genuine for the signAndExecute path.
+const buildLaunchCollectionSpy = vi.fn();
+const buildLaunchCollectionWithEntitlementSpy = vi.fn();
+vi.mock('../sui/collectionTxBuilders', async () => {
+  const actual = await vi.importActual<typeof import('../sui/collectionTxBuilders')>(
+    '../sui/collectionTxBuilders',
+  );
+  return {
+    ...actual,
+    buildLaunchCollectionPtb: (...a: Parameters<typeof actual.buildLaunchCollectionPtb>) => {
+      buildLaunchCollectionSpy(...a);
+      return actual.buildLaunchCollectionPtb(...a);
+    },
+    buildLaunchCollectionWithEntitlementPtb: (
+      ...a: Parameters<typeof actual.buildLaunchCollectionWithEntitlementPtb>
+    ) => {
+      buildLaunchCollectionWithEntitlementSpy(...a);
+      return actual.buildLaunchCollectionWithEntitlementPtb(...a);
+    },
+  };
+});
+
 const CAP_ID = '0xcap';
 const COLLECTION_ID = '0xcoll';
 const MODEL_ID = '0xmodel';
@@ -86,17 +112,21 @@ describe('parseSealedKeyFromObject', () => {
 });
 
 describe('launchEncryptedCollection (step 1)', () => {
-  it('signs the cap-issuing launch with an EMPTY quilt and returns the parsed ids', async () => {
+  const createdChanges = [
+    { type: 'created', objectType: `${PACKAGE_ID}::model3d::NftCollectionCreatorCap`, objectId: '0xthecap' },
+    { type: 'created', objectType: `${PACKAGE_ID}::model3d::NftCollection`, objectId: '0xthecoll' },
+  ];
+
+  it('entitlement mode: signs the cap-issuing launch with an EMPTY quilt and returns the parsed ids', async () => {
+    buildLaunchCollectionSpy.mockClear();
+    buildLaunchCollectionWithEntitlementSpy.mockClear();
     const signAndExecute = vi.fn().mockResolvedValue('0xdigest1');
-    const fetchObjectChanges = vi.fn().mockResolvedValue([
-      { type: 'created', objectType: `${PACKAGE_ID}::model3d::NftCollectionCreatorCap`, objectId: '0xthecap' },
-      { type: 'created', objectType: `${PACKAGE_ID}::model3d::NftCollection`, objectId: '0xthecoll' },
-    ]);
+    const fetchObjectChanges = vi.fn().mockResolvedValue(createdChanges);
     const out = await launchEncryptedCollection({
       modelId: MODEL_ID,
-      // plan-027 D-078 — the encrypted launch is entitlement-gated; the caller
-      // threads the soulbound AccessEntitlement id.
-      entitlementId: ENTITLEMENT_ID,
+      // plan-027 D-078 — a FORKER routes through the entitlement-gated launch; the
+      // caller threads the soulbound AccessEntitlement id.
+      launchAuth: { kind: 'entitlement', entitlementId: ENTITLEMENT_ID },
       feeMist: 250_000_000n,
       signAndExecute,
       fetchObjectChanges,
@@ -104,6 +134,43 @@ describe('launchEncryptedCollection (step 1)', () => {
     expect(out).toEqual({ capId: '0xthecap', collectionId: '0xthecoll', digest: '0xdigest1' });
     expect(signAndExecute).toHaveBeenCalledTimes(1);
     expect(fetchObjectChanges).toHaveBeenCalledWith('0xdigest1');
+    // Routed through the entitlement-gated launch entry (NOT the legacy one), with
+    // an empty quilt + the threaded entitlement id.
+    expect(buildLaunchCollectionWithEntitlementSpy).toHaveBeenCalledTimes(1);
+    expect(buildLaunchCollectionWithEntitlementSpy.mock.calls[0]![0]).toMatchObject({
+      modelId: MODEL_ID,
+      entitlementId: ENTITLEMENT_ID,
+      feeMist: 250_000_000n,
+      quiltBlobId: '',
+    });
+    expect(buildLaunchCollectionSpy).not.toHaveBeenCalled();
+  });
+
+  it('creator mode: routes through the LEGACY launch_collection (no entitlement) and returns the parsed ids', async () => {
+    buildLaunchCollectionSpy.mockClear();
+    buildLaunchCollectionWithEntitlementSpy.mockClear();
+    const signAndExecute = vi.fn().mockResolvedValue('0xdigest1');
+    const fetchObjectChanges = vi.fn().mockResolvedValue(createdChanges);
+    const out = await launchEncryptedCollection({
+      modelId: MODEL_ID,
+      // Contract v11 — the BASE CREATOR forks their OWN ALLOW_LIST base via the
+      // legacy entry, with NO entitlement.
+      launchAuth: { kind: 'creator' },
+      feeMist: 250_000_000n,
+      signAndExecute,
+      fetchObjectChanges,
+    });
+    expect(out).toEqual({ capId: '0xthecap', collectionId: '0xthecoll', digest: '0xdigest1' });
+    expect(signAndExecute).toHaveBeenCalledTimes(1);
+    // Routed through the LEGACY launch_collection (no entitlement arg), empty quilt.
+    expect(buildLaunchCollectionSpy).toHaveBeenCalledTimes(1);
+    expect(buildLaunchCollectionSpy.mock.calls[0]![0]).toMatchObject({
+      modelId: MODEL_ID,
+      feeMist: 250_000_000n,
+      quiltBlobId: '',
+    });
+    expect(buildLaunchCollectionSpy.mock.calls[0]![0]).not.toHaveProperty('entitlementId');
+    expect(buildLaunchCollectionWithEntitlementSpy).not.toHaveBeenCalled();
   });
 });
 
