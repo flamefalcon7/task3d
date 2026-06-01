@@ -840,18 +840,22 @@ export function LaunchCollectionPage() {
       // and the entitlement gate (decryptViaEntitlement) each encapsulate the
       // SessionKey sign (≤1 popup) + the key-server dry-run + the AES-GCM decrypt,
       // and return the plaintext GLB bytes. ONLY the seal_approve gate differs.
+      // NB: bind via arrow — `signer.signPersonalMessage` is a Signer CLASS
+      // method that calls `this.signWithIntent`; passing it unbound drops `this`
+      // and throws "this.signWithIntent is not a function" at the key-server step.
+      const signPersonalMessage = (msg: Uint8Array) => signer.signPersonalMessage(msg);
       const { plaintext } = ownBase
         ? await decryptViaCreator({
             model: base,
             suiClient: suiClient as never,
-            signPersonalMessage: signer.signPersonalMessage,
+            signPersonalMessage,
             address: session.address,
           })
         : await decryptViaEntitlement({
             model: base,
             entitlementId: entitlementId!,
             suiClient: suiClient as never,
-            signPersonalMessage: signer.signPersonalMessage,
+            signPersonalMessage,
             address: session.address,
           });
 
