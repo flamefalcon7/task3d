@@ -3514,6 +3514,7 @@ D-074/075/076 folded "access to decrypt an encrypted base" into the per-collecti
 - ⚠️ Fresh v10 republish (abandons v9 objects); new `seal_approve` first-arg source (entitlement) is a never-live-verified Seal seam — must pass a post-deploy Part-A pre-flight (sender from SessionKey + wrong-sender denied).
 - ⚠️ One `buyers` table per `Model3D` (incl. PERMISSIONLESS, which never uses it) — cheap.
 - 🔮 A future transferable/expiring entitlement would reopen the soulbound + immutability choices.
+- 📝 **v11 follow-up (2026-06-01):** the U3b ALLOW_LIST launch rejection was relaxed so the base **creator** may launch their own ALLOW_LIST base via the legacy `launch_collection`/`_with_tokens` entries **without** an entitlement (`policy != ALLOW_LIST || sender == creator`); non-creators are still rejected, so the free-fork bypass stays closed. Reason: making a creator buy access to their own content is a pointless self-pay round-trip (they pay the access_fee to themselves). Mirrors the on-chain `seal_approve_creator` "creator may always decrypt own content" rule on the launch side. Frontend: `/model/:id` + `/launch` treat the creator as already-entitled and decrypt via the creator gate. Fresh republish v11 (package `0x1cf8aa4d…`, supersedes v10 `0x01baf4fc…`); VERSION unchanged (seal gate untouched).
 
 ### Related
 - **Amends D-076** (the `ALLOW_LIST ⇒ fee > 0` invariant moves derive → access; derive may now be 0).

@@ -1,5 +1,27 @@
 # Phase Progress
 
+## Last Updated: 2026-06-01 (plan-027 post-ship: creator-self-pay fix + v11 republish + AUTO-NAME button)
+
+### Where we are (read this first after compact)
+plan-027 shipped (see block below). This session added **3 post-ship fixes** on branch `feat/access-entitlement-split`, all committed, **873 frontend tests + 88 move tests green, tsc 32 baseline**:
+
+1. **AUTO-NAME button** (`e0a9d70`) — `/create` tagging step: one click fills every part `part1..partN` (uploaders don't have to type each). buttonOutline, opt-in, overwrites whole map.
+2. **Creator self-pay fix** — a creator publishing an ALLOW_LIST model was paying access_fee to THEMSELVES to view/fork their own content (confirmed via tx `FvQCPsZA…`: only gas moved, fee round-tripped). Fixed both surfaces:
+   - **View** (`d7799a4`, frontend-only): `/model/:id` — `isCreator` skips Buy-access, decrypts via `seal_approve_creator` (`buildSealApproveCreatorPtb` + `decryptViaCreator`; `decryptEncryptedBase` now has a `DecryptGate = entitlement | creator` discriminator).
+   - **Fork** (`e36de95` contract + `b05dc22` deploy + `0db279e` frontend): needed a contract change → **v11 republish**. `launch_collection`/`_with_tokens` now allow ALLOW_LIST when `sender == creator` (non-creators still rejected → bypass stays closed). `/launch`: `isOwnBase` → own base launchable (not locked), unlock via creator gate, mint via legacy `launch_collection` (`launchEncryptedCollection` gained a `launchAuth = entitlement | creator` discriminator).
+
+**v11 deploy (live testnet, supersedes v10 0x01baf4fc…):** package `0x1cf8aa4d81788469a5ccfe8f6e119872c2afa7840b02f76013273421c90b3b6a` (publish `4B8Nv5NF…`, bootstrap `BMApE44B…`); publisher `0x4fd038cd…`, SealIdRegistry `0xb303ecb4…`, TransferPolicy `0x2e35d5bf…` (+cap `0xa0040ab6…`), upgradeCap `0x1a480d47…`. VERSION still 2 (seal gate unchanged). Wired in testnet.json + networkConfig.ts; parity green. **NOTE: the user's v10 test model is now superseded — re-create on v11.**
+
+### Next concrete step (USER, wallet-gated)
+Real-Slush demo arc on v11: /create ALLOW_LIST base → as creator, /model/:id shows NO buy CTA + free in-app view; /launch shows your own base launchable → free unlock → mint (pays only derive fee to self + gas). Also test the multi-wallet path (2nd wallet buys access + forks). Report any failure.
+
+### Deferred / open
+- AUTO-NAME button: unit-tested, NOT browser-verified (upload→tagging needs a real multi-part GLB; `frontend/public/dev-glbs/pickup-truck.glb` is 14 parts if you want to smoke it).
+- Not merged to main (linear stack). Merge/demo/deck pending.
+- D-078 covers the entitlement model; the v11 creator-launch relax is noted in D-078's Consequences (no separate ADR — small follow-up amendment).
+
+---
+
 ## Last Updated: 2026-06-01 (plan-027 paid-access entitlement split — ALL 11 units shipped + v10 DEPLOYED; pending user real-Slush demo arc)
 
 ### Where we are (read this first after compact)
