@@ -1,5 +1,32 @@
 # Phase Progress
 
+## Last Updated: 2026-06-01 (plan-028 track scene visual polish — SHIPPED on feat/track-visual-polish)
+
+### Where we are (read this first after compact)
+**plan-028 COMPLETE** (`docs/plans/2026-06-01-028-feat-track-visual-polish-plan.md`, ADR **D-079**) on branch **`feat/track-visual-polish`** (off `main`; NOT merged). Upgraded the `/track` Babylon racing scene from "dark/2000s-flat" to a modern render. **Full frontend suite 887 tests green, tsc 0 new errors.** All 6 units committed (1 commit each) + ADR + review-fix commit + pitch stills.
+
+Root cause was lighting, not geometry. Shipped (all in `frontend/src/track/racetrackScene.ts` + its test):
+- **U1 IBL + tonemap** (`58b853a`): `scene.environmentTexture` from a committed prefiltered `.env` (`frontend/public/textures/env/environment.env`, Babylon's official, 268KB) — fixes the near-black PBR car; exposure/contrast lift the ACES-crushed midtones.
+- **U2 directional key + shadows** (`90d746b`): DirectionalLight aligned to the SkyMaterial sun + ShadowGenerator (car casts a contact shadow; road+grass receive). Hemispheric dropped to fill.
+- **U3 PBR** (`8f2cdba`): asphalt + grass StandardMaterial→PBRMaterial (outer barriers stay Standard — they're `isVisible=false`, replaced by trees).
+- **U4 SSAO** (`8a0402d`): perf-gated SSAO2RenderingPipeline; later gated on `IsSupported` too.
+- **U5 fog** (`0537dab`): EXP2 atmospheric fog.
+- **U6 tuning + browser verify** (`9cec9aa`): drove `/track?blob=…` in agent-browser; before/after stills in `pitch/track-visual-polish/`.
+- **Review fix** (`b6ccdc1`): 5-reviewer pass caught an **inverted sun** — a first U6 pass set `SKY_INCLINATION=0.58`, which put the sun BELOW the horizon (light pointed UP). Corrected to 0.35 (sun ~27° up, light down); added a regression test asserting `direction.y < 0`, an SSAO `IsSupported` gate, and roughness + dispose-order assertions.
+
+### Browser verification (done, no wallet needed)
+Used the `/track?blob=<id>` dev hatch. The prior dev blob had expired (Walrus testnet blobs are ephemeral), so minted a **fresh** one via the public Walrus testnet publisher (no wallet): uploaded `frontend/public/models/tusk3d/walrus-tusk.glb` → blob `7WOezE8xWP0uCIv-GQh_8iRWTQ2pc4q3Tg6Zqy65dRc` (valid ~5 epochs from epoch 415). Verified: model lit, contact shadow grounding, bright midtones, fog depth.
+
+### Next concrete step
+Merge `feat/track-visual-polish` → main (or open a PR), or continue the plan-027 real-Slush demo arc below. The track polish is independent of the plan-027 stack.
+
+### Deferred / open (plan-028, all P3, intentionally not fixed)
+- IBL async-load failure (404 `.env` on a broken deploy) isn't caught by the sync try/catch — outcome is still graceful (PBR renders unlit, scene doesn't blank) and honestly documented; asset verified present (200). 
+- env-texture load can resolve after a sub-second carousel-switch dispose — Babylon 9 guards the late callback internally; benign.
+- `/textures/*` absolute paths assume a root-base deploy (pre-existing convention, not introduced here).
+
+---
+
 ## Last Updated: 2026-06-01 (plan-027 post-ship: creator-self-pay fix + v11 republish + AUTO-NAME button)
 
 ### Where we are (read this first after compact)

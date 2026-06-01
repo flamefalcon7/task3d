@@ -1,7 +1,7 @@
 ---
 title: "feat: Track scene visual polish (lighting + material upgrade)"
 type: feat
-status: active
+status: completed
 created: 2026-06-01
 origin: docs/brainstorms/2026-06-01-track-visual-polish-requirements.md
 phase: "Phase 3 — Tiny Racetrack (visual polish pass)"
