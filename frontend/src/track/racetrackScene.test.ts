@@ -936,6 +936,21 @@ describe('createRacetrackScene', () => {
     expect(M.ssao2Dispose).toHaveBeenCalledTimes(1);
   });
 
+  // ─── Plan-028 U5: atmospheric fog ───
+
+  it('U5 — enables EXP2 fog for atmospheric depth', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    // fogMode is set with the numeric literal 2 (= Scene.FOGMODE_EXP2), matching
+    // the no-statics-on-the-mock convention used for TONEMAPPING_ACES.
+    expect(M.state.lastScene!.fogMode).toBe(2);
+    expect(M.state.lastScene!.fogDensity).toBeGreaterThan(0);
+    expect(M.state.lastScene!.fogColor).not.toBeNull();
+  });
+
   it('dispose() tears down scene + engine', async () => {
     const handles = await createRacetrackScene({
       canvas: fakeCanvas(),

@@ -285,6 +285,11 @@ const SSAO_ENABLED = true;
 const SSAO_RATIO = 0.75; // render-target scale
 const SSAO_STRENGTH = 1.0; // occlusion darkness (totalStrength)
 const SSAO_RADIUS = 2.0; // sample radius in world units
+// Plan-028 U5 — exponential-squared fog for atmospheric depth. Color is matched
+// to the sky horizon so distant track/foliage softens into atmosphere rather
+// than ending at a hard line. Density tuned in-browser (U6).
+const FOG_DENSITY = 0.006;
+const FOG_COLOR: [number, number, number] = [0.7, 0.78, 0.85]; // hazy sky-horizon blue
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
 // Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
 // 0.45 puts the sun just above the horizon for visible directional warmth;
@@ -414,6 +419,13 @@ export async function createRacetrackScene(
   shadowGenerator.useBlurExponentialShadowMap = true;
   shadowGenerator.darkness = SHADOW_DARKNESS;
   shadowGenerator.bias = SHADOW_BIAS;
+
+  // Plan-028 U5 — exponential-squared fog for atmospheric depth. Numeric literal
+  // 2 = Scene.FOGMODE_EXP2 (the test mock defines no Scene statics; this mirrors
+  // the TONEMAPPING_ACES = 1 literal idiom used on the render pipeline below).
+  scene.fogMode = 2; // Scene.FOGMODE_EXP2
+  scene.fogDensity = FOG_DENSITY;
+  scene.fogColor = new Color3(...FOG_COLOR);
 
   // Plan-006 U3 — SkyMaterial atmospheric sky on a large skybox cube.
   // Replaces the flat clearColor (kept as fallback for the frame before
