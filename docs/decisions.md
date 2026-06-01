@@ -3524,6 +3524,56 @@ D-074/075/076 folded "access to decrypt an encrypted base" into the per-collecti
 
 ---
 
+## D-079: Track scene render upgrade — IBL + directional shadows + PBR + SSAO
+
+**Status**: Accepted
+**Date**: 2026-06-01
+**Phase**: Phase 3 — Tiny Racetrack (visual polish)
+
+### Context
+The `/track` demo scene read "dark" and "2000s-flat." Root cause was lighting,
+not geometry: only a `HemisphericLight`, no `scene.environmentTexture` (so PBR
+car GLBs rendered near-black with nothing to reflect), no shadows, and
+`StandardMaterial` track surfaces under an untuned ACES tonemap. Demo-only
+surface, but it must impress Sui Overflow judges.
+
+### Decision
+Upgrade the track scene's lighting/material layer (not geometry): add a static
+**prefiltered `.env` image-based light** for `scene.environmentTexture`, a
+`DirectionalLight` + `ShadowGenerator` (car casts a contact shadow), convert
+road/grass/barrier `StandardMaterial` → `PBRMaterial`, add a perf-gated
+`SSAO2RenderingPipeline`, EXP2 fog, and tonemap exposure/contrast tuning.
+
+### Rationale
+- IBL is the single biggest win — PBR car paint/metal needs a prefiltered
+  environment to light it; a `.env` is prefiltered by design (a raw reflection
+  probe is not), so it lights matte/rough surfaces correctly.
+- No new per-frame observers → the test's "exactly 3 observers" invariant holds.
+- No new npm dependency — all APIs live in `@babylonjs/core` 9.x; the `.env` is a
+  committed asset (`frontend/public/textures/env/environment.env`, Babylon's
+  official prefiltered environment).
+
+### Alternatives Considered
+- **`ReflectionProbe` derived from the live `SkyMaterial`** — rejected: a raw
+  probe cubemap isn't prefiltered, giving weak/incorrect diffuse+rough IBL (the
+  exact lighting the car needs); its only edge (sky-color match) is minor and
+  tunable via `environmentIntensity`.
+- **Option 3 cinematic** (LUT, DoF, vignette, hero camera) — deferred; over-scoped
+  for a demo-only surface.
+
+### Consequences
+- ✅ Car lit with reflections, grounded by a contact shadow; modern render.
+- ⚠️ Heavier frame (shadows + SSAO + PBR + bloom) — SSAO is behind an enable flag
+  and is the first thing dropped if fps suffers on the demo machine.
+- 🔮 A future per-car `.env` or sky-matched probe could deepen sky/IBL coherence.
+
+### Related
+- Extends D-027 (`@babylonjs/materials` SkyMaterial adoption).
+- Plan: `docs/plans/2026-06-01-028-feat-track-visual-polish-plan.md`. Origin:
+  `docs/brainstorms/2026-06-01-track-visual-polish-requirements.md`.
+
+---
+
 # Reserved Decision Numbers
 
-D-079 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-080 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
