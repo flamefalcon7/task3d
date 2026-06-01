@@ -35,22 +35,24 @@
 // Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only,
 // D-036 carry-forward).
 //
-// Everything else carries over from v7: L1 license-policy enforcement
-// (D-040); Model3D shared object w/ glb_blob_id (D-037); mint yields a
-// plain owned token; listing is a separate opt-in Kiosk PTB.
-// `transferPolicyId`/`transferPolicyCapId` hold the NftToken policy.
-// Supersedes v7 0x3f53506b… (abandoned on testnet).
+// v10 (plan-027 / D-078): fresh republish of v9. Splits the fork fee into a
+// one-time soulbound AccessEntitlement (gates Seal decrypt) + a per-launch
+// derive fee; adds `access_fee` to LicenseTerms + a `buyers` Table to the
+// Model3D `key` struct (layout-breaking → fresh republish); replaces
+// `seal_approve_cap` with `seal_approve_entitlement`; bumps VERSION 1→2.
+// Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only).
+// Supersedes v9 0xba1e84ba… (abandoned on testnet; VERSION tripwire fails-closed).
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0xba1e84ba2889b540defc11245955d3c6650a99f5251e5ee4faf69dc98a876c5c',
+    '0x01baf4fc457047d6ae6d818063feca20038eb2d878ecae7ec9b0d1dd259cd065',
   publisherId:
-    '0x863582ffed716b541a04e2360019dced4709678f4aea62accccb2ed7607cede0',
+    '0xa01e054f754fc2d05f4353eafbb9070a1ba9b551cdffc6dbddf71c6e7282c217',
   transferPolicyId:
-    '0x81850ced8e3ead1bc4b6008b0c9ade9b8fbb7339c615e0a15b468bffadcb2c44',
+    '0xd151395b36ba17f016621a183afc67142b5c218956d296b995bc6623501e9b05',
   transferPolicyCapId:
-    '0x8b626d922b0a65256d99a83f15b02aa151d577908baa341241669006ffac14f6',
+    '0xfc0198a517df73cffd7418f7efb808bd20dcf7a19e72163402ebede9601f0fc4',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
@@ -58,11 +60,11 @@ export const TESTNET = {
   // address (unchanged from v2/v3). This is NOT the @mysten/kiosk SDK default.
   kioskAppsPackageId:
     '0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d',
-  // D-075 (plan-026 U2) — the shared SealIdRegistry bootstrapped in the v9
-  // `init` (publish digest 2sFX6yuy…). The encrypted publish/forge PTBs read
-  // this for the seal_id global-uniqueness assert (Resolution G).
+  // D-075 — the shared SealIdRegistry bootstrapped in the v10 `init`
+  // (publish digest Ckpi288e…). The encrypted publish/forge PTBs read this
+  // for the seal_id global-uniqueness assert (Resolution G).
   sealIdRegistryId:
-    '0xdb6e97f7d319bd06cac18420270a88e754209c47eb3e145ffc01a4bbeeb372e3',
+    '0x051c7ec1ed09a5e3cf7e5394643da97c72b4f2ba6254379cb4ff430d66be67c7',
 } as const;
 
 // Public testnet RPC endpoints. Primary + 1 fallback per U5 spec.
