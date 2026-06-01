@@ -130,7 +130,82 @@ export async function decryptViaEntitlement(
     sessionKey,
     sealedKey,
     ciphertextBlobId: args.model.glbBlobId,
-    entitlementId: args.entitlementId,
+    gate: { kind: 'entitlement', entitlementId: args.entitlementId },
+    baseModelId: args.model.objectId,
+    buildTxBytes: (tx: Transaction) =>
+      tx.build({ client: args.suiClient as never, onlyTransactionKind: true }),
+    maxAttempts: args.maxAttempts,
+  });
+
+  // 4 — wrap for the in-app viewer. Caller revokes on unmount (no download).
+  const blobUrl = URL.createObjectURL(
+    new Blob([plaintext as BlobPart], { type: 'model/gltf-binary' }),
+  );
+
+  return { plaintext, blobUrl };
+}
+
+export interface DecryptViaCreatorArgs {
+  /** The encrypted base to decrypt (objectId + ciphertext blob id). */
+  model: DecryptableModel;
+  /** The app's shared SuiClient (getObject + onlyTransactionKind build). */
+  suiClient: DecryptSuiClient;
+  /** Sign the SessionKey personal message (one wallet popup, only when no live
+   *  cached session exists for this address+package). */
+  signPersonalMessage: SignPersonalMessage;
+  /** The signed-in wallet address — the SessionKey + the on-chain
+   *  `sender == model.creator` gate both key off it. MUST equal the base's
+   *  creator, or `seal_approve_creator` aborts and the key servers refuse. */
+  address: string;
+  /** Override the SealClient (tests). Defaults to the app's testnet client. */
+  sealClient?: Pick<SealClient, 'decrypt'>;
+  /** Override the decrypt retry attempt count (tests). */
+  maxAttempts?: number;
+}
+
+/**
+ * Run the full SessionKey → seal_approve_creator → decrypt sequence for the BASE
+ * CREATOR and return the plaintext GLB bytes plus a viewer object URL. Mirrors
+ * `decryptViaEntitlement` but routes through the CREATOR gate: no entitlement,
+ * no cap, no payment — the on-chain `seal_approve_creator(id, model)` only checks
+ * `sender == model.creator`, so a creator views their OWN encrypted model (any
+ * policy) for free instead of buying access from themselves.
+ *
+ * `signPersonalMessage` is invoked at most once (only when no live SessionKey is
+ * cached for this address+package). A persistent denial — e.g. the caller is not
+ * actually the creator — throws after the bounded retries, never silently succeeds.
+ */
+export async function decryptViaCreator(
+  args: DecryptViaCreatorArgs,
+): Promise<DecryptViaEntitlementResult> {
+  // 1 — SessionKey: reuse a cached one within its short TTL so a retry doesn't
+  // re-prompt; otherwise create one and sign its personal message.
+  let sessionKey = getCachedSession(args.address, PACKAGE_ID);
+  if (!sessionKey) {
+    const pending = await createSession(
+      args.address,
+      PACKAGE_ID,
+      args.suiClient as never,
+    );
+    const { signature } = await args.signPersonalMessage(pending.personalMessage);
+    sessionKey = await activateSession(pending, PACKAGE_ID, signature);
+  }
+
+  // 2 — lazily read the encrypted base's sealed_key (omitted from the catalog
+  // summary because it is a few hundred bytes per model).
+  const modelResp = await args.suiClient.getObject({
+    id: args.model.objectId,
+    options: { showContent: true },
+  });
+  const sealedKey = parseSealedKeyFromObject(modelResp);
+
+  // 3 — creator-gated decrypt (key-server dry-run + AES-GCM). No entitlement.
+  const plaintext = await decryptEncryptedBase({
+    sealClient: args.sealClient ?? getSealClient(),
+    sessionKey,
+    sealedKey,
+    ciphertextBlobId: args.model.glbBlobId,
+    gate: { kind: 'creator' },
     baseModelId: args.model.objectId,
     buildTxBytes: (tx: Transaction) =>
       tx.build({ client: args.suiClient as never, onlyTransactionKind: true }),

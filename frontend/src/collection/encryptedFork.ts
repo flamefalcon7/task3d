@@ -3,6 +3,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import {
   buildLaunchCollectionWithEntitlementPtb,
   buildSealApproveEntitlementPtb,
+  buildSealApproveCreatorPtb,
   buildMintTokensPtb,
 } from '../sui/collectionTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
@@ -125,6 +126,19 @@ export function parseSealedKeyFromObject(resp: unknown): Uint8Array {
 // ---------------------------------------------------------------------------
 // Step 2 — decrypt the base (key-server dry-run gate). No on-chain tx.
 
+/**
+ * The Seal key-server gate the decrypt dry-runs through. Both gates share the
+ * full id + AES decrypt arc; ONLY the seal_approve PTB's object args differ:
+ *   - `entitlement` — a CONSUMER who bought access: dry-runs
+ *     `seal_approve_entitlement(id, entitlement, model)` (needs an entitlementId).
+ *   - `creator` — the BASE CREATOR viewing their OWN encrypted model for free:
+ *     dry-runs `seal_approve_creator(id, model)` (no entitlement, no cap; the
+ *     on-chain gate asserts `sender == model.creator`).
+ */
+export type DecryptGate =
+  | { kind: 'entitlement'; entitlementId: string }
+  | { kind: 'creator' };
+
 export interface DecryptEncryptedBaseArgs {
   /** SealClient (mocked at the boundary in unit tests). */
   sealClient: Pick<SealClient, 'decrypt'>;
@@ -134,14 +148,12 @@ export interface DecryptEncryptedBaseArgs {
   sealedKey: Uint8Array;
   /** The base's `glb_blob_id` — holds AES CIPHERTEXT for an encrypted base. */
   ciphertextBlobId: string;
-  /** plan-027 D-078 — the soulbound `AccessEntitlement` id that gates decrypt
-   *  (replaces the old cap/collection binding). The caller proves it bought
-   *  access; the key servers dry-run `seal_approve_entitlement(id, entitlement,
-   *  model)` against it. */
-  entitlementId: string;
-  /** The encrypted base `Model3D` object id the entitlement binds to. */
+  /** Which key-server gate to dry-run: an entitlement (consumer who bought
+   *  access) or the creator gate (base creator viewing their own model). */
+  gate: DecryptGate;
+  /** The encrypted base `Model3D` object id (the seal_approve `model` arg). */
   baseModelId: string;
-  /** Build the seal_approve_entitlement PTB into txBytes (onlyTransactionKind). */
+  /** Build the seal_approve PTB into txBytes (onlyTransactionKind). */
   buildTxBytes: (tx: Transaction) => Promise<Uint8Array>;
   /** Fetch raw bytes from a Walrus aggregator blob url (defaults to global fetch). */
   fetchBytes?: (url: string) => Promise<Uint8Array>;
@@ -157,24 +169,33 @@ async function defaultFetchBytes(url: string): Promise<Uint8Array> {
 
 /**
  * STEP 2 — recover the FULL Seal identity from the sealed key, build the
- * seal_approve_entitlement dry-run PTB (plan-027 D-078: entitlement-gated, no
- * cap), decrypt the AES key (with bounded retry for the fresh-object race),
- * fetch the ciphertext, and AES-GCM-decrypt to the plaintext GLB. Returns the
- * plaintext the existing backend bake consumes — there is NO raw-download
- * affordance for these bytes (R7).
+ * seal_approve dry-run PTB for the requested gate (entitlement: a consumer who
+ * bought access; creator: the base creator viewing their own model — no
+ * entitlement, no cap), decrypt the AES key (with bounded retry for the
+ * fresh-object race), fetch the ciphertext, and AES-GCM-decrypt to the plaintext
+ * GLB. Returns the plaintext the existing backend bake consumes — there is NO
+ * raw-download affordance for these bytes (R7).
  */
 export async function decryptEncryptedBase(
   args: DecryptEncryptedBaseArgs,
 ): Promise<Uint8Array> {
   // The on-chain model.seal_id is only the PREFIX; the full id (prefix+nonce)
-  // lives inside the EncryptedObject and is what seal_approve_entitlement's
+  // lives inside the EncryptedObject and is what the seal_approve gate's
   // is_prefix(model.seal_id, id) check needs.
   const fullId = recoverFullSealId(args.sealedKey);
-  const { tx } = buildSealApproveEntitlementPtb({
-    id: fullId,
-    entitlementId: args.entitlementId,
-    baseModelId: args.baseModelId,
-  });
+  // ONLY the seal_approve PTB object args differ between the two gates; the rest
+  // of the decrypt arc is identical.
+  const { tx } =
+    args.gate.kind === 'creator'
+      ? buildSealApproveCreatorPtb({
+          id: fullId,
+          baseModelId: args.baseModelId,
+        })
+      : buildSealApproveEntitlementPtb({
+          id: fullId,
+          entitlementId: args.gate.entitlementId,
+          baseModelId: args.baseModelId,
+        });
   const txBytes = await args.buildTxBytes(tx);
   const fetchBytes = args.fetchBytes ?? defaultFetchBytes;
   // The ciphertext is a QUILT PATCH (co-located with the preview stills in one

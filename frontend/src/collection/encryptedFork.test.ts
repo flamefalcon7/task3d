@@ -135,7 +135,7 @@ describe('decryptEncryptedBase (step 2)', () => {
       ciphertextBlobId: 'blob-xyz',
       // plan-027 D-078 — the decrypt gate is now the soulbound entitlement, not
       // the per-collection cap.
-      entitlementId: ENTITLEMENT_ID,
+      gate: { kind: 'entitlement', entitlementId: ENTITLEMENT_ID },
       baseModelId: MODEL_ID,
       buildTxBytes,
       fetchBytes,
@@ -148,6 +148,43 @@ describe('decryptEncryptedBase (step 2)', () => {
     );
     // Ciphertext fetched from the base's blob id (never re-fetched as a GLB).
     expect(fetchBytes).toHaveBeenCalledWith(expect.stringContaining('blob-xyz'));
+  });
+
+  it('creator gate: decrypts the same arc without an entitlement (seal_approve_creator)', async () => {
+    const fullId = new Uint8Array(48).fill(5);
+    const sealedKey = makeSealedKey(fullId);
+    const aesKey = new Uint8Array(32).fill(9);
+    const plaintext = new Uint8Array([1, 2, 3, 4]);
+    const ivKey = await crypto.subtle.importKey('raw', aesKey, { name: 'AES-GCM' }, false, ['encrypt']);
+    const iv = new Uint8Array(12).fill(2);
+    const ct = new Uint8Array(
+      await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ivKey, plaintext),
+    );
+    const ciphertext = new Uint8Array(iv.length + ct.length);
+    ciphertext.set(iv, 0);
+    ciphertext.set(ct, iv.length);
+
+    const sealClient = { decrypt: vi.fn().mockResolvedValue(aesKey) };
+    const buildTxBytes = vi.fn().mockResolvedValue(new Uint8Array([0xbb]));
+    const fetchBytes = vi.fn().mockResolvedValue(ciphertext);
+
+    const out = await decryptEncryptedBase({
+      sealClient: sealClient as never,
+      sessionKey: {} as never,
+      sealedKey,
+      ciphertextBlobId: 'blob-creator',
+      // The creator gate carries NO entitlement.
+      gate: { kind: 'creator' },
+      baseModelId: MODEL_ID,
+      buildTxBytes,
+      fetchBytes,
+    });
+    expect(Array.from(out)).toEqual(Array.from(plaintext));
+    expect(buildTxBytes).toHaveBeenCalledTimes(1);
+    expect(sealClient.decrypt).toHaveBeenCalledWith(
+      expect.objectContaining({ data: sealedKey, txBytes: new Uint8Array([0xbb]) }),
+    );
+    expect(fetchBytes).toHaveBeenCalledWith(expect.stringContaining('blob-creator'));
   });
 });
 

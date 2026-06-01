@@ -136,6 +136,19 @@ export interface SealApproveEntitlementArgs {
   baseModelId: string;
 }
 
+export interface SealApproveCreatorArgs {
+  /** The FULL Seal identity the EncryptedObject was sealed under
+   *  (`[seal_id prefix][nonce]`) — recovered via `EncryptedObject.parse().id`,
+   *  NOT the on-chain `model.seal_id` prefix alone. On-chain
+   *  `seal_approve_creator` asserts `is_prefix(model.seal_id, id)`, which this
+   *  full id satisfies. */
+  id: Uint8Array;
+  /** The encrypted base `Model3D` object id. The on-chain creator gate asserts
+   *  `ctx.sender() == model.creator` — so this path needs NEITHER an entitlement
+   *  NOR a cap: the creator decrypts ANY of their own encrypted models. */
+  baseModelId: string;
+}
+
 export interface PurchaseAccessArgs {
   /** Shared ALLOW_LIST `Model3D` object id to buy access to. */
   modelId: string;
@@ -409,6 +422,43 @@ export function buildSealApproveEntitlementPtb(
     metadata: {
       // No on-chain effect: this is a dry-run-only gate (key servers invoke it).
       target: `${PKG}::model3d::seal_approve_entitlement`,
+      expectedEvents: [],
+    },
+  };
+}
+
+/**
+ * The Seal key-server DRY-RUN gate for the BASE CREATOR (built as `txBytes` for
+ * `SealClient.decrypt`, NOT signed/executed). `seal_approve_creator(id, model)`
+ * lets a creator decrypt ANY of their own encrypted models WITHOUT buying access
+ * or holding any cap/entitlement — the on-chain gate is purely:
+ *   is_prefix(model.seal_id, id)  ∧  sender == model.creator  ∧  seal_version == VERSION
+ * No policy check, no entitlement. So a creator who published an ALLOW_LIST base
+ * views their own content for free, instead of paying the access fee to themselves.
+ *
+ * Mirrors `buildSealApproveEntitlementPtb` but drops the entitlement object: the
+ * args are just `(id, model)`. `id` MUST be the FULL Seal identity
+ * (`[seal_id][nonce]`) recovered via `EncryptedObject.parse(sealedKey).id`.
+ * Callers build `txBytes` with `tx.build({ client, onlyTransactionKind: true })`
+ * and pass it to `decryptKey`. This builder returns the unbuilt `Transaction`.
+ */
+export function buildSealApproveCreatorPtb(
+  args: SealApproveCreatorArgs,
+): TxResult<Record<string, never>> {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PKG}::model3d::seal_approve_creator`,
+    arguments: [
+      tx.pure.vector('u8', Array.from(args.id)),
+      tx.object(args.baseModelId),
+    ],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      // No on-chain effect: this is a dry-run-only gate (key servers invoke it).
+      target: `${PKG}::model3d::seal_approve_creator`,
       expectedEvents: [],
     },
   };

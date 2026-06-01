@@ -9,7 +9,7 @@ import { useSession } from '../auth/useSession';
 import { useAppSigner } from '../wallet/useAppSigner';
 import { SignInButton } from '../auth/SignInButton';
 import { buildPurchaseAccessPtb } from '../sui/collectionTxBuilders';
-import { decryptViaEntitlement } from '../seal/decryptAndView';
+import { decryptViaEntitlement, decryptViaCreator } from '../seal/decryptAndView';
 
 // plan-027 U8 — L1 published-content detail page (`/model/:objectId`). Three
 // policies branch here:
@@ -183,14 +183,50 @@ export function ModelDetailPage() {
     }
   }, [model, signer, suiClient, reloadEntitlements, runDecrypt]);
 
+  // The CREATOR-gated decrypt: the base creator views their OWN encrypted model
+  // (any policy) for free via `seal_approve_creator` — no entitlement, no
+  // payment. Shared by the "View model" action and "Retry decrypt" for a creator.
+  const runDecryptAsCreator = useCallback(async () => {
+    if (!model || !address || !signer) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setViewState({ kind: 'decrypting' });
+    try {
+      const { blobUrl } = await decryptViaCreator({
+        model,
+        suiClient: suiClient as never,
+        signPersonalMessage: (bytes) => signer.signPersonalMessage(bytes),
+        address,
+      });
+      setViewState({ kind: 'viewing', blobUrl });
+    } catch (e) {
+      setViewState({
+        kind: 'decrypt-failed',
+        message: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [model, address, signer, suiClient]);
+
+  // The viewer IS the base creator iff their signed-in address matches
+  // `model.creator`. A creator never buys access to their own content — the
+  // on-chain `seal_approve_creator` gate decrypts it for free.
+  const isCreator = !!address && address === model?.creator;
+
   // "View model" (holder already owns access) + "Retry decrypt" both resolve an
   // entitlement id (fresh-from-purchase ref first, then the owned read) and run
-  // the decrypt ONLY. Never re-purchase.
+  // the decrypt ONLY. Never re-purchase. A creator routes through the creator
+  // gate instead (no entitlement needed).
   const onView = useCallback(() => {
+    if (isCreator) {
+      void runDecryptAsCreator();
+      return;
+    }
     const entId = freshEntitlementRef.current ?? entitlementId;
     if (!entId) return;
     void runDecrypt(entId);
-  }, [entitlementId, runDecrypt]);
+  }, [isCreator, runDecryptAsCreator, entitlementId, runDecrypt]);
 
   if (!objectId) {
     return (
@@ -284,9 +320,73 @@ export function ModelDetailPage() {
     return <PreviewCanvas glbUrl={aggregatorUrl} />;
   }
 
+  // The base creator viewing their OWN encrypted model (ALLOW_LIST or
+  // RESTRICTED) decrypts for free via `seal_approve_creator` — no buy-access, no
+  // entitlement, no round-trip payment to themselves. Renders a "View model"
+  // action wired to the creator gate, plus the shared decrypting/failed states.
+  function renderCreatorAction() {
+    if (isViewing) {
+      return (
+        <div
+          data-testid="buy-access-viewing"
+          style={{ fontSize: 12, color: '#7bd88f', marginBottom: 12 }}
+        >
+          Access unlocked — viewing the decrypted mesh.
+        </div>
+      );
+    }
+
+    if (viewState.kind === 'decrypt-failed') {
+      // Decrypt failed; the creator gate needs no purchase, so Retry re-runs the
+      // creator decrypt ONLY (onView routes to the creator gate when isCreator).
+      return (
+        <div data-testid="decrypt-failed" style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: '#e0a96b', marginBottom: 8 }}>
+            Decryption failed
+          </div>
+          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 8 }}>
+            {viewState.message}
+          </div>
+          <button
+            type="button"
+            data-testid="retry-decrypt-cta"
+            onClick={onView}
+            style={ctaStyle(false)}
+          >
+            Retry decrypt
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: '#7bd88f', marginBottom: 8 }} data-testid="creator-note">
+          You're the creator — view your own model for free.
+        </div>
+        <button
+          type="button"
+          data-testid="view-model-cta"
+          onClick={onView}
+          disabled={isDecrypting}
+          style={ctaStyle(isDecrypting)}
+        >
+          {isDecrypting ? 'Decrypting…' : 'View model'}
+        </button>
+      </div>
+    );
+  }
+
   // The ALLOW_LIST access action column (the U8 interaction table). RESTRICTED /
-  // PERMISSIONLESS render nothing here.
+  // PERMISSIONLESS render nothing here — EXCEPT the base creator, who decrypts
+  // any of their own encrypted models for free (creator gate).
   function renderAccessAction() {
+    // Creator viewing their own encrypted model — free creator-gate decrypt,
+    // regardless of policy (ALLOW_LIST or RESTRICTED). Bypasses buy-access.
+    if (isCreator && model!.isEncrypted) {
+      return renderCreatorAction();
+    }
+
     if (!isAllowList) return null;
 
     // Not connected → connect prompt, no purchase CTA.
@@ -487,8 +587,9 @@ export function ModelDetailPage() {
         {/* ALLOW_LIST: buy-access / view consumer flow (U8 state table). */}
         {renderAccessAction()}
 
-        {/* RESTRICTED: not purchasable (AE6) — no buy-access action. */}
-        {isRestricted && (
+        {/* RESTRICTED non-creator: not purchasable (AE6) — no buy-access action.
+            The creator gets the free creator-gate view via renderAccessAction. */}
+        {isRestricted && !isCreator && (
           <div data-testid="restricted-note" style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
             Restricted base — only the creator can decrypt this content.
           </div>

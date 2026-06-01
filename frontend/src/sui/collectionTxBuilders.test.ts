@@ -20,6 +20,7 @@ import {
   buildMintNftTokenPtb,
   buildMintTokensPtb,
   buildSealApproveEntitlementPtb,
+  buildSealApproveCreatorPtb,
   buildPurchaseAccessPtb,
   buildRegisterIntegrationPtb,
   type LaunchCollectionArgs,
@@ -29,6 +30,7 @@ import {
   type MintNftTokenArgs,
   type MintTokensArgs,
   type SealApproveEntitlementArgs,
+  type SealApproveCreatorArgs,
   type PurchaseAccessArgs,
   type RegisterIntegrationArgs,
 } from './collectionTxBuilders';
@@ -299,6 +301,34 @@ describe('buildSealApproveEntitlementPtb', () => {
   // wrong-sender dry-run is denied). Deferred per plan Risks (Seal seam
   // re-verify in U5 Part A); no network call in unit tests.
   it.skip('dry-runs against the deployed package (DEFERRED to post-U5 deploy)', () => {});
+});
+
+// === seal_approve_creator (base creator decrypts their OWN model, free) ===
+const SEAL_APPROVE_CREATOR_ARGS: SealApproveCreatorArgs = {
+  id: new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]),
+  baseModelId: FAKE_MODEL,
+};
+describe('buildSealApproveCreatorPtb', () => {
+  it('emits one seal_approve_creator call (id, model) with NO entitlement/cap and NO events', () => {
+    const { tx, metadata } = buildSealApproveCreatorPtb(SEAL_APPROVE_CREATOR_ARGS);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('seal_approve_creator');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Creator gate args are just (id, model) = 2 (no entitlement, no cap).
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(2);
+    expect(metadata.expectedEvents).toEqual([]);
+    expect(metadata.target).toBe(`${PKG}::model3d::seal_approve_creator`);
+  });
+
+  it('builds the id as the only Pure input; the model is an object ref', () => {
+    const { tx } = buildSealApproveCreatorPtb(SEAL_APPROVE_CREATOR_ARGS);
+    const inputs = tx.getData().inputs;
+    const pure = inputs.filter((i) => (i as { $kind?: string }).$kind === 'Pure');
+    expect(pure).toHaveLength(1);
+    const nonPure = inputs.filter((i) => (i as { $kind?: string }).$kind !== 'Pure');
+    expect(nonPure).toHaveLength(1);
+  });
 });
 
 // === purchase_access (plan-027 D-078 — buy a soulbound AccessEntitlement) ===

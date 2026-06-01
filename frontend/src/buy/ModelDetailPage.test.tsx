@@ -45,8 +45,10 @@ vi.mock('../sui/collectionTxBuilders', () => ({
 }));
 
 const decryptViaEntitlementMock = vi.fn();
+const decryptViaCreatorMock = vi.fn();
 vi.mock('../seal/decryptAndView', () => ({
   decryptViaEntitlement: (...args: unknown[]) => decryptViaEntitlementMock(...args),
+  decryptViaCreator: (...args: unknown[]) => decryptViaCreatorMock(...args),
 }));
 
 import { ModelDetailPage } from './ModelDetailPage';
@@ -142,6 +144,7 @@ beforeEach(() => {
   useAppSignerMock.mockReset();
   buildPurchaseAccessPtbMock.mockReset();
   decryptViaEntitlementMock.mockReset();
+  decryptViaCreatorMock.mockReset();
 
   // Defaults: not connected, no entitlement, builders return a tx envelope.
   useSessionMock.mockReturnValue({ session: null, address: null });
@@ -152,6 +155,10 @@ beforeEach(() => {
   decryptViaEntitlementMock.mockResolvedValue({
     plaintext: new Uint8Array([1, 2, 3]),
     blobUrl: 'blob:decrypted-glb',
+  });
+  decryptViaCreatorMock.mockResolvedValue({
+    plaintext: new Uint8Array([4, 5, 6]),
+    blobUrl: 'blob:creator-glb',
   });
 });
 
@@ -391,5 +398,109 @@ describe('ModelDetailPage', () => {
     expect(cta.disabled).toBe(false);
     // Never reached the decrypt.
     expect(decryptViaEntitlementMock).not.toHaveBeenCalled();
+  });
+
+  // --- Creator-gate view (creator decrypts their OWN encrypted model, free) ---
+
+  const CREATOR_ADDR = '0xCAFECAFECAFECAFECAFECAFE'; // == makeModel().creator
+
+  it('ALLOW_LIST viewer IS creator → NO buy-access CTA; "View" decrypts via creator gate (never purchases)', async () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ policy: 1, isEncrypted: true, accessFee: '500000000', previewBlobIds: ['p'] }),
+      loading: false,
+      error: null,
+    });
+    setConnected({ address: CREATOR_ADDR });
+    setEntitlement({ hasEntitlement: false });
+    renderAt('/model/0xENC');
+
+    // Creator never sees a buy-access CTA or connect-to-buy prompt.
+    expect(screen.queryByTestId('buy-access-cta')).toBeNull();
+    expect(screen.queryByTestId('buy-access-connect')).toBeNull();
+    expect(screen.getByTestId('creator-note')).toBeTruthy();
+
+    const viewCta = screen.getByTestId('view-model-cta');
+    fireEvent.click(viewCta);
+
+    // Decrypts via the CREATOR gate, NOT the entitlement gate.
+    await waitFor(() => expect(decryptViaCreatorMock).toHaveBeenCalledTimes(1));
+    expect(decryptViaCreatorMock.mock.calls[0]?.[0]).toMatchObject({ address: CREATOR_ADDR });
+    expect(decryptViaEntitlementMock).not.toHaveBeenCalled();
+    // The purchase builder is NEVER invoked for the creator.
+    expect(buildPurchaseAccessPtbMock).not.toHaveBeenCalled();
+
+    // Viewer mounts the decrypted creator blob.
+    await waitFor(() => {
+      const canvas = screen.getByTestId('preview-canvas-stub');
+      expect(canvas.getAttribute('data-glb-url')).toBe('blob:creator-glb');
+    });
+    // No download/export affordance for the plaintext.
+    const downloadAnchors = Array.from(document.querySelectorAll('a[download], a[href^="blob:"]'));
+    expect(downloadAnchors.length).toBe(0);
+  });
+
+  it('ALLOW_LIST viewer NOT creator, no entitlement → buy-access CTA still shows (regression)', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ policy: 1, isEncrypted: true, accessFee: '500000000', previewBlobIds: ['p'] }),
+      loading: false,
+      error: null,
+    });
+    setConnected({ address: '0xNOTCREATOR' });
+    setEntitlement({ hasEntitlement: false });
+    renderAt('/model/0xENC');
+    expect(screen.getByTestId('buy-access-cta')).toBeTruthy();
+    expect(screen.queryByTestId('creator-note')).toBeNull();
+  });
+
+  it('RESTRICTED viewer IS creator → can view via creator gate; no buy action, no restricted-note', async () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ policy: 0, isEncrypted: true, accessFee: '0', previewBlobIds: ['p'] }),
+      loading: false,
+      error: null,
+    });
+    setConnected({ address: CREATOR_ADDR });
+    setEntitlement({ hasEntitlement: false });
+    renderAt('/model/0xRES');
+
+    expect(screen.queryByTestId('buy-access-cta')).toBeNull();
+    // The "only the creator can decrypt" note is for non-creators; gone here.
+    expect(screen.queryByTestId('restricted-note')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('view-model-cta'));
+    await waitFor(() => expect(decryptViaCreatorMock).toHaveBeenCalledTimes(1));
+    expect(buildPurchaseAccessPtbMock).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const canvas = screen.getByTestId('preview-canvas-stub');
+      expect(canvas.getAttribute('data-glb-url')).toBe('blob:creator-glb');
+    });
+  });
+
+  it('creator decrypt fails → "Retry decrypt" re-runs creator decrypt, never purchases', async () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ policy: 1, isEncrypted: true, accessFee: '500000000', previewBlobIds: ['p'] }),
+      loading: false,
+      error: null,
+    });
+    setConnected({ address: CREATOR_ADDR });
+    setEntitlement({ hasEntitlement: false });
+    decryptViaCreatorMock
+      .mockRejectedValueOnce(new Error('key server denied'))
+      .mockResolvedValueOnce({ plaintext: new Uint8Array(), blobUrl: 'blob:creator-retry' });
+
+    renderAt('/model/0xENC');
+    fireEvent.click(screen.getByTestId('view-model-cta'));
+
+    await waitFor(() => expect(screen.getByTestId('decrypt-failed')).toBeTruthy());
+    expect(decryptViaCreatorMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('retry-decrypt-cta'));
+    await waitFor(() => expect(decryptViaCreatorMock).toHaveBeenCalledTimes(2));
+    // Never purchases, never routes through the entitlement gate.
+    expect(buildPurchaseAccessPtbMock).not.toHaveBeenCalled();
+    expect(decryptViaEntitlementMock).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const canvas = screen.getByTestId('preview-canvas-stub');
+      expect(canvas.getAttribute('data-glb-url')).toBe('blob:creator-retry');
+    });
   });
 });
