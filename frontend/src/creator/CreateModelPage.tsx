@@ -410,6 +410,19 @@ function TaggingStep({
     onContinue(out);
   }, [labels, partCount, onContinue, allLabeled]);
 
+  // Quality-of-life — fill every part with an incrementing `part1, part2, …`
+  // so an uploader who doesn't care about semantic names can skip the
+  // click-each-part-and-type loop. Overwrites the whole map (predictable
+  // 1..N numbering) — it's an explicit opt-in button, not auto-applied.
+  const autoName = useCallback(() => {
+    if (partCount === 0) return;
+    const next = new Map<number, string>();
+    for (let i = 0; i < partCount; i++) {
+      next.set(i, `part${i + 1}`.slice(0, MAX_LABEL_LEN));
+    }
+    setLabels(next);
+  }, [partCount]);
+
   // PartListPanel items — derived from labels Map + partsColorHex. The
   // swatch rainbow is stable per index regardless of current mode so the
   // row identity stays consistent if the user cycles modes mid-tagging.
@@ -498,6 +511,16 @@ function TaggingStep({
         <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
           {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} NAMED`}
         </span>
+        <button
+          type="button"
+          data-testid="auto-name-parts"
+          onClick={autoName}
+          disabled={disabled || partCount === 0}
+          style={buttonOutline}
+          title="Fill every part with part1, part2, part3…"
+        >
+          AUTO-NAME {partCount > 0 ? `(part1…${partCount})` : ''}
+        </button>
         <button
           type="button"
           data-testid="continue-tagging"

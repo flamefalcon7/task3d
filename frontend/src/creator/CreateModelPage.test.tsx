@@ -622,6 +622,23 @@ describe('CreateModelPage', () => {
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/5 OF 5 NAMED/);
   });
 
+  it('AUTO-NAME fills every part with part1..N, enables Continue, and emits in order', async () => {
+    TAGGING_PART_COUNT_REF.current = 5;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(true);
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
+    // One click fills all five parts.
+    fireEvent.click(screen.getByTestId('auto-name-parts'));
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/5 OF 5 NAMED/);
+    expect(continueBtn.disabled).toBe(false);
+    // Continue emits the incrementing labels in part-index order.
+    fireEvent.click(continueBtn);
+    const args = await driveMintAndCaptureArgs();
+    expect(args.partLabels).toEqual(['part1', 'part2', 'part3', 'part4', 'part5']);
+  });
+
   it('AE1: 5-part freeform tagging emits typed labels in part-index order', async () => {
     TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
