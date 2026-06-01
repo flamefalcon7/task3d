@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { SUI_GRAPHQL_ENDPOINT } from '../browse/graphqlQueries';
+import { useOwnedEntitlements } from '../collection/useOwnedEntitlements';
 
 // Single-object Model3D query — sibling of useModelIndex (U8) but scoped to
 // one object id. Defensive about partial decodes, same as useModelIndex.
@@ -135,4 +136,41 @@ export function useModelById(objectId: string): {
   }, [objectId]);
 
   return { model, loading, error };
+}
+
+// plan-027 U8 — "does this wallet already hold access to THIS base?" selector
+// over useOwnedEntitlements. The detail page branches the ALLOW_LIST CTA on
+// `hasEntitlement` (Buy access vs. View) and needs `entitlementId` as the
+// seal_approve object arg for the decrypt. `reload()` is bumped after a
+// purchase so the freshly-minted entitlement surfaces without a page reload.
+export interface UseDetailEntitlement {
+  /** This wallet holds an AccessEntitlement bound to `modelObjectId`. */
+  hasEntitlement: boolean;
+  /** The entitlement object id (the seal_approve arg), or undefined if none. */
+  entitlementId: string | undefined;
+  loading: boolean;
+  error: Error | null;
+  /** Force a refetch (call after a purchase mints a new entitlement). */
+  reload: () => void;
+}
+
+export function useDetailEntitlement(
+  walletAddress: string | undefined,
+  modelObjectId: string | undefined,
+  reloadKey?: unknown,
+): UseDetailEntitlement {
+  const { modelIds, entitlementByModel, loading, error, reload } =
+    useOwnedEntitlements(walletAddress, reloadKey);
+  return useMemo(
+    () => ({
+      hasEntitlement: modelObjectId ? modelIds.has(modelObjectId) : false,
+      entitlementId: modelObjectId
+        ? entitlementByModel.get(modelObjectId)
+        : undefined,
+      loading,
+      error,
+      reload,
+    }),
+    [modelObjectId, modelIds, entitlementByModel, loading, error, reload],
+  );
 }
