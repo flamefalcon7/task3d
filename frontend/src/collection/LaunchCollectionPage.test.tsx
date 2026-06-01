@@ -83,6 +83,26 @@ vi.mock('../sui/collectionTxBuilders', () => ({
   buildLaunchCollectionWithTokensPtb: (...args: unknown[]) => buildLaunchMock(...args),
 }));
 
+// plan-027 U10 — entitlement catalog hook + the free entitlement-gated decrypt
+// helper. Mocked so the catalog split (launchable vs locked) + the FREE unlock
+// (decryptViaEntitlement, NOT a payment PTB) can be driven without a wallet or
+// live key servers. `ownedEntitlementsMock` is mutable per-test so a wallet can
+// hold an entitlement for base X but not Y.
+const ownedEntitlementsMock = {
+  modelIds: new Set<string>(),
+  entitlementByModel: new Map<string, string>(),
+  loading: false,
+  error: null,
+  reload: vi.fn(),
+};
+vi.mock('./useOwnedEntitlements', () => ({
+  useOwnedEntitlements: () => ownedEntitlementsMock,
+}));
+const decryptViaEntitlementMock = vi.fn();
+vi.mock('../seal/decryptAndView', () => ({
+  decryptViaEntitlement: (...a: unknown[]) => decryptViaEntitlementMock(...a),
+}));
+
 // plan A2 — runBuildVariants headlessly parses the base GLB for per-part material
 // names (real Babylon NullEngine — not jsdom-friendly), so mock it. Default `[]`
 // means "no names" → name-keying does not apply → the build payload stays on the
@@ -241,6 +261,9 @@ beforeEach(() => {
   launchEncryptedCollectionMock.mockReset();
   decryptEncryptedBaseMock.mockReset();
   mintEncryptedTokensMock.mockReset();
+  decryptViaEntitlementMock.mockReset();
+  ownedEntitlementsMock.modelIds = new Set<string>();
+  ownedEntitlementsMock.entitlementByModel = new Map<string, string>();
   extractMaterialNamesMock.mockReset();
   extractMaterialNamesMock.mockResolvedValue([]);
   buildLaunchMock.mockReset();
@@ -1479,13 +1502,15 @@ describe('LaunchCollectionPage', () => {
   });
 });
 
-// plan-026 U5 — encrypted ALLOW_LIST base, pre-sign UI assertions only. The
-// two wallet signatures (step-1 launch + the SessionKey personal message) can't
-// be driven in jsdom/agent-browser, so the live decrypt arc is the user's
-// manual real-Slush step; here we assert the page routes + renders correctly up
-// to (and not past) the first signature.
-describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => {
-  const encBase = () =>
+// plan-027 U10 / D-078 — entitlement-gated encrypted ALLOW_LIST base. The wallet
+// signatures (the SessionKey personal message at unlock + the launch/mint txs)
+// can't be driven in jsdom/agent-browser, so the live decrypt arc is the user's
+// manual real-Slush step; here we assert the page routes + renders correctly,
+// the catalog launchable/locked split, the FREE unlock (no payment PTB), and the
+// derive-fee-at-mint flow — mocking the seam (decryptViaEntitlement, the
+// entitlement-gated launch, mint_tokens).
+describe('LaunchCollectionPage — encrypted ALLOW_LIST base (entitlement-gated)', () => {
+  const encBase = (overrides: Partial<Model3DSummary> = {}) =>
     summary({
       objectId: '0xenc',
       name: 'Sealed Car',
@@ -1493,9 +1518,19 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
       policy: 1, // ALLOW_LIST
       glbBlobId: 'cipher-blob', // AES ciphertext — must NEVER be fetched as a GLB
       previewBlobIds: ['still-1'],
+      ...overrides,
     });
 
+  // Seed the owned-entitlements mock so the wallet HOLDS an entitlement for the
+  // given base id → the catalog surfaces it as launchable + the free unlock has
+  // an entitlement id to gate the decrypt.
+  function holdEntitlement(modelId: string, entitlementId = '0xentitlement') {
+    ownedEntitlementsMock.modelIds = new Set([modelId]);
+    ownedEntitlementsMock.entitlementByModel = new Map([[modelId, entitlementId]]);
+  }
+
   it('AE1: renders the public preview STILL (an <img>) for an encrypted base, never the ciphertext as a GLB', () => {
+    // No entitlement held → locked card, but the public still still renders.
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
     renderPage();
     const still = screen.getByTestId('base-option-still-0xenc') as HTMLImageElement;
@@ -1505,8 +1540,29 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     expect(still.src).not.toContain('cipher-blob');
   });
 
-  it('AE1: picking an encrypted base does NOT fetch the ciphertext as a base GLB', async () => {
+  it('AE4: catalog splits — held base X launchable, unheld base Y locked (w/ /model/:id link), public Z launchable', () => {
+    const X = encBase({ objectId: '0xX', name: 'X' });
+    const Y = encBase({ objectId: '0xY', name: 'Y' });
+    const Z = summary({ objectId: '0xZ', name: 'Z', glbBlobId: 'glb-z' }); // public
+    useModelIndexMock.mockReturnValue({ models: [X, Y, Z], loading: false, error: null, refetch: vi.fn() });
+    holdEntitlement('0xX'); // wallet holds an entitlement for X only
+    renderPage();
+    // X (held) + Z (public) → full clickable fork buttons.
+    expect(screen.getByTestId('base-option-0xX')).toBeTruthy();
+    expect(screen.getByTestId('base-option-0xZ')).toBeTruthy();
+    // X + Z are NOT locked cards.
+    expect(screen.queryByTestId('base-option-locked-card-0xX')).toBeNull();
+    expect(screen.queryByTestId('base-option-locked-card-0xZ')).toBeNull();
+    // Y (unheld ALLOW_LIST) → locked card, NOT a forkable button (locked ≠ forkable).
+    expect(screen.queryByTestId('base-option-0xY')).toBeNull();
+    expect(screen.getByTestId('base-option-locked-card-0xY')).toBeTruthy();
+    const buyLink = screen.getByTestId('base-option-buy-access-0xY') as HTMLAnchorElement;
+    expect(buyLink.getAttribute('href')).toBe('/model/0xY');
+  });
+
+  it('AE1: picking an entitled encrypted base does NOT fetch the ciphertext as a base GLB', async () => {
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    holdEntitlement('0xenc');
     const fetchMock = vi.fn(async (_url: string) => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     renderPage();
@@ -1514,16 +1570,17 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
       fireEvent.click(screen.getByTestId('base-option-0xenc'));
     });
     await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
-    // No aggregator fetch for the ciphertext base — the decrypt happens later,
-    // post-payment, inside onLaunchEncrypted. Forker evaluates from the still only.
+    // No aggregator fetch for the ciphertext base — the decrypt happens later at
+    // unlock (free, via the entitlement). Forker evaluates from the still only.
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(calls.some((u) => u.includes('cipher-blob'))).toBe(false);
   });
 
-  // plan A — "unlock-first": before unlock, the blind color editor is gone; only
-  // the unlock gate shows. After unlock the live editor + MINT button appear.
-  it('PRE-UNLOCK: shows the unlock gate and hides the color editor + mint button', async () => {
+  // plan-027 U10 — before unlock, the blind color editor is gone; only the unlock
+  // gate shows. After the FREE unlock the live editor + MINT button appear.
+  it('PRE-UNLOCK: shows the FREE unlock gate and hides the color editor + mint button', async () => {
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    holdEntitlement('0xenc');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
     renderPage();
     await act(async () => {
@@ -1531,7 +1588,9 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     });
     await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
     expect(screen.getByTestId('unlock-gate')).toBeTruthy();
+    // Copy advertises the free decrypt, not a payment.
     expect(screen.getByTestId('unlock-button').textContent).toMatch(/UNLOCK TO DESIGN/);
+    expect(screen.getByTestId('unlock-button').textContent).toMatch(/FREE/);
     // No blind authoring: the color editor, PREVIEW, mint button, and the
     // "unlocked" notice are all absent until the base is unlocked.
     expect(screen.queryByTestId('collection-name-input')).toBeNull();
@@ -1540,12 +1599,15 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     expect(screen.queryByTestId('encrypted-base-notice')).toBeNull();
   });
 
-  it('UNLOCK: paying + decrypting reveals the live editor (collection name + MINT button)', async () => {
+  it('AE3: UNLOCK is a FREE decrypt — decryptViaEntitlement is called, editor mounts, NO payment/launch PTB issued', async () => {
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    holdEntitlement('0xenc', '0xent-enc');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
     signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
-    launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
-    decryptEncryptedBaseMock.mockResolvedValue(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    decryptViaEntitlementMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
     renderPage();
     await act(async () => {
       fireEvent.click(screen.getByTestId('base-option-0xenc'));
@@ -1560,27 +1622,38 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
     expect(screen.getByTestId('preview-button')).toBeTruthy();
     expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/);
     expect(screen.getByTestId('encrypted-base-notice').textContent).toMatch(/Unlocked/);
-    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
-    expect(decryptEncryptedBaseMock).toHaveBeenCalledOnce();
+    // The decrypt ran via the held entitlement.
+    expect(decryptViaEntitlementMock).toHaveBeenCalledOnce();
+    expect(decryptViaEntitlementMock.mock.calls[0]![0]).toMatchObject({
+      entitlementId: '0xent-enc',
+      address: ADDR,
+    });
+    // CRITICAL (AE3): unlock issues NO on-chain charge — the entitlement-gated
+    // launch + the bare/with-tokens launch builders are NOT called at unlock.
+    expect(launchEncryptedCollectionMock).not.toHaveBeenCalled();
+    expect(buildLaunchMock).not.toHaveBeenCalled();
+    expect(mintEncryptedTokensMock).not.toHaveBeenCalled();
   });
 
-  it('MINT: after unlock, minting passes the stored cap to the build + mint_tokens', async () => {
+  it('MINT (AE3 fee-at-mint): issues launch_collection_with_entitlement (derive fee) + mint_tokens, threads the entitlement id + base derive fee', async () => {
     useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
+    holdEntitlement('0xenc', '0xent-enc');
     signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    decryptViaEntitlementMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
     launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
-    decryptEncryptedBaseMock.mockResolvedValue(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
     mintEncryptedTokensMock.mockResolvedValue('0xmintdigest');
     uploadFilesMock.mockResolvedValue({
       blobIds: ['quilt'],
       blobObjects: [{ blobId: 'quilt', blobObjectId: '0xq' }],
       patchIds: ['p0'],
     });
-    const buildBodies: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
+      vi.fn(async (url: string) => {
         if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1]), { status: 200 });
-        if (init?.body) buildBodies.push(init.body as string);
         return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -1600,45 +1673,105 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (pre-sign)', () => 
       fireEvent.click(screen.getByTestId('launch-button'));
     });
     await waitFor(() => expect(mintEncryptedTokensMock).toHaveBeenCalled());
-    // The build request carried the unlocked cap (encrypted-base hardening), and
-    // mint_tokens received the same stored cap + collection.
-    const buildBody = JSON.parse(buildBodies[buildBodies.length - 1]!);
-    expect(buildBody.encryptedBase).toEqual({ capId: '0xcap', collectionId: '0xcol' });
+    // The cap is created AT MINT via the entitlement-gated launch (charges the
+    // derive fee read from the base summary), threading the held entitlement id.
+    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
+    expect(launchEncryptedCollectionMock.mock.calls[0]![0]).toMatchObject({
+      modelId: '0xenc',
+      entitlementId: '0xent-enc',
+      feeMist: BigInt(encBase().derivativeMintFee), // 0.25 SUI from the base summary
+    });
+    // mint_tokens consumes the cap + collection that launch just created.
     expect(mintEncryptedTokensMock.mock.calls[0]![0]).toMatchObject({
       capId: '0xcap',
       collectionId: '0xcol',
     });
   });
 
-  it('UNLOCK is idempotent: a decrypt failure after payment does NOT re-charge on retry', async () => {
-    useModelIndexMock.mockReturnValue({ models: [encBase()], loading: false, error: null, refetch: vi.fn() });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+  it('R5: a derive-fee = 0 encrypted base → unlock + mint succeed with a zero derive payment', async () => {
+    useModelIndexMock.mockReturnValue({
+      models: [encBase({ derivativeMintFee: '0' })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    holdEntitlement('0xenc', '0xent-enc');
     signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    decryptViaEntitlementMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
     launchEncryptedCollectionMock.mockResolvedValue({ capId: '0xcap', collectionId: '0xcol' });
-    // STEP 1 pays the fork fee + mints the cap (succeeds); the decrypt then fails
-    // once (key-server hiccup), then succeeds on retry.
-    decryptEncryptedBaseMock
-      .mockRejectedValueOnce(new Error('key-server timeout'))
-      .mockResolvedValueOnce(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    mintEncryptedTokensMock.mockResolvedValue('0xmintdigest');
+    uploadFilesMock.mockResolvedValue({
+      blobIds: ['quilt'],
+      blobObjects: [{ blobId: 'quilt', blobObjectId: '0xq' }],
+      patchIds: ['p0'],
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1]), { status: 200 });
+        return new Response(JSON.stringify({ variants: [{ glbBase64: 'Z2xURg==' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+    );
     renderPage();
     await act(async () => {
       fireEvent.click(screen.getByTestId('base-option-0xenc'));
     });
     await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
-    // First unlock: decrypt throws → error banner, gate stays (still locked).
     await act(async () => {
       fireEvent.click(screen.getByTestId('unlock-button'));
     });
-    await waitFor(() => expect(screen.getByTestId('launch-error')).toBeTruthy());
-    expect(screen.getByTestId('unlock-gate')).toBeTruthy();
-    // Retry: resumes from the already-paid cap — launch_collection is NOT called
-    // a second time (no double-charge), only the free decrypt re-runs.
+    await waitFor(() => expect(screen.getByTestId('launch-button').textContent).toMatch(/MINT COLLECTION/));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('launch-button'));
+    });
+    await waitFor(() => expect(mintEncryptedTokensMock).toHaveBeenCalled());
+    // The zero derive fee flows through to the entitlement-gated launch (the
+    // contract splits + destroys a zero coin).
+    expect(launchEncryptedCollectionMock.mock.calls[0]![0]).toMatchObject({ feeMist: 0n });
+  });
+
+  it('re-pick base resets the catalog/decrypt state (a freshly picked encrypted base is locked again)', async () => {
+    const enc1 = encBase({ objectId: '0xenc1', name: 'Enc One' });
+    const enc2 = encBase({ objectId: '0xenc2', name: 'Enc Two' });
+    useModelIndexMock.mockReturnValue({ models: [enc1, enc2], loading: false, error: null, refetch: vi.fn() });
+    // Wallet holds entitlements for BOTH so both are launchable.
+    ownedEntitlementsMock.modelIds = new Set(['0xenc1', '0xenc2']);
+    ownedEntitlementsMock.entitlementByModel = new Map([
+      ['0xenc1', '0xent1'],
+      ['0xenc2', '0xent2'],
+    ]);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    signPersonalMessageMock.mockResolvedValue({ signature: 'sig' });
+    decryptViaEntitlementMock.mockResolvedValue({
+      plaintext: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+      blobUrl: 'blob:mock',
+    });
+    renderPage();
+    // Pick + unlock enc1 → live editor.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-button')).toBeTruthy());
     await act(async () => {
       fireEvent.click(screen.getByTestId('unlock-button'));
     });
     await waitFor(() => expect(screen.queryByTestId('unlock-gate')).toBeNull());
-    expect(launchEncryptedCollectionMock).toHaveBeenCalledOnce();
-    expect(decryptEncryptedBaseMock).toHaveBeenCalledTimes(2);
+    // CHANGE base → re-expand grid → pick enc2: the new base is locked again
+    // (decrypt state reset), so the unlock gate returns and the editor is gone.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-picker-change'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xenc2'));
+    });
+    await waitFor(() => expect(screen.getByTestId('unlock-gate')).toBeTruthy());
+    expect(screen.queryByTestId('collection-name-input')).toBeNull();
   });
 
   it('regression: a PERMISSIONLESS base keeps the GLB thumbnail, PREVIEW button, and LAUNCH COLLECTION label', async () => {

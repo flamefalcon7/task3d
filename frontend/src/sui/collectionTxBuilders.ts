@@ -89,6 +89,24 @@ export interface LaunchCollectionWithTokensArgs {
   tokenPatchIds: string[];
 }
 
+export interface LaunchCollectionWithEntitlementArgs {
+  /** Shared `Model3D` object ID to fork — an ENCRYPTED ALLOW_LIST base (D-032). */
+  modelId: string;
+  /** plan-027 D-078 — the caller's soulbound `AccessEntitlement` id for this
+   *  base (bought via `purchase_access` on /model/:id). The entitlement-gated
+   *  launch entry asserts the caller holds it; the bare `launch_collection`
+   *  REJECTS ALLOW_LIST bases (`EEntitlementRequired`), so an encrypted fork MUST
+   *  route through here. */
+  entitlementId: string;
+  /** Derive fee in MIST (base model's `license.derivative_mint_fee`). Split from
+   *  gas; the Move side refunds excess to the caller. May be 0 (zero-coin split;
+   *  the contract destroys the zero coin). */
+  feeMist: bigint;
+  /** D-076 — empty at launch (the variants aren't baked until AFTER the base
+   *  decrypts); the post-bake quilt is pinned later by `mint_tokens`. */
+  quiltBlobId: string;
+}
+
 export interface MintTokensArgs {
   /** Soulbound `NftCollectionCreatorCap` ID issued by step-1 `launch_collection`. */
   capId: string;
@@ -266,6 +284,43 @@ export function buildMintNftTokenPtb(
     metadata: {
       target: `${PKG}::model3d::mint_nft_token`,
       expectedEvents: [`${PKG}::model3d::NftTokenMinted`],
+    },
+  };
+}
+
+/**
+ * plan-027 D-078 — STEP 1 of the encrypted ALLOW_LIST fork (entitlement-gated):
+ * `launch_collection_with_entitlement(model: &Model3D, entitlement:
+ * &AccessEntitlement, payment: Coin<SUI>, quilt_blob_id, ctx)`. Forks an
+ * ENCRYPTED ALLOW_LIST base into an empty `NftCollection` + soulbound cap. The
+ * bare `launch_collection` now REJECTS ALLOW_LIST bases (`EEntitlementRequired`,
+ * D-078 U3b), so the encrypted path MUST go through this entry, which asserts the
+ * caller holds an `AccessEntitlement` for the base. The derive fee is split from
+ * gas (excess refunded); a zero fee splits a zero coin the Move side destroys.
+ * The quilt is empty here — the variants are baked AFTER the base decrypts and
+ * pinned later by `mint_tokens` (D-076). Mirrors `buildLaunchCollectionPtb`'s
+ * split-from-gas shape with the entitlement object threaded as the 2nd arg.
+ */
+export function buildLaunchCollectionWithEntitlementPtb(
+  args: LaunchCollectionWithEntitlementArgs,
+): TxResult<Record<string, never>> {
+  const tx = new Transaction();
+  const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.feeMist)]);
+  tx.moveCall({
+    target: `${PKG}::model3d::launch_collection_with_entitlement`,
+    arguments: [
+      tx.object(args.modelId),
+      tx.object(args.entitlementId),
+      payment!,
+      tx.pure.string(args.quiltBlobId),
+    ],
+  });
+  return {
+    tx,
+    handles: {},
+    metadata: {
+      target: `${PKG}::model3d::launch_collection_with_entitlement`,
+      expectedEvents: [`${PKG}::model3d::CollectionLaunched`],
     },
   };
 }

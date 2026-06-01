@@ -15,6 +15,7 @@ import { TESTNET, TESTNET_RPC_ENDPOINTS } from './networkConfig';
 import {
   buildLaunchCollectionPtb,
   buildLaunchCollectionWithTokensPtb,
+  buildLaunchCollectionWithEntitlementPtb,
   buildSetRegisterFeePtb,
   buildMintNftTokenPtb,
   buildMintTokensPtb,
@@ -23,6 +24,7 @@ import {
   buildRegisterIntegrationPtb,
   type LaunchCollectionArgs,
   type LaunchCollectionWithTokensArgs,
+  type LaunchCollectionWithEntitlementArgs,
   type SetRegisterFeeArgs,
   type MintNftTokenArgs,
   type MintTokensArgs,
@@ -140,6 +142,37 @@ describe('buildLaunchCollectionWithTokensPtb', () => {
         tokenPatchIds: ['only-one'],
       }),
     ).toThrow(/same length/);
+  });
+});
+
+// === launch_collection_with_entitlement (plan-027 D-078 — entitlement-gated
+// step-1 of the encrypted ALLOW_LIST fork; the bare launch_collection rejects
+// ALLOW_LIST) ===
+const ENTITLEMENT_LAUNCH_ARGS: LaunchCollectionWithEntitlementArgs = {
+  modelId: FAKE_MODEL,
+  entitlementId: '0x' + '4'.repeat(64),
+  feeMist: 250_000_000n,
+  quiltBlobId: '',
+};
+describe('buildLaunchCollectionWithEntitlementPtb', () => {
+  it('emits one launch_collection_with_entitlement call after a splitCoins, declaring CollectionLaunched', () => {
+    const { tx, metadata } = buildLaunchCollectionWithEntitlementPtb(ENTITLEMENT_LAUNCH_ARGS);
+    const cmds = tx.getData().commands;
+    expect(cmds.some((c) => (c as { $kind?: string }).$kind === 'SplitCoins')).toBe(true);
+    const calls = moveCalls(tx);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.MoveCall?.function).toBe('launch_collection_with_entitlement');
+    expect(calls[0]!.MoveCall?.package).toBe(PKG);
+    // Arity: model, entitlement, payment, quilt_blob_id (4). A dropped
+    // entitlement or a transposed arg would change this count.
+    expect(calls[0]!.MoveCall?.arguments).toHaveLength(4);
+    expect(metadata.expectedEvents).toEqual([`${PKG}::model3d::CollectionLaunched`]);
+  });
+
+  it('builds with a zero derive fee (derive may be 0 — splits a zero coin)', () => {
+    expect(() =>
+      buildLaunchCollectionWithEntitlementPtb({ ...ENTITLEMENT_LAUNCH_ARGS, feeMist: 0n }),
+    ).not.toThrow();
   });
 });
 

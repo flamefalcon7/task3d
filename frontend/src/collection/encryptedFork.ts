@@ -1,7 +1,7 @@
 import type { SealClient, SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import {
-  buildLaunchCollectionPtb,
+  buildLaunchCollectionWithEntitlementPtb,
   buildSealApproveEntitlementPtb,
   buildMintTokensPtb,
 } from '../sui/collectionTxBuilders';
@@ -19,7 +19,10 @@ import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 //   Step 3  mintEncryptedTokens        → digest (sets quilt + batch-mints)
 
 // ---------------------------------------------------------------------------
-// Step 1 — cap-issuing launch_collection (fee paid, empty quilt). One popup.
+// plan-027 D-078 — STEP 1 of the encrypted ALLOW_LIST fork, now charged AT MINT
+// (not at unlock): cap-issuing `launch_collection_with_entitlement` (derive fee
+// paid, empty quilt, entitlement-gated). One popup. The unlock step is a FREE
+// entitlement-gated decrypt; this is the only on-chain charge of the fork.
 
 export interface LaunchResult {
   capId: string;
@@ -63,6 +66,10 @@ export function extractLaunchIds(
 
 export interface LaunchEncryptedCollectionArgs {
   modelId: string;
+  /** plan-027 D-078 — the caller's soulbound `AccessEntitlement` id for this
+   *  base. The entitlement-gated launch entry asserts the caller holds it; the
+   *  bare `launch_collection` rejects ALLOW_LIST bases. */
+  entitlementId: string;
   feeMist: bigint;
   /** Sign + execute the launch PTB (wallet). Returns the tx digest. */
   signAndExecute: (tx: Transaction) => Promise<string>;
@@ -73,15 +80,18 @@ export interface LaunchEncryptedCollectionArgs {
 }
 
 /**
- * STEP 1 — call cap-issuing `launch_collection(model, payment≥fee, quilt="")`.
- * The quilt is empty because the variants aren't baked until step 2 (after the
- * base decrypts). Returns the new cap + collection ids parsed from the effects.
+ * STEP 1 — call cap-issuing `launch_collection_with_entitlement(model,
+ * entitlement, payment≥fee, quilt="")` (plan-027 D-078). The quilt is empty
+ * because the variants aren't baked until after the base decrypts; `mint_tokens`
+ * sets the real one. Returns the new cap + collection ids parsed from the
+ * effects. The derive fee is charged HERE (at mint), not at the free unlock.
  */
 export async function launchEncryptedCollection(
   args: LaunchEncryptedCollectionArgs,
 ): Promise<LaunchResult> {
-  const { tx } = buildLaunchCollectionPtb({
+  const { tx } = buildLaunchCollectionWithEntitlementPtb({
     modelId: args.modelId,
+    entitlementId: args.entitlementId,
     feeMist: args.feeMist,
     // D-076 — empty quilt at launch; mint_tokens (step 3) sets the real one.
     quiltBlobId: '',

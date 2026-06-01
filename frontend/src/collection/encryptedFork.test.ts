@@ -94,6 +94,9 @@ describe('launchEncryptedCollection (step 1)', () => {
     ]);
     const out = await launchEncryptedCollection({
       modelId: MODEL_ID,
+      // plan-027 D-078 — the encrypted launch is entitlement-gated; the caller
+      // threads the soulbound AccessEntitlement id.
+      entitlementId: ENTITLEMENT_ID,
       feeMist: 250_000_000n,
       signAndExecute,
       fetchObjectChanges,

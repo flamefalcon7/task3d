@@ -51,6 +51,8 @@ import {
   hexToHsl,
 } from '../forge/harmonics';
 import { buildLaunchCollectionWithTokensPtb } from '../sui/collectionTxBuilders';
+import { useOwnedEntitlements } from './useOwnedEntitlements';
+import { decryptViaEntitlement } from '../seal/decryptAndView';
 import { MeshInfoPanel } from '../babylon/MeshInfoPanel';
 import { type CanvasMode, partsColorHex, useModeCycle } from '../babylon/modePalette';
 import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
@@ -58,19 +60,14 @@ import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanva
 import { extractMaterialNames } from '../babylon/extractMaterialNames';
 import { allNamesUniqueNonEmpty } from '../babylon/partMaterials';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
-// plan-026 U5 — Seal decrypt 3-step fork for encrypted ALLOW_LIST bases.
-import { getSealClient } from '../seal/sealClient';
-import {
-  createSession,
-  activateSession,
-  getCachedSession,
-} from '../seal/sessionKey';
+// plan-027 U10 — entitlement-gated encrypted ALLOW_LIST fork. Unlock is now a
+// FREE entitlement-gated decrypt (decryptViaEntitlement); the derive fee + cap
+// are deferred to mint (launchEncryptedCollection now routes through the
+// entitlement-gated launch entry). The SessionKey/Seal plumbing lives inside
+// decryptViaEntitlement (D-078).
 import {
   launchEncryptedCollection,
-  decryptEncryptedBase,
   mintEncryptedTokens,
-  parseSealedKeyFromObject,
-  PACKAGE_ID,
 } from './encryptedFork';
 import {
   buttonOutline,
@@ -95,9 +92,9 @@ type Phase =
   | 'building-variants'
   | 'uploading'
   | 'signing'
-  // plan-026 U5 — encrypted ALLOW_LIST 3-step fork interstitials:
-  //   'launching-cap' — step 1 (pay fee → mint cap, one popup)
-  //   'decrypting'    — step 2 (SessionKey sign + key-server decrypt + bake)
+  // plan-027 U10 — encrypted ALLOW_LIST entitlement-gated fork interstitials:
+  //   'decrypting'    — UNLOCK: SessionKey sign + key-server decrypt (FREE).
+  //   'launching-cap' — MINT: entitlement-gated launch (pay derive fee → cap).
   | 'launching-cap'
   | 'decrypting'
   | 'success'
@@ -379,12 +376,15 @@ export function LaunchCollectionPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [base, setBase] = useState<Model3DSummary | null>(null);
   const [baseGlb, setBaseGlb] = useState<Uint8Array | null>(null);
-  // plan A — encrypted "unlock-first" flow. Once the forker pays the fork fee
-  // (mints the cap + empty collection) and decrypts the base, we hold the cap +
-  // collection here and `baseGlb` holds the decrypted plaintext, so the rest of
-  // the authoring UI renders LIVE (identical to a public base). null = locked
-  // (encrypted base not yet unlocked); irrelevant for public bases.
-  const [unlockedCap, setUnlockedCap] = useState<{ capId: string; collectionId: string } | null>(null);
+  // plan-027 U10 / D-078 — encrypted "unlock = free decrypt" flow. The forker
+  // already HOLDS an AccessEntitlement for this base (that is why the catalog
+  // surfaced it as launchable), so unlock no longer pays or mints a cap: it is a
+  // FREE entitlement-gated decrypt. On success `baseGlb` holds the decrypted
+  // plaintext and `unlockedEntitlementId` records WHICH entitlement gated it (so
+  // the mint-time entitlement-gated launch reuses the same id). null = locked
+  // (encrypted base not yet decrypted); irrelevant for public bases. The
+  // derive-fee payment + cap mint now happen at MINT (onMintEncrypted), not here.
+  const [unlockedEntitlementId, setUnlockedEntitlementId] = useState<string | null>(null);
   const [collectionName, setCollectionName] = useState('');
   const [registerFeeSui, setRegisterFeeSui] = useState('0');
   const [editorState, setEditorState] = useState<VariantEditorState>(newVariantEditorState);
@@ -429,6 +429,25 @@ export function LaunchCollectionPage() {
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
   const forkable = useMemo(() => models.filter((m) => m.glbBlobId !== ''), [models]);
 
+  // plan-027 U10 / D-078 — which forkable bases the wallet already holds an
+  // AccessEntitlement for. RESTRICTED bases are filtered upstream (useModelIndex),
+  // so in `forkable` an encrypted base ⇔ ALLOW_LIST. The catalog splits into:
+  //   launchable = PERMISSIONLESS ∪ (ALLOW_LIST ∩ ownedEntitlements) — full card.
+  //   locked     = ALLOW_LIST the wallet has no entitlement for — grayed card
+  //                with a "buy access on model page" link (AE4: locked ≠ forkable).
+  // entitlementByModel supplies the `seal_approve_entitlement` object arg the
+  // free unlock decrypt needs; the same id is threaded into the mint-time
+  // entitlement-gated launch.
+  const {
+    modelIds: ownedEntitlementModelIds,
+    entitlementByModel,
+  } = useOwnedEntitlements(session?.address);
+  const isLaunchable = useCallback(
+    (m: Model3DSummary): boolean =>
+      !m.isEncrypted || ownedEntitlementModelIds.has(m.objectId),
+    [ownedEntitlementModelIds],
+  );
+
   // Plan-013 UAT polish: writeFilesFlow has two non-popup phases (encoding
   // + relay-upload) that can run 5-15s with no visible feedback. Shared
   // hook so the counter survives status transitions within the active
@@ -458,13 +477,11 @@ export function LaunchCollectionPage() {
     // plan-015 U8 — clear locks when switching bases; preserving them
     // would carry forward lock indices into a different variant array.
     setLockedIndices(new Set());
-    // plan A — re-lock: a freshly picked base is never unlocked yet, and the
-    // previous base's decrypted plaintext must not leak into the new authoring
-    // session. Both reset here (encrypted branch keeps baseGlb null; the public
-    // branch overwrites baseGlb with the fetched mesh below). Also drop any
-    // pending-cap resume marker from a half-finished unlock of the old base.
-    setUnlockedCap(null);
-    pendingCapRef.current = null;
+    // plan-027 U10 — re-lock: a freshly picked base is never unlocked yet, and
+    // the previous base's decrypted plaintext must not leak into the new
+    // authoring session. Both reset here (encrypted branch keeps baseGlb null;
+    // the public branch overwrites baseGlb with the fetched mesh below).
+    setUnlockedEntitlementId(null);
     // plan-013 U7 — reset the editor state with the base's unique labels so
     // the palette starts with one entry per semantic label (or `['primary']`
     // for legacy bases). Switching between bases of different label shapes
@@ -501,14 +518,13 @@ export function LaunchCollectionPage() {
   }, [collectionName]);
 
   const runBuildVariants = useCallback(async (
-    // plan-026 U5 — the encrypted path decrypts the plaintext base inside
-    // onLaunch (after step 1) and passes it here; the public path omits it and
-    // we fall back to the state `baseGlb` fetched at pick time.
+    // plan-027 U10 — the encrypted path holds the decrypted plaintext base
+    // (free entitlement-gated unlock) and passes it here; the public path omits
+    // it and we fall back to the state `baseGlb` fetched at pick time. The
+    // mint-time cap doesn't exist yet at bake (the entitlement-gated launch runs
+    // AFTER the bake), so no `encryptedBase` cap-ownership hardening param is
+    // passed — the on-chain entitlement gate is the real authority now (D-078).
     baseGlbOverride?: Uint8Array,
-    // plan-026 U5 — the in-flight cap + collection so the backend can verify the
-    // JWT wallet owns the cap before baking decrypted plaintext (hardening).
-    // Present only on the encrypted path.
-    encryptedBase?: { capId: string; collectionId: string },
   ): Promise<Uint8Array[]> => {
     const effectiveBaseGlb = baseGlbOverride ?? baseGlb;
     if (!session || !effectiveBaseGlb || !base) throw new Error('build: session + base GLB required');
@@ -565,9 +581,6 @@ export function LaunchCollectionPage() {
           paramsJson: JSON.stringify({ palette: row.palette, texture: row.textureId }),
         };
       }),
-      // plan-026 U5 — only sent on the encrypted path; triggers backend
-      // hardening (no body log, no plaintext persist, JWT-owns-cap check).
-      ...(encryptedBase ? { encryptedBase } : {}),
     };
     const res = await fetch('/api/collection/build', {
       method: 'POST',
@@ -661,13 +674,11 @@ export function LaunchCollectionPage() {
   // wallet-popup interstitial to serialize clicks). useRef flips
   // synchronously, so the second invocation early-returns immediately.
   const launchingRef = useRef(false);
-  // plan A — idempotent unlock. STEP 1 (launch_collection) PAYS the fork fee +
-  // mints the cap on-chain (irreversible); the SessionKey decrypt that follows
-  // is fallible (key-server 502, sig reject). If decrypt throws AFTER step 1
-  // succeeded, we MUST NOT re-pay on retry — so we stash the paid cap here the
-  // instant step 1 returns and resume from it (the decrypt is a free key-server
-  // dry-run, safe to re-run). Cleared on full unlock + on base re-pick.
-  const pendingCapRef = useRef<{ capId: string; collectionId: string; modelId: string } | null>(null);
+  // plan-027 U10 / D-078 — unlock is now a FREE entitlement-gated decrypt (no
+  // on-chain payment), so the old pay-once `pendingCapRef` double-charge guard is
+  // gone: re-running the free decrypt on a transient key-server failure costs
+  // nothing. The single on-chain charge now lives at MINT (one tx, naturally
+  // idempotent via launchingRef).
   // plan-017 U5 — bumped on every LAUNCH click so MemoryPressureBanner
   // re-checks heap pressure and re-surfaces if still over threshold even
   // when the user dismissed it earlier in the session.
@@ -774,103 +785,50 @@ export function LaunchCollectionPage() {
     [signer, suiClient],
   );
 
-  // plan A — UNLOCK (encrypted bases, ~2 signatures): pay the fork fee (mints the
-  // cap + empty collection), then SessionKey-sign + key-server decrypt the base.
-  // On success the plaintext lands in `baseGlb` and the cap/collection in
-  // `unlockedCap`, so the rest of the authoring UI renders LIVE (WYSIWYG per-part
-  // recolor) — no more blind coloring against the public still. The bake + mint
-  // happen later in onMintEncrypted using the held plaintext (no re-decrypt).
+  // plan-027 U10 / D-078 — UNLOCK = FREE entitlement-gated decrypt (≤1 wallet
+  // signature, only when no live SessionKey is cached — no payment, no cap mint).
+  // The forker already HOLDS an AccessEntitlement for this base (that is why the
+  // catalog surfaced it as launchable), bought earlier via purchase_access on
+  // /model/:id. We look that entitlement up and run the shared
+  // decryptViaEntitlement helper (SessionKey → seal_approve_entitlement key-server
+  // dry-run → AES-GCM). On success the plaintext lands in `baseGlb` and the
+  // entitlement id in `unlockedEntitlementId`, so the rest of the authoring UI
+  // renders LIVE and the mint-time entitlement-gated launch reuses the same id.
+  // The derive fee is charged later, at MINT (onMintEncrypted) — NOT here.
   const onUnlock = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base) return;
+    const entitlementId = entitlementByModel.get(base.objectId);
+    if (!entitlementId) {
+      // Defensive: the catalog only surfaces an encrypted base as launchable when
+      // the wallet holds its entitlement, so this is a should-not-happen guard
+      // (e.g. the entitlement set went stale mid-session). Point the forker at the
+      // buy-access page instead of firing a decrypt that deterministically aborts.
+      setErrorMsg('You don’t hold access to this base yet — buy access on its model page first.');
+      setPhase('error');
+      return;
+    }
     setMemoryRecheckSignal((n) => n + 1);
     launchingRef.current = true;
     setErrorMsg(null);
+    setPhase('decrypting');
 
     try {
-      // ---- STEP 1 — cap-issuing launch_collection (fee paid, empty quilt) ----
-      // Idempotent: if a prior unlock attempt for THIS base already paid the fee
-      // + minted the cap (decrypt then failed), resume from that cap instead of
-      // paying again. Only launch (and charge) when there's no pending cap.
-      const reuse =
-        pendingCapRef.current && pendingCapRef.current.modelId === base.objectId
-          ? pendingCapRef.current
-          : null;
-      let launch: { capId: string; collectionId: string };
-      if (reuse) {
-        launch = { capId: reuse.capId, collectionId: reuse.collectionId };
-      } else {
-        setPhase('launching-cap');
-        launch = await launchEncryptedCollection({
-          modelId: base.objectId,
-          feeMist: BigInt(base.derivativeMintFee || '0'),
-          signAndExecute: signAndExecutePtb,
-          fetchObjectChanges: async (digest) => {
-            // Wait for finality so getTransactionBlock's objectChanges resolve.
-            await suiClient.waitForTransaction({ digest });
-            const tb = await suiClient.getTransactionBlock({
-              digest,
-              options: { showObjectChanges: true },
-            });
-            return (tb.objectChanges ?? []) as ReadonlyArray<{
-              type?: string;
-              objectType?: string;
-              objectId?: string;
-            }>;
-          },
-        });
-        // Persist the PAID cap before the fallible decrypt so a retry resumes.
-        pendingCapRef.current = {
-          capId: launch.capId,
-          collectionId: launch.collectionId,
-          modelId: base.objectId,
-        };
-      }
-
-      // ---- SessionKey sign + key-server decrypt ----
-      setPhase('decrypting');
-      // Reuse a cached SessionKey within its short TTL so a retry doesn't
-      // re-prompt; otherwise create one and sign its personal message.
-      let sessionKey = getCachedSession(session.address, PACKAGE_ID);
-      if (!sessionKey) {
-        const pending = await createSession(session.address, PACKAGE_ID, suiClient as never);
-        const { signature } = await signer.signPersonalMessage(pending.personalMessage);
-        sessionKey = await activateSession(pending, PACKAGE_ID, signature);
-      }
-
-      // Read the encrypted base's sealed_key lazily (omitted from the catalog
-      // summary because it is a few hundred bytes per model).
-      const modelResp = await suiClient.getObject({
-        id: base.objectId,
-        options: { showContent: true },
-      });
-      const sealedKey = parseSealedKeyFromObject(modelResp);
-
-      // TODO(U10): the decrypt gate moved from the per-collection cap to the
-      // soulbound AccessEntitlement (plan-027 D-078). U10 rewires this whole
-      // handler to a FREE entitlement-gated unlock (no step-1 payment) and
-      // sources `entitlementId` from useOwnedEntitlements. Until then this stub
-      // keeps the call type-correct + compiling; it is NOT a working decrypt
-      // (the cap is no longer the gate), but the wallet-signed path here is
-      // superseded by U10 before any browser verification.
-      const entitlementId = launch.capId; // TODO(U10): real AccessEntitlement id
-      const plaintextGlb = await decryptEncryptedBase({
-        sealClient: getSealClient(),
-        sessionKey,
-        sealedKey,
-        ciphertextBlobId: base.glbBlobId,
+      // FREE decrypt — no on-chain payment. decryptViaEntitlement encapsulates
+      // the SessionKey sign (≤1 popup) + the entitlement-gated key-server dry-run
+      // + the AES-GCM decrypt, and returns the plaintext GLB bytes.
+      const { plaintext } = await decryptViaEntitlement({
+        model: base,
         entitlementId,
-        baseModelId: base.objectId,
-        buildTxBytes: (tx) =>
-          tx.build({ client: suiClient as never, onlyTransactionKind: true }),
+        suiClient: suiClient as never,
+        signPersonalMessage: signer.signPersonalMessage,
+        address: session.address,
       });
 
-      // Unlocked: hold the plaintext + cap and return to LIVE authoring. No
-      // raw-download affordance is ever rendered for these bytes (R9). Clear the
-      // pending-cap resume marker — the unlock is fully committed now.
-      pendingCapRef.current = null;
-      setBaseGlb(plaintextGlb);
-      setUnlockedCap({ capId: launch.capId, collectionId: launch.collectionId });
+      // Unlocked: hold the plaintext + the gating entitlement and return to LIVE
+      // authoring. No raw-download affordance is ever rendered for these bytes (R7).
+      setBaseGlb(plaintext);
+      setUnlockedEntitlementId(entitlementId);
       setPhase('editing-variants');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
@@ -878,16 +836,24 @@ export function LaunchCollectionPage() {
     } finally {
       launchingRef.current = false;
     }
-  }, [session, signer, base, suiClient, signAndExecutePtb]);
+  }, [session, signer, base, suiClient, entitlementByModel]);
 
-  // plan A — MINT (encrypted bases, ~2 signatures: Walrus + mint_tokens). Runs
-  // AFTER the base is unlocked: bakes the authored variants from the held
-  // plaintext, uploads the quilt, and batch-mints. Reuses the cap/collection from
-  // onUnlock — no second decrypt.
+  // plan-027 U10 / D-078 — MINT (encrypted bases). Runs AFTER the free unlock, and
+  // is where the DERIVE FEE is charged (no charge happened at unlock). Sequence
+  // (signs ~3×: Walrus register/certify + entitlement-gated launch + mint_tokens):
+  //   1. bake the authored palettes onto the held decrypted plaintext + upload the
+  //      quilt to Walrus (the cap doesn't exist yet, so no cap-ownership hardening),
+  //   2. launch_collection_with_entitlement(model, entitlement, payment=deriveFee,
+  //      quilt="") → creates the empty collection + soulbound cap (the cap is
+  //      created HERE, at mint, not at unlock),
+  //   3. mint_tokens(cap, collection, quilt, names, patches) → pins the post-bake
+  //      quilt + batch-mints the colored fleet.
+  // The derive fee is read from the base summary (may be 0 → a zero-coin split the
+  // contract destroys). The held `unlockedEntitlementId` gates the launch.
   const onMintEncrypted = useCallback(async () => {
     if (launchingRef.current) return;
     if (!session || !signer || !base) return;
-    if (!unlockedCap || !baseGlb) {
+    if (!unlockedEntitlementId || !baseGlb) {
       setErrorMsg('Unlock the base before minting.');
       return;
     }
@@ -897,23 +863,46 @@ export function LaunchCollectionPage() {
     previewRef.current?.dispose();
 
     try {
-      // Bake the authored palettes onto the held plaintext. The cap + collection
-      // travel along so the backend can verify the JWT wallet owns the cap.
+      // 1 — bake the authored palettes onto the held plaintext + upload the quilt.
       setPhase('building-variants');
-      const swapped = await runBuildVariants(baseGlb, unlockedCap);
+      const swapped = await runBuildVariants(baseGlb);
 
       setPhase('uploading');
       const upload = await uploadFiles(swapped, signer as never);
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
-      // ---- mint_tokens (set quilt + batch-mint) ----
+      // 2 — entitlement-gated launch: pay the derive fee + mint the cap + empty
+      // collection. The bare launch_collection rejects ALLOW_LIST (D-078 U3b), so
+      // the encrypted fork MUST go through launch_collection_with_entitlement.
+      setPhase('launching-cap');
+      const launch = await launchEncryptedCollection({
+        modelId: base.objectId,
+        entitlementId: unlockedEntitlementId,
+        feeMist: BigInt(base.derivativeMintFee || '0'),
+        signAndExecute: signAndExecutePtb,
+        fetchObjectChanges: async (digest) => {
+          // Wait for finality so getTransactionBlock's objectChanges resolve.
+          await suiClient.waitForTransaction({ digest });
+          const tb = await suiClient.getTransactionBlock({
+            digest,
+            options: { showObjectChanges: true },
+          });
+          return (tb.objectChanges ?? []) as ReadonlyArray<{
+            type?: string;
+            objectType?: string;
+            objectId?: string;
+          }>;
+        },
+      });
+
+      // 3 — mint_tokens (set quilt + batch-mint into the just-created collection).
       setPhase('signing');
       const name = collectionName.trim() || `${base.name} variants`;
       const tokenNames = swapped.map((_, i) => `${name} #${i + 1}`);
       const tokenPatchIds = swapped.map((_, i) => upload.patchIds[i] ?? '');
       const digest = await mintEncryptedTokens({
-        capId: unlockedCap.capId,
-        collectionId: unlockedCap.collectionId,
+        capId: launch.capId,
+        collectionId: launch.collectionId,
         quiltBlobId: upload.blobIds[0],
         tokenNames,
         tokenPatchIds,
@@ -928,16 +917,16 @@ export function LaunchCollectionPage() {
       launchingRef.current = false;
       previewRef.current?.remount();
     }
-  }, [session, signer, base, unlockedCap, baseGlb, runBuildVariants, uploadFiles, collectionName, signAndExecutePtb]);
+  }, [session, signer, base, unlockedEntitlementId, baseGlb, runBuildVariants, uploadFiles, collectionName, signAndExecutePtb, suiClient]);
 
   // plan-026 U5 — the picked base's encryption decides the launch handler +
-  // labels. Encrypted ALLOW_LIST bases run the 3-step decrypt fork; everything
-  // else stays on the atomic path.
+  // labels. Encrypted ALLOW_LIST bases run the entitlement-gated decrypt fork;
+  // everything else stays on the atomic path.
   const isEncryptedBase = base?.isEncrypted ?? false;
-  // plan A — encrypted bases are "locked" until the forker pays + decrypts. The
-  // authoring editor + live preview are gated behind the unlock; the public path
-  // is never locked.
-  const needsUnlock = isEncryptedBase && !unlockedCap;
+  // plan-027 U10 — encrypted bases are "locked" until the forker decrypts (a
+  // FREE entitlement-gated unlock). The authoring editor + live preview are gated
+  // behind the unlock; the public path is never locked.
+  const needsUnlock = isEncryptedBase && !unlockedEntitlementId;
 
   const busy =
     phase === 'downloading-base' ||
@@ -947,12 +936,13 @@ export function LaunchCollectionPage() {
     phase === 'launching-cap' ||
     phase === 'decrypting';
 
-  // plan A — UNLOCK button label (encrypted, pre-unlock). Owns the
-  // launching-cap / decrypting phases (the 2 unlock signatures).
+  // plan-027 U10 — UNLOCK button label (encrypted, pre-unlock). The unlock is now
+  // a FREE entitlement-gated decrypt — no payment — so the copy advertises "free,
+  // you own access". Owns only the 'decrypting' phase (the derive fee is charged
+  // at MINT, which owns 'launching-cap').
   const unlockLabel = (() => {
-    if (phase === 'launching-cap') return '— APPROVE FORK FEE…';
     if (phase === 'decrypting') return '— SIGN + DECRYPT BASE…';
-    return `UNLOCK TO DESIGN — PAY ${mistToSui(base?.derivativeMintFee ?? '0')} SUI + DECRYPT →`;
+    return 'UNLOCK TO DESIGN — DECRYPT (FREE, YOU OWN ACCESS) →';
   })();
 
   const launchLabel = (() => {
@@ -1282,6 +1272,69 @@ export function LaunchCollectionPage() {
             <div style={basePickerGrid}>
               {forkable.map((m) => {
                 const picked = base?.objectId === m.objectId;
+                // plan-027 U10 / D-078 — preview thumbnail (GLB canvas for public
+                // bases; the watermarked public still for encrypted ALLOW_LIST
+                // bases; NEVER the ciphertext as a GLB).
+                const previewNode = (() => {
+                  const thumb = thumbSourceForSummary(m);
+                  if (thumb.kind === 'glb') {
+                    return <PreviewCanvas glbUrl={thumb.url} bgToggle={false} />;
+                  }
+                  return thumb.url ? (
+                    <img
+                      src={thumb.url}
+                      alt={`${m.name || 'model'} preview`}
+                      data-testid={`base-option-still-${m.objectId}`}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <span
+                      data-testid={`base-option-locked-${m.objectId}`}
+                      style={{ ...monoLabel, color: 'rgba(255,255,255,0.5)' }}
+                    >
+                      ENCRYPTED
+                    </span>
+                  );
+                })();
+                const metaLine = (
+                  <span style={baseOptionMeta}>
+                    fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
+                  </span>
+                );
+                // plan-027 U10 / D-078 — LOCKED card: an encrypted ALLOW_LIST base
+                // the wallet holds no AccessEntitlement for. Rendered grayed +
+                // NON-clickable (a <div>, not a fork <button> — AE4: locked ≠
+                // forkable) with a "buy access on model page" link so a new wallet
+                // sees a path to acquire access rather than an empty catalog.
+                if (!isLaunchable(m)) {
+                  return (
+                    <div
+                      key={m.objectId}
+                      data-testid={`base-option-locked-card-${m.objectId}`}
+                      style={{ ...baseOptionStyle(false), cursor: 'default', opacity: 0.55 }}
+                    >
+                      <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
+                        {previewNode}
+                      </div>
+                      <div style={baseOptionBody}>
+                        <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                        {metaLine}
+                        <span style={{ ...baseOptionMeta, color: tokens.color.muted }}>
+                          — LOCKED · ACCESS REQUIRED
+                        </span>
+                        <Link
+                          to={`/model/${m.objectId}`}
+                          data-testid={`base-option-buy-access-${m.objectId}`}
+                          style={{ ...baseOptionMeta, color: tokens.color.ink, textDecoration: 'underline' }}
+                        >
+                          Buy access on model page →
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }
+                // LAUNCHABLE card: PERMISSIONLESS ∪ (ALLOW_LIST the wallet holds an
+                // entitlement for). Full clickable fork button.
                 return (
                   <button
                     key={m.objectId}
@@ -1292,41 +1345,17 @@ export function LaunchCollectionPage() {
                     aria-pressed={picked}
                     style={baseOptionStyle(picked)}
                   >
+                    {/* bgToggle={false}: a base-option <button> wraps this
+                        PreviewCanvas; PreviewCanvas's default BgTogglePill is
+                        itself a <button>, producing a hydration-error nested
+                        <button>-in-<button> (caught in dev console). The pill
+                        also reads as visual noise on a ~150 px thumbnail. */}
                     <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
-                      {/* bgToggle={false}: a base-option <button> wraps this
-                          PreviewCanvas; PreviewCanvas's default BgTogglePill is
-                          itself a <button>, producing a hydration-error nested
-                          <button>-in-<button> (caught in dev console). The pill
-                          also reads as visual noise on a ~150 px thumbnail.
-                          plan-026 — encrypted ALLOW_LIST bases render the public
-                          preview still (an <img>), NEVER the ciphertext as a GLB. */}
-                      {(() => {
-                        const thumb = thumbSourceForSummary(m);
-                        if (thumb.kind === 'glb') {
-                          return <PreviewCanvas glbUrl={thumb.url} bgToggle={false} />;
-                        }
-                        return thumb.url ? (
-                          <img
-                            src={thumb.url}
-                            alt={`${m.name || 'model'} preview`}
-                            data-testid={`base-option-still-${m.objectId}`}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        ) : (
-                          <span
-                            data-testid={`base-option-locked-${m.objectId}`}
-                            style={{ ...monoLabel, color: 'rgba(255,255,255,0.5)' }}
-                          >
-                            ENCRYPTED
-                          </span>
-                        );
-                      })()}
+                      {previewNode}
                     </div>
                     <div style={baseOptionBody}>
                       <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
-                      <span style={baseOptionMeta}>
-                        fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
-                      </span>
+                      {metaLine}
                     </div>
                   </button>
                 );
@@ -1361,10 +1390,11 @@ export function LaunchCollectionPage() {
               <strong>{(base.derivativeRoyaltyBps / 100).toFixed(2)}%</strong> resale royalty back to them.
             </p>
 
-            {/* plan A — encrypted base UNLOCK gate. Until the forker pays + decrypts
-                there is no plaintext mesh to color against, so we DON'T render the
-                blind color editor; we show the public still + an unlock CTA. After
-                onUnlock, `unlockedCap` is set and the full live editor renders below. */}
+            {/* plan-027 U10 — encrypted base UNLOCK gate. Until the forker decrypts
+                (a FREE entitlement-gated unlock) there is no plaintext mesh to color
+                against, so we DON'T render the blind color editor; we show the public
+                still + an unlock CTA. After onUnlock, `unlockedEntitlementId` is set
+                and the full live editor renders below. */}
             {needsUnlock && (
               <div
                 data-testid="unlock-gate"
@@ -1394,9 +1424,10 @@ export function LaunchCollectionPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
                   <span style={{ ...monoLabel, color: tokens.color.ink }}>— ENCRYPTED BASE · LOCKED</span>
                   <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px', lineHeight: 1.5 }}>
-                    Unlock this base to design your collection on the real mesh. Unlocking pays the{' '}
-                    <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> fork fee and decrypts the base in
-                    your browser (2 signatures). Then you recolor each variant live — what you see is what mints.
+                    Unlock this base to design your collection on the real mesh. Unlocking is{' '}
+                    <strong>free</strong> — you already own access — and decrypts the base in your browser
+                    (1 signature). Then you recolor each variant live — what you see is what mints. The{' '}
+                    <strong>{mistToSui(base.derivativeMintFee)} SUI</strong> derive fee is charged at mint, not now.
                   </p>
                   <button
                     type="button"
@@ -1467,7 +1498,7 @@ export function LaunchCollectionPage() {
                 autoRotate
                 partColors={partColors}
                 baseGlbUrl={baseGlbUrl}
-                encryptedPreviewUrls={isEncryptedBase && !unlockedCap && base ? previewStillUrlsForSummary(base) : []}
+                encryptedPreviewUrls={isEncryptedBase && !unlockedEntitlementId && base ? previewStillUrlsForSummary(base) : []}
                 previewRef={previewRef}
               />
               <div style={previewSideRail}>
@@ -1548,7 +1579,7 @@ export function LaunchCollectionPage() {
                   public base it's always present; for an encrypted base it exists
                   only AFTER unlock (decrypt). So show it whenever the base isn't
                   locked. */}
-              {(!isEncryptedBase || unlockedCap) && (
+              {(!isEncryptedBase || unlockedEntitlementId) && (
                 <button
                   type="button"
                   onClick={() => void onPreview()}
@@ -1577,7 +1608,7 @@ export function LaunchCollectionPage() {
             </div>
             <p style={launchHelper}>
               {isEncryptedBase
-                ? 'ENCRYPTED BASE · UNLOCKED · SIGNS 2× (WALRUS · MINT) · PAYS GAS'
+                ? 'ENCRYPTED BASE · UNLOCKED · SIGNS 3× (WALRUS · LAUNCH · MINT) · PAYS DERIVE FEE + GAS'
                 : 'SIGNS 3× · PAYS GAS · MINTS L2'}
             </p>
             {isEncryptedBase && (
