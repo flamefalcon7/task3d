@@ -70,6 +70,7 @@ const M = vi.hoisted(() => {
     directionalLightCtor: vi.fn(),
     shadowGeneratorCtor: vi.fn(),
     shadowAddCaster: vi.fn(),
+    pbrMaterialCtor: vi.fn(),
     state: {
       lastEngine: null as null | {
         runRenderLoop: ReturnType<typeof vi.fn>;
@@ -139,6 +140,14 @@ const M = vi.hoisted(() => {
       },
       lastGround: null as null | { receiveShadows: boolean },
       lastRoadRibbon: null as null | { receiveShadows: boolean },
+      // Plan-028 U3 — every PBRMaterial created, captured for albedo/bump asserts.
+      pbrMaterials: [] as Array<{
+        name: string;
+        albedoTexture: unknown;
+        bumpTexture: unknown;
+        metallic: number;
+        roughness: number;
+      }>,
     },
   };
 });
@@ -352,6 +361,21 @@ vi.mock('@babylonjs/core', () => {
       M.color3Ctor(r, g, b);
     }
   }
+  // Plan-028 U3 — PBRMaterial for the visible track surfaces. Settable
+  // albedo/bump/metallic/roughness; instances captured so tests can assert the
+  // texture wiring landed.
+  class PBRMaterial {
+    albedoColor: unknown;
+    albedoTexture: unknown = null;
+    bumpTexture: unknown = null;
+    metallic = 0;
+    roughness = 1;
+    constructor(public name: string, _scene: unknown) {
+      M.pbrMaterialCtor(name, _scene);
+      M.state.pbrMaterials.push(this);
+    }
+    dispose() {}
+  }
   // Plan-006 polish — asphalt diffuse + normal map. Track-scene loads two
   // Texture instances and assigns uScale/vScale; tests only need the class
   // to exist as a constructor so the assignments don't throw.
@@ -501,6 +525,7 @@ vi.mock('@babylonjs/core', () => {
     HemisphericLight,
     ShadowGenerator,
     StandardMaterial,
+    PBRMaterial,
     Texture,
     CubeTexture,
     Color3,
@@ -537,6 +562,7 @@ beforeEach(() => {
   M.directionalLightCtor.mockClear();
   M.shadowGeneratorCtor.mockClear();
   M.shadowAddCaster.mockClear();
+  M.pbrMaterialCtor.mockClear();
   M.state.lastEngine = null;
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
@@ -548,6 +574,7 @@ beforeEach(() => {
   M.state.lastShadowGenerator = null;
   M.state.lastGround = null;
   M.state.lastRoadRibbon = null;
+  M.state.pbrMaterials = [];
   skidMarksSpy.ctor.mockClear();
   skidMarksSpy.tick.mockClear();
   skidMarksSpy.reset.mockClear();
@@ -839,6 +866,27 @@ describe('createRacetrackScene', () => {
     expect(
       M.state.lastScene?.onBeforeRenderObservable.add,
     ).toHaveBeenCalledTimes(3);
+  });
+
+  // ─── Plan-028 U3: PBR materials for the visible track surfaces ───
+
+  it('U3 — asphalt + grass use PBRMaterial with albedo + bump textures', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    // Exactly the two VISIBLE surfaces convert to PBR; the invisible outer
+    // barriers stay StandardMaterial (isVisible=false → PBR there is dead cost).
+    expect(M.state.pbrMaterials).toHaveLength(2);
+    const byName = (n: string) =>
+      M.state.pbrMaterials.find((m) => m.name === n);
+    for (const name of ['asphaltMat', 'grassMat']) {
+      const mat = byName(name);
+      expect(mat, `${name} should be a PBRMaterial`).toBeDefined();
+      expect(mat!.albedoTexture).not.toBeNull();
+      expect(mat!.bumpTexture).not.toBeNull();
+    }
   });
 
   it('dispose() tears down scene + engine', async () => {

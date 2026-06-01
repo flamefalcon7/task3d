@@ -33,6 +33,7 @@ import {
   KeyboardEventTypes,
   LoadAssetContainerAsync,
   MeshBuilder,
+  PBRMaterial,
   PhysicsAggregate,
   PhysicsShapeType,
   Scene,
@@ -267,6 +268,14 @@ const HEMI_LIGHT_INTENSITY = 0.5; // hemispheric drops to fill (was an implicit 
 const SHADOW_MAP_SIZE = 1024; // shadow-map resolution — perf vs. crispness
 const SHADOW_DARKNESS = 0.4; // 0 = pitch-black shadow, 1 = invisible
 const SHADOW_BIAS = 0.002; // nudges shadow acne off the extruded road ribbon
+// Plan-028 U3 — PBR material response for the VISIBLE track surfaces (asphalt
+// road + grass infield). The outer barriers stay StandardMaterial on purpose:
+// those boxes are isVisible=false (replaced by Kenney tree instances in
+// createFoliage), so PBR there would be dead cost. albedo+bump reuse the
+// existing textures; metallic/roughness are the feel knobs.
+const ASPHALT_METALLIC = 0.0;
+const ASPHALT_ROUGHNESS = 0.55; // slight sheen — wet-ish race asphalt
+const GRASS_ROUGHNESS = 0.95; // matte
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
 // Golden-hour preset: warm low sun, slightly hazy atmosphere. Inclination
 // 0.45 puts the sun just above the horizon for visible directional warmth;
@@ -432,16 +441,18 @@ export async function createRacetrackScene(
   // Grass texture (CC0, ambientCG Grass001). The safety ground is 200×200u
   // so we tile 50× per side — each tile reads as ~4m of grass at chase-cam
   // distance. Bump map adds subtle grain so the floor isn't a flat felt.
-  const grassMat = new StandardMaterial('grassMat', scene);
+  // Plan-028 U3 — PBR grass so the infield responds to the IBL + key light.
+  const grassMat = new PBRMaterial('grassMat', scene);
   const grassDiff = new Texture('/textures/grass/grass_diff.jpg', scene);
   grassDiff.uScale = 50;
   grassDiff.vScale = 50;
-  grassMat.diffuseTexture = grassDiff;
+  grassMat.albedoTexture = grassDiff;
   const grassNormal = new Texture('/textures/grass/grass_normal.jpg', scene);
   grassNormal.uScale = 50;
   grassNormal.vScale = 50;
   grassMat.bumpTexture = grassNormal;
-  grassMat.specularColor = new Color3(0.03, 0.03, 0.03);
+  grassMat.metallic = 0;
+  grassMat.roughness = GRASS_ROUGHNESS;
   safetyGround.material = grassMat;
   // Plan-028 U2 — the infield/outfield grass receives the car's contact shadow.
   safetyGround.receiveShadows = true;
@@ -476,16 +487,18 @@ export async function createRacetrackScene(
   // ROAD_WIDTH = 14u; the chosen uScale/vScale give roughly 4×3.5m per tile,
   // which reads as believable race-grade asphalt without obvious repetition
   // at chase-cam distance.
-  const asphaltMat = new StandardMaterial('asphaltMat', scene);
+  // Plan-028 U3 — PBR asphalt with a slight roughness sheen under the IBL.
+  const asphaltMat = new PBRMaterial('asphaltMat', scene);
   const asphaltDiff = new Texture('/textures/asphalt/asphalt_diff.jpg', scene);
   asphaltDiff.uScale = 15;
   asphaltDiff.vScale = 2;
-  asphaltMat.diffuseTexture = asphaltDiff;
+  asphaltMat.albedoTexture = asphaltDiff;
   const asphaltNormal = new Texture('/textures/asphalt/asphalt_normal.jpg', scene);
   asphaltNormal.uScale = 15;
   asphaltNormal.vScale = 2;
   asphaltMat.bumpTexture = asphaltNormal;
-  asphaltMat.specularColor = new Color3(0.05, 0.05, 0.05);
+  asphaltMat.metallic = ASPHALT_METALLIC;
+  asphaltMat.roughness = ASPHALT_ROUGHNESS;
   roadRibbon.material = asphaltMat;
   // Plan-028 U2 — the road surface receives the car's contact shadow.
   roadRibbon.receiveShadows = true;
