@@ -12,13 +12,19 @@ plan-027 shipped (see block below). This session added **3 post-ship fixes** on 
 
 **v11 deploy (live testnet, supersedes v10 0x01baf4fc…):** package `0x1cf8aa4d81788469a5ccfe8f6e119872c2afa7840b02f76013273421c90b3b6a` (publish `4B8Nv5NF…`, bootstrap `BMApE44B…`); publisher `0x4fd038cd…`, SealIdRegistry `0xb303ecb4…`, TransferPolicy `0x2e35d5bf…` (+cap `0xa0040ab6…`), upgradeCap `0x1a480d47…`. VERSION still 2 (seal gate unchanged). Wired in testnet.json + networkConfig.ts; parity green. **NOTE: the user's v10 test model is now superseded — re-create on v11.**
 
+### Also this session — live-Slush UX fixes (committed)
+- **`signWithIntent` bug** (`<commit>`): `/launch` unlock crashed live with "this.signWithIntent is not a function" — `LaunchCollectionPage` passed `signer.signPersonalMessage` UNBOUND (Signer class method → lost `this`). Wrapped in an arrow. (ModelDetailPage already did this.) Unit tests mock signPersonalMessage so they never caught it — this was the never-live-verified Seal seam surfacing.
+- **Masthead DISCONNECT button** (`<commit>`): the top-right wallet pill was passive (no disconnect anywhere on-nav). Added an explicit `DISCONNECT` button (testid `disconnect-wallet`).
+- **Root cause of "can't switch wallet"**: `frontend/.env.local` had `VITE_TEST_WALLET=1` → app signed with the baked **deployer key (= creator 0x3116881c…)**, NOT Slush. So disconnect/Slush-account-switch did nothing AND "buying access to my own model" happened because the app's identity WAS the creator. Set `VITE_TEST_WALLET=0` (gitignored file, not committed) → real Slush; **requires a dev-server restart** (Vite bakes env at start).
+
 ### Next concrete step (USER, wallet-gated)
-Real-Slush demo arc on v11: /create ALLOW_LIST base → as creator, /model/:id shows NO buy CTA + free in-app view; /launch shows your own base launchable → free unlock → mint (pays only derive fee to self + gas). Also test the multi-wallet path (2nd wallet buys access + forks). Report any failure.
+Real-Slush demo arc on v11 (now that VITE_TEST_WALLET=0 + dev restarted): /create ALLOW_LIST base → as creator, /model/:id shows NO buy CTA + free in-app view; /launch shows your own base launchable → free unlock → mint. Multi-wallet: 2nd Slush account buys access + forks (the buyer-variable seal_approve_entitlement seam). Report any failure.
 
 ### Deferred / open
-- AUTO-NAME button: unit-tested, NOT browser-verified (upload→tagging needs a real multi-part GLB; `frontend/public/dev-glbs/pickup-truck.glb` is 14 parts if you want to smoke it).
+- AUTO-NAME button: unit-tested, NOT browser-verified.
 - Not merged to main (linear stack). Merge/demo/deck pending.
-- D-078 covers the entitlement model; the v11 creator-launch relax is noted in D-078's Consequences (no separate ADR — small follow-up amendment).
+- D-078 covers the entitlement model; the v11 creator-launch relax is in D-078's Consequences (no separate ADR).
+- `VITE_TEST_WALLET` is per-dev `.env.local` (gitignored) — toggle 0/1 + restart dev server to switch between real Slush and the baked deployer-key identity. The baked key == the deployer/creator, so test-wallet mode can only ever act AS the creator.
 
 ---
 
