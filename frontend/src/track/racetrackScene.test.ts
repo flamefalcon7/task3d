@@ -350,6 +350,9 @@ vi.mock('@babylonjs/core', () => {
   // Plan-028 U4 — SSAO pipeline. Tracks construction (with the camera) and
   // disposal so the teardown test can assert it runs before scene.dispose().
   class SSAO2RenderingPipeline {
+    // SUT gates construction on this static (real Babylon: true on WebGL2 with
+    // depth/float-texture support). Default true so the on-path test runs.
+    static IsSupported = true;
     totalStrength = 0;
     radius = 0;
     constructor(...args: unknown[]) {
@@ -834,6 +837,22 @@ describe('createRacetrackScene', () => {
     expect(M.state.lastHemiLight!.intensity).toBeLessThan(1);
   });
 
+  it('U2 — the sun light points DOWN (direction.y < 0), i.e. sun above the horizon', async () => {
+    // Regression guard for the inverted-sun defect: SKY_INCLINATION must stay
+    // below 0.5 so the derived DirectionalLight travels downward onto the
+    // scene. An inclination > 0.5 flips the sun below the horizon and the key
+    // light shines UP into the car's underside with the shadow cast the wrong
+    // way — exactly what a first U6 tuning pass did (0.58) before review caught
+    // it. The direction is ctor arg [1] (a Vector3 with a computed .y).
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      carGlbBytes: fakeGlb(),
+      dev_skipIntro: true,
+    });
+    const direction = M.directionalLightCtor.mock.calls[0]![1] as { y: number };
+    expect(direction.y).toBeLessThan(0);
+  });
+
   it('U2 — builds one ShadowGenerator (blur-exponential) against the directional light', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
@@ -904,6 +923,12 @@ describe('createRacetrackScene', () => {
       expect(mat!.albedoTexture).not.toBeNull();
       expect(mat!.bumpTexture).not.toBeNull();
     }
+    // Behavioral contract that survives feel-tuning: asphalt has a sheen
+    // (lower roughness) while grass is matte (higher roughness). Guards
+    // against a regression that drops the roughness differentiation.
+    expect(byName('asphaltMat')!.roughness).toBeLessThan(
+      byName('grassMat')!.roughness,
+    );
   });
 
   // ─── Plan-028 U4: SSAO ambient occlusion (perf-gated) ───
@@ -934,6 +959,14 @@ describe('createRacetrackScene', () => {
     });
     handles.dispose();
     expect(M.ssao2Dispose).toHaveBeenCalledTimes(1);
+    // Order is load-bearing: SSAO render targets must be released BEFORE
+    // scene.dispose() tears down the pipeline manager, or a carousel switch
+    // leaks them. Assert ssao dispose ran before the scene's dispose.
+    const ssaoOrder = M.ssao2Dispose.mock.invocationCallOrder[0]!;
+    const sceneOrder = (M.state.lastScene!.dispose as unknown as {
+      mock: { invocationCallOrder: number[] };
+    }).mock.invocationCallOrder[0]!;
+    expect(ssaoOrder).toBeLessThan(sceneOrder);
   });
 
   // ─── Plan-028 U5: atmospheric fog ───

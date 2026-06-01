@@ -291,17 +291,21 @@ const SSAO_RADIUS = 2.0; // sample radius in world units
 const FOG_DENSITY = 0.006;
 const FOG_COLOR: [number, number, number] = [0.7, 0.78, 0.85]; // hazy sky-horizon blue
 // Plan-006 U3 — SkyMaterial Preetham atmospheric-scattering tunables.
-// Late-afternoon preset: warm sun, slightly hazy atmosphere. Plan-028 U6 raised
-// inclination 0.45 → 0.58 (sun lifted off the horizon) once the U2 DirectionalLight
-// + ShadowGenerator landed: at 0.45 the derived key light grazed the horizon, so
-// the car's contact shadow stretched long/shallow and the key barely lit the
-// model. 0.58 gives a flatter-to-the-camera key, a readable contact shadow, and
-// still-warm light. azimuth 0.25 places the sun forward-right of the chase camera
-// at spawn so the car picks up rim light from the angle the player sees.
-// Tunables for in-browser tweaking; not asserted in tests (KTD).
+// IMPORTANT (Plan-028 U6, post-review): inclination MUST stay BELOW 0.5 or the
+// derived DirectionalLight inverts. SkyMaterial sun elevation is theta =
+// π·(inclination − 0.5); the U2 key light points along −sunPosition, whose Y =
+// −sin(azimuthPhi)·sin(theta). At inclination < 0.5 the sun sits above the
+// horizon and the light travels DOWN (correct); at inclination > 0.5 the sun
+// drops below the horizon and the light shines UP into the car's underside with
+// the shadow cast the wrong way. A first U6 pass wrongly raised this to 0.58
+// (sun below horizon) — caught in code review. LOWER inclination = HIGHER sun =
+// steeper key + tighter contact shadow. 0.35 puts the sun ~27° up: a readable
+// grounded shadow, the car top-lit, still warm. azimuth 0.25 places the sun
+// forward-right of the chase camera at spawn for rim light from the player's
+// angle. The U2 test asserts direction.y < 0 so this can't silently re-invert.
 const SKY_TURBIDITY = 3;
 const SKY_LUMINANCE = 0.5;
-const SKY_INCLINATION = 0.58;
+const SKY_INCLINATION = 0.35;
 const SKY_AZIMUTH = 0.25;
 const SKY_RAYLEIGH = 2;
 const SKYBOX_SIZE = 1000;
@@ -841,8 +845,12 @@ export async function createRacetrackScene(
   // the DefaultRenderingPipeline above (both register as named pipelines on the
   // same PostProcessRenderPipelineManager). Perf-gated by SSAO_ENABLED; the
   // 3rd ctor arg is the required render-target ratio, cameras are the 4th arg.
+  // Gate on IsSupported (not just the SSAO_ENABLED flag): SSAO2 needs WebGL2 with
+  // float/depth-texture support. On a GPU that lacks it the ctor logs a scary
+  // Logger.Error and returns a dead object — the IsSupported check degrades to a
+  // clean no-op instead (review finding, demo-machine safety).
   let ssaoPipeline: SSAO2RenderingPipeline | null = null;
-  if (SSAO_ENABLED) {
+  if (SSAO_ENABLED && SSAO2RenderingPipeline.IsSupported) {
     ssaoPipeline = new SSAO2RenderingPipeline('ssao', scene, SSAO_RATIO, [camera]);
     ssaoPipeline.totalStrength = SSAO_STRENGTH;
     ssaoPipeline.radius = SSAO_RADIUS;
