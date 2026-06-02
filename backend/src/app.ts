@@ -4,6 +4,7 @@ import type { Router } from '@overflow2026/shared';
 import { HardcodedRouter } from './agent/router.js';
 import { buildCollectionRoute } from './routes/collection.js';
 import { buildGenerateRoute } from './routes/generate.js';
+import { buildMemoryRoute } from './routes/memory.js';
 import { buildCollectionsRoute } from './api/collections.js';
 import type { IntegrationIndexer } from './events/integrationIndexer.js';
 import type { PaymentVerifier } from './sui/paymentVerifier.js';
@@ -28,6 +29,7 @@ export function buildApp(deps: BuildAppDeps = {}) {
   const router = deps.router ?? new HardcodedRouter();
   app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt, paymentVerifier: deps.paymentVerifier }));
   app.route('/api/collection', buildCollectionRoute({ jwt: deps.jwt }));
+  app.route('/api/memory', buildMemoryRoute({ jwt: deps.jwt }));
   app.route(
     '/api/collections',
     buildCollectionsRoute({ indexer: deps.integrationIndexer ?? { getIntegrations: () => [] } }),
