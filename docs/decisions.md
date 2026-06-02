@@ -3616,6 +3616,18 @@ conversational copilot and Upload Captioning as stretches. Pin the SDK version.
 - ⚠️ New dependency on a beta SDK (pin version; compatibility gate).
 - 🔮 Stretches (L2 copilot, Upload Captioning) + real per-user ownership build on this.
 
+### U1 Spike Findings (2026-06-02 — verified against live testnet relayer)
+The plan-001 U1 spike (`backend/scripts/memwal-spike.ts`, throwaway) round-tripped end-to-end. Results:
+- **SDK version pinned: `@mysten-incubation/memwal@0.0.6`** (exact, in `backend/package.json`). Deps add only `@noble/hashes` + `@noble/ed25519` — **no wasm** (SDK is a thin ed25519-signed HTTP client; relayer TEE does embedding/SEAL/Walrus). The plan's "ESM+wasm in Node" risk is **moot**.
+- **Compatibility gate passes:** relayer `apiVersion 1.0.0` (major = `SUPPORTED_RELAYER_API_MAJOR` 1), `minSupportedSdk.typescript 0.0.4` ≤ 0.0.6. `relayerVersion 0.1.0`.
+- **Relayer host correction:** the live **testnet** relayer paired with the testnet contracts is **`https://relayer.dev.memwal.ai`** (per MemWal `apps/app/.env.example`). `relayer.staging.memwal.ai` is also live (testnet); `relayer.memwal.ai` is mainnet. `relayer.testnet.memwal.ai` does not exist. *(Supersedes the requirements/plan assumption of "staging".)*
+- **`MemWalConfig` has NO `suiNetwork` field** — client config is `{ key, accountId, serverUrl?, namespace? }`; network is implicit in `serverUrl`. The "must set suiNetwork:testnet" note applies only to the **account-provisioning** opts (`createAccount`/`addDelegateKey`), not the client. *(Corrects a plan assumption.)*
+- **Provisioning needs an explicit `suiClient`:** `@mysten/sui` 2.6.0+ removed the auto-created `SuiClient`, so `createAccount`/`addDelegateKey` throw `"SuiClient not found"` unless passed `suiClient`. Pass `new SuiJsonRpcClient({ url, network })` (the backend's standard client). Owner signing via `suiPrivateKey` (bech32) works server-side.
+- **Testnet contracts:** packageId `0xcf6ad755a1cdff7217865c796778fabe5aa399cb0cf2eba986f4b582047229c6`, AccountRegistry `0xe80f2feec1c139616a86c9f71210152e2a7ca552b20841f2e192f99f75864437`.
+- **Baked account provisioned** (owner = deployer `0x3116…91ed`): `accountId 0x55c2bb7f0eafbe7ce7356f01440bbe3d6d3eee9f27bdd167e332c720d9edd837`; delegate suiAddress `0x696c0847…`. Delegate **private key stored in `backend/.env`** (gitignored — `MEMWAL_*`), never committed/VITE-prefixed.
+- **`recall()` is server-indexed** (SDK holds no local store) — confirmed: a fresh process recalled prior writes; results ranked, distances ascending (lower = closer).
+- **U8 GATE PASSED — shared `global` namespace viable:** 3 records written to a single `global` namespace returned independent, well-ranked recall (`"racing vehicle"` → race car `dist 0.39` ≫ chest `0.79` / mushroom `0.83`). Namespace isolation also holds (a personal-ns query did not see global-only records). **U8–U10 are technically unblocked.**
+
 ### Related
 - `docs/brainstorms/2026-06-02-memwal-riff-copilot-requirements.md`
 - `docs/ideation/2026-06-02-memwal-integration-ideation.md`

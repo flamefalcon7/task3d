@@ -1,14 +1,22 @@
 # Phase Progress
 
-## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — ideate→brainstorm→plan, NOT yet built)
+## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — plan done + **U1 spike PASSED**; wrapper NOT yet built)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **19**
 - Days to demo day (7/20–21): ~48
 - Days to winners (8/27): ~86
 
+### U1 spike result (2026-06-02 — on branch `spike/memwal-u1`, NOT merged)
+Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **All gates PASSED** against the live testnet relayer — full findings in **D-080 → "U1 Spike Findings"**. Headlines:
+- **`@mysten-incubation/memwal@0.0.6` pinned** in `backend/package.json`. **No wasm** (thin ed25519 HTTP client; +2 `@noble` deps only) → the "ESM+wasm in Node" risk is moot. Compat gate passes (relayer apiVersion 1, minSdk 0.0.4).
+- **Plan assumptions corrected:** testnet host is **`relayer.dev.memwal.ai`** (not `staging`); `MemWalConfig` has **no `suiNetwork`** (only `{key,accountId,serverUrl,namespace}`); provisioning needs an explicit `suiClient` (pass `SuiJsonRpcClient`) since `@mysten/sui` 2.6+ removed the auto client.
+- **Baked account provisioned** (owner = deployer): `accountId 0x55c2bb7f…`; delegate key + `MEMWAL_*` config saved in **`backend/.env`** (gitignored, server-side only).
+- **U8 GATE PASSED** — shared `global` namespace gives independent, well-ranked multi-record recall; namespace isolation holds. **U8–U10 technically unblocked.**
+- Throwaway repro: `backend/scripts/memwal-spike.ts` (lives on the spike branch).
+
 ### Where we are (read this first after compact)
-A full **planning-only** session for a **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK, `@mysten-incubation/memwal`, managed testnet relayer `relayer.staging.memwal.ai`, free/sponsored) into `/create`. **No code written.** Ran ideate → brainstorm → plan → ce-doc-review (twice). Captured as **ADR D-080**.
+A **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK) into `/create`. Ran ideate → brainstorm → plan → ce-doc-review (twice) → **U1 spike (passed)**. Captured as **ADR D-080**. The wrapper/route/UI (U1 proper through U10) are **not built**.
 
 Artifacts (all committed, none built):
 - `docs/ideation/2026-06-02-memwal-integration-ideation.md` — 7 survivors.
@@ -20,10 +28,10 @@ Artifacts (all committed, none built):
 - **Global recall (U8–U10, cuttable next layer):** dual-write non-RESTRICTED prompts to a shared `global` namespace; "from the community" section (click = open model in new tab). Scope-by-policy: **personal = all policies; global excludes RESTRICTED** (PERMISSIONLESS + ALLOW_LIST in).
 - Architecture: **backend proxy** (delegate key in `backend` env, NEVER VITE_; `namespace` = JWT `sub`, hard-fail 401 on unbound); **Gemini** chosen for the (out-of-scope) LLM stretches; fail-soft everywhere.
 
-**Key facts verified from MemWal `dev` source:** no `ask()` method (use `recall`/`remember`/`withMemWal`); testnet via `suiNetwork:"testnet"` + staging relayer (default is mainnet); 1536-dim embeddings; the published prompt is **already public on-chain** (`Model3D.params_json = {prompt}`).
+**Key facts verified from MemWal `dev` source:** no `ask()` method (use `recall`/`remember`/`withMemWal`); 1536-dim embeddings; the published prompt is **already public on-chain** (`Model3D.params_json = {prompt}`). *(Earlier "suiNetwork:testnet + staging relayer" note superseded by the U1 spike — see D-080 findings.)*
 
 ### Next concrete step
-This is a bonus, NOT 6/21 critical path. **Recommended: do NOT `/ce-work` yet** — finish the core (the plan-027/028 stack) first. When ready: `/ce-work docs/plans/2026-06-02-001-feat-memwal-riff-copilot-l0-l1-plan.md`. **U1 is a spike-first unit** (the SDK is not installed; ESM+wasm in Node + the shared `global` namespace are unverified) — that spike gates everything, especially U8–U10.
+Spike is done and green; the risk it gated is retired. This is still a bonus, NOT 6/21 critical path — **recommended: finish the core (plan-027/028 stack) before building the rest.** When ready, resume the plan from **U1 proper** (build `memwal-client.ts` wrapper, now de-risked) → U2–U10. The baked creds in `backend/.env` and the corrected facts in D-080 mean U1's build can skip re-discovery. Decide branch strategy then (the spike lives on `spike/memwal-u1`, off `main`).
 
 ### Deferred / open (MemWal)
 - The "global = semantic search over already-public data" framing is the weaker half; handle at pitch time (personal = private-memory story; global = discovery layer on Walrus). Not a bug.
