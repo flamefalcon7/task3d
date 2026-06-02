@@ -36,6 +36,11 @@ const POLICY_RESTRICTED = 0;
 // Global recall over-fetches (exclude-self filters post-recall, so the page
 // isn't silently short).
 const GLOBAL_OVERFETCH = 4;
+// Relevance gate: vector recall always returns nearest neighbours, so without a
+// distance ceiling a junk/short query surfaces the whole pool. Probe data
+// (text-embedding-3-small): real top matches ≤ ~0.71, junk/unrelated ≥ ~0.745.
+// Drop results at/above this cosine distance. Env-tunable for the demo.
+const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.73');
 
 const rememberSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -187,7 +192,10 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
     if (scope === 'global') {
       const n = limit ?? 10;
       // Over-fetch: exclude-self + denylist filter post-recall, so request more.
-      const outcome = await getClient().recall(GLOBAL_NAMESPACE, query, { limit: n * GLOBAL_OVERFETCH });
+      const outcome = await getClient().recall(GLOBAL_NAMESPACE, query, {
+        limit: n * GLOBAL_OVERFETCH,
+        maxDistance: RECALL_MAX_DISTANCE,
+      });
       const results: RecallChip[] = outcome.results
         .map((m) => ({ ...parseMemory(m.text), distance: m.distance }))
         // Drop unverifiable authorship; exclude the caller's own; honor denylist.
@@ -198,7 +206,7 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
       return c.json({ results });
     }
 
-    const outcome = await getClient().recall(ns, query, { limit });
+    const outcome = await getClient().recall(ns, query, { limit, maxDistance: RECALL_MAX_DISTANCE });
     const results: RecallChip[] = outcome.results.map((m) => {
       const { prompt, ref } = parseMemory(m.text);
       return { prompt, modelId: ref?.m ?? null, distance: m.distance };

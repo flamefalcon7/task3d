@@ -49,7 +49,7 @@ describe('POST /recall', () => {
       body: JSON.stringify({ query: 'fast car', namespace: '0xEVIL' }),
     });
     expect(res.status).toBe(200);
-    expect(client.recall).toHaveBeenCalledWith(WALLET, 'fast car', { limit: undefined });
+    expect(client.recall).toHaveBeenCalledWith(WALLET, 'fast car', { limit: undefined, maxDistance: 0.73 });
   });
 
   it('maps recalled records through parseMemory → {prompt, modelId, distance}', async () => {
@@ -207,7 +207,7 @@ describe('U8 — global recall', () => {
       results: [{ prompt: 'theirs', modelId: '0xm2', creator: CREATOR2, distance: 0.3 }],
     });
     // over-fetch: default n=10 → asks the relayer for 40.
-    expect(client.recall).toHaveBeenCalledWith('global', 'x', { limit: 40 });
+    expect(client.recall).toHaveBeenCalledWith('global', 'x', { limit: 40, maxDistance: 0.73 });
   });
 
   it('over-fetches so exclude-self does not empty the page', async () => {
@@ -221,7 +221,7 @@ describe('U8 — global recall', () => {
     const res = await route.request('/recall', { method: 'POST', headers: auth(), body: JSON.stringify({ query: 'x', scope: 'global', limit: 1 }) });
     const body = (await res.json()) as { results: unknown[] };
     expect(body.results).toHaveLength(1);
-    expect(client.recall).toHaveBeenCalledWith('global', 'x', { limit: 4 });
+    expect(client.recall).toHaveBeenCalledWith('global', 'x', { limit: 4, maxDistance: 0.73 });
   });
 
   it('suppresses denylisted authors', async () => {

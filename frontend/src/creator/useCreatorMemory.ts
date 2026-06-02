@@ -26,6 +26,10 @@ export type RecallStatus = 'idle' | 'loading' | 'ready' | 'empty';
 const RECALL_DEBOUNCE_MS = 300;
 const PERSONAL_LIMIT = 5;
 const COMMUNITY_LIMIT = 3;
+// Don't recall on trivial input — a single 'z' embeds to *something* and the
+// relayer always returns nearest-neighbours, so junk queries surface the whole
+// pool. Real queries start at ~3 chars (probe: "car" matches, "ca"/"z" don't).
+const MIN_QUERY_LEN = 3;
 
 export interface UseCreatorMemory {
   chips: MemoryChip[];
@@ -108,7 +112,7 @@ export function useCreatorMemory(): UseCreatorMemory {
     if (t.timer.current) clearTimeout(t.timer.current);
     const token = tokenRef.current;
     const q = query.trim();
-    if (!token || !q) {
+    if (!token || q.length < MIN_QUERY_LEN) {
       t.setStatus('idle');
       t.setResults([]);
       t.displayed.current = [];

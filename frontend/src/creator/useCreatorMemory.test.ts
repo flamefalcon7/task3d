@@ -128,6 +128,22 @@ describe('useCreatorMemory', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('does not recall on a query shorter than 3 chars (no fetch, status idle)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([CHIP_A]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    for (const q of ['z', 'ca']) {
+      act(() => result.current.recallSimilar(q));
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.personalStatus).toBe('idle');
+    // 3 chars → recalls.
+    act(() => result.current.recallSimilar('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('status goes loading (immediately on a valid query) → ready when results land', async () => {
     const fetchMock = vi.fn().mockResolvedValue(recallResponse([CHIP_A]));
     vi.stubGlobal('fetch', fetchMock);
@@ -210,9 +226,9 @@ describe('useCreatorMemory', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useCreatorMemory());
 
-    act(() => result.current.recallSimilar('a'));
+    act(() => result.current.recallSimilar('car'));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); }); // fetch1 in flight (seq 1)
-    act(() => result.current.recallSimilar('ab'));
+    act(() => result.current.recallSimilar('cars'));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); }); // fetch2 in flight (seq 2)
 
     const A: MemoryChip = { prompt: 'old', modelId: '0x1', distance: 0.1 };
