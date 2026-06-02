@@ -16,6 +16,12 @@ function turnResponse(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as unknown as Response;
 }
 
+// vi.fn() infers an empty-tuple call signature, so reach the RequestInit via cast.
+function requestBody(mock: { mock: { calls: unknown[] } }, callIndex: number): unknown {
+  const call = mock.mock.calls[callIndex] as [unknown, RequestInit];
+  return JSON.parse(call[1].body as string);
+}
+
 beforeEach(() => {
   h.session = { address: '0x1', jwt: 'tok' };
   h.expired = false;
@@ -51,8 +57,10 @@ describe('useRiffCopilot', () => {
       { role: 'assistant', content: 'What color?' },
     ]);
     // request carried the user message and force=false
-    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ messages: [{ role: 'user', content: 'a car' }], forceSynthesize: false });
+    expect(requestBody(fetchMock, 0)).toEqual({
+      messages: [{ role: 'user', content: 'a car' }],
+      forceSynthesize: false,
+    });
   });
 
   it('synthesis result surfaces synthesizedPrompt and ends the conversation (AE5 supply side)', async () => {
@@ -84,7 +92,7 @@ describe('useRiffCopilot', () => {
     act(() => result.current.generateNow());
     await waitFor(() => expect(result.current.status).toBe('done'));
 
-    const lastBody = JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string);
+    const lastBody = requestBody(fetchMock, 1) as { forceSynthesize: boolean };
     expect(lastBody.forceSynthesize).toBe(true);
     expect(result.current.synthesizedPrompt).toBe('P');
   });

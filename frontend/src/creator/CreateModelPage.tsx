@@ -29,6 +29,8 @@ import { useCreatorMemory } from './useCreatorMemory';
 import { CopilotBar } from './CopilotBar';
 import { PromptMemoryChips } from './PromptMemoryChips';
 import { CommunityRecall } from './CommunityRecall';
+import { CopilotChat } from './CopilotChat';
+import { useRiffCopilot } from './useRiffCopilot';
 import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
 import { encryptBase } from '../seal/envelope';
@@ -611,7 +613,21 @@ export function CreateModelPage() {
     recallCommunity,
     rememberCreation,
   } = useCreatorMemory();
+  // L2 Riff Copilot (D-081) — conversational prompt authoring. Fail-soft: when
+  // unavailable (no key / LLM error) the toggle is hidden and /create degrades to
+  // the Write experience above. `chatMode` is a sub-mode of the Tripo path only.
+  const copilot = useRiffCopilot();
+  const [chatMode, setChatMode] = useState(false);
   const signer = useDappKitSigner(account?.address ?? null);
+
+  // When the copilot synthesizes a prompt, drop it into the existing input box
+  // and flip back to Write so the user sees + edits it before generating (R3/AE5).
+  useEffect(() => {
+    if (copilot.synthesizedPrompt) {
+      setPrompt(copilot.synthesizedPrompt);
+      setChatMode(false);
+    }
+  }, [copilot.synthesizedPrompt]);
 
   // plan-015 F1 — URL lifecycle is split across this effect (revoke on
   // glbUrl change/unmount) and setGlbBytes below (createObjectURL when new
@@ -918,30 +934,66 @@ export function CreateModelPage() {
         {sourceMode === 'tripo' ? (
           <div>
             <span style={sectionLabel}>PROMPT</span>
-            <textarea
-              data-testid="prompt-input"
-              value={prompt}
-              onChange={(e) => {
-                setPrompt(e.target.value);
-                recallSimilar(e.target.value);
-                recallCommunity(e.target.value);
-              }}
-              onFocus={() => {
-                recallSimilar(prompt);
-                recallCommunity(prompt);
-              }}
-              placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
-              rows={3}
-              style={promptArea}
-            />
-            <CopilotBar
-              personalStatus={personalStatus}
-              communityStatus={communityStatus}
-              personalCount={memoryChips.length}
-              communityCount={communityChips.length}
-            />
-            <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} status={personalStatus} />
-            <CommunityRecall items={communityChips} status={communityStatus} />
+            {/* L2 (D-081): opt-in Write/Chat sub-mode. Hidden when the copilot is
+                unavailable so /create degrades to the Write experience (R10/R13). */}
+            {copilot.available && (
+              <div role="radiogroup" aria-label="prompt mode" style={toggleRow} data-testid="copilot-toggle">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!chatMode}
+                  onClick={() => setChatMode(false)}
+                  style={toggleCell(!chatMode)}
+                >
+                  ✎ Write
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={chatMode}
+                  data-testid="copilot-toggle-chat"
+                  onClick={() => setChatMode(true)}
+                  style={toggleCell(chatMode)}
+                >
+                  🧠 Chat with Copilot
+                </button>
+              </div>
+            )}
+            {chatMode && copilot.available ? (
+              <CopilotChat
+                messages={copilot.messages}
+                status={copilot.status}
+                onSend={copilot.sendAnswer}
+                onGenerateNow={copilot.generateNow}
+              />
+            ) : (
+              <>
+                <textarea
+                  data-testid="prompt-input"
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    recallSimilar(e.target.value);
+                    recallCommunity(e.target.value);
+                  }}
+                  onFocus={() => {
+                    recallSimilar(prompt);
+                    recallCommunity(prompt);
+                  }}
+                  placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
+                  rows={3}
+                  style={promptArea}
+                />
+                <CopilotBar
+                  personalStatus={personalStatus}
+                  communityStatus={communityStatus}
+                  personalCount={memoryChips.length}
+                  communityCount={communityChips.length}
+                />
+                <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} status={personalStatus} />
+                <CommunityRecall items={communityChips} status={communityStatus} />
+              </>
+            )}
             <div style={{ marginTop: 12 }}>
               {/* D-053 — pre-sign confirmation panel before Slush popup. */}
               <SignConfirmation
