@@ -37,10 +37,17 @@ const POLICY_RESTRICTED = 0;
 // isn't silently short).
 const GLOBAL_OVERFETCH = 4;
 // Relevance gate: vector recall always returns nearest neighbours, so without a
-// distance ceiling a junk/short query surfaces the whole pool. Probe data
-// (text-embedding-3-small): real top matches ≤ ~0.71, junk/unrelated ≥ ~0.745.
-// Drop results at/above this cosine distance. Env-tunable for the demo.
-const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.73');
+// distance ceiling a junk query surfaces the whole pool. Drop results at/above
+// this cosine distance. Env-tunable for the demo.
+//
+// LIMITATION (honest): a single global threshold CANNOT perfectly separate
+// relevant from irrelevant — an unrelated word can sit as "close" as a related
+// one. Probe (text-embedding-3-small, tiny pool): descriptive prompts cluster
+// low ("sports car" 0.545, "fast car" 0.590, "vehicle" 0.619), but a junk word
+// like "penis" (0.709) overlaps bare "car" (0.710). 0.66 keeps the descriptive
+// cluster and drops the noisy 0.7+ band (incl. junk and vague single words).
+// Real robustness needs a larger/diverse pool + descriptive queries, not a tighter number.
+const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.66');
 
 const rememberSchema = z.object({
   prompt: z.string().min(1).max(2000),
