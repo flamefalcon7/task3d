@@ -25,6 +25,9 @@ import {
   TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
+import { useCreatorMemory } from './useCreatorMemory';
+import { PromptMemoryChips } from './PromptMemoryChips';
+import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
 import { encryptBase } from '../seal/envelope';
 import { HelpIcon } from '../ux/HelpIcon';
@@ -596,6 +599,8 @@ export function CreateModelPage() {
   const { uploadBlob, uploadFiles, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const suiClient = useSuiClient();
+  // Riff Copilot memory (D-080) — recall chips + remember-on-publish. Fail-soft.
+  const { chips: memoryChips, recallSimilar, rememberCreation } = useCreatorMemory();
   const signer = useDappKitSigner(account?.address ?? null);
 
   // plan-015 F1 — URL lifecycle is split across this effect (revoke on
@@ -804,11 +809,33 @@ export function CreateModelPage() {
       const result = await signAndExecute({ transaction: tx });
       setTxDigest(result.digest);
       setMintStatus('success');
+      // U5 (D-080) — fire-and-forget: capture the published prompt + new model
+      // id into MemWal. Tripo-only (R4: uploads have no prompt). Reads only (no
+      // wallet popup); never blocks the success UI; never throws.
+      if (sourceMode === 'tripo' && prompt.trim()) {
+        const digest = result.digest;
+        const promptAtPublish = prompt;
+        void (async () => {
+          try {
+            await suiClient.waitForTransaction({ digest });
+            const tb = await suiClient.getTransactionBlock({
+              digest,
+              options: { showObjectChanges: true },
+            });
+            const modelId = extractCreatedModelId(tb.objectChanges ?? []);
+            if (modelId) {
+              void rememberCreation({ prompt: promptAtPublish, modelId });
+            }
+          } catch {
+            /* fail-soft — memory must never disturb publish */
+          }
+        })();
+      }
     } catch (e) {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
 
   if (!session) {
     return (
@@ -884,11 +911,16 @@ export function CreateModelPage() {
             <textarea
               data-testid="prompt-input"
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                recallSimilar(e.target.value);
+              }}
+              onFocus={() => recallSimilar(prompt)}
               placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
               rows={3}
               style={promptArea}
             />
+            <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} />
             <div style={{ marginTop: 12 }}>
               {/* D-053 — pre-sign confirmation panel before Slush popup. */}
               <SignConfirmation
