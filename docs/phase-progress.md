@@ -1,5 +1,32 @@
 # Phase Progress
 
+## Last Updated: 2026-06-02 (MemWal **L2 conversational copilot — U1–U7 BUILT**; same branch `feat/memwal-riff-copilot`, not merged)
+
+### Hackathon Tracker
+- Days to submission (6/21): **19**
+- Days to demo day (7/20–21): ~48
+- Days to winners (8/27): ~86
+
+### MemWal L2 — Conversational Riff Copilot (BUILT, branch `feat/memwal-riff-copilot`, stacked on L0/L1, NOT merged)
+Ran ideate-context → brainstorm → plan → `/ce-work`. **ADR D-081** (reintroduce an LLM — Gemini — at the *prompt-authoring* seam; does NOT supersede D-023, which still governs the LLM-free generation-dispatch path). Plan: `docs/plans/2026-06-02-002-feat-memwal-l2-conversational-copilot-plan.md`. Origin: `docs/brainstorms/2026-06-02-memwal-l2-conversational-copilot-requirements.md` (R1–R14, AE1–AE7).
+
+**What it is:** an opt-in **"Chat with Copilot"** toggle on the Tripo path of `/create`. Gemini asks ≤3 turns (server-enforced hard cap, forced synthesis on turn 3), skips what it can infer from the user's recalled MemWal memory, and synthesizes a Tripo prompt **into the existing input box** (editable; never auto-generates). Fail-soft: no key / LLM error → toggle hidden, `/create` degrades to L0/L1 + raw textarea. On mint, only the final prompt is remembered (reuses the shipped remember-on-publish; no L1 pollution).
+
+**Units (per-commit, conventional, D-081-tagged):**
+- **U1** ADR D-081 + D-023 cross-ref (Status unchanged — it's a *separate seam*, not a reversal).
+- **U2** deps `ai@6` + `@ai-sdk/google@3` + `GOOGLE_GENERATIVE_AI_API_KEY` env (backend-only, inert when absent).
+- **U3** `backend/src/lib/copilot-client.ts` — Gemini single-shot synthesis; **server decides question-vs-prompt** from turnIndex/forceSynthesize (robust to LLM drift); INERT without key; typed `CopilotDegradedError`; clamps ≤1000 chars. *test-first.*
+- **U4** `backend/src/routes/copilot.ts` (`/api/copilot/turn`) — mirrors memory.ts: JWT bindNamespace (hard-401), server-derived turnIndex, per-address limiter (30/min), server-side personal recall→memoryContext (fail-soft), degraded→clean `{available:false}`+`x-copilot-degraded` (never 5xx, never leaks key). Registered in `app.ts`.
+- **U5** `frontend/src/creator/useRiffCopilot.ts` — bounded convo hook; token/seq/mounted guards + clear-on-token-change (mirrors useCreatorMemory); error/`available:false`→`available=false`; surfaces `synthesizedPrompt`; never auto-generates.
+- **U6** `frontend/src/creator/CopilotChat.tsx` + CreateModelPage integration — Write/Chat toggle (hidden when unavailable, R10/R13), synthesis→`setPrompt`+flip-to-Write (editable, AE5), remember-on-publish untouched. testids `copilot-toggle`/`copilot-chat`/`copilot-send`/`copilot-generate-now`.
+- **U7** docs (this block). Demo seed = **reuse** `backend/scripts/seed-memory.ts` (no new mechanism) so the history-aware greeting is real, not hardcoded (R14).
+
+**Tests:** copilot-client 10, copilot route 13 → backend full suite **193 green**, backend tsc **0**. useRiffCopilot 8 + CopilotChat 7 → frontend creator suite **115 green**. Frontend tsc: my files **0 new** (40 pre-existing errors in unrelated track/landing/babylon test files — confirmed via stash that they predate this work).
+
+**Still to do for L2:** (a) 5-reviewer pass per CLAUDE.md (correctness/testing/api-contract/adversarial/julik-races); (b) pre-wallet browser-verify on `/create` (toggle render, synthesis→input fill, toggle hidden when backend has no key); (c) **needs a real `GOOGLE_GENERATIVE_AI_API_KEY`** (user to supply) to exercise live + tune the synthesis system prompt (ideation's top risk: LLM→Tripo quality, burns SUI to tune); (d) demo seed account.
+
+---
+
 ## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — **U1–U10 BUILT + reviewed + UX/relevance polish + live-API verified**; on branch, not merged)
 
 ### Hackathon Tracker
