@@ -23,7 +23,7 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 
 // Shared community namespace (D-080 Global Recall). Personal records live under
 // `namespace = wallet address`; non-RESTRICTED publishes are ALSO mirrored here.
-const GLOBAL_NAMESPACE = 'global';
+export const GLOBAL_NAMESPACE = 'global';
 // model3d.move policy ints (CreateModelPage): RESTRICTED=0, ALLOW_LIST=1, PERMISSIONLESS=2.
 const POLICY_RESTRICTED = 0;
 // Global recall over-fetches (exclude-self filters post-recall, so the page
@@ -41,6 +41,27 @@ const recallSchema = z.object({
   limit: z.number().int().min(1).max(20).optional(),
   scope: z.enum(['personal', 'global']).optional(),
 });
+
+export interface MemoryWrite {
+  namespace: string;
+  text: string;
+}
+
+/**
+ * The set of MemWal writes a single publish produces (D-080 dual-write). Shared
+ * by the live /remember route AND the demo-seed script (U7) so seeded records
+ * are byte-identical to live ones. `address` is the creator (= JWT sub = the
+ * personal namespace, and the `c` in the global trailer).
+ *   - personal namespace: ALL policies, trailer { m } (no creator).
+ *   - global namespace: only policy ≠ RESTRICTED, trailer { m, c }.
+ */
+export function memoryWrites(address: string, prompt: string, modelId: string, policy?: number): MemoryWrite[] {
+  const writes: MemoryWrite[] = [{ namespace: address, text: encodeMemory(prompt, { m: modelId }) }];
+  if (policy !== undefined && policy !== POLICY_RESTRICTED) {
+    writes.push({ namespace: GLOBAL_NAMESPACE, text: encodeMemory(prompt, { m: modelId, c: address }) });
+  }
+  return writes;
+}
 
 /** A recalled memory mapped for the client (no blob_id, no raw trailer). */
 export interface RecallChip {
@@ -134,15 +155,11 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
 
     const { prompt, modelId, policy } = parsed.data;
     const client = getClient();
-    // Dual-write (best-effort, non-atomic — both fire-and-forget; divergence is
-    // tolerated, consistent with fail-soft). Personal: ALL policies, no creator
-    // in the trailer (only the owner recalls their own namespace).
-    void client.remember(ns, encodeMemory(prompt, { m: modelId }));
-    // Global: only non-RESTRICTED (RESTRICTED is off-catalog/private — the
-    // creator chose not to be discoverable). Trailer carries the creator (= ns)
-    // so global recall can exclude-self and attribute.
-    if (policy !== undefined && policy !== POLICY_RESTRICTED) {
-      void client.remember(GLOBAL_NAMESPACE, encodeMemory(prompt, { m: modelId, c: ns }));
+    // Dual-write (best-effort, non-atomic — fire-and-forget; divergence tolerated,
+    // consistent with fail-soft). Personal: all policies. Global: non-RESTRICTED
+    // only. See memoryWrites — shared with the U7 seed for format parity.
+    for (const w of memoryWrites(ns, prompt, modelId, policy)) {
+      void client.remember(w.namespace, w.text);
     }
     return c.json({ status: 'accepted' }, 202);
   });
