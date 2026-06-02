@@ -159,6 +159,47 @@ describe('useCreatorMemory', () => {
     expect(result.current.community).toEqual([]);
   });
 
+  it('drops an older recall response that resolves after a newer one (seq guard)', async () => {
+    function deferred<T>() {
+      let resolve!: (v: T) => void;
+      const promise = new Promise<T>((r) => (resolve = r));
+      return { promise, resolve };
+    }
+    const d1 = deferred<Response>();
+    const d2 = deferred<Response>();
+    const fetchMock = vi.fn().mockReturnValueOnce(d1.promise).mockReturnValueOnce(d2.promise);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+
+    act(() => result.current.recallSimilar('a'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); }); // fetch1 in flight (seq 1)
+    act(() => result.current.recallSimilar('ab'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); }); // fetch2 in flight (seq 2)
+
+    const A: MemoryChip = { prompt: 'old', modelId: '0x1', distance: 0.1 };
+    const B: MemoryChip = { prompt: 'new', modelId: '0x2', distance: 0.2 };
+    // Newer (seq 2) resolves first and wins.
+    await act(async () => { d2.resolve(recallResponse([B])); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.chips).toEqual([B]);
+    // Older (seq 1) resolves later and is dropped — newer result stays.
+    await act(async () => { d1.resolve(recallResponse([A])); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.chips).toEqual([B]);
+  });
+
+  it('clears chips when the session changes (no cross-account leak)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([CHIP_A]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, rerender } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallSimilar('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.chips).toEqual([CHIP_A]);
+
+    // A different account signs in → chips must not leak across the switch.
+    h.session = { address: '0x2', jwt: 'tok2' };
+    await act(async () => { rerender(); });
+    expect(result.current.chips).toEqual([]);
+  });
+
   it('rememberCreation posts prompt+modelId and never throws on failure', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('boom'));
     vi.stubGlobal('fetch', fetchMock);

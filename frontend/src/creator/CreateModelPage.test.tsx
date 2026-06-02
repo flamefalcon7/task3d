@@ -5,11 +5,14 @@ const useCurrentAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
 const signTxMock = vi.fn();
 const waitForTransactionMock = vi.fn(async () => ({})); // resolve immediately by default
+// U5 (D-080): remember-on-publish reads objectChanges to extract the new model
+// id. Default → no created Model3D, so non-U5 tests never trigger a remember.
+const getTransactionBlockMock = vi.fn(async () => ({ objectChanges: [] }) as { objectChanges: unknown[] });
 vi.mock('@mysten/dapp-kit', () => ({
   useCurrentAccount: () => useCurrentAccountMock(),
   useSignTransaction: () => ({ mutateAsync: signTxMock }),
   useSignAndExecuteTransaction: () => ({ mutateAsync: signAndExecuteMock }),
-  useSuiClient: () => ({ waitForTransaction: waitForTransactionMock }),
+  useSuiClient: () => ({ waitForTransaction: waitForTransactionMock, getTransactionBlock: getTransactionBlockMock }),
 }));
 
 const useSessionMock = vi.fn();
@@ -584,6 +587,49 @@ describe('CreateModelPage', () => {
     await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
     return buildPublishPtbMock.mock.calls[0]![0] as { partLabels: string[]; tags: string[] };
   }
+
+  it('U5 (D-080): a successful Tripo publish remembers the prompt + extracted modelId + policy', async () => {
+    const MODEL_ID = '0x' + 'b'.repeat(64);
+    getTransactionBlockMock.mockResolvedValue({
+      objectChanges: [
+        { type: 'mutated', objectType: '0x2::coin::Coin', objectId: '0xgas' },
+        { type: 'created', objectType: '0xpkg::model3d::Model3D', objectId: MODEL_ID },
+      ],
+    });
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel(); // prompt 'a sword', default policy Open(2)
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('name-input')).toBeTruthy());
+    await driveMintAndCaptureArgs(); // names, signs, mints (digest PUBDIGEST456)
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+      expect(calls.length).toBe(1);
+    });
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/memory/remember')!;
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      prompt: 'a sword',
+      modelId: MODEL_ID,
+      policy: 2,
+    });
+  });
+
+  it('U5 (D-080): publish does NOT remember when objectChanges has no Model3D (degrade, not crash)', async () => {
+    getTransactionBlockMock.mockResolvedValue({ objectChanges: [] });
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('name-input')).toBeTruthy());
+    await driveMintAndCaptureArgs();
+    // Publish still succeeds; no remember fetch fired.
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+    expect(calls.length).toBe(0);
+  });
 
   it('TaggingStep renders after confirming a Tripo model (R1 framing-B copy + help icon)', async () => {
     render(<CreateModelPage />);

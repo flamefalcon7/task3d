@@ -28,6 +28,18 @@ export interface ParsedMemory {
   ref: MemoryRef | null;
 }
 
+/**
+ * The recall response item — the single source of truth for the /api/memory
+ * recall wire shape, shared by the backend route and the frontend hook so the
+ * contract can't drift. `creator` is present on community (global) results only.
+ */
+export interface RecallChip {
+  prompt: string;
+  modelId: string | null;
+  distance: number;
+  creator?: string;
+}
+
 // Control chars that never meaningfully appear in a 3D-model text prompt.
 const RS = '\x1e'; // record separator — trailer boundary
 const ESC = '\x1b'; // escape marker

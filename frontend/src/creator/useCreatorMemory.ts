@@ -8,15 +8,12 @@
 // namespace) run independently off the same query — one erroring/emptying never
 // affects the other.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RecallChip } from '@overflow2026/shared';
 import { useSession, isJwtExpired } from '../auth/useSession';
 
-export interface MemoryChip {
-  prompt: string;
-  modelId: string | null;
-  distance: number;
-  /** Author address — present on community (global) results only. */
-  creator?: string;
-}
+// Single source of truth for the recall wire shape lives in shared/src/memory.ts
+// (RecallChip) — aliased here so existing call sites keep the MemoryChip name.
+export type MemoryChip = RecallChip;
 
 const RECALL_DEBOUNCE_MS = 300;
 const PERSONAL_LIMIT = 5;
@@ -57,13 +54,23 @@ export function useCreatorMemory(): UseCreatorMemory {
   const communityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const personalSeq = useRef(0);
   const communitySeq = useRef(0);
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       if (personalTimer.current) clearTimeout(personalTimer.current);
       if (communityTimer.current) clearTimeout(communityTimer.current);
     };
   }, []);
+
+  // Clear chips when the session changes (sign-out / account switch) so one
+  // user's recalled prompts never leak into the next account's view (review).
+  useEffect(() => {
+    setChips([]);
+    setCommunity([]);
+  }, [authToken]);
 
   const rememberCreation = useCallback(
     async ({ prompt, modelId, policy }: { prompt: string; modelId: string; policy?: number }) => {
@@ -101,7 +108,11 @@ export function useCreatorMemory(): UseCreatorMemory {
         });
         if (!res.ok) return; // keep prior chips (stale-while-revalidate)
         const data = (await res.json()) as { results?: MemoryChip[] };
-        if (seq === t.seq.current) t.setter(data.results ?? []);
+        // Drop the response if a newer recall superseded it, the component
+        // unmounted, or the session changed since the request was issued.
+        if (seq === t.seq.current && mounted.current && tokenRef.current === token) {
+          t.setter(data.results ?? []);
+        }
       } catch {
         /* keep prior chips */
       }

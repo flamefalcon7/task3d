@@ -9,9 +9,12 @@
 // from silently crossing user boundaries).
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { encodeMemory, parseMemory } from '@overflow2026/shared';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { encodeMemory, parseMemory, type RecallChip } from '@overflow2026/shared';
 import type { JwtSigner } from '../lib/jwt.js';
 import { getMemwalClient, type MemwalClient } from '../lib/memwal-client.js';
+
+export type { RecallChip };
 
 export interface MemoryRouteDeps {
   jwt?: JwtSigner;
@@ -20,6 +23,10 @@ export interface MemoryRouteDeps {
 }
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
+// The auth layer mints JWTs for addresses matching {1,64} hex; normalize the
+// derived sub to canonical 64-hex so a valid-but-short address can't dead-feature
+// a user (review). Read and write both normalize → namespaces stay consistent.
+const RAW_ADDRESS_RE = /^0x[0-9a-fA-F]{1,64}$/;
 
 // Shared community namespace (D-080 Global Recall). Personal records live under
 // `namespace = wallet address`; non-RESTRICTED publishes are ALSO mirrored here.
@@ -63,15 +70,6 @@ export function memoryWrites(address: string, prompt: string, modelId: string, p
   return writes;
 }
 
-/** A recalled memory mapped for the client (no blob_id, no raw trailer). */
-export interface RecallChip {
-  prompt: string;
-  modelId: string | null;
-  distance: number;
-  /** Author address — present on global (community) results only. */
-  creator?: string;
-}
-
 // Operator break-glass: addresses suppressed from global recall. Testnet's free
 // publish fee is no spam deterrent, so this denylist — not the fee — is the real
 // lever for the demo window. Seeded from env (comma-separated), mutable in tests.
@@ -91,7 +89,10 @@ export function setMemoryDenylistForTest(addresses: string[]): void {
 // sponsored relayer account from a single user's abuse. Mirrors the
 // fixed-window shape in api/collections.ts, re-keyed from IP to address.
 const WINDOW_MS = 60_000;
-const MAX_PER_WINDOW = 120;
+// Generous: /create fires TWO recalls per debounced keystroke (personal +
+// community), so sustained typing must not self-throttle the demo. Recall is
+// debounced + cheap; the denylist is the real spam lever (review).
+const MAX_PER_WINDOW = 600;
 const hits = new Map<string, { count: number; resetAt: number }>();
 function rateLimited(address: string, now = Date.now()): boolean {
   const entry = hits.get(address);
@@ -123,17 +124,18 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
     if (!token) {
       return c.json({ error: 'auth_required', message: 'Memory requires Authorization: Bearer <jwt>' }, 401);
     }
-    let address: string;
+    let sub: string;
     try {
       const claims = await deps.jwt.verifySession(token);
-      address = claims.sub;
+      sub = claims.sub;
     } catch {
       return c.json({ error: 'auth_invalid', message: 'Invalid or expired session token' }, 401);
     }
     // Hard-fail (NOT empty 200) on a malformed derived namespace.
-    if (!ADDRESS_RE.test(address)) {
+    if (!RAW_ADDRESS_RE.test(sub)) {
       return c.json({ error: 'auth_invalid', message: 'Token subject is not a valid address' }, 401);
     }
+    const address = normalizeSuiAddress(sub); // canonical 0x + 64 hex
     return address;
   }
 

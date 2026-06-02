@@ -257,7 +257,7 @@ describe('rate limit (per address)', () => {
     const client = fakeClient();
     const route = buildMemoryRoute({ jwt: stubJwt, client });
     let last = 200;
-    for (let i = 0; i < 130; i++) {
+    for (let i = 0; i < 605; i++) {
       const res = await route.request('/recall', { method: 'POST', headers: auth(), body: JSON.stringify({ query: 'x' }) });
       last = res.status;
     }
