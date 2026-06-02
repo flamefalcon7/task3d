@@ -618,6 +618,10 @@ export function CreateModelPage() {
   // the Write experience above. `chatMode` is a sub-mode of the Tripo path only.
   const copilot = useRiffCopilot();
   const [chatMode, setChatMode] = useState(false);
+  // Build-time opt-in (default OFF): the copilot toggle only appears when L2 is
+  // explicitly enabled AND the backend reports the LLM available at runtime. This
+  // keeps a key-less 6/21 deploy clean — no broken-on-click toggle for judges.
+  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
   const signer = useDappKitSigner(account?.address ?? null);
 
   // When the copilot synthesizes a prompt, drop it into the existing input box
@@ -937,9 +941,9 @@ export function CreateModelPage() {
         {sourceMode === 'tripo' ? (
           <div>
             <span style={sectionLabel}>PROMPT</span>
-            {/* L2 (D-081): opt-in Write/Chat sub-mode. Hidden when the copilot is
-                unavailable so /create degrades to the Write experience (R10/R13). */}
-            {copilot.available && (
+            {/* L2 (D-081): opt-in Write/Chat sub-mode. Hidden unless enabled + the
+                copilot is available, so /create degrades to Write otherwise (R10/R13). */}
+            {copilotOn && (
               <div role="radiogroup" aria-label="prompt mode" style={toggleRow} data-testid="copilot-toggle">
                 <button
                   type="button"
@@ -972,7 +976,7 @@ export function CreateModelPage() {
                 </button>
               </div>
             )}
-            {chatMode && copilot.available ? (
+            {chatMode && copilotOn ? (
               <CopilotChat
                 messages={copilot.messages}
                 status={copilot.status}

@@ -935,7 +935,17 @@ describe('CreateModelPage', () => {
 });
 
 describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
-  it('shows the Write/Chat toggle when the copilot is available', () => {
+  beforeEach(() => vi.stubEnv('VITE_COPILOT_ENABLED', 'true'));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('keeps the toggle hidden when the feature flag is off (default-off safety)', () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', '');
+    render(<CreateModelPage />);
+    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
+    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+  });
+
+  it('shows the Write/Chat toggle when enabled and the copilot is available', () => {
     render(<CreateModelPage />);
     expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
     expect(screen.getByTestId('prompt-input')).toBeTruthy(); // Write is the default
