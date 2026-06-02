@@ -23,7 +23,7 @@ const stubJwt: JwtSigner = {
 function fakeCopilot(over: Partial<CopilotClient> = {}): CopilotClient {
   return {
     configured: true,
-    turn: vi.fn(async () => ({ kind: 'question', text: 'What color?' })),
+    turn: vi.fn(async () => ({ kind: 'question' as const, text: 'What color?' })),
     ...over,
   };
 }
@@ -38,7 +38,7 @@ function fakeMemory(over: Partial<MemwalClient> = {}): MemwalClient {
 function auth(token = 'valid') {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
-const post = (route: ReturnType<typeof buildCopilotRoute>, body: unknown, headers = auth()) =>
+const post = (route: ReturnType<typeof buildCopilotRoute>, body: unknown, headers: Record<string, string> = auth()) =>
   route.request('/turn', { method: 'POST', headers, body: JSON.stringify(body) });
 
 beforeEach(() => {
@@ -84,7 +84,7 @@ describe('POST /turn — behavior', () => {
   });
 
   it('derives turnIndex from assistant-message count (server-enforced cap, AE2)', async () => {
-    const client = fakeCopilot({ turn: vi.fn(async () => ({ kind: 'prompt', text: 'low-poly ship' })) });
+    const client = fakeCopilot({ turn: vi.fn(async () => ({ kind: 'prompt' as const, text: 'low-poly ship' })) });
     const route = buildCopilotRoute({ jwt: stubJwt, client, memory: fakeMemory() });
     const messages = [
       { role: 'user', content: 'a ship' },
@@ -98,7 +98,7 @@ describe('POST /turn — behavior', () => {
   });
 
   it('passes forceSynthesize through (AE1)', async () => {
-    const client = fakeCopilot({ turn: vi.fn(async () => ({ kind: 'prompt', text: 'p' })) });
+    const client = fakeCopilot({ turn: vi.fn(async () => ({ kind: 'prompt' as const, text: 'p' })) });
     const route = buildCopilotRoute({ jwt: stubJwt, client, memory: fakeMemory() });
     await post(route, { messages: [{ role: 'user', content: 'a ship' }], forceSynthesize: true });
     expect(client.turn).toHaveBeenCalledWith(expect.objectContaining({ forceSynthesize: true }));
@@ -160,7 +160,7 @@ describe('POST /turn — behavior', () => {
   it('ignores a client-supplied namespace; recalls the JWT address only', async () => {
     const memory = fakeMemory();
     const route = buildCopilotRoute({ jwt: stubJwt, client: fakeCopilot(), memory });
-    // @ts-expect-error namespace is not in the schema; it must be ignored regardless
+    // namespace is not in the schema and must be ignored regardless (post body is unknown)
     await post(route, { messages: [{ role: 'user', content: 'a car' }], namespace: '0xEVIL' });
     expect(memory.recall).toHaveBeenCalledWith(WALLET, 'a car', { limit: 5 });
   });
