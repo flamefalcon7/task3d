@@ -128,6 +128,45 @@ describe('useCreatorMemory', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('status goes loading (immediately on a valid query) → ready when results land', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([CHIP_A]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallSimilar('car'));
+    // loading is set synchronously, before the debounce/fetch even fires.
+    expect(result.current.personalStatus).toBe('loading');
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.personalStatus).toBe('ready');
+  });
+
+  it('status settles to empty when recall returns nothing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallSimilar('zzz'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.personalStatus).toBe('empty');
+  });
+
+  it('status returns to idle on an empty query', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([CHIP_A]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallSimilar('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    act(() => result.current.recallSimilar('  '));
+    expect(result.current.personalStatus).toBe('idle');
+  });
+
+  it('status does not get stuck on loading when the recall errors', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('relayer down'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallSimilar('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.personalStatus).toBe('empty'); // no prior chips → empty, not stuck loading
+  });
+
   it('recallCommunity fetches the global scope and populates community', async () => {
     const COMMUNITY: MemoryChip = { prompt: 'their car', modelId: '0xz', distance: 0.3, creator: '0xc2' };
     const fetchMock = vi.fn().mockResolvedValue(recallResponse([COMMUNITY]));

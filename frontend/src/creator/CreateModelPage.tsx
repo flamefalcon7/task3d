@@ -604,6 +604,8 @@ export function CreateModelPage() {
   const {
     chips: memoryChips,
     community: communityChips,
+    personalStatus,
+    communityStatus,
     recallSimilar,
     recallCommunity,
     rememberCreation,
@@ -931,8 +933,8 @@ export function CreateModelPage() {
               rows={3}
               style={promptArea}
             />
-            <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} />
-            <CommunityRecall items={communityChips} />
+            <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} status={personalStatus} />
+            <CommunityRecall items={communityChips} status={communityStatus} />
             <div style={{ marginTop: 12 }}>
               {/* D-053 — pre-sign confirmation panel before Slush popup. */}
               <SignConfirmation

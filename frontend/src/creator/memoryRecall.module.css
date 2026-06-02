@@ -1,0 +1,53 @@
+/* Riff Copilot recall — loading skeleton + reveal (plan-001 UX pass, D-080).
+   Animation is gated behind prefers-reduced-motion (matches landing/*.module.css). */
+
+.skeleton {
+  height: 28px;
+  width: 140px;
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.06);
+  opacity: 0.5;
+}
+
+.spin {
+  display: inline-block;
+}
+
+@keyframes memoryPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes memorySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes memoryReveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: memoryPulse 1.2s ease-in-out infinite;
+  }
+  .spin {
+    animation: memorySpin 0.9s linear infinite;
+  }
+  .reveal {
+    animation: memoryReveal 200ms ease-out;
+  }
+}

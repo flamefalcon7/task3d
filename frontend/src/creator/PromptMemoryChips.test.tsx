@@ -79,6 +79,37 @@ describe('PromptMemoryChips', () => {
     expect((screen.getByTestId('memory-chip') as HTMLElement).tagName).toBe('BUTTON');
   });
 
+  it('status=loading with no chips shows the recalling affordance (skeletons)', () => {
+    render(
+      <MemoryRouter>
+        <PromptMemoryChips chips={[]} currentPrompt="" onPick={vi.fn()} status="loading" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('memory-loading')).toBeTruthy();
+    expect(screen.getByText(/Recalling your past creations/i)).toBeTruthy();
+    expect(screen.queryByTestId('memory-chip')).toBeNull();
+  });
+
+  it('status=loading WITH prior chips keeps them (stale-while-revalidate, no skeleton)', () => {
+    renderChips({ chips: [WEAK], status: 'loading' });
+    expect(screen.getByTestId('memory-chip')).toBeTruthy();
+    expect(screen.queryByTestId('memory-loading')).toBeNull();
+  });
+
+  it('status=ready shows the Walrus-memory provenance line', () => {
+    renderChips({ chips: [WEAK, STRONG], status: 'ready' });
+    expect(screen.getByText(/recalled from your Walrus memory/i)).toBeTruthy();
+  });
+
+  it('status=empty renders nothing (cold start)', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <PromptMemoryChips chips={[]} currentPrompt="" onPick={vi.fn()} status="empty" />
+      </MemoryRouter>,
+    );
+    expect(container.textContent).toBe('');
+  });
+
   it('caps at 5 chips even if more are passed', () => {
     const many: MemoryChip[] = Array.from({ length: 8 }, (_, i) => ({
       prompt: `p${i}`,

@@ -66,6 +66,35 @@ describe('CommunityRecall', () => {
     expect(screen.getAllByTestId('community-item')).toHaveLength(3);
   });
 
+  it('status=loading with no items shows the "searching the community" affordance', () => {
+    render(
+      <MemoryRouter>
+        <CommunityRecall items={[]} status="loading" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('community-loading')).toBeTruthy();
+    expect(screen.getByText(/Searching the community on Walrus/i)).toBeTruthy();
+    expect(screen.queryByTestId('community-item')).toBeNull();
+  });
+
+  it('status=ready shows the Walrus provenance line', () => {
+    render(
+      <MemoryRouter>
+        <CommunityRecall items={[ITEM]} status="ready" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/from the community on Walrus/i)).toBeTruthy();
+  });
+
+  it('status=empty renders nothing', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <CommunityRecall items={[]} status="empty" />
+      </MemoryRouter>,
+    );
+    expect(container.textContent).toBe('');
+  });
+
   it('on a narrow viewport, collapses behind a disclosure until opened', () => {
     const mq = {
       matches: true,
