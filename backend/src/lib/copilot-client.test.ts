@@ -1,0 +1,110 @@
+import { describe, it, expect, vi } from 'vitest';
+import {
+  buildCopilotClient,
+  CopilotDegradedError,
+  MAX_TURNS,
+  PROMPT_MAX_CHARS,
+  type GenerateFn,
+  type CopilotMessage,
+} from './copilot-client.js';
+
+const KEY = 'test-gemini-key';
+const msgs = (n: number): CopilotMessage[] =>
+  Array.from({ length: n }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` }));
+
+describe('copilot-client', () => {
+  it('question mode: early turn with no force asks a question', async () => {
+    const generate: GenerateFn = vi.fn(async () => 'What color should it be?');
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
+    expect(r.kind).toBe('question');
+    expect(r.text).toBe('What color should it be?');
+  });
+
+  it('forces synthesis at the turn cap even with sparse messages (AE2)', async () => {
+    const generate: GenerateFn = vi.fn(async () => 'low-poly red sports car, smooth shading');
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: MAX_TURNS - 1 });
+    expect(r.kind).toBe('prompt');
+    expect(r.text).toContain('sports car');
+  });
+
+  it('forceSynthesize short-circuits to a prompt at turn 0 (AE1)', async () => {
+    const generate: GenerateFn = vi.fn(async () => 'low-poly spaceship');
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0, forceSynthesize: true });
+    expect(r.kind).toBe('prompt');
+  });
+
+  it('folds recalled memory into the system prompt (R6)', async () => {
+    let capturedSystem = '';
+    const generate: GenerateFn = vi.fn(async ({ system }) => {
+      capturedSystem = system;
+      return 'Q?';
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    await client.turn({
+      messages: msgs(1),
+      memoryContext: ['low-poly red sports car', 'off-road truck'],
+      turnIndex: 0,
+    });
+    expect(capturedSystem).toContain('low-poly red sports car');
+    expect(capturedSystem).toContain('off-road truck');
+  });
+
+  it('does not fabricate history when memory is empty (R7)', async () => {
+    let capturedSystem = '';
+    const generate: GenerateFn = vi.fn(async ({ system }) => {
+      capturedSystem = system;
+      return 'Q?';
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
+    expect(capturedSystem.toLowerCase()).toContain('no recalled history');
+  });
+
+  it('throws a typed degraded error when the model rejects', async () => {
+    const generate: GenerateFn = vi.fn(async () => {
+      throw new Error('gemini 500');
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
+      CopilotDegradedError,
+    );
+  });
+
+  it('throws a typed degraded error on timeout', async () => {
+    const generate: GenerateFn = vi.fn(() => new Promise<string>(() => {})); // never resolves
+    const client = buildCopilotClient({ apiKey: KEY }, { generate, timeoutMs: 20 });
+    await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
+      CopilotDegradedError,
+    );
+  });
+
+  it('is inert without an API key — never calls the model', async () => {
+    const generate: GenerateFn = vi.fn(async () => 'should not be called');
+    const client = buildCopilotClient({}, { generate });
+    expect(client.configured).toBe(false);
+    await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
+      CopilotDegradedError,
+    );
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('clamps an over-long synthesized prompt to the Tripo limit (R3)', async () => {
+    const huge = 'x'.repeat(PROMPT_MAX_CHARS + 500);
+    const generate: GenerateFn = vi.fn(async () => huge);
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0, forceSynthesize: true });
+    expect(r.kind).toBe('prompt');
+    expect(r.text.length).toBeLessThanOrEqual(PROMPT_MAX_CHARS);
+  });
+
+  it('throws degraded on empty model output', async () => {
+    const generate: GenerateFn = vi.fn(async () => '   ');
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
+      CopilotDegradedError,
+    );
+  });
+});
