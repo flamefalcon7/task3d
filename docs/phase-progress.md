@@ -1,11 +1,20 @@
 # Phase Progress
 
-## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — plan done + **U1 spike PASSED**; wrapper NOT yet built)
+## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — **U1–U10 BUILT + reviewed + tests green**; on branch, not merged)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **19**
 - Days to demo day (7/20–21): ~48
 - Days to winners (8/27): ~86
+
+### MemWal Riff Copilot — FULLY BUILT (branch `feat/memwal-riff-copilot`, off main, NOT merged)
+`/ce-work` ran the whole plan (D-080, docs/plans/2026-06-02-001-...). All 10 units committed (one commit each, conventional, D-080-tagged) + a review-fix commit. **Tests: shared 9, backend 170, frontend 919 (+2 skipped) — all green. tsc: backend 0; frontend 38 = pre-existing baseline, 0 added.**
+- **Personal recall (U1–U7, must-ship):** shared codec `shared/src/memory.ts` (escaped trailer) · backend `lib/memwal-client.ts` (fail-soft wrapper, 2s timeout) · `routes/memory.ts` (JWT→namespace proxy, hard-401 binding, fail-soft recall, address-keyed limiter) · frontend `useCreatorMemory.ts` (debounced SWR hook) · `PromptMemoryChips.tsx` · remember-on-publish in `CreateModelPage.tsx` (Tripo-only, objectChanges→modelId via `extractModelId.ts`) · `scripts/seed-memory.ts`.
+- **Global community recall (U8–U10):** dual-write gated on policy≠RESTRICTED (`memoryWrites` shared by route+seed) · global recall exclude-self + drop-missing-`c` + over-fetch×4 + operator denylist · `useCreatorMemory.recallCommunity` (parallel) · `CommunityRecall.tsx` (open-in-new-tab, mobile-collapse, a11y).
+- **5-reviewer pass done** (correctness, testing, api-contract, adversarial, julik-races). Trust boundaries all held. Fixed: clear chips on session-change (cross-account leak), normalize derived namespace (ADDRESS_RE vs auth-schema), shared `RecallChip` type, raised recall rate-limit (2 recalls/keystroke), +out-of-order-race & U5-publish-integration tests. Accepted (documented): per-process limiter/denylist (single-instance hackathon deploy), over-fetch heuristic, degraded-200 replaces chips.
+- **Browser verify:** pre-wallet PASSED (agent-browser — `/create` sign-in gate + landing render clean in the real Vite bundle, 0 console errors → new hook/components/shared-import resolve). Post-wallet (chips appear for a seeded account, click-to-fill, community open-in-new-tab) is **wallet-gated → USER-RUN**.
+- **Baked creds** in `backend/.env` (gitignored, MEMWAL_*). For a live demo: run `seed-memory.ts` (ideally point modelIds at real published models from 2–3 wallets) + set `VITE_TEST_WALLET=0` for real Slush.
+- **NOT merged.** Next: user post-wallet browser pass on `/create`, then merge decision.
 
 ### U1 spike result (2026-06-02 — on branch `spike/memwal-u1`, NOT merged)
 Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **All gates PASSED** against the live testnet relayer — full findings in **D-080 → "U1 Spike Findings"**. Headlines:
@@ -16,7 +25,7 @@ Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **A
 - Throwaway repro: `backend/scripts/memwal-spike.ts` (lives on the spike branch).
 
 ### Where we are (read this first after compact)
-A **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK) into `/create`. Ran ideate → brainstorm → plan → ce-doc-review (twice) → **U1 spike (passed)**. Captured as **ADR D-080**. The wrapper/route/UI (U1 proper through U10) are **not built**.
+A **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK) into `/create`. Ran ideate → brainstorm → plan → ce-doc-review (twice) → **U1 spike (passed)**. Captured as **ADR D-080**. *(Historical: this block is the spike-stage record. The whole plan U1–U10 is now BUILT — see the latest block at the top of this file.)*
 
 Artifacts (all committed, none built):
 - `docs/ideation/2026-06-02-memwal-integration-ideation.md` — 7 survivors.
@@ -31,7 +40,7 @@ Artifacts (all committed, none built):
 **Key facts verified from MemWal `dev` source:** no `ask()` method (use `recall`/`remember`/`withMemWal`); 1536-dim embeddings; the published prompt is **already public on-chain** (`Model3D.params_json = {prompt}`). *(Earlier "suiNetwork:testnet + staging relayer" note superseded by the U1 spike — see D-080 findings.)*
 
 ### Next concrete step
-Spike is done and green; the risk it gated is retired. This is still a bonus, NOT 6/21 critical path — **recommended: finish the core (plan-027/028 stack) before building the rest.** When ready, resume the plan from **U1 proper** (build `memwal-client.ts` wrapper, now de-risked) → U2–U10. The baked creds in `backend/.env` and the corrected facts in D-080 mean U1's build can skip re-discovery. Decide branch strategy then (the spike lives on `spike/memwal-u1`, off `main`).
+*(Superseded — U1–U10 are now built; see the top block.)* Remaining: user post-wallet browser pass on `/create` (real Slush + seeded pool), then merge `feat/memwal-riff-copilot` decision.
 
 ### Deferred / open (MemWal)
 - The "global = semantic search over already-public data" framing is the weaker half; handle at pitch time (personal = private-memory story; global = discovery layer on Walrus). Not a bug.
