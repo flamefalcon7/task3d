@@ -86,7 +86,6 @@ describe('PromptMemoryChips', () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId('memory-loading')).toBeTruthy();
-    expect(screen.getByText(/Recalling your past creations/i)).toBeTruthy();
     expect(screen.queryByTestId('memory-chip')).toBeNull();
   });
 

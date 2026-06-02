@@ -73,7 +73,6 @@ describe('CommunityRecall', () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId('community-loading')).toBeTruthy();
-    expect(screen.getByText(/Searching the community on Walrus/i)).toBeTruthy();
     expect(screen.queryByTestId('community-item')).toBeNull();
   });
 

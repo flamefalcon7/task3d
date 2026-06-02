@@ -46,7 +46,6 @@ const wrap: CSSProperties = {
   flexDirection: 'column',
   gap: tokens.space[2],
 };
-const headingRow: CSSProperties = { display: 'flex', alignItems: 'center', gap: tokens.space[2] };
 const heading: CSSProperties = {
   fontFamily: tokens.font.mono,
   fontSize: tokens.size.xs,
@@ -54,18 +53,12 @@ const heading: CSSProperties = {
   textTransform: 'uppercase',
   color: tokens.color.hint,
 };
-const spinner: CSSProperties = {
-  fontFamily: tokens.font.mono,
-  fontSize: tokens.size.xs,
-  color: tokens.color.accent,
-};
 const provenance: CSSProperties = {
   fontFamily: tokens.font.mono,
   fontSize: 9,
   letterSpacing: '0.5px',
   color: tokens.color.hint,
 };
-const caption: CSSProperties = { fontFamily: tokens.font.mono, fontSize: 10, color: tokens.color.hint };
 const row: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: tokens.space[2] };
 const chipGroup: CSSProperties = {
   display: 'inline-flex',
@@ -101,16 +94,6 @@ const strongTag: CSSProperties = {
   alignSelf: 'center',
 };
 
-function Spinner() {
-  return (
-    <span style={spinner} aria-hidden>
-      <span className={styles.spin} style={{ display: 'inline-block' }}>
-        ↻
-      </span>
-    </span>
-  );
-}
-
 export function PromptMemoryChips({
   chips,
   currentPrompt,
@@ -140,19 +123,13 @@ export function PromptMemoryChips({
 
   return (
     <div style={wrap} aria-live="polite">
-      <div style={headingRow}>
-        <span style={heading}>Riff on your past creations</span>
-        {loading && <Spinner />}
-      </div>
+      <span style={heading}>Riff on your past creations</span>
 
       {loadingFresh ? (
-        <div data-testid="memory-loading" aria-label="Recalling your past creations">
-          <span style={caption}>Recalling your past creations…</span>
-          <div style={{ ...row, marginTop: tokens.space[1] }}>
-            {Array.from({ length: SKELETON_COUNT }, (_, i) => (
-              <div key={i} className={styles.skeleton} />
-            ))}
-          </div>
+        <div style={row} data-testid="memory-loading" aria-label="Recalling your past creations">
+          {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+            <div key={i} className={styles.skeleton} />
+          ))}
         </div>
       ) : (
         <>

@@ -26,6 +26,7 @@ import {
 } from '../sui/modelTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
 import { useCreatorMemory } from './useCreatorMemory';
+import { CopilotBar } from './CopilotBar';
 import { PromptMemoryChips } from './PromptMemoryChips';
 import { CommunityRecall } from './CommunityRecall';
 import { extractCreatedModelId } from './extractModelId';
@@ -932,6 +933,12 @@ export function CreateModelPage() {
               placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
               rows={3}
               style={promptArea}
+            />
+            <CopilotBar
+              personalStatus={personalStatus}
+              communityStatus={communityStatus}
+              personalCount={memoryChips.length}
+              communityCount={communityChips.length}
             />
             <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} status={personalStatus} />
             <CommunityRecall items={communityChips} status={communityStatus} />

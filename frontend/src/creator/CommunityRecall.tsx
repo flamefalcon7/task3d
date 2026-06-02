@@ -56,7 +56,6 @@ const wrap: CSSProperties = {
   flexDirection: 'column',
   gap: tokens.space[2],
 };
-const headingRow: CSSProperties = { display: 'flex', alignItems: 'center', gap: tokens.space[2] };
 const heading: CSSProperties = {
   fontFamily: tokens.font.mono,
   fontSize: tokens.size.xs,
@@ -64,8 +63,6 @@ const heading: CSSProperties = {
   textTransform: 'uppercase',
   color: tokens.color.hint,
 };
-const spinner: CSSProperties = { fontFamily: tokens.font.mono, fontSize: tokens.size.xs, color: tokens.color.accent };
-const caption: CSSProperties = { fontFamily: tokens.font.mono, fontSize: 10, color: tokens.color.hint };
 const provenance: CSSProperties = { fontFamily: tokens.font.mono, fontSize: 9, letterSpacing: '0.5px', color: tokens.color.hint };
 const list: CSSProperties = { display: 'flex', flexDirection: 'column', gap: tokens.space[1] };
 const item: CSSProperties = {
@@ -94,14 +91,6 @@ const disclosure: CSSProperties = {
   color: tokens.color.hint,
 };
 
-function Spinner() {
-  return (
-    <span style={spinner} aria-hidden>
-      <span className={styles.spin} style={{ display: 'inline-block' }}>↻</span>
-    </span>
-  );
-}
-
 export function CommunityRecall({ items, status }: CommunityRecallProps) {
   const narrow = useIsNarrow();
   const [open, setOpen] = useState(false);
@@ -115,26 +104,18 @@ export function CommunityRecall({ items, status }: CommunityRecallProps) {
 
   return (
     <div style={wrap}>
-      <div style={headingRow}>
-        <span style={heading}>From the community — tap to view</span>
-        {loading && <Spinner />}
-      </div>
+      <span style={heading}>From the community — tap to view</span>
 
       {loadingFresh ? (
-        // Searching, nothing yet: personified caption + skeletons (or a compact
-        // caption when collapsed on mobile).
+        // Searching, nothing yet: skeletons reserve the space (the CopilotBar
+        // carries the "recalling…" voice). Collapsed on mobile → nothing here.
         showList ? (
-          <div data-testid="community-loading">
-            <span style={caption}>Searching the community on Walrus…</span>
-            <div style={{ ...list, marginTop: tokens.space[1] }}>
-              {Array.from({ length: SKELETON_COUNT }, (_, i) => (
-                <div key={i} className={styles.skeleton} style={{ width: '100%' }} />
-              ))}
-            </div>
+          <div style={list} data-testid="community-loading">
+            {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+              <div key={i} className={styles.skeleton} style={{ width: '100%' }} />
+            ))}
           </div>
-        ) : (
-          <span style={caption} data-testid="community-loading">Searching the community on Walrus…</span>
-        )
+        ) : null
       ) : narrow && !open ? (
         <button type="button" style={disclosure} onClick={() => setOpen(true)} data-testid="community-disclosure">
           Show community ({Math.min(items.length, MAX_ITEMS)})
