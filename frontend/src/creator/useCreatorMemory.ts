@@ -1,9 +1,12 @@
-// Riff Copilot memory hook (plan-001 U4, D-080).
+// Riff Copilot memory hook (plan-001 U4 + U9, D-080).
 //
 // Thin, fail-soft client over the JWT-authed /api/memory proxy. Every op is a
 // no-op when there's no live session, and NEVER throws — memory must not be
-// able to disturb /create. `recallSimilar` is debounced (~300ms) and
+// able to disturb /create. Recall is debounced (~300ms) and
 // stale-while-revalidate: prior chips stay visible until a fresh result lands.
+// `recallSimilar` (personal namespace) and `recallCommunity` (shared global
+// namespace) run independently off the same query — one erroring/emptying never
+// affects the other.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession, isJwtExpired } from '../auth/useSession';
 
@@ -11,35 +14,54 @@ export interface MemoryChip {
   prompt: string;
   modelId: string | null;
   distance: number;
+  /** Author address — present on community (global) results only. */
+  creator?: string;
 }
 
 const RECALL_DEBOUNCE_MS = 300;
-const RECALL_LIMIT = 5;
+const PERSONAL_LIMIT = 5;
+const COMMUNITY_LIMIT = 3;
 
 export interface UseCreatorMemory {
   /** Personal recalled chips (own namespace). */
   chips: MemoryChip[];
+  /** Community recalled chips (shared global namespace, exclude-self). */
+  community: MemoryChip[];
   /** Debounced recall of the user's similar past prompts. */
   recallSimilar: (query: string) => void;
+  /** Debounced recall of similar community models. */
+  recallCommunity: (query: string) => void;
   /** Fire-and-forget store on publish. `policy` gates the global dual-write
    *  (RESTRICTED → personal only). Never throws. */
   rememberCreation: (input: { prompt: string; modelId: string; policy?: number }) => Promise<void>;
 }
 
+interface RecallTarget {
+  timer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  seq: React.MutableRefObject<number>;
+  setter: (chips: MemoryChip[]) => void;
+  limit: number;
+  scope?: 'global';
+}
+
 export function useCreatorMemory(): UseCreatorMemory {
   const { session } = useSession();
   const authToken = session && !isJwtExpired(session.jwt) ? session.jwt : null;
-
-  const [chips, setChips] = useState<MemoryChip[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Monotonic request id so a slow earlier recall can't overwrite a newer one.
-  const seqRef = useRef(0);
   const tokenRef = useRef<string | null>(authToken);
   tokenRef.current = authToken;
 
+  const [chips, setChips] = useState<MemoryChip[]>([]);
+  const [community, setCommunity] = useState<MemoryChip[]>([]);
+
+  const personalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const communityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const personalSeq = useRef(0);
+  const communitySeq = useRef(0);
+
   useEffect(() => {
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (personalTimer.current) clearTimeout(personalTimer.current);
+      if (communityTimer.current) clearTimeout(communityTimer.current);
     };
   }, []);
 
@@ -60,32 +82,49 @@ export function useCreatorMemory(): UseCreatorMemory {
     [],
   );
 
-  const recallSimilar = useCallback((query: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
+  // Shared debounced recall runner. Refs + setters are stable, so this is too.
+  const runRecall = useCallback((query: string, t: RecallTarget) => {
+    if (t.timer.current) clearTimeout(t.timer.current);
     const token = tokenRef.current;
     const q = query.trim();
-    // No session or nothing to search on → clear chips, no request.
     if (!token || !q) {
-      setChips([]);
+      t.setter([]);
       return;
     }
-    debounceRef.current = setTimeout(async () => {
-      const seq = ++seqRef.current;
+    t.timer.current = setTimeout(async () => {
+      const seq = ++t.seq.current;
       try {
         const res = await fetch('/api/memory/recall', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ query: q, limit: RECALL_LIMIT }),
+          body: JSON.stringify({ query: q, limit: t.limit, ...(t.scope ? { scope: t.scope } : {}) }),
         });
         if (!res.ok) return; // keep prior chips (stale-while-revalidate)
         const data = (await res.json()) as { results?: MemoryChip[] };
-        // Ignore if a newer recall has since been issued.
-        if (seq === seqRef.current) setChips(data.results ?? []);
+        if (seq === t.seq.current) t.setter(data.results ?? []);
       } catch {
         /* keep prior chips */
       }
     }, RECALL_DEBOUNCE_MS);
   }, []);
 
-  return { chips, recallSimilar, rememberCreation };
+  const recallSimilar = useCallback(
+    (query: string) =>
+      runRecall(query, { timer: personalTimer, seq: personalSeq, setter: setChips, limit: PERSONAL_LIMIT }),
+    [runRecall],
+  );
+
+  const recallCommunity = useCallback(
+    (query: string) =>
+      runRecall(query, {
+        timer: communityTimer,
+        seq: communitySeq,
+        setter: setCommunity,
+        limit: COMMUNITY_LIMIT,
+        scope: 'global',
+      }),
+    [runRecall],
+  );
+
+  return { chips, community, recallSimilar, recallCommunity, rememberCreation };
 }

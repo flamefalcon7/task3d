@@ -128,6 +128,37 @@ describe('useCreatorMemory', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('recallCommunity fetches the global scope and populates community', async () => {
+    const COMMUNITY: MemoryChip = { prompt: 'their car', modelId: '0xz', distance: 0.3, creator: '0xc2' };
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([COMMUNITY]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => result.current.recallCommunity('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.scope).toBe('global');
+    expect(result.current.community).toEqual([COMMUNITY]);
+  });
+
+  it('personal and community recall are independent (one erroring leaves the other intact)', async () => {
+    const PERSONAL: MemoryChip = { prompt: 'my car', modelId: '0xa', distance: 0.4 };
+    // Route the mock by scope: personal succeeds, global rejects.
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      if (body.scope === 'global') return Promise.reject(new Error('global down'));
+      return Promise.resolve(recallResponse([PERSONAL]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCreatorMemory());
+    act(() => {
+      result.current.recallSimilar('car');
+      result.current.recallCommunity('car');
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.chips).toEqual([PERSONAL]);
+    expect(result.current.community).toEqual([]);
+  });
+
   it('rememberCreation posts prompt+modelId and never throws on failure', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('boom'));
     vi.stubGlobal('fetch', fetchMock);

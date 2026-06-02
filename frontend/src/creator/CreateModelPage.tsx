@@ -27,6 +27,7 @@ import {
 import { TESTNET } from '../sui/networkConfig';
 import { useCreatorMemory } from './useCreatorMemory';
 import { PromptMemoryChips } from './PromptMemoryChips';
+import { CommunityRecall } from './CommunityRecall';
 import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
 import { encryptBase } from '../seal/envelope';
@@ -600,7 +601,13 @@ export function CreateModelPage() {
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const suiClient = useSuiClient();
   // Riff Copilot memory (D-080) — recall chips + remember-on-publish. Fail-soft.
-  const { chips: memoryChips, recallSimilar, rememberCreation } = useCreatorMemory();
+  const {
+    chips: memoryChips,
+    community: communityChips,
+    recallSimilar,
+    recallCommunity,
+    rememberCreation,
+  } = useCreatorMemory();
   const signer = useDappKitSigner(account?.address ?? null);
 
   // plan-015 F1 — URL lifecycle is split across this effect (revoke on
@@ -914,13 +921,18 @@ export function CreateModelPage() {
               onChange={(e) => {
                 setPrompt(e.target.value);
                 recallSimilar(e.target.value);
+                recallCommunity(e.target.value);
               }}
-              onFocus={() => recallSimilar(prompt)}
+              onFocus={() => {
+                recallSimilar(prompt);
+                recallCommunity(prompt);
+              }}
               placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
               rows={3}
               style={promptArea}
             />
             <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} />
+            <CommunityRecall items={communityChips} />
             <div style={{ marginTop: 12 }}>
               {/* D-053 — pre-sign confirmation panel before Slush popup. */}
               <SignConfirmation
