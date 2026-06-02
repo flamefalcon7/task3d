@@ -31,6 +31,10 @@ export interface UseRiffCopilot {
   available: boolean;
   /** Set when the copilot synthesizes; the page reads this to fill the input box. */
   synthesizedPrompt: string | null;
+  /** Monotonic counter — bumps once per synthesis (even to identical text). The
+   *  page keys its fill-the-box effect on this so each synthesis applies exactly
+   *  once and a later re-render never re-stomps a manual edit (review: julik P1/P2). */
+  synthSeq: number;
   /** Append a user turn and advance the conversation. */
   sendAnswer: (text: string) => void;
   /** Force synthesis now from whatever has been gathered (the "Generate now" button). */
@@ -49,6 +53,7 @@ export function useRiffCopilot(): UseRiffCopilot {
   const [status, setStatus] = useState<CopilotStatus>('idle');
   const [available, setAvailable] = useState(true);
   const [synthesizedPrompt, setSynthesizedPrompt] = useState<string | null>(null);
+  const [synthSeq, setSynthSeq] = useState(0);
 
   const messagesRef = useRef<CopilotMessage[]>([]);
   const seq = useRef(0);
@@ -109,6 +114,7 @@ export function useRiffCopilot(): UseRiffCopilot {
           if (data.result.kind === 'prompt') {
             finished.current = true;
             setSynthesizedPrompt(data.result.text);
+            setSynthSeq((n) => n + 1);
             commit([...next, { role: 'assistant', content: data.result.text }]);
             setStatus('done');
           } else {
@@ -152,5 +158,5 @@ export function useRiffCopilot(): UseRiffCopilot {
     setSynthesizedPrompt(null);
   }, [commit]);
 
-  return { messages, status, available, synthesizedPrompt, sendAnswer, generateNow, reset };
+  return { messages, status, available, synthesizedPrompt, synthSeq, sendAnswer, generateNow, reset };
 }

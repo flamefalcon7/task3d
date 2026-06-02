@@ -622,12 +622,15 @@ export function CreateModelPage() {
 
   // When the copilot synthesizes a prompt, drop it into the existing input box
   // and flip back to Write so the user sees + edits it before generating (R3/AE5).
+  // Keyed on synthSeq (one-shot per synthesis) so a later re-render never re-applies
+  // a stale value over the user's manual edit (review: julik P1/P2).
   useEffect(() => {
-    if (copilot.synthesizedPrompt) {
+    if (copilot.synthSeq > 0 && copilot.synthesizedPrompt) {
       setPrompt(copilot.synthesizedPrompt);
       setChatMode(false);
     }
-  }, [copilot.synthesizedPrompt]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilot.synthSeq]);
 
   // plan-015 F1 — URL lifecycle is split across this effect (revoke on
   // glbUrl change/unmount) and setGlbBytes below (createObjectURL when new
@@ -942,7 +945,12 @@ export function CreateModelPage() {
                   type="button"
                   role="radio"
                   aria-checked={!chatMode}
-                  onClick={() => setChatMode(false)}
+                  onClick={() => {
+                    // Flipping to Write abandons the chat turn (drops any in-flight
+                    // response so it can't stomp the textarea — review: julik #4).
+                    copilot.reset();
+                    setChatMode(false);
+                  }}
                   style={toggleCell(!chatMode)}
                 >
                   ✎ Write
@@ -952,7 +960,12 @@ export function CreateModelPage() {
                   role="radio"
                   aria-checked={chatMode}
                   data-testid="copilot-toggle-chat"
-                  onClick={() => setChatMode(true)}
+                  onClick={() => {
+                    // Start a fresh conversation when re-entering chat after one
+                    // already finished (review: correctness P1 — second-session dead-end).
+                    if (copilot.status === 'done') copilot.reset();
+                    setChatMode(true);
+                  }}
                   style={toggleCell(chatMode)}
                 >
                   🧠 Chat with Copilot

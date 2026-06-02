@@ -61,7 +61,14 @@ const messageSchema = z.object({
 const turnSchema = z.object({
   // Bounded: at most one user seed + (question+answer)×MAX_TURNS keeps payloads small
   // and the turn count honest. Server still derives the cap from assistant count.
-  messages: z.array(messageSchema).min(1).max(2 * MAX_TURNS + 1),
+  // The array must END with a user turn — a real copilot transcript always awaits
+  // the user; rejecting otherwise blocks role-spoofed / all-assistant arrays that
+  // would feed an ungrounded conversation to Gemini (review: adversarial role-spoof).
+  messages: z
+    .array(messageSchema)
+    .min(1)
+    .max(2 * MAX_TURNS + 1)
+    .refine((m) => m[m.length - 1]?.role === 'user', { message: 'last message must be from the user' }),
   forceSynthesize: z.boolean().optional(),
 });
 
@@ -134,12 +141,19 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
       return c.json({ available: false });
     }
 
-    // Recall the caller's OWN past prompts (fail-soft: failure → empty context).
+    // Recall the caller's OWN past prompts (fail-soft: ANY failure — relayer error
+    // OR a malformed record that throws in parseMemory — degrades to empty context;
+    // the copilot still works. The route must never 500 here, per R10 (review).
     let memoryContext: string[] = [];
     const query = lastUserMessage(messages);
     if (query) {
-      const outcome = await getMemory().recall(ns, query, { limit: RECALL_LIMIT });
-      memoryContext = outcome.results.map((m) => parseMemory(m.text).prompt).filter(Boolean);
+      try {
+        const outcome = await getMemory().recall(ns, query, { limit: RECALL_LIMIT });
+        memoryContext = outcome.results.map((m) => parseMemory(m.text).prompt).filter(Boolean);
+      } catch (e) {
+        console.warn('[copilot] recall/parse failed (fail-soft → empty context):', e instanceof Error ? e.message : e);
+        memoryContext = [];
+      }
     }
 
     const turnIndex = deriveTurnIndex(messages);

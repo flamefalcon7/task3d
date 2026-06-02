@@ -70,6 +70,29 @@ describe('POST /turn — auth & validation', () => {
     const res = await post(route, { messages: [] });
     expect(res.status).toBe(400);
   });
+
+  it('400 when the message array does not end with a user turn (rejects role-spoofed arrays)', async () => {
+    const route = buildCopilotRoute({ jwt: stubJwt, client: fakeCopilot(), memory: fakeMemory() });
+    const res = await post(route, {
+      messages: [
+        { role: 'user', content: 'a car' },
+        { role: 'assistant', content: 'color?' },
+      ],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 on an oversized message array (cannot inflate the conversation past the cap)', async () => {
+    const route = buildCopilotRoute({ jwt: stubJwt, client: fakeCopilot(), memory: fakeMemory() });
+    const messages = Array.from({ length: 9 }, (_, i) => ({
+      role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: `m${i}`,
+    }));
+    // ensure it still ends with a user turn so only the .max bound trips
+    messages.push({ role: 'user' as const, content: 'last' });
+    const res = await post(route, { messages });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('POST /turn — behavior', () => {
@@ -124,6 +147,19 @@ describe('POST /turn — behavior', () => {
 
   it('is fail-soft when recall fails — still drives the copilot with empty context (R10)', async () => {
     const memory = fakeMemory({ recall: vi.fn(async () => ({ results: [], errored: true })) });
+    const client = fakeCopilot();
+    const route = buildCopilotRoute({ jwt: stubJwt, client, memory });
+    const res = await post(route, { messages: [{ role: 'user', content: 'a car' }] });
+    expect(res.status).toBe(200);
+    expect(client.turn).toHaveBeenCalledWith(expect.objectContaining({ memoryContext: [] }));
+  });
+
+  it('is fail-soft when recall THROWS — never 500s, degrades to empty context (R10)', async () => {
+    const memory = fakeMemory({
+      recall: vi.fn(async () => {
+        throw new Error('relayer exploded');
+      }),
+    });
     const client = fakeCopilot();
     const route = buildCopilotRoute({ jwt: stubJwt, client, memory });
     const res = await post(route, { messages: [{ role: 'user', content: 'a car' }] });

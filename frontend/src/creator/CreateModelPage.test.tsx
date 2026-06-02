@@ -23,6 +23,27 @@ vi.mock('../auth/useSession', () => ({
   isJwtExpired: (jwt: string) => isJwtExpiredMock(jwt),
 }));
 
+// L2 (D-081) — controllable Riff Copilot hook so the integration (toggle gate,
+// synthesis→fill→flip, second-session reset) can be driven without a backend.
+const copilotState = vi.hoisted(() => ({
+  messages: [] as { role: 'user' | 'assistant'; content: string }[],
+  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done',
+  available: true,
+  synthesizedPrompt: null as string | null,
+  synthSeq: 0,
+}));
+const copilotResetMock = vi.hoisted(() => vi.fn());
+const copilotSendMock = vi.hoisted(() => vi.fn());
+const copilotGenerateNowMock = vi.hoisted(() => vi.fn());
+vi.mock('./useRiffCopilot', () => ({
+  useRiffCopilot: () => ({
+    ...copilotState,
+    sendAnswer: copilotSendMock,
+    generateNow: copilotGenerateNowMock,
+    reset: copilotResetMock,
+  }),
+}));
+
 const uploadBlobMock = vi.fn();
 const uploadFilesMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
@@ -191,6 +212,15 @@ beforeEach(() => {
   });
   TAGGING_PART_COUNT_REF.current = 12;
   TAGGING_MATERIAL_NAMES_REF.current = null;
+  // Reset L2 copilot mock to defaults (available, idle, no synthesis).
+  copilotState.messages = [];
+  copilotState.status = 'idle';
+  copilotState.available = true;
+  copilotState.synthesizedPrompt = null;
+  copilotState.synthSeq = 0;
+  copilotResetMock.mockReset();
+  copilotSendMock.mockReset();
+  copilotGenerateNowMock.mockReset();
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
   vi.stubGlobal('URL', Object.assign(URL, {
@@ -901,5 +931,66 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('confirm-model'));
     await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
+  });
+});
+
+describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
+  it('shows the Write/Chat toggle when the copilot is available', () => {
+    render(<CreateModelPage />);
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    expect(screen.getByTestId('prompt-input')).toBeTruthy(); // Write is the default
+  });
+
+  it('hides the toggle and keeps the plain textarea when the copilot is unavailable (AE7/R13)', () => {
+    copilotState.available = false;
+    render(<CreateModelPage />);
+    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
+    // /create degrades to the shipped Write experience.
+    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+  });
+
+  it('clicking "Chat with Copilot" mounts the conversation panel', () => {
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-chat')).toBeTruthy();
+    expect(screen.queryByTestId('prompt-input')).toBeNull(); // textarea swapped out
+  });
+
+  it('a synthesized prompt fills the existing input box and flips back to Write (R3/AE5)', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1; // a synthesis has occurred → one-shot effect applies it
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    const box = screen.getByTestId('prompt-input') as HTMLTextAreaElement;
+    expect(box.value).toBe('low-poly red sports car');
+  });
+
+  it('the synthesized prompt remains user-editable before generation (AE5)', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    const box = screen.getByTestId('prompt-input') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'low-poly red sports car with chrome wheels' } });
+    // Generate reads the live `prompt` state, so the edited value is what ships.
+    expect(box.value).toBe('low-poly red sports car with chrome wheels');
+  });
+
+  it('re-entering Chat after a finished conversation resets it (no second-session dead-end)', () => {
+    copilotState.status = 'done';
+    copilotState.messages = [
+      { role: 'user', content: 'a car' },
+      { role: 'assistant', content: 'low-poly red car' },
+    ];
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(copilotResetMock).toHaveBeenCalled();
+  });
+
+  it('flipping back to Write resets the copilot (abandons an in-flight turn)', () => {
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter chat
+    fireEvent.click(screen.getByText('✎ Write')); // back to write
+    expect(copilotResetMock).toHaveBeenCalled();
   });
 });
