@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — **U1–U10 BUILT + reviewed + tests green**; on branch, not merged)
+## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — **U1–U10 BUILT + reviewed + UX/relevance polish + live-API verified**; on branch, not merged)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **19**
@@ -15,6 +15,13 @@
 - **Browser verify:** pre-wallet PASSED (agent-browser — `/create` sign-in gate + landing render clean in the real Vite bundle, 0 console errors → new hook/components/shared-import resolve). Post-wallet (chips appear for a seeded account, click-to-fill, community open-in-new-tab) is **wallet-gated → USER-RUN**.
 - **Baked creds** in `backend/.env` (gitignored, MEMWAL_*). For a live demo: run `seed-memory.ts` (ideally point modelIds at real published models from 2–3 wallets) + set `VITE_TEST_WALLET=0` for real Slush.
 - **NOT merged.** Next: user post-wallet browser pass on `/create`, then merge decision.
+
+#### Post-build UX + quality pass (same session, also committed on the branch)
+Driven by live hands-on testing with the local dev servers + real Slush:
+- **Live API e2e verified (no wallet):** `backend/scripts/memwal-smoke.ts` mints JWTs for 2 addresses and drives the real relayer — proved dual-write, policy gate (RESTRICTED→personal only), exclude-self, RESTRICTED-not-in-global, codec round-trip, 401-on-unauth. This is the end-to-end backend↔relayer proof the unit tests mock.
+- **Legible agent presence:** added a persistent **`CopilotBar.tsx`** (`🧠 Riff Copilot` status line, always present once signed in: idle-invite / "Recalling from Walrus memory…"+spinner / found / neutral "No similar models found"). Sections now show skeleton + Walrus provenance line (`N · …Walrus`); the bar is the single "voice" (no duplicate captions). Loading status surfaced via `personalStatus`/`communityStatus` from the hook (SWR-safe, no stuck spinner). reduced-motion gated via `memoryRecall.module.css`.
+- **Relevance gate (the "why does 'z'/'penis' match a car" fix):** frontend min-query-length 3 + backend `MEMORY_MAX_DISTANCE` (cosine ceiling, default **0.66**, env-tunable). Probe-tuned: descriptive prompts ≤~0.62 kept; junk/vague (`penis` 0.709, bare `car` 0.710, `dog`) dropped. **Honest limitation captured in `memory.ts`:** a single global threshold can't perfectly separate relevant from irrelevant (junk overlaps real matches); real robustness needs a larger/diverse pool. Deferred option: profanity denylist for demo hardening.
+- Tests after polish: creator suite 100 green; backend memory 21; tsc 0 new. All committed.
 
 ### U1 spike result (2026-06-02 — on branch `spike/memwal-u1`, NOT merged)
 Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **All gates PASSED** against the live testnet relayer — full findings in **D-080 → "U1 Spike Findings"**. Headlines:
