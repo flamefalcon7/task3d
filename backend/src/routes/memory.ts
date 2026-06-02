@@ -21,13 +21,25 @@ export interface MemoryRouteDeps {
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 
+// Shared community namespace (D-080 Global Recall). Personal records live under
+// `namespace = wallet address`; non-RESTRICTED publishes are ALSO mirrored here.
+const GLOBAL_NAMESPACE = 'global';
+// model3d.move policy ints (CreateModelPage): RESTRICTED=0, ALLOW_LIST=1, PERMISSIONLESS=2.
+const POLICY_RESTRICTED = 0;
+// Global recall over-fetches (exclude-self filters post-recall, so the page
+// isn't silently short).
+const GLOBAL_OVERFETCH = 4;
+
 const rememberSchema = z.object({
   prompt: z.string().min(1).max(2000),
   modelId: z.string().regex(ADDRESS_RE),
+  // Gates the global dual-write. Optional for back-compat; absent → personal only.
+  policy: z.number().int().min(0).max(2).optional(),
 });
 const recallSchema = z.object({
   query: z.string().min(1).max(2000),
   limit: z.number().int().min(1).max(20).optional(),
+  scope: z.enum(['personal', 'global']).optional(),
 });
 
 /** A recalled memory mapped for the client (no blob_id, no raw trailer). */
@@ -35,6 +47,23 @@ export interface RecallChip {
   prompt: string;
   modelId: string | null;
   distance: number;
+  /** Author address — present on global (community) results only. */
+  creator?: string;
+}
+
+// Operator break-glass: addresses suppressed from global recall. Testnet's free
+// publish fee is no spam deterrent, so this denylist — not the fee — is the real
+// lever for the demo window. Seeded from env (comma-separated), mutable in tests.
+const denylist = new Set<string>(
+  (process.env.MEMORY_DENYLIST ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+/** Test-only: replace the denylist contents. */
+export function setMemoryDenylistForTest(addresses: string[]): void {
+  denylist.clear();
+  for (const a of addresses) denylist.add(a);
 }
 
 // Per-address fixed-window limiter (in-memory; demo-grade). Protects the shared
@@ -103,9 +132,18 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
       return c.json({ error: 'invalid_params', issues: parsed.error.issues }, 400);
     }
 
-    const text = encodeMemory(parsed.data.prompt, { m: parsed.data.modelId });
-    // Fire-and-forget: do NOT await the relayer job — respond 202 immediately.
-    void getClient().remember(ns, text);
+    const { prompt, modelId, policy } = parsed.data;
+    const client = getClient();
+    // Dual-write (best-effort, non-atomic — both fire-and-forget; divergence is
+    // tolerated, consistent with fail-soft). Personal: ALL policies, no creator
+    // in the trailer (only the owner recalls their own namespace).
+    void client.remember(ns, encodeMemory(prompt, { m: modelId }));
+    // Global: only non-RESTRICTED (RESTRICTED is off-catalog/private — the
+    // creator chose not to be discoverable). Trailer carries the creator (= ns)
+    // so global recall can exclude-self and attribute.
+    if (policy !== undefined && policy !== POLICY_RESTRICTED) {
+      void client.remember(GLOBAL_NAMESPACE, encodeMemory(prompt, { m: modelId, c: ns }));
+    }
     return c.json({ status: 'accepted' }, 202);
   });
 
@@ -125,7 +163,23 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
       return c.json({ error: 'invalid_params', issues: parsed.error.issues }, 400);
     }
 
-    const outcome = await getClient().recall(ns, parsed.data.query, { limit: parsed.data.limit });
+    const { query, limit, scope } = parsed.data;
+
+    if (scope === 'global') {
+      const n = limit ?? 10;
+      // Over-fetch: exclude-self + denylist filter post-recall, so request more.
+      const outcome = await getClient().recall(GLOBAL_NAMESPACE, query, { limit: n * GLOBAL_OVERFETCH });
+      const results: RecallChip[] = outcome.results
+        .map((m) => ({ ...parseMemory(m.text), distance: m.distance }))
+        // Drop unverifiable authorship; exclude the caller's own; honor denylist.
+        .filter((r) => r.ref?.c && r.ref.c !== ns && !denylist.has(r.ref.c))
+        .slice(0, n)
+        .map((r) => ({ prompt: r.prompt, modelId: r.ref!.m, creator: r.ref!.c, distance: r.distance }));
+      if (outcome.errored) c.header('x-memwal-degraded', '1');
+      return c.json({ results });
+    }
+
+    const outcome = await getClient().recall(ns, query, { limit });
     const results: RecallChip[] = outcome.results.map((m) => {
       const { prompt, ref } = parseMemory(m.text);
       return { prompt, modelId: ref?.m ?? null, distance: m.distance };

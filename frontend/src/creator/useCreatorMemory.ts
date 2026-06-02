@@ -21,8 +21,9 @@ export interface UseCreatorMemory {
   chips: MemoryChip[];
   /** Debounced recall of the user's similar past prompts. */
   recallSimilar: (query: string) => void;
-  /** Fire-and-forget store on publish. Never throws. */
-  rememberCreation: (input: { prompt: string; modelId: string }) => Promise<void>;
+  /** Fire-and-forget store on publish. `policy` gates the global dual-write
+   *  (RESTRICTED → personal only). Never throws. */
+  rememberCreation: (input: { prompt: string; modelId: string; policy?: number }) => Promise<void>;
 }
 
 export function useCreatorMemory(): UseCreatorMemory {
@@ -42,19 +43,22 @@ export function useCreatorMemory(): UseCreatorMemory {
     };
   }, []);
 
-  const rememberCreation = useCallback(async ({ prompt, modelId }: { prompt: string; modelId: string }) => {
-    const token = tokenRef.current;
-    if (!token) return;
-    try {
-      await fetch('/api/memory/remember', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ prompt, modelId }),
-      });
-    } catch {
-      /* fail-soft */
-    }
-  }, []);
+  const rememberCreation = useCallback(
+    async ({ prompt, modelId, policy }: { prompt: string; modelId: string; policy?: number }) => {
+      const token = tokenRef.current;
+      if (!token) return;
+      try {
+        await fetch('/api/memory/remember', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ prompt, modelId, policy }),
+        });
+      } catch {
+        /* fail-soft */
+      }
+    },
+    [],
+  );
 
   const recallSimilar = useCallback((query: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);

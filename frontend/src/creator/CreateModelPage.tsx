@@ -824,7 +824,7 @@ export function CreateModelPage() {
             });
             const modelId = extractCreatedModelId(tb.objectChanges ?? []);
             if (modelId) {
-              void rememberCreation({ prompt: promptAtPublish, modelId });
+              void rememberCreation({ prompt: promptAtPublish, modelId, policy });
             }
           } catch {
             /* fail-soft — memory must never disturb publish */
