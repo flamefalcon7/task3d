@@ -12,8 +12,8 @@ const ENV = { delegateKey: 'deadbeef', accountId: '0xacct' };
 
 function fakeSdk(over: Partial<MemwalLike> = {}): MemwalLike {
   return {
-    remember: vi.fn(async () => ({ job_id: 'j', status: 'pending' })),
-    recall: vi.fn(async () => ({ results: [] as RecallMemory[], total: 0 })),
+    remember: vi.fn<MemwalLike['remember']>(async () => ({ job_id: 'j', status: 'pending' })),
+    recall: vi.fn<MemwalLike['recall']>(async () => ({ results: [], total: 0 })),
     ...over,
   };
 }
@@ -29,13 +29,15 @@ describe('buildMemwalClient', () => {
   });
 
   it('recall rejects → [] with errored=true', async () => {
-    const sdk = fakeSdk({ recall: vi.fn(async () => { throw new Error('relayer down'); }) });
+    const sdk = fakeSdk({ recall: vi.fn<MemwalLike['recall']>(async () => { throw new Error('relayer down'); }) });
     const c = buildMemwalClient(ENV, { sdk });
     expect(await c.recall('ns', 'q')).toEqual({ results: [], errored: true });
   });
 
   it('recall times out → [] with errored=true within budget', async () => {
-    const sdk = fakeSdk({ recall: vi.fn(() => new Promise(() => {})) }); // never resolves
+    const sdk = fakeSdk({
+      recall: vi.fn<MemwalLike['recall']>(() => new Promise<{ results: RecallMemory[]; total: number }>(() => {})),
+    }); // never resolves
     const c = buildMemwalClient(ENV, { sdk, recallTimeoutMs: 20 });
     const start = Date.now();
     const out = await c.recall('ns', 'q');
