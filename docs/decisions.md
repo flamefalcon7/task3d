@@ -1190,6 +1190,7 @@ The `/api/generate` JWT gate stays — Tripo itself is a paid API, so the cost-p
 - `backend/src/agent/router.ts` — implementation site
 - `shared/src/types.ts` — `RouterDecisionSchema` removed; `Router` + `Generator` interfaces remain
 - `docs/process.md` — refresh after this ADR lands
+- D-081 — reintroduces an LLM at a separate (prompt-authoring) seam for the L2 copilot; does not affect this decision
 
 ---
 
@@ -3635,6 +3636,52 @@ The plan-001 U1 spike (`backend/scripts/memwal-spike.ts`, throwaway) round-tripp
 
 ---
 
+## D-081: Reintroduce an LLM (Gemini) at the prompt-authoring seam for the L2 Riff Copilot
+
+**Status**: Accepted
+**Date**: 2026-06-02
+**Phase**: 4 (Composable Creator Economy) — bonus/stretch
+
+**Relates to**: D-023 (dropped the LLM *router* in the generation-dispatch path — still fully in effect), D-080 (MemWal memory layer this copilot consumes). Does **not** supersede D-023: this LLM lives at a different seam D-023 explicitly left open ("a separate seam … D-023 doesn't constrain it").
+
+### Context
+
+L2 (the conversational Riff Copilot) needs an LLM to run a ≤3-turn elicitation and synthesize a Tripo prompt from the user's MemWal memory. D-023 removed `AnthropicRouter`/`@anthropic-ai/sdk` from the generation-dispatch path because the LLM earned nothing there. L2 is a different surface: it authors the prompt *before* `/api/generate`, leaving dispatch exactly as D-023 left it (`HardcodedRouter` → Tripo, no LLM).
+
+### Decision
+
+Reintroduce an LLM **scoped to the L2 copilot only**, via **Google Gemini** through the Vercel AI SDK (`ai` + `@ai-sdk/google`), called from a backend route (`/api/copilot`) that mirrors `/api/memory`. The API key (`GOOGLE_GENERATIVE_AI_API_KEY`) is backend-only, never `VITE_`-exposed; the browser never calls Gemini. The copilot does **not** use MemWal's `withMemWal` AI middleware in v1 — it assembles memory context from the existing shipped `recall` path (resolves R9: no fact auto-save, no L1 pollution). The generation-dispatch path (D-023) is untouched.
+
+### Rationale
+
+- L2 is a genuine new value seam (memory-aware prompt authoring) — the exact "separate seam" D-023 anticipated, not a re-litigation of the router decision.
+- Gemini (not Anthropic) + a dedicated route keeps the new dependency isolated and the dispatch path clean.
+- Backend-only key honors the repo's documented `VITE_` key-confusion gotcha (same posture as the MemWal delegate key).
+- Avoiding the beta `withMemWal` middleware reduces demo-day failure surface and satisfies R9 by construction.
+
+### Alternatives Considered
+
+- **Use `withMemWal` AI middleware** — auto-injects memory + auto-saves facts. Rejected for v1: adds beta surface and risks polluting the L1 recall namespace (R9); the same provider setup can adopt it later with no rework.
+- **Reuse Anthropic (revert D-023 literally)** — rejected: D-023's dispatch-path removal stands; L2 is a different seam, and Gemini was already chosen at ideation.
+- **Keep L2 LLM-free (templated questions)** — rejected: defeats the "agent that reasons over memory" value and the demo hero shot.
+
+### Consequences
+
+- ✅ New deps `ai` + `@ai-sdk/google` in `backend/` only; key backend-only.
+- ✅ D-023's clean dispatch path and `@anthropic-ai/sdk` removal remain intact.
+- ✅ Fail-soft: missing key or LLM/relayer error → copilot inert, core `/create` unaffected (R10/R13).
+- ⚠️ Pitch may now claim a live LLM **copilot** (prompt authoring), but must NOT claim LLM-routed *generation* — that remains deterministic (D-023 honesty clause preserved).
+- ⚠️ LLM→Tripo synthesis quality is a tuning risk (burns SUI to tune); the user always edits the prompt before generating as a backstop.
+- 🔮 Future upgrade to `withMemWal` middleware reuses this provider setup.
+
+### Related
+
+- D-023, D-080
+- plan: `docs/plans/2026-06-02-002-feat-memwal-l2-conversational-copilot-plan.md`
+- origin: `docs/brainstorms/2026-06-02-memwal-l2-conversational-copilot-requirements.md`
+
+---
+
 # Reserved Decision Numbers
 
-D-081 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-082 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
