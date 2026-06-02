@@ -1,5 +1,37 @@
 # Phase Progress
 
+## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — ideate→brainstorm→plan, NOT yet built)
+
+### Hackathon Tracker
+- Days to submission (6/21): **19**
+- Days to demo day (7/20–21): ~48
+- Days to winners (8/27): ~86
+
+### Where we are (read this first after compact)
+A full **planning-only** session for a **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK, `@mysten-incubation/memwal`, managed testnet relayer `relayer.staging.memwal.ai`, free/sponsored) into `/create`. **No code written.** Ran ideate → brainstorm → plan → ce-doc-review (twice). Captured as **ADR D-080**.
+
+Artifacts (all committed, none built):
+- `docs/ideation/2026-06-02-memwal-integration-ideation.md` — 7 survivors.
+- `docs/brainstorms/2026-06-02-memwal-riff-copilot-requirements.md` — requirements + Global Recall follow-on.
+- `docs/plans/2026-06-02-001-feat-memwal-riff-copilot-l0-l1-plan.md` — **U1–U10**, the operative doc.
+
+**Feature shape (reframed after review — it is a CREATION-RECALL assistant, NOT a "save-SUI déjà-vu guard"):**
+- **Personal recall (U1–U7, must-ship):** on publish, `remember()` the prompt to the user's namespace; `/create` shows "your past prompts" chips (click = fill, strong-match highlight).
+- **Global recall (U8–U10, cuttable next layer):** dual-write non-RESTRICTED prompts to a shared `global` namespace; "from the community" section (click = open model in new tab). Scope-by-policy: **personal = all policies; global excludes RESTRICTED** (PERMISSIONLESS + ALLOW_LIST in).
+- Architecture: **backend proxy** (delegate key in `backend` env, NEVER VITE_; `namespace` = JWT `sub`, hard-fail 401 on unbound); **Gemini** chosen for the (out-of-scope) LLM stretches; fail-soft everywhere.
+
+**Key facts verified from MemWal `dev` source:** no `ask()` method (use `recall`/`remember`/`withMemWal`); testnet via `suiNetwork:"testnet"` + staging relayer (default is mainnet); 1536-dim embeddings; the published prompt is **already public on-chain** (`Model3D.params_json = {prompt}`).
+
+### Next concrete step
+This is a bonus, NOT 6/21 critical path. **Recommended: do NOT `/ce-work` yet** — finish the core (the plan-027/028 stack) first. When ready: `/ce-work docs/plans/2026-06-02-001-feat-memwal-riff-copilot-l0-l1-plan.md`. **U1 is a spike-first unit** (the SDK is not installed; ESM+wasm in Node + the shared `global` namespace are unverified) — that spike gates everything, especially U8–U10.
+
+### Deferred / open (MemWal)
+- The "global = semantic search over already-public data" framing is the weaker half; handle at pitch time (personal = private-memory story; global = discovery layer on Walrus). Not a bug.
+- L2 conversational Gemini copilot + Upload Captioning (GLB→vision→prompt) are captured stretches, unsequenced.
+- Demo-day reliability: managed relayer is beta/no-SLA → plan a pre-recorded clip; global demo needs a curated pool seeded from ≥2 non-presenter wallets (exclude-self trap).
+
+---
+
 ## Last Updated: 2026-06-01 (plan-028 track scene visual polish — SHIPPED on feat/track-visual-polish)
 
 ### Where we are (read this first after compact)

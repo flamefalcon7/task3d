@@ -3574,6 +3574,55 @@ road/grass/barrier `StandardMaterial` → `PBRMaterial`, add a perf-gated
 
 ---
 
+## D-080: Adopt MemWal (Walrus agent-memory SDK) for the Riff Copilot memory layer
+
+**Status**: Accepted
+**Date**: 2026-06-02
+**Phase**: Phase 4 (bonus track; not 6/21 critical path)
+
+### Context
+`/create` is stateless — no prompt history, and Tripo is SUI-fee-gated (D-033/D-034)
+so re-describing a past creation wastes money. We want a Walrus-ecosystem-native,
+demo-legible memory feature rather than a plain vector DB over already-public data.
+
+### Decision
+Adopt `@mysten-incubation/memwal` to add an opt-in, fail-soft memory layer on
+`/create` (L0 capture + L1 recall chips; **amended 2026-06-02: déjà-vu guard
+dropped, reframed as a creation-recall assistant after ce-doc-review; **also adds
+Global Recall (community discovery) via a shared `global` namespace alongside the
+per-user namespace — published prompts are already public on-chain (`params_json`),
+so no opt-in needed** — see plan U8–U10**).
+Use the managed staging
+(testnet) relayer with a single pre-provisioned `MemWalAccount` + delegate key;
+isolate per user by `namespace = wallet address`. Scope L0+L1 for 6/21; defer the L2
+conversational copilot and Upload Captioning as stretches. Pin the SDK version.
+
+### Rationale
+- Genuine use of a flagship Walrus product (track narrative) — not vector-DB-over-public-data.
+- Free on testnet (managed relayer sponsors storage + gas + embeddings).
+- Fail-soft → cannot endanger the core flow.
+- Single-account + namespace keeps user onboarding at zero for the hackathon.
+
+### Alternatives Considered
+- **Real per-user MemWal accounts** — rejected for 6/21 (2 on-chain txs + browser key mgmt); roadmap.
+- **Local LLM on VM** for the stretch generative parts — rejected; use Gemini API (quality/latency).
+- **Plain localStorage history** — rejected: device-local, non-semantic, no Walrus narrative.
+- **Don't integrate MemWal** — viable; it's a bonus and can be cut if core slips.
+
+### Consequences
+- ✅ Demo-legible, on-narrative, ~zero cost on testnet.
+- ⚠️ Memory is deployer-owned (namespace isolation, not true ownership); managed relayer
+  is beta/no-SLA → demo-day reliability risk (mitigate: pre-recorded clip / self-host).
+- ⚠️ New dependency on a beta SDK (pin version; compatibility gate).
+- 🔮 Stretches (L2 copilot, Upload Captioning) + real per-user ownership build on this.
+
+### Related
+- `docs/brainstorms/2026-06-02-memwal-riff-copilot-requirements.md`
+- `docs/ideation/2026-06-02-memwal-integration-ideation.md`
+- D-033 (GLB upload), D-034 (Tripo fee-gating)
+
+---
+
 # Reserved Decision Numbers
 
-D-080 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-081 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
