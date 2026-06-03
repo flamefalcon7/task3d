@@ -999,6 +999,17 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     expect(screen.queryByTestId('prompt-input')).toBeNull();
   });
 
+  it('renders the real Generate gate inside the chat done-state, not duplicated below', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter Chat (done state)
+    const triggers = screen.getAllByTestId('generate-button-trigger');
+    expect(triggers.length).toBe(1); // exactly one SignConfirmation — in the panel, not also below
+    expect(screen.getByTestId('copilot-done')).toBeTruthy();
+  });
+
   it('re-entering Chat after a finished conversation resets it (no second-session dead-end)', () => {
     copilotState.status = 'done';
     copilotState.messages = [

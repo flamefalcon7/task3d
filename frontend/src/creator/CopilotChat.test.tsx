@@ -19,6 +19,7 @@ function panel(over: Partial<Parameters<typeof CopilotChat>[0]> = {}) {
       draftPrompt={over.draftPrompt ?? ''}
       onDraftChange={onDraftChange}
       onStartOver={onStartOver}
+      generateSlot={over.generateSlot}
     />,
   );
   return { onSend, onGenerateNow, onDraftChange, onStartOver };
@@ -91,5 +92,23 @@ describe('CopilotChat', () => {
     const { onStartOver } = panel({ status: 'done', draftPrompt: 'x' });
     fireEvent.click(screen.getByTestId('copilot-start-over'));
     expect(onStartOver).toHaveBeenCalled();
+  });
+
+  it('renders the generateSlot (Generate gate) in the done state', () => {
+    panel({
+      status: 'done',
+      draftPrompt: 'x',
+      generateSlot: <button data-testid="gen-slot">Generate</button>,
+    });
+    expect(screen.getByTestId('gen-slot')).toBeTruthy();
+  });
+
+  it('does NOT render the generateSlot before synthesis (only in done)', () => {
+    panel({
+      status: 'asking',
+      messages: [{ role: 'assistant', content: 'Q?' }],
+      generateSlot: <button data-testid="gen-slot">Generate</button>,
+    });
+    expect(screen.queryByTestId('gen-slot')).toBeNull();
   });
 });

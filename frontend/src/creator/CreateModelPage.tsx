@@ -907,6 +907,22 @@ export function CreateModelPage() {
           ? `GENERATE AGAIN (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
           : `PAY ${Number(TRIPO_FEE_MIST) / 1e9} SUI & GENERATE`;
 
+  // D-053 — pre-sign fee confirmation. Single instance, placed either inside the
+  // copilot panel's done-state (chat mode) or below the textarea (write mode).
+  const generateConfirm = (
+    <SignConfirmation
+      testIdPrefix="generate-button"
+      buttonLabel={generateLabel}
+      disabled={genBusy || !prompt.trim()}
+      summary={[
+        { label: 'Tripo generation fee', amount: `${Number(TRIPO_FEE_MIST) / 1e9} SUI` },
+        { label: 'Estimated gas', amount: '~ 0.001 SUI', muted: true },
+      ]}
+      recipient={{ address: TRIPO_FEE_TREASURY, note: 'TRIPO_FEE_TREASURY (deployer)' }}
+      onConfirm={onGenerate}
+    />
+  );
+
   return (
     <div data-testid="create-page" style={pagePaper}>
       <main style={mainStyle}>
@@ -972,7 +988,7 @@ export function CreateModelPage() {
                   }}
                   style={toggleCell(chatMode)}
                 >
-                  🧠 Chat with Copilot
+                  🧠 Brainstorm with AI
                 </button>
               </div>
             )}
@@ -985,6 +1001,7 @@ export function CreateModelPage() {
                 draftPrompt={prompt}
                 onDraftChange={setPrompt}
                 onStartOver={copilot.reset}
+                generateSlot={generateConfirm}
               />
             ) : (
               <>
@@ -1015,28 +1032,9 @@ export function CreateModelPage() {
               </>
             )}
             <div style={{ marginTop: 12 }}>
-              {/* D-053 — pre-sign confirmation panel before Slush popup. */}
-              <SignConfirmation
-                testIdPrefix="generate-button"
-                buttonLabel={generateLabel}
-                disabled={genBusy || !prompt.trim()}
-                summary={[
-                  {
-                    label: 'Tripo generation fee',
-                    amount: `${Number(TRIPO_FEE_MIST) / 1e9} SUI`,
-                  },
-                  {
-                    label: 'Estimated gas',
-                    amount: '~ 0.001 SUI',
-                    muted: true,
-                  },
-                ]}
-                recipient={{
-                  address: TRIPO_FEE_TREASURY,
-                  note: 'TRIPO_FEE_TREASURY (deployer)',
-                }}
-                onConfirm={onGenerate}
-              />
+              {/* D-053 fee confirm: in chat mode it lives inside the copilot panel
+                  (generateSlot); here it renders for the Write path only. */}
+              {!(chatMode && copilotOn) && generateConfirm}
               {genBusy && (
                 <div style={{ marginTop: 8 }}>
                   <span style={statusPill}>— SUI FEE-GATED · TWO-STEP, ~120S TYPICAL</span>
