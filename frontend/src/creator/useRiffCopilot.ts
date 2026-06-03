@@ -16,11 +16,12 @@ export type CopilotMessage = { role: 'user' | 'assistant'; content: string };
 
 // idle: not started · thinking: request in flight · asking: copilot returned a
 // question, awaiting the user · done: a prompt was synthesized (conversation over)
-// · error: a transient failure (retryable — the feature stays available) · quota:
-// the operator's Gemini quota is exhausted (R6) — the toggle stays VISIBLE with a
-// reset hint and auto-recovers (R7). Distinct from `available:false` (no key → hide,
-// the ONLY hide path, AE7).
-export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done' | 'error' | 'quota';
+// · error: a transient failure (retryable) · quota: the operator's Gemini quota is
+// exhausted (R6) — the toggle stays VISIBLE with a reset hint, auto-recovers (R7) ·
+// unavailable: the backend is keyless / not configured — VISIBLE but the panel shows
+// "AI unavailable" (no auto-recovery). Per D-084 a built feature is NEVER hidden at
+// runtime; the only hide is the build-time VITE_COPILOT_ENABLED flag.
+export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done' | 'error' | 'quota' | 'unavailable';
 
 interface TurnResponse {
   available: boolean;
@@ -136,10 +137,12 @@ export function useRiffCopilot(): UseRiffCopilot {
           });
           const data = res.ok ? ((await res.json()) as TurnResponse) : null;
           if (mySeq !== seq.current || !mounted.current || tokenRef.current !== token) return;
-          // Explicit "off" (no key / INERT) → hide the feature (the ONLY hide path, AE7).
+          // Explicit "off" (no key / INERT) → show a VISIBLE "AI unavailable" panel,
+          // never hide (D-084). `available` stays informational; the page gates on the
+          // build flag, not on this.
           if (data && data.available === false) {
             setAvailable(false);
-            setStatus('idle');
+            setStatus('unavailable');
             return;
           }
           // Quota exhausted (R6) → keep the toggle VISIBLE with a reset hint; the

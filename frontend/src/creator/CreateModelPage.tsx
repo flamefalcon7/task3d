@@ -693,14 +693,17 @@ export function CreateModelPage() {
   // Build-time opt-in (default OFF): the copilot toggle only appears when L2 is
   // explicitly enabled AND the backend reports the LLM available at runtime. This
   // keeps a key-less 6/21 deploy clean — no broken-on-click toggle for judges.
-  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
+  // D-084: gate ONLY on the build flag — a built feature is never hidden at runtime.
+  // Keyless / quota / error all render as VISIBLE degraded states (driven by status),
+  // so an evaluator never mistakes a configured-but-degraded feature for "not built".
+  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true';
   // Upload Captioning (D-082) — vision describe-on-upload. The editable DESCRIPTION
   // field shows for any upload (so a creator can hand-type one even with no key),
   // but the "Describe with AI" button only appears when captioning is available.
   // The caption is written personal-only on mint (R9). Fail-soft throughout (R11).
   const captioner = useUploadCaption();
   const [caption, setCaption] = useState('');
-  const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && captioner.available;
+  const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true'; // D-084 — flag only; never hide on keyless
   // A caption describes ONE specific uploaded model. Clear it (and reset the hook)
   // when the loaded model changes or we leave upload mode, so a stale caption can't
   // ride onto the next mint's params_json / personal-memory write (review:
@@ -1292,16 +1295,23 @@ export function CreateModelPage() {
                     type="button"
                     data-testid="caption-describe"
                     onClick={() => void onDescribe()}
-                    // Disabled while in flight OR while the operator's Gemini quota is
-                    // exhausted (R6) — the button stays VISIBLE (R10), never hidden.
-                    disabled={captioner.status === 'thinking' || captioner.status === 'quota'}
+                    // Disabled while in flight, while quota is exhausted (R6), or while
+                    // keyless/unconfigured (D-084) — the button always stays VISIBLE
+                    // (never hidden at runtime), only its label + enabled state change.
+                    disabled={
+                      captioner.status === 'thinking' ||
+                      captioner.status === 'quota' ||
+                      captioner.status === 'unavailable'
+                    }
                     style={buttonOutline}
                   >
                     {captioner.status === 'thinking'
                       ? 'DESCRIBING…'
                       : captioner.status === 'quota'
                         ? 'AI QUOTA REACHED'
-                        : '🧠 DESCRIBE WITH AI'}
+                        : captioner.status === 'unavailable'
+                          ? 'AI UNAVAILABLE'
+                          : '🧠 DESCRIBE WITH AI'}
                   </button>
                   {captioner.status === 'error' && (
                     <button
@@ -1318,6 +1328,12 @@ export function CreateModelPage() {
                 {captioner.status === 'quota' && (
                   <p data-testid="caption-quota" style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
                     AI quota reached — try again {formatRetryAfter(captioner.retryAfterMs)}.
+                  </p>
+                )}
+                {/* Keyless / not configured (D-084): visible, never hidden; hand-typing stays available. */}
+                {captioner.status === 'unavailable' && (
+                  <p data-testid="caption-unavailable" style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
+                    AI captioning is unavailable right now — you can still type a description above.
                   </p>
                 )}
                 {captioner.status === 'thinking' && (

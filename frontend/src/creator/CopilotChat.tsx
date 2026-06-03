@@ -79,6 +79,9 @@ export function CopilotChat({
   // the input — the feature is visibly degraded, never hidden (R10), and recovers
   // automatically (R7), so there is NO retry button.
   const quota = status === 'quota';
+  // Keyless / not configured (D-084): the panel stays present but shows "AI unavailable"
+  // instead of the input — never hidden at runtime; does NOT auto-recover.
+  const unavailable = status === 'unavailable';
 
   const submit = () => {
     const t = draft.trim();
@@ -129,7 +132,16 @@ export function CopilotChat({
         </div>
       )}
 
-      {!done && !errored && !quota && (
+      {unavailable && (
+        <div
+          data-testid="copilot-unavailable"
+          style={{ display: 'flex', alignItems: 'center', gap: tokens.space[2], marginTop: tokens.space[1] }}
+        >
+          <span style={{ ...microLabel, color: tokens.color.subtle }}>⚠ AI unavailable</span>
+        </div>
+      )}
+
+      {!done && !errored && !quota && !unavailable && (
         <div style={{ display: 'flex', gap: tokens.space[2], marginTop: tokens.space[1] }}>
           <input
             data-testid="copilot-answer-input"

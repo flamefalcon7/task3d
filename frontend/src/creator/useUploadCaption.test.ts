@@ -67,7 +67,7 @@ describe('useUploadCaption', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
   });
 
-  it('available:false response → hides the feature, returns null (AE6)', async () => {
+  it('available:false response → status "unavailable" (visible, never hidden — D-084)', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ available: false }));
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useUploadCaption());
@@ -76,8 +76,10 @@ describe('useUploadCaption', () => {
       out = await result.current.describe(frames(4));
     });
     expect(out).toBeNull();
-    await waitFor(() => expect(result.current.available).toBe(false));
-    expect(result.current.status).toBe('idle');
+    // `available` stays informational (configured:false), but the feature is NOT
+    // hidden — the page renders it disabled via status 'unavailable'.
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(result.current.available).toBe(false);
   });
 
   it('transient failure keeps available, sets error, and retry() re-posts (AE6)', async () => {

@@ -12,11 +12,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession, isJwtExpired } from '../auth/useSession';
 
 // idle: not started · thinking: request in flight · done: a caption came back ·
-// error: a transient failure (retryable — the feature stays available) ·
-// quota: the operator's Gemini quota is exhausted (R6) — the feature stays VISIBLE
-// with a reset hint and auto-recovers when the cooldown passes (R7). Distinct from
-// `available:false`, which is the ONLY hide path (no key — AE7).
-export type CaptionStatus = 'idle' | 'thinking' | 'done' | 'error' | 'quota';
+// error: a transient failure (retryable) · quota: the operator's Gemini quota is
+// exhausted (R6) — VISIBLE with a reset hint, auto-recovers (R7) · unavailable: the
+// backend is keyless / not configured — VISIBLE but disabled with "AI UNAVAILABLE"
+// (does NOT auto-recover). Per D-084 a built feature is NEVER hidden at runtime; the
+// only hide is the build-time VITE_COPILOT_ENABLED flag (this build doesn't ship it).
+export type CaptionStatus = 'idle' | 'thinking' | 'done' | 'error' | 'quota' | 'unavailable';
 
 interface CaptionResponse {
   available: boolean;
@@ -117,10 +118,12 @@ export function useUploadCaption(): UseUploadCaption {
       const data = res.ok ? ((await res.json()) as CaptionResponse) : null;
       // Stale response (a newer describe started, unmount, or token changed) → drop.
       if (mySeq !== seq.current || !mounted.current || tokenRef.current !== token) return null;
-      // Explicit "off" (no key / INERT) → hide the feature (the ONLY hide path, AE7).
+      // Explicit "off" (no key / INERT) → show a VISIBLE "AI UNAVAILABLE" state, never
+      // hide (D-084 — a hidden feature reads as "not built" to an evaluator). `available`
+      // stays as the informational configured-flag; the page no longer hides on it.
       if (data && data.available === false) {
         setAvailable(false);
-        setStatus('idle');
+        setStatus('unavailable');
         return null;
       }
       // Quota exhausted (R6) → stay VISIBLE with a reset hint; auto-recovers (R7).

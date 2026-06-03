@@ -3780,6 +3780,51 @@ Wrap both dependencies in a degradation layer:
 
 ---
 
+## D-084: Never hide a built AI feature at runtime — keyless shows "AI UNAVAILABLE"
+
+**Status**: Accepted
+**Date**: 2026-06-03
+**Phase**: Phase 4 (hardening / demo-readiness)
+**Supersedes**: the keyless-hide aspect of D-081 / D-082 / D-083 (AE7 — "available:false → hide" as the only sanctioned hide)
+
+### Context
+
+D-081/D-082 (and D-083 AE7) made `available:false` (no Gemini key / INERT backend) the one case where the frontend HIDES the Copilot toggle + "Describe with AI" button. The reasoning was "a keyless deploy shouldn't show a broken-on-click control." But the project's overriding principle (and the entire point of the D-083 degradation work) is **report-don't-hide**: a vanished feature reads as *"not built"* to a hackathon evaluator. A hidden control is indistinguishable from an unimplemented one — the worst outcome during judging. (User direction, 2026-06-03, after seeing the keyless path hide the feature in browser verification.)
+
+### Decision
+
+At runtime, **a built AI feature is never hidden** — keyless / not-configured now renders a VISIBLE, disabled state with **"AI UNAVAILABLE"** (Copilot panel: "⚠ AI unavailable"), exactly as quota exhaustion renders "AI QUOTA REACHED". The **only** remaining hide is the **build-time `VITE_COPILOT_ENABLED` flag** = "this build does not ship the feature" (the 6/21 demo build has it ON, so evaluators always see the feature).
+
+- Frontend gating changes from `flag && hook.available` to `flag` only (`CreateModelPage.tsx`).
+- Both Gemini hooks add a `'unavailable'` status (set on the `available:false` response); `available` stays as an informational configured-flag but no longer drives hiding. `unavailable` does NOT auto-recover (unlike `quota`, which does, R7).
+- The **backend contract is unchanged** — it still truthfully returns `{ available:false }` for keyless; only the frontend's *interpretation* changed (show vs hide).
+
+### Rationale
+
+- A keyless deploy showing a clearly-disabled "AI UNAVAILABLE" button is honest and obviously "built but off" — strictly better for an evaluator than a missing control. The DESCRIPTION hand-type field remains available regardless.
+- Distinct copy from quota: keyless is a config state that won't self-heal, so no "retry ~X" / auto-recovery is implied.
+
+### Alternatives Considered
+
+- **Keep keyless → hide (status quo)** — rejected: contradicts report-don't-hide; a judge hitting a keyless surface sees nothing and assumes it's unimplemented.
+- **Make `VITE_COPILOT_ENABLED=false` also show a disabled control** — rejected: that flag means "this build deliberately omits the feature"; surfacing a permanently-dead control there is misleading, and the demo build never uses it.
+- **Reuse "AI QUOTA REACHED" copy for keyless** — rejected: inaccurate (keyless ≠ quota) and falsely implies auto-recovery.
+
+### Consequences
+
+- ✅ No runtime path hides a built AI feature; evaluators always see it (the demo build is flag-on + keyed, so the visible state is the normal one anyway).
+- ✅ Backend untouched; pure frontend reinterpretation + a new `unavailable` status.
+- ⚠️ Reverses AE7 from the brainstorm/D-083; the frontend AE7 tests flip from "hidden" to "visible AI UNAVAILABLE" (the backend `{available:false}` route tests are unchanged).
+- ⚠️ On a keyless deploy the user must click once before the state resolves to `unavailable` (optimistic-then-degrade, same pattern as before); acceptable.
+
+### Related
+
+- D-081, D-082, D-083 (keyless-hide framing this supersedes); the report-don't-hide principle (D-083)
+- Files: `frontend/src/creator/useUploadCaption.ts`, `useRiffCopilot.ts`, `CopilotChat.tsx`, `CreateModelPage.tsx`
+- Browser-verified 2026-06-03: keyless Copilot shows "⚠ AI unavailable" with the toggle still visible (`/tmp/verify-3-keyless-unavailable.png`).
+
+---
+
 # Reserved Decision Numbers
 
-D-084 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-085 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

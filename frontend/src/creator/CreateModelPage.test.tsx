@@ -1079,13 +1079,18 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('caption-describe')).toBeNull();
   });
 
-  it('U5 (D-082): captioning unavailable hides the AI button even with the flag on (AE6)', async () => {
+  it('D-084: keyless captioning stays VISIBLE as "AI UNAVAILABLE" (never hidden), hand-typing still works', async () => {
     vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
     captionState.available = false;
+    captionState.status = 'unavailable';
     render(<CreateModelPage />);
     await uploadToMetadataForm();
-    expect(screen.getByTestId('caption-input')).toBeTruthy();
-    expect(screen.queryByTestId('caption-describe')).toBeNull();
+    expect(screen.getByTestId('caption-input')).toBeTruthy(); // always-on hand-type field
+    const btn = screen.getByTestId('caption-describe') as HTMLButtonElement; // NOT hidden
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/AI UNAVAILABLE/i);
+    expect(screen.getByTestId('caption-unavailable')).toBeTruthy();
   });
 
   it('U7: caption quota → button stays VISIBLE, disabled "AI QUOTA REACHED" + reset hint, no RETRY (R6/R10)', async () => {
@@ -1277,12 +1282,15 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     expect(screen.getByTestId('prompt-input')).toBeTruthy(); // Write is the default
   });
 
-  it('hides the toggle and keeps the plain textarea when the copilot is unavailable (AE7/R13)', () => {
+  it('D-084: keyless copilot stays VISIBLE — toggle shown, panel says "AI unavailable" (never hidden)', () => {
     copilotState.available = false;
+    copilotState.status = 'unavailable';
     render(<CreateModelPage />);
-    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
-    // /create degrades to the shipped Write experience.
-    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+    // Toggle is NOT hidden (gated on the build flag only, not on availability).
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull(); // input replaced by the message
   });
 
   it('clicking "Chat with Copilot" mounts the conversation panel', () => {
