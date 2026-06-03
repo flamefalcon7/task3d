@@ -231,11 +231,16 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         return captureStillsFromScene(engine, camera, count);
       },
       // D-082 — clean (un-watermarked) frames for Upload Captioning vision input.
+      // Unlike captureStills (forker thumbnails), we do NOT re-frame the camera:
+      // the model is already framed from load, vision is robust to framing, and
+      // re-framing would mutate radius/target/limits that captureFramesFromScene
+      // does not restore — losing the user's live orbit (review: julik/correctness).
+      // captureFramesFromScene rotates + restores alpha only, so the user's view is
+      // preserved.
       captureFrames: async (count?: number) => {
         const engine = engineRef.current;
         const camera = sceneRef.current?.activeCamera as ArcRotateCamera | null | undefined;
         if (!engine || !camera) return [];
-        if (meshesRef.current.length > 0) frameCameraToMeshes(camera, meshesRef.current);
         return captureFramesFromScene(engine, camera, count);
       },
     }),

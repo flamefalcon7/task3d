@@ -113,6 +113,32 @@ describe('useUploadCaption', () => {
     expect(result.current.available).toBe(true);
   });
 
+  it('latest-wins: a slow earlier describe never overwrites a newer result', async () => {
+    let resolveFirst!: (r: Response) => void;
+    const first = new Promise<Response>((r) => {
+      resolveFirst = r;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(first) // first call: pending
+      .mockResolvedValueOnce(jsonResponse({ available: true, caption: 'NEWER' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useUploadCaption());
+
+    let firstOut: string | null = 'unset';
+    let secondOut: string | null = 'unset';
+    await act(async () => {
+      const p1 = result.current.describe(frames(3)); // in flight (pending)
+      const p2 = result.current.describe(frames(2)); // newer, supersedes p1
+      secondOut = await p2;
+      resolveFirst(jsonResponse({ available: true, caption: 'STALE' }));
+      firstOut = await p1;
+    });
+    expect(secondOut).toBe('NEWER');
+    expect(firstOut).toBeNull(); // stale response dropped by the seq guard
+    expect(result.current.status).toBe('done');
+  });
+
   it('empty frames → error, no fetch', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

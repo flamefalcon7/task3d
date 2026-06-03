@@ -681,17 +681,46 @@ export function CreateModelPage() {
   const captioner = useUploadCaption();
   const [caption, setCaption] = useState('');
   const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && captioner.available;
+  // A caption describes ONE specific uploaded model. Clear it (and reset the hook)
+  // when the loaded model changes or we leave upload mode, so a stale caption can't
+  // ride onto the next mint's params_json / personal-memory write (review:
+  // correctness + julik — stale-caption-onto-wrong-model).
+  const captionerReset = captioner.reset;
+  useEffect(() => {
+    // Keyed on the GLB bytes (the model identity) + sourceMode: a new upload or a
+    // mode switch produces a fresh `glb` reference, clearing any prior caption.
+    setCaption('');
+    captionerReset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glb, sourceMode]);
+  // Re-entrancy guard: onDescribe awaits captureFrames BEFORE the hook flips to
+  // 'thinking', so the button's disabled state can't prevent a rapid second click
+  // from launching a second capture + paid call. This ref closes that window
+  // across the whole capture→describe span (review: julik + adversarial).
+  const describeInFlight = useRef(false);
   const onDescribe = useCallback(async () => {
-    // Capture clean turntable frames from the live preview; soft no-op if it isn't
-    // ready (the hook/route never sees an empty payload).
-    const frames = (await previewRef.current?.captureFrames()) ?? [];
-    if (frames.length === 0) return;
-    const text = await captioner.describe(frames);
-    if (text) setCaption(text);
+    if (describeInFlight.current) return;
+    describeInFlight.current = true;
+    try {
+      // Capture clean turntable frames from the live preview; soft no-op if it isn't
+      // ready (the hook/route never sees an empty payload).
+      const frames = (await previewRef.current?.captureFrames()) ?? [];
+      if (frames.length === 0) return;
+      const text = await captioner.describe(frames);
+      if (text) setCaption(text);
+    } finally {
+      describeInFlight.current = false;
+    }
   }, [captioner]);
   const onRetryDescribe = useCallback(async () => {
-    const text = await captioner.retry();
-    if (text) setCaption(text);
+    if (describeInFlight.current) return;
+    describeInFlight.current = true;
+    try {
+      const text = await captioner.retry();
+      if (text) setCaption(text);
+    } finally {
+      describeInFlight.current = false;
+    }
   }, [captioner]);
   const signer = useDappKitSigner(account?.address ?? null);
 
@@ -1195,6 +1224,9 @@ export function CreateModelPage() {
               data-testid="caption-input"
               value={caption}
               onChange={(e) => setCaption(e.target.value.slice(0, 1000))}
+              // Locked while a describe is in flight so a slow response can't clobber
+              // an edit the user made mid-request (review: julik edit-during-flight).
+              disabled={captioner.status === 'thinking'}
               placeholder="Describe your model — this makes it findable in your memory. Or let AI draft it from the preview."
               rows={2}
               style={{ ...inputStyle, width: '100%', resize: 'vertical' }}

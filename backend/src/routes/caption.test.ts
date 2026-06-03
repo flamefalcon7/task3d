@@ -87,6 +87,16 @@ describe('POST /api/caption — auth & validation', () => {
     const res = await route.request('/', { method: 'POST', headers: auth(), body: '{not json' });
     expect(res.status).toBe(400);
   });
+
+  it('413 when the body exceeds the size limit BEFORE buffering/parsing (OOM guard)', async () => {
+    const client = fakeCaption();
+    const route = buildCaptionRoute({ jwt: stubJwt, client });
+    // > 3 MB body — rejected by bodyLimit middleware before the handler/zod runs.
+    const big = 'x'.repeat(3 * 1024 * 1024 + 1024);
+    const res = await post(route, { frames: [{ base64: big, mediaType: 'image/webp' }] });
+    expect(res.status).toBe(413);
+    expect(client.caption).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/caption — behavior', () => {

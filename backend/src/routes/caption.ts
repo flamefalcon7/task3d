@@ -11,6 +11,7 @@
 // Per R6 the request carries IMAGES ONLY — the schema has no filename / mesh /
 // text-hint field, so no misleading text can reach the model.
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import type { JwtSigner } from '../lib/jwt.js';
@@ -49,6 +50,12 @@ export const MAX_FRAMES = 6;
 // A 512px WebP frame is a few KB → ~tens of KB base64. Cap generously but bounded
 // so a single request can't ship multi-MB blobs (R13). 400k chars ≈ 300 KB binary.
 const BASE64_MAX = 400_000;
+// Hard request-body ceiling, enforced BEFORE the body is buffered/parsed (review:
+// adversarial — c.req.json() buffers the whole body first, so the zod caps alone
+// can't stop an oversized payload from being allocated). Sized to cover the worst
+// in-spec body (MAX_FRAMES × BASE64_MAX + JSON overhead ≈ 2.4 MB) with headroom.
+// Mirrors collection.ts's bodyLimit posture.
+const MAX_BODY_BYTES = 3 * 1024 * 1024;
 
 const frameSchema = z.object({
   base64: z.string().min(1).max(BASE64_MAX),
@@ -86,7 +93,11 @@ export function buildCaptionRoute(deps: CaptionRouteDeps) {
     return normalizeSuiAddress(sub);
   }
 
-  route.post('/', async (c) => {
+  route.post(
+    '/',
+    // Reject oversized bodies before buffering/parsing (review: adversarial OOM).
+    bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: 'payload_too_large' }, 413) }),
+    async (c) => {
     const ns = await bindNamespace(c);
     if (ns instanceof Response) return ns;
     if (rateLimited(ns)) return c.json({ error: 'rate_limited' }, 429);
@@ -122,7 +133,8 @@ export function buildCaptionRoute(deps: CaptionRouteDeps) {
       c.header('x-caption-degraded', '1');
       return c.json({ available: true, error: 'unavailable', retryable: true });
     }
-  });
+    },
+  );
 
   return route;
 }

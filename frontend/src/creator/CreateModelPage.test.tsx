@@ -999,6 +999,25 @@ describe('CreateModelPage', () => {
     expect(captionDescribeMock).not.toHaveBeenCalled();
   });
 
+  it('U5 (D-082): a new upload clears a prior caption (no stale caption onto the wrong model)', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'model A caption' } });
+    expect((screen.getByTestId('caption-input') as HTMLTextAreaElement).value).toBe('model A caption');
+    // Upload a different GLB → fresh `glb` reference → the prior caption is cleared.
+    await uploadGlb('model-b.glb');
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+    expect((screen.getByTestId('caption-input') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('U5 (D-082): the description field is locked while a describe is in flight (no edit clobber)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.status = 'thinking';
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    expect((screen.getByTestId('caption-input') as HTMLTextAreaElement).disabled).toBe(true);
+  });
+
   it('U5 (D-082): Tripo mode shows no caption section (R14)', async () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
