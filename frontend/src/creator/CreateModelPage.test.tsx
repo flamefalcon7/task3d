@@ -274,6 +274,27 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+// URL-aware fetch mock for the Tripo flow (U6): the generate flow now pre-flights
+// (GET /api/generate/preflight) BEFORE charging, then POSTs /api/generate. The
+// pre-flight answers available:true by default; pass overrides to exercise the
+// blocked-before-pay path and classified post-payment errors.
+function tripoFetchMock(opts: { preflight?: () => Response; generate?: () => Response } = {}) {
+  const okGlb = () =>
+    new Response(JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const okPreflight = () =>
+    new Response(JSON.stringify({ available: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  return vi.fn(async (url: string | URL) => {
+    if (String(url).includes('/api/generate/preflight')) return (opts.preflight ?? okPreflight)();
+    return (opts.generate ?? okGlb)();
+  });
+}
+
 describe('CreateModelPage', () => {
   it('gates on sign-in when there is no session', () => {
     useSessionMock.mockReturnValue({ session: null });
@@ -296,15 +317,7 @@ describe('CreateModelPage', () => {
 
   it('pays then generates, showing a preview + confirm step (Tripo path)', async () => {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
-    );
+    vi.stubGlobal('fetch', tripoFetchMock());
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
@@ -328,11 +341,16 @@ describe('CreateModelPage', () => {
     const signOrder = signAndExecuteMock.mock.invocationCallOrder[0]!;
     const waitOrder = waitForTransactionMock.mock.invocationCallOrder[0]!;
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-    const fetchOrder = fetchMock.mock.invocationCallOrder[0]!;
+    // The generate POST is the call to /api/generate carrying a body — distinct from
+    // the pre-flight (a bodyless GET to /api/generate/preflight, which fires first).
+    const genCallIndex = fetchMock.mock.calls.findIndex(
+      (c) => String(c[0]).endsWith('/api/generate') && (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(genCallIndex).toBeGreaterThanOrEqual(0);
+    const genOrder = fetchMock.mock.invocationCallOrder[genCallIndex]!;
     expect(signOrder).toBeLessThan(waitOrder);
-    expect(waitOrder).toBeLessThan(fetchOrder);
-    const firstCall = fetchMock.mock.calls[0]!;
-    const body = JSON.parse((firstCall[1] as RequestInit).body as string);
+    expect(waitOrder).toBeLessThan(genOrder); // waitForTransaction before the generate POST
+    const body = JSON.parse((fetchMock.mock.calls[genCallIndex]![1] as RequestInit).body as string);
     expect(body).toMatchObject({ prompt: 'a sword', paymentDigest: 'PAYDIGEST123' });
     expect(screen.getByTestId('confirm-model')).toBeTruthy();
   });
@@ -357,17 +375,103 @@ describe('CreateModelPage', () => {
     expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
   });
 
-  it('offers all three policies (Open/Allow-list/Restricted), defaulting to Open (D-076)', async () => {
+  // ----- U6: pre-flight before pay + classified generate errors (R1/R2/R3/R10) -----
+
+  async function clickGenerate() {
+    render(<CreateModelPage />);
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
+    });
+  }
+
+  it('AE1: pre-flight available:false blocks payment — no signAndExecute, visible message (R1/R10)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'SHOULD_NOT_BE_CALLED' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        preflight: () =>
+          new Response(JSON.stringify({ available: false, reason: 'insufficient' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    expect(signAndExecuteMock).not.toHaveBeenCalled(); // R1 — never charged
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/temporarily unavailable/i);
+  });
+
+  it('pre-flight network failure → treated as unavailable (no charge), distinct message', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'SHOULD_NOT_BE_CALLED' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        preflight: () => {
+          throw new Error('network down');
+        },
+      }),
+    );
+    await clickGenerate();
+    expect(signAndExecuteMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/couldn't check generation availability/i);
+  });
+
+  it('AE3: a refundable post-payment failure shows the "fee may be refundable" copy (R3)', async () => {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'tripo_failed', refundable: true }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
     );
+    await clickGenerate();
+    expect(signAndExecuteMock).toHaveBeenCalledTimes(1); // payment WAS made
+    await waitFor(() => expect(screen.getByTestId('gen-error').textContent).toMatch(/may be refundable/i));
+  });
+
+  it('tripo_unavailable (operator outage) maps to the temporary-unavailable message', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'tripo_unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    await waitFor(() => expect(screen.getByTestId('gen-error').textContent).toMatch(/temporarily unavailable/i));
+    expect(screen.getByTestId('gen-error').textContent).not.toMatch(/refundable/i);
+  });
+
+  it('a 401 during generate clears the session (re-gates to sign-in)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'auth_invalid' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    await waitFor(() => expect(clearSessionMock).toHaveBeenCalled());
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
+  });
+
+  it('offers all three policies (Open/Allow-list/Restricted), defaulting to Open (D-076)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal('fetch', tripoFetchMock());
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
@@ -646,15 +750,7 @@ describe('CreateModelPage', () => {
 
   async function generateAndConfirmTripoModel() {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
-    );
+    vi.stubGlobal('fetch', tripoFetchMock());
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
     fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
