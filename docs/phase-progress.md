@@ -1,8 +1,36 @@
 # Phase Progress
 
-## Last Updated: 2026-06-02 (MemWal **L2 conversational copilot — U1–U7 BUILT**; same branch `feat/memwal-riff-copilot`, not merged)
+## Last Updated: 2026-06-03 (MemWal **Upload Captioning — U1–U6 BUILT**; branch `feat/memwal-upload-captioning` off `main`)
 
 ### Hackathon Tracker
+- Days to submission (6/21): **18**
+- Days to demo day (7/20–21): ~47
+- Days to winners (8/27): ~85
+
+### MemWal Upload Captioning (BUILT, branch `feat/memwal-upload-captioning`, NOT merged)
+Ran the remaining MemWal stretch: brainstorm → plan → `/ce-work`. **ADR D-082** (extends D-081's prompt-authoring LLM seam from text→text to **vision/image→text**; does NOT touch D-023's LLM-free dispatch). Plan: `docs/plans/2026-06-03-001-feat-memwal-upload-captioning-plan.md`. Origin: `docs/brainstorms/2026-06-03-memwal-upload-captioning-requirements.md` (R1–R14, AE1–AE7).
+
+**What it is:** an opt-in **"Describe with AI"** button on `/create` **upload** mode. Captures 3–4 clean (un-watermarked) turntable frames from the Babylon preview → POSTs base64 WebP (images only, **no filename/mesh text hints** — they mislead vision) to a new JWT-authed `/api/caption` route → Gemini `gemini-2.5-flash` (multimodal, **reuses the L2 key + `VITE_COPILOT_ENABLED` gate**, no new dep/key) → short low-poly description into an **editable** field. On mint, a captioned upload writes the caption **personal-only** to MemWal (no global mirror — AI guesses stay out of the human-authored community pool) + `params_json = { source:'upload', caption }`. An always-on DESCRIPTION field lets creators hand-type even with no key. Fail-soft throughout: no key / capture failure / model error → upload→mint unchanged, no caption. Closes the memory-story gap (uploads were invisible to recall).
+
+**Units (per-commit, conventional, D-082-tagged):**
+- **U1** `backend/src/lib/caption-client.ts` — Gemini vision single-shot; INERT without key; `CaptionDegradedError`; clamps ≤1000; `generate` seam for tests. (9 tests)
+- **U2** `backend/src/routes/caption.ts` (`/api/caption`) — mirrors copilot.ts: JWT bindNamespace (hard-401), per-address limiter (30/min), zod frames schema (min1/max6, base64 bounded, mediaType literal `image/webp` — **no text field**), INERT→`{available:false}`+`x-caption-degraded`, transient→`{available:true,retryable:true}` (never 5xx/leak). Registered in `app.ts`. (12 tests)
+- **U3** `captureStills.ts` clean variant (`frameStill` no-watermark + `captureFramesFromScene` + `CAPTION_FRAME_COUNT=4`) + `PreviewCanvasHandle.captureFrames`; watermarked publish path untouched. (5 tests)
+- **U4** `frontend/src/creator/useUploadCaption.ts` — single-shot describe hook; token/seq/mounted guards (StrictMode re-assert), `{available:false}`→hide, transient→error+retry, base64-encode frames. (6 tests)
+- **U5** CreateModelPage wiring — DESCRIPTION field + "Describe with AI" button in upload mode (gated `VITE_COPILOT_ENABLED && captioner.available`), `previewRef.captureFrames()`→describe→fill, IndeterminateBar on wait, `params_json` + personal-only remember branch (no `policy`). (7 new tests)
+- **U6** ADR D-082 + `.env.example` (CAPTION_MODEL note) + this block.
+
+**Tests:** backend **221 green**, backend tsc clean (pre-existing 2 errors in `glb.ts` unrelated). Frontend **990 green** (2 pre-existing skips), frontend tsc **clean**.
+
+**5-reviewer pass DONE** (correctness/testing/api-contract/adversarial/julik-races). Fixed: **bodyLimit(3 MB) on /api/caption** (was: `c.req.json()` buffered full body before zod caps → OOM vector); **clear caption + `captioner.reset()` on `glb`/sourceMode change** (was: a stale caption could ride onto the next model's `params_json` + personal-memory write — data-integrity, flagged by 2 reviewers); **`describe()` re-entrancy guard** + **textarea locked while `thinking`** (was: rapid clicks fired duplicate paid calls; a slow response could clobber a mid-flight edit); **skip `frameCameraToMeshes` in the caption capture** (was: re-frame mutated radius/target/limits that only-alpha-restore left lost — killed the camera race + pose loss). Added tests: 413 oversized body, latest-wins stale-drop, stale-caption-cleared-on-reupload, edit-lock-while-thinking. **Accepted (pre-existing/hackathon-scope, shared with copilot.ts):** per-address-only limiter + shared-key fan-out (no global key cap), rate-limit map no sweep, quota-vs-transient not distinguished, `frameStill`/`captureFrames` browser-only fns tested via DI seam not directly.
+
+**BROWSER-VERIFIED (2026-06-03, headed Chromium via agent-browser + user manual check):** sign-in → upload mode → GLB upload → preview render → DESCRIPTION field + "DESCRIBE WITH AI" button (design-token aligned) → click → `captureFrames` (real WebGL) → POST `/api/caption` → Gemini → accurate caption filled (e.g. "Low-poly game asset of a white classic pickup truck, slightly lifted with an empty bed and chunky black tires"); "DESCRIBING…" label + textarea disabled during the call (edit-lock verified live); caption editable after; no console errors. Backend+Gemini path also confirmed standalone (real WebP → 200 + accurate caption). NOTE: headless Chromium can't drive it (Babylon `Tools.CreateScreenshotAsync` needs real WebGL → `captureFrames` returns [] → fail-soft no-op; correct behavior). D-082 **Accepted**. Merged to `main`.
+
+---
+
+### (prior) MemWal L2 — merged to `main` 2026-06-03 via `aa509da`. Snapshot below.
+
+### Hackathon Tracker (L2 snapshot)
 - Days to submission (6/21): **19**
 - Days to demo day (7/20–21): ~48
 - Days to winners (8/27): ~86

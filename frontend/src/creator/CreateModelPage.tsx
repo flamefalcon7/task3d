@@ -31,6 +31,7 @@ import { PromptMemoryChips } from './PromptMemoryChips';
 import { CommunityRecall } from './CommunityRecall';
 import { CopilotChat } from './CopilotChat';
 import { useRiffCopilot } from './useRiffCopilot';
+import { useUploadCaption } from './useUploadCaption';
 import { IndeterminateBar } from '../ux/IndeterminateBar';
 import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
@@ -673,6 +674,54 @@ export function CreateModelPage() {
   // explicitly enabled AND the backend reports the LLM available at runtime. This
   // keeps a key-less 6/21 deploy clean — no broken-on-click toggle for judges.
   const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
+  // Upload Captioning (D-082) — vision describe-on-upload. The editable DESCRIPTION
+  // field shows for any upload (so a creator can hand-type one even with no key),
+  // but the "Describe with AI" button only appears when captioning is available.
+  // The caption is written personal-only on mint (R9). Fail-soft throughout (R11).
+  const captioner = useUploadCaption();
+  const [caption, setCaption] = useState('');
+  const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && captioner.available;
+  // A caption describes ONE specific uploaded model. Clear it (and reset the hook)
+  // when the loaded model changes or we leave upload mode, so a stale caption can't
+  // ride onto the next mint's params_json / personal-memory write (review:
+  // correctness + julik — stale-caption-onto-wrong-model).
+  const captionerReset = captioner.reset;
+  useEffect(() => {
+    // Keyed on the GLB bytes (the model identity) + sourceMode: a new upload or a
+    // mode switch produces a fresh `glb` reference, clearing any prior caption.
+    setCaption('');
+    captionerReset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glb, sourceMode]);
+  // Re-entrancy guard: onDescribe awaits captureFrames BEFORE the hook flips to
+  // 'thinking', so the button's disabled state can't prevent a rapid second click
+  // from launching a second capture + paid call. This ref closes that window
+  // across the whole capture→describe span (review: julik + adversarial).
+  const describeInFlight = useRef(false);
+  const onDescribe = useCallback(async () => {
+    if (describeInFlight.current) return;
+    describeInFlight.current = true;
+    try {
+      // Capture clean turntable frames from the live preview; soft no-op if it isn't
+      // ready (the hook/route never sees an empty payload).
+      const frames = (await previewRef.current?.captureFrames()) ?? [];
+      if (frames.length === 0) return;
+      const text = await captioner.describe(frames);
+      if (text) setCaption(text);
+    } finally {
+      describeInFlight.current = false;
+    }
+  }, [captioner]);
+  const onRetryDescribe = useCallback(async () => {
+    if (describeInFlight.current) return;
+    describeInFlight.current = true;
+    try {
+      const text = await captioner.retry();
+      if (text) setCaption(text);
+    } finally {
+      describeInFlight.current = false;
+    }
+  }, [captioner]);
   const signer = useDappKitSigner(account?.address ?? null);
 
   // When the copilot synthesizes a prompt, write it into the shared prompt state
@@ -878,7 +927,13 @@ export function CreateModelPage() {
       const commonArgs = {
         blobObjectId: glbBlob.blobObjectId,
         shapeType: sourceMode,
-        paramsJson: JSON.stringify(sourceMode === 'tripo' ? { prompt } : { source: 'upload' }),
+        paramsJson: JSON.stringify(
+          sourceMode === 'tripo'
+            ? { prompt }
+            : caption.trim()
+              ? { source: 'upload', caption: caption.trim() } // D-082 — captioned upload
+              : { source: 'upload' }, // R10 — no placeholder when uncaptioned
+        ),
         name: name.trim(),
         tags,
         lineageBlobId: glbBlob.blobId,
@@ -929,12 +984,33 @@ export function CreateModelPage() {
             /* fail-soft — memory must never disturb publish */
           }
         })();
+      } else if (sourceMode === 'upload' && caption.trim()) {
+        // D-082 — bring captioned uploads into memory. PERSONAL-ONLY: no `policy`
+        // arg means memoryWrites skips the global mirror (R9 — an AI caption is a
+        // guess, the shared pool stays human-authored). Same fail-soft path.
+        const digest = result.digest;
+        const captionAtPublish = caption.trim();
+        void (async () => {
+          try {
+            await suiClient.waitForTransaction({ digest });
+            const tb = await suiClient.getTransactionBlock({
+              digest,
+              options: { showObjectChanges: true },
+            });
+            const modelId = extractCreatedModelId(tb.objectChanges ?? []);
+            if (modelId) {
+              void rememberCreation({ prompt: captionAtPublish, modelId });
+            }
+          } catch {
+            /* fail-soft — memory must never disturb publish */
+          }
+        })();
       }
     } catch (e) {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, caption, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
 
   if (!session) {
     return (
@@ -1140,6 +1216,51 @@ export function CreateModelPage() {
         <div style={viewerWellSized}>
           {haveModel ? <PreviewCanvas ref={previewRef} glbUrl={glbUrl} /> : <WireframePlaceholder />}
         </div>
+
+        {sourceMode === 'upload' && haveModel && (
+          <div data-testid="caption-section" style={{ marginTop: 16 }}>
+            <span style={sectionLabel}>DESCRIPTION</span>
+            <textarea
+              data-testid="caption-input"
+              value={caption}
+              onChange={(e) => setCaption(e.target.value.slice(0, 1000))}
+              // Locked while a describe is in flight so a slow response can't clobber
+              // an edit the user made mid-request (review: julik edit-during-flight).
+              disabled={captioner.status === 'thinking'}
+              placeholder="Describe your model — this makes it findable in your memory. Or let AI draft it from the preview."
+              rows={2}
+              style={{ ...inputStyle, width: '100%', resize: 'vertical' }}
+            />
+            {captionOn && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    data-testid="caption-describe"
+                    onClick={() => void onDescribe()}
+                    disabled={captioner.status === 'thinking'}
+                    style={buttonOutline}
+                  >
+                    {captioner.status === 'thinking' ? 'DESCRIBING…' : '🧠 DESCRIBE WITH AI'}
+                  </button>
+                  {captioner.status === 'error' && (
+                    <button
+                      type="button"
+                      data-testid="caption-retry"
+                      onClick={() => void onRetryDescribe()}
+                      style={buttonOutline}
+                    >
+                      ⚠ RETRY
+                    </button>
+                  )}
+                </div>
+                {captioner.status === 'thinking' && (
+                  <IndeterminateBar testId="caption-progress" ariaLabel="Describing model…" />
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {haveModel && sourceMode === 'tripo' && !confirmed && (
           <div style={{ marginTop: 16 }}>

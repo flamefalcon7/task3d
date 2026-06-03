@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { captureStillsWith, DEFAULT_STILL_COUNT } from './captureStills';
+import { captureStillsWith, DEFAULT_STILL_COUNT, CAPTION_FRAME_COUNT } from './captureStills';
 
 // Lockstep guard: capturing more preview stills than the contract's
 // MAX_PREVIEW_BLOBS aborts ETooManyPreviews (code 44) at publish. Keep this in
@@ -42,5 +42,30 @@ describe('captureStillsWith', () => {
     expect(out).toEqual([]);
     expect(screenshot).not.toHaveBeenCalled();
     expect(watermark).not.toHaveBeenCalled();
+  });
+});
+
+// D-082 Upload Captioning clean-frame path. `captureFramesFromScene`/`frameStill`
+// are browser-only (canvas WebP encode); like `captureStillsFromScene`/
+// `watermarkStill` they're exercised through the DI seam here, modeling the clean
+// (no-stamp) encoder as a passthrough that returns the screenshot bytes untouched.
+describe('CAPTION_FRAME_COUNT', () => {
+  it('is a small positive count (a few angles, not the full 8-blob turntable)', () => {
+    expect(CAPTION_FRAME_COUNT).toBeGreaterThan(0);
+    expect(CAPTION_FRAME_COUNT).toBeLessThanOrEqual(DEFAULT_STILL_COUNT);
+  });
+
+  it('clean path reuses the turntable orchestration without a watermark step', async () => {
+    const screenshot = vi.fn(async (alpha: number) => `data:image/webp;base64,clean-${alpha}`);
+    // Passthrough encoder = the clean variant: bytes derived straight from the
+    // screenshot, no text stamped on top.
+    const cleanEncode = vi.fn(async (dataUrl: string) => new TextEncoder().encode(dataUrl));
+
+    const out = await captureStillsWith(CAPTION_FRAME_COUNT, 0, { screenshot, watermark: cleanEncode });
+
+    expect(out).toHaveLength(CAPTION_FRAME_COUNT);
+    expect(screenshot).toHaveBeenCalledTimes(CAPTION_FRAME_COUNT);
+    // Order preserved; each frame is the unmodified screenshot output.
+    expect(new TextDecoder().decode(out[0])).toBe('data:image/webp;base64,clean-0');
   });
 });

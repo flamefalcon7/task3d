@@ -19,7 +19,7 @@ import { BgTogglePill } from './BgTogglePill';
 import { applyCanvasMode } from './applyCanvasMode';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
 import { ModeTogglePill } from './ModeTogglePill';
-import { captureStillsFromScene } from './captureStills';
+import { captureStillsFromScene, captureFramesFromScene } from './captureStills';
 
 // plan-015 U2 — accent color hex inlined here so the mode/highlight effect
 // doesn't need to round-trip through the ux/tokens module. Matches
@@ -137,6 +137,13 @@ export interface PreviewCanvasHandle {
    * ready). MUST be called before `dispose()` / the encrypt+upload window.
    */
   captureStills(count?: number): Promise<Uint8Array[]>;
+  /**
+   * D-082 — capture `count` CLEAN (un-watermarked) turntable frames from the
+   * current scene for Upload Captioning vision input. Returns WebP byte arrays
+   * (empty if the engine/camera aren't ready). Distinct from `captureStills`,
+   * which watermarks for the encrypted-base preview path.
+   */
+  captureFrames(count?: number): Promise<Uint8Array[]>;
 }
 
 // Imperative Babylon wrapper (D-007: drop react-babylonjs). Engine creation
@@ -222,6 +229,19 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         // regardless of wherever the user left the on-screen orbit/zoom.
         if (meshesRef.current.length > 0) frameCameraToMeshes(camera, meshesRef.current);
         return captureStillsFromScene(engine, camera, count);
+      },
+      // D-082 — clean (un-watermarked) frames for Upload Captioning vision input.
+      // Unlike captureStills (forker thumbnails), we do NOT re-frame the camera:
+      // the model is already framed from load, vision is robust to framing, and
+      // re-framing would mutate radius/target/limits that captureFramesFromScene
+      // does not restore — losing the user's live orbit (review: julik/correctness).
+      // captureFramesFromScene rotates + restores alpha only, so the user's view is
+      // preserved.
+      captureFrames: async (count?: number) => {
+        const engine = engineRef.current;
+        const camera = sceneRef.current?.activeCamera as ArcRotateCamera | null | undefined;
+        if (!engine || !camera) return [];
+        return captureFramesFromScene(engine, camera, count);
       },
     }),
     [],

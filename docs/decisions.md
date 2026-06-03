@@ -3676,12 +3676,59 @@ Reintroduce an LLM **scoped to the L2 copilot only**, via **Google Gemini** thro
 
 ### Related
 
-- D-023, D-080
+- D-023, D-080, D-082 (extends this seam to vision/image→text for upload captioning)
 - plan: `docs/plans/2026-06-02-002-feat-memwal-l2-conversational-copilot-plan.md`
 - origin: `docs/brainstorms/2026-06-02-memwal-l2-conversational-copilot-requirements.md`
 
 ---
 
+## D-082: Extend the prompt-authoring LLM seam to vision (image→text) for Upload Captioning
+
+**Status**: Accepted
+**Date**: 2026-06-03
+**Phase**: 4 (Composable Creator Economy) — bonus/stretch
+
+**Relates to**: D-081 (same prompt-authoring seam, text→text; this extends it to image→text), D-080 (the MemWal memory layer captioned uploads now enter), D-033 (GLB upload as a content source). Does **not** affect D-023 (generation dispatch stays LLM-free).
+
+### Context
+
+Uploaded GLBs publish as `params_json = { source: 'upload' }` with no text (`CreateModelPage.tsx`), so they can never surface in MemWal recall, seed the copilot, or be riffed — the one gap in the D-080/D-081 memory story. The wired `gemini-2.5-flash` is already multimodal, so the same backend seam D-081 opened (LLM authoring a prompt *before* `/api/generate`) can describe an uploaded model from snapshots with no new dependency or key.
+
+### Decision
+
+Add an **opt-in** "Describe with AI" capability on `/create` upload mode: the frontend captures 3–4 clean (un-watermarked) turntable frames from the Babylon preview and POSTs them (base64 WebP, **images only** — no filename/mesh text) to a new JWT-authed backend route (`/api/caption`) that calls Gemini vision and returns a short low-poly description into an **editable** field. On a successful mint of a captioned upload, the (edited) caption is written **personal-only** to MemWal (no global mirror) and stored in `params_json` as `{ source: 'upload', caption }`. Reuses the same backend-only `GOOGLE_GENERATIVE_AI_API_KEY` and the `VITE_COPILOT_ENABLED` gate. Fail-soft throughout: no key / capture failure / model error → the upload→mint flow is unchanged, no caption written.
+
+### Rationale
+
+- Closes the memory-story gap (uploads become recall-able) reusing shipped infra (`captureStills`, copilot client/route patterns, the remember-on-publish path) — minimal new surface.
+- **Images only, no text hints**: a wrong/non-semantic filename or generator mesh name (`segmentation_1`) misleads vision more than it helps; multi-frame + the human-editable field are the recognition design, not text priors.
+- **Personal-only**: an AI caption is a guess, not human-authored — keep the shared community recall pool human-authored (deliberately unlike prompt write-back, which mirrors non-RESTRICTED prompts globally).
+- **Not SUI-fee-gated** (unlike Tripo, D-034): captioning dispatches no generation; it is a read, mirroring the copilot's rate-limited-only posture.
+
+### Alternatives Considered
+
+- **Auto-caption on file drop** — rejected: fires a paid call on every upload (incl. abandoned), removes user agency; opt-in button instead.
+- **Feed filename / mesh names as text hints** — rejected for v1 (they mislead); revisit only behind a strict "weak hint, ignore if it conflicts with the image" fence if pure vision proves weak.
+- **Mirror captions to the global pool like prompts** — rejected: dilutes the human-authored community pool with model guesses.
+- **Single snapshot** — rejected: single-view low-poly shapes are ambiguous; 3–4 turntable frames in one multimodal call cost ~nothing and cut misses.
+
+### Consequences
+
+- ✅ No new dependency or key (reuses `ai` + `@ai-sdk/google` + the existing Gemini key); `gemini-2.5-flash` multimodal.
+- ✅ Additive `params_json` shape `{ source: 'upload', caption }`; uncaptioned uploads unchanged (`{ source: 'upload' }`, no placeholder).
+- ✅ Fail-soft: key-less deploy hides the button (same `VITE_COPILOT_ENABLED` gate); transient errors keep it visible + offer retry; core flow never breaks.
+- ⚠️ Caption records share the personal namespace with Tripo prompts and surface as pickable recall chips — intended (uploads become riffable), but means an AI guess can appear as a future prompt suggestion.
+- ⚠️ Vision recognition quality is a tuning risk; the editable field is the explicit human backstop.
+- 🔮 Frame-angle / system-prompt tuning and a shared JWT-bind/limiter helper extraction are deferred follow-ups.
+
+### Related
+
+- D-081, D-080, D-033, D-034
+- plan: `docs/plans/2026-06-03-001-feat-memwal-upload-captioning-plan.md`
+- origin: `docs/brainstorms/2026-06-03-memwal-upload-captioning-requirements.md`
+
+---
+
 # Reserved Decision Numbers
 
-D-082 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-083 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
