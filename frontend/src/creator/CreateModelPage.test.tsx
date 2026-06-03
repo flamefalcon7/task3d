@@ -62,6 +62,9 @@ vi.mock('../walrus/useWalrusUpload', () => ({
 // forwards a ref exposing a stubbed captureStills so the ALLOW_LIST preview path
 // can be driven without Babylon/WebGL.
 const captureStillsMock = vi.hoisted(() => vi.fn(async (): Promise<Uint8Array[]> => []));
+// D-082 — clean frames for Upload Captioning. Default: one non-empty frame so the
+// describe path runs; tests override to [] to drive the preview-not-ready no-op.
+const captureFramesMock = vi.hoisted(() => vi.fn(async (): Promise<Uint8Array[]> => [new Uint8Array([1, 2, 3])]));
 vi.mock('../babylon/PreviewCanvas', () => {
   const React = require('react') as typeof import('react');
   return {
@@ -69,7 +72,12 @@ vi.mock('../babylon/PreviewCanvas', () => {
       ({ glbUrl }: { glbUrl: string | null }, ref: React.Ref<unknown>) => {
         React.useImperativeHandle(
           ref,
-          () => ({ dispose: () => {}, remount: () => {}, captureStills: captureStillsMock }),
+          () => ({
+            dispose: () => {},
+            remount: () => {},
+            captureStills: captureStillsMock,
+            captureFrames: captureFramesMock,
+          }),
           [],
         );
         return <div data-testid="preview-canvas-mock">{glbUrl ?? 'no url'}</div>;
@@ -77,6 +85,27 @@ vi.mock('../babylon/PreviewCanvas', () => {
     ),
   };
 });
+
+// D-082 — controllable Upload Captioning hook so the button gate, describe→fill,
+// and degraded paths can be driven without a backend. The editable DESCRIPTION
+// field is independent of this hook (it's plain state), so memory/params_json
+// tests drive it by typing directly.
+const captionState = vi.hoisted(() => ({
+  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error',
+  available: true,
+}));
+const captionDescribeMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => 'low-poly red truck'));
+const captionRetryMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
+const captionResetMock = vi.hoisted(() => vi.fn());
+vi.mock('./useUploadCaption', () => ({
+  useUploadCaption: () => ({
+    status: captionState.status,
+    available: captionState.available,
+    describe: captionDescribeMock,
+    retry: captionRetryMock,
+    reset: captionResetMock,
+  }),
+}));
 
 // plan-013 — capture buildPublishPtb args so we can assert partLabels reach
 // the PTB boundary in the right position. Pay-for-API is also mocked since
@@ -206,6 +235,15 @@ beforeEach(() => {
   });
   captureStillsMock.mockReset();
   captureStillsMock.mockResolvedValue([]);
+  captureFramesMock.mockReset();
+  captureFramesMock.mockResolvedValue([new Uint8Array([1, 2, 3])]);
+  captionState.status = 'idle';
+  captionState.available = true;
+  captionDescribeMock.mockReset();
+  captionDescribeMock.mockResolvedValue('low-poly red truck');
+  captionRetryMock.mockReset();
+  captionRetryMock.mockResolvedValue(null);
+  captionResetMock.mockReset();
   buildPayForApiCallPtbMock.mockReset();
   buildPayForApiCallPtbMock.mockReturnValue({
     tx: {},
@@ -231,7 +269,10 @@ beforeEach(() => {
     revokeObjectURL: vi.fn(),
   }));
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe('CreateModelPage', () => {
   it('gates on sign-in when there is no session', () => {
@@ -851,6 +892,117 @@ describe('CreateModelPage', () => {
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
     const args = await driveMintAndCaptureArgs();
     expect(args.partLabels).toEqual(['blade', 'hilt', 'guard']);
+  });
+
+  // ----- D-082 Upload Captioning ------------------------------------------
+
+  // Upload a single-part (non-taggable) GLB and land on the metadata form.
+  async function uploadToMetadataForm() {
+    TAGGING_PART_COUNT_REF.current = 1;
+    TAGGING_MATERIAL_NAMES_REF.current = ['only'];
+    await uploadGlb();
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+  }
+
+  it('U5 (D-082): "Describe with AI" captures frames, calls describe, fills the editable field (AE1, R2)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    await waitFor(() => expect(screen.getByTestId('caption-describe')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('caption-describe'));
+    });
+    expect(captureFramesMock).toHaveBeenCalled();
+    expect(captionDescribeMock).toHaveBeenCalled();
+    await waitFor(() =>
+      expect((screen.getByTestId('caption-input') as HTMLTextAreaElement).value).toBe('low-poly red truck'),
+    );
+    // The drafted caption is editable; the edit (not the draft) is what sticks.
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'my own words' } });
+    expect((screen.getByTestId('caption-input') as HTMLTextAreaElement).value).toBe('my own words');
+  });
+
+  it('U5 (D-082): a captioned upload writes caption to params_json AND remembers personal-only (AE3, R9)', async () => {
+    const MODEL_ID = '0x' + 'c'.repeat(64);
+    getTransactionBlockMock.mockResolvedValue({
+      objectChanges: [{ type: 'created', objectType: '0xpkg::model3d::Model3D', objectId: MODEL_ID }],
+    });
+    const fetchMock = vi.fn(
+      async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'low-poly red truck' } });
+    await driveMintAndCaptureArgs();
+
+    const args = buildPublishPtbMock.mock.calls[0]![0] as { paramsJson: string };
+    expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload', caption: 'low-poly red truck' });
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+      expect(calls.length).toBe(1);
+    });
+    const body = JSON.parse(
+      (fetchMock.mock.calls.find((c) => c[0] === '/api/memory/remember')![1] as RequestInit).body as string,
+    );
+    // Caption stored as the prompt + model id, and crucially NO policy → personal-only.
+    expect(body).toEqual({ prompt: 'low-poly red truck', modelId: MODEL_ID });
+    expect('policy' in body).toBe(false);
+  });
+
+  it('U5 (D-082): an uncaptioned upload mints {source:"upload"} and remembers nothing (AE4, R10)', async () => {
+    getTransactionBlockMock.mockResolvedValue({
+      objectChanges: [{ type: 'created', objectType: '0xpkg::model3d::Model3D', objectId: '0x' + 'd'.repeat(64) }],
+    });
+    const fetchMock = vi.fn(
+      async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    // do NOT type a caption
+    await driveMintAndCaptureArgs();
+
+    const args = buildPublishPtbMock.mock.calls[0]![0] as { paramsJson: string };
+    expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload' });
+    const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+    expect(calls.length).toBe(0);
+  });
+
+  it('U5 (D-082): with the flag off, no AI button — but the description field still works (AE6)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'false');
+    render(<CreateModelPage />); // flag off → captionOn false
+    await uploadToMetadataForm();
+    expect(screen.getByTestId('caption-input')).toBeTruthy();
+    expect(screen.queryByTestId('caption-describe')).toBeNull();
+  });
+
+  it('U5 (D-082): captioning unavailable hides the AI button even with the flag on (AE6)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.available = false;
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    expect(screen.getByTestId('caption-input')).toBeTruthy();
+    expect(screen.queryByTestId('caption-describe')).toBeNull();
+  });
+
+  it('U5 (D-082): describe is a soft no-op when the preview yields no frames', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captureFramesMock.mockResolvedValueOnce([]);
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('caption-describe'));
+    });
+    expect(captureFramesMock).toHaveBeenCalled();
+    expect(captionDescribeMock).not.toHaveBeenCalled();
+  });
+
+  it('U5 (D-082): Tripo mode shows no caption section (R14)', async () => {
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    expect(screen.queryByTestId('caption-section')).toBeNull();
   });
 
   it('Continue is disabled while TaggingCanvas has not reported a part count yet', async () => {
