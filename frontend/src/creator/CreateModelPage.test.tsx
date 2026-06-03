@@ -27,8 +27,9 @@ vi.mock('../auth/useSession', () => ({
 // synthesis→fill→flip, second-session reset) can be driven without a backend.
 const copilotState = vi.hoisted(() => ({
   messages: [] as { role: 'user' | 'assistant'; content: string }[],
-  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done',
+  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done' | 'quota',
   available: true,
+  retryAfterMs: 0,
   synthesizedPrompt: null as string | null,
   synthSeq: 0,
 }));
@@ -91,8 +92,9 @@ vi.mock('../babylon/PreviewCanvas', () => {
 // field is independent of this hook (it's plain state), so memory/params_json
 // tests drive it by typing directly.
 const captionState = vi.hoisted(() => ({
-  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error',
+  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error' | 'quota',
   available: true,
+  retryAfterMs: 0,
 }));
 const captionDescribeMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => 'low-poly red truck'));
 const captionRetryMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
@@ -101,6 +103,7 @@ vi.mock('./useUploadCaption', () => ({
   useUploadCaption: () => ({
     status: captionState.status,
     available: captionState.available,
+    retryAfterMs: captionState.retryAfterMs,
     describe: captionDescribeMock,
     retry: captionRetryMock,
     reset: captionResetMock,
@@ -239,6 +242,7 @@ beforeEach(() => {
   captureFramesMock.mockResolvedValue([new Uint8Array([1, 2, 3])]);
   captionState.status = 'idle';
   captionState.available = true;
+  captionState.retryAfterMs = 0;
   captionDescribeMock.mockReset();
   captionDescribeMock.mockResolvedValue('low-poly red truck');
   captionRetryMock.mockReset();
@@ -256,6 +260,7 @@ beforeEach(() => {
   copilotState.messages = [];
   copilotState.status = 'idle';
   copilotState.available = true;
+  copilotState.retryAfterMs = 0;
   copilotState.synthesizedPrompt = null;
   copilotState.synthSeq = 0;
   copilotResetMock.mockReset();
@@ -1083,6 +1088,20 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('caption-describe')).toBeNull();
   });
 
+  it('U7: caption quota → button stays VISIBLE, disabled "AI QUOTA REACHED" + reset hint, no RETRY (R6/R10)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.status = 'quota';
+    captionState.retryAfterMs = 90_000;
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    const btn = screen.getByTestId('caption-describe') as HTMLButtonElement;
+    expect(btn).toBeTruthy(); // NOT hidden (R10)
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/AI QUOTA REACHED/i);
+    expect(screen.getByTestId('caption-quota').textContent).toMatch(/~2m/); // reset hint
+    expect(screen.queryByTestId('caption-retry')).toBeNull(); // auto-recovery → no manual retry
+  });
+
   it('U5 (D-082): describe is a soft no-op when the preview yields no frames', async () => {
     vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
     captureFramesMock.mockResolvedValueOnce([]);
@@ -1271,6 +1290,18 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
     expect(screen.getByTestId('copilot-chat')).toBeTruthy();
     expect(screen.queryByTestId('prompt-input')).toBeNull(); // textarea swapped out
+  });
+
+  it('U7: copilot quota → toggle stays visible; panel shows reset hint instead of input (R6/R10)', () => {
+    copilotState.status = 'quota';
+    copilotState.retryAfterMs = 90_000;
+    render(<CreateModelPage />);
+    // available stays true in quota, so the toggle is NOT hidden (R10).
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-quota').textContent).toMatch(/~2m/);
+    // the answer input is replaced by the quota message — feature present, not hidden.
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull();
   });
 
   it('a synthesized prompt is written into the shared prompt state (R3)', () => {

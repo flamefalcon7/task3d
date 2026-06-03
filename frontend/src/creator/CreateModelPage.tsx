@@ -13,6 +13,7 @@ import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanva
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
 import { isUploadTaggable } from '../babylon/partMaterials';
 import { generate, preflightGenerate, GenerateError } from '../lib/api';
+import { formatRetryAfter } from '../lib/formatRetryAfter';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import { useSession, isJwtExpired } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
@@ -1190,6 +1191,7 @@ export function CreateModelPage() {
               <CopilotChat
                 messages={copilot.messages}
                 status={copilot.status}
+                retryAfterMs={copilot.retryAfterMs}
                 onSend={copilot.sendAnswer}
                 onGenerateNow={copilot.generateNow}
                 draftPrompt={prompt}
@@ -1290,10 +1292,16 @@ export function CreateModelPage() {
                     type="button"
                     data-testid="caption-describe"
                     onClick={() => void onDescribe()}
-                    disabled={captioner.status === 'thinking'}
+                    // Disabled while in flight OR while the operator's Gemini quota is
+                    // exhausted (R6) — the button stays VISIBLE (R10), never hidden.
+                    disabled={captioner.status === 'thinking' || captioner.status === 'quota'}
                     style={buttonOutline}
                   >
-                    {captioner.status === 'thinking' ? 'DESCRIBING…' : '🧠 DESCRIBE WITH AI'}
+                    {captioner.status === 'thinking'
+                      ? 'DESCRIBING…'
+                      : captioner.status === 'quota'
+                        ? 'AI QUOTA REACHED'
+                        : '🧠 DESCRIBE WITH AI'}
                   </button>
                   {captioner.status === 'error' && (
                     <button
@@ -1306,6 +1314,12 @@ export function CreateModelPage() {
                     </button>
                   )}
                 </div>
+                {/* Quota: visible reset hint, NO retry button — recovery is automatic (R7). */}
+                {captioner.status === 'quota' && (
+                  <p data-testid="caption-quota" style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
+                    AI quota reached — try again {formatRetryAfter(captioner.retryAfterMs)}.
+                  </p>
+                )}
                 {captioner.status === 'thinking' && (
                   <IndeterminateBar testId="caption-progress" ariaLabel="Describing model…" />
                 )}

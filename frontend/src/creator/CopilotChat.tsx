@@ -11,11 +11,14 @@
 // mono labels, accent #FF4500 — so the panel matches the rest of /create.
 import { useState, type ReactNode } from 'react';
 import { tokens, card, input as inputStyle, buttonPrimary, buttonOutline } from '../ux/tokens';
+import { formatRetryAfter } from '../lib/formatRetryAfter';
 import type { CopilotMessage, CopilotStatus } from './useRiffCopilot';
 
 export interface CopilotChatProps {
   messages: CopilotMessage[];
   status: CopilotStatus;
+  /** When status==='quota', approximate ms until the quota resets (for the hint). */
+  retryAfterMs?: number;
   onSend: (text: string) => void;
   onGenerateNow: () => void;
   /** The live prompt state — shown editable in the done state (synthesis target). */
@@ -59,6 +62,7 @@ const bubble = (role: CopilotMessage['role']): React.CSSProperties => ({
 export function CopilotChat({
   messages,
   status,
+  retryAfterMs = 0,
   onSend,
   onGenerateNow,
   draftPrompt,
@@ -71,6 +75,10 @@ export function CopilotChat({
   const busy = status === 'thinking';
   const done = status === 'done';
   const errored = status === 'error';
+  // Quota exhausted (R6): the panel stays present but shows a reset hint instead of
+  // the input — the feature is visibly degraded, never hidden (R10), and recovers
+  // automatically (R7), so there is NO retry button.
+  const quota = status === 'quota';
 
   const submit = () => {
     const t = draft.trim();
@@ -110,7 +118,18 @@ export function CopilotChat({
         </div>
       )}
 
-      {!done && !errored && (
+      {quota && (
+        <div
+          data-testid="copilot-quota"
+          style={{ display: 'flex', alignItems: 'center', gap: tokens.space[2], marginTop: tokens.space[1] }}
+        >
+          <span style={{ ...microLabel, color: tokens.color.subtle }}>
+            ⏳ AI quota reached — try again {formatRetryAfter(retryAfterMs)}
+          </span>
+        </div>
+      )}
+
+      {!done && !errored && !quota && (
         <div style={{ display: 'flex', gap: tokens.space[2], marginTop: tokens.space[1] }}>
           <input
             data-testid="copilot-answer-input"

@@ -168,4 +168,42 @@ describe('useRiffCopilot', () => {
     expect(result.current.messages).toEqual([]);
     expect(result.current.status).toBe('idle');
   });
+
+  // ----- U7: visible quota state + auto-recovery (R6/R7/R10) -----
+
+  it('AE4: quota_exhausted → status "quota", available stays true (NOT hidden), retryAfterMs carried', async () => {
+    const fetchMock = vi.fn(async () => turnResponse({ available: true, error: 'quota_exhausted', retryAfterMs: 90_000 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useRiffCopilot());
+    act(() => result.current.sendAnswer('a car'));
+    await waitFor(() => expect(result.current.status).toBe('quota'));
+    expect(result.current.available).toBe(true); // visible (R10)
+    expect(result.current.retryAfterMs).toBe(90_000);
+  });
+
+  it('AE5/R7: auto-recovers to idle once the cooldown elapses — no manual step', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async () => turnResponse({ available: true, error: 'quota_exhausted', retryAfterMs: 5_000 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const { result } = renderHook(() => useRiffCopilot());
+      act(() => result.current.sendAnswer('a car'));
+      await vi.waitFor(() => expect(result.current.status).toBe('quota'));
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(result.current.status).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('quota is distinct from a generic transient error', async () => {
+    const fetchMock = vi.fn(async () => turnResponse({ available: true, error: 'unavailable', retryable: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useRiffCopilot());
+    act(() => result.current.sendAnswer('a car'));
+    await waitFor(() => expect(result.current.status).toBe('error')); // not 'quota'
+    expect(result.current.available).toBe(true);
+  });
 });
