@@ -157,6 +157,13 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
       c.header('x-copilot-degraded', '1');
       return c.json(quotaExhaustedBody(budget.retryAfterMs));
     }
+    // Count the per-address attempt (R8) HERE — once past the gate — not on the
+    // success return: a model call that resolves but yields empty output throws
+    // CopilotDegradedError, which would skip a post-success increment and desync the
+    // per-address cap from the global count the client closure already advanced
+    // (review: adversarial — counter desync). Counting attempts is the conservative
+    // bound for an anti-abuse cap (billed calls ⊆ attempts).
+    store.recordGeminiUsage('copilot', { scope: ns });
 
     // Recall the caller's OWN past prompts (fail-soft: ANY failure — relayer error
     // OR a malformed record that throws in parseMemory — degrades to empty context;
@@ -176,9 +183,6 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
     const turnIndex = deriveTurnIndex(messages);
     try {
       const result = await client.turn({ messages, memoryContext, turnIndex, forceSynthesize });
-      // Per-address usage counter (R8) — the client closure already counted the
-      // global budget + recorded any 429; here we advance only this address's bucket.
-      store.recordGeminiUsage('copilot', { scope: ns });
       return c.json({ available: true, result, turnIndex });
     } catch (e) {
       // The copilot IS configured but this call failed. If the failure was a 429 the

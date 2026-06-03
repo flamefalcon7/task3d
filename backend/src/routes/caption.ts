@@ -135,10 +135,13 @@ export function buildCaptionRoute(deps: CaptionRouteDeps) {
       c.header('x-caption-degraded', '1');
       return c.json(quotaExhaustedBody(budget.retryAfterMs));
     }
+    // Count the per-address attempt (R8) HERE — once past the gate — so an empty-output
+    // CaptionDegradedError can't skip it and desync the cap from the global count
+    // (review: adversarial — counter desync). Attempts ⊇ billed calls = safe bound.
+    store.recordGeminiUsage('caption', { scope: ns });
 
     try {
       const caption = await client.caption({ frames: parsed.data.frames });
-      store.recordGeminiUsage('caption', { scope: ns }); // per-address counter (R8)
       return c.json({ available: true, caption });
     } catch (e) {
       // Configured but this call failed. A recorded 429 (by the client closure) →

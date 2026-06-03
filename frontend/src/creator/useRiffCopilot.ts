@@ -71,6 +71,10 @@ export function useRiffCopilot(): UseRiffCopilot {
   const seq = useRef(0);
   const inFlight = useRef(false);
   const finished = useRef(false);
+  // Latest status, read by the send guards without re-creating the callbacks (avoids
+  // a stale-closure read of `status`). Blocks a turn while a quota cooldown is active.
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const lastArgs = useRef<{ next: CopilotMessage[]; force: boolean } | null>(null);
   const mounted = useRef(true);
 
@@ -183,15 +187,18 @@ export function useRiffCopilot(): UseRiffCopilot {
   const sendAnswer = useCallback(
     (text: string) => {
       const t = text.trim();
-      // Ignore empty input, in-flight requests, and sends after synthesis is done.
-      if (!t || inFlight.current || finished.current) return;
+      // Ignore empty input, in-flight requests, sends after synthesis, and sends
+      // while a quota cooldown is active (defense-in-depth: the panel hides the input
+      // in 'quota', but a stray caller mustn't fire a doomed turn that resets the
+      // visible countdown — review: julik).
+      if (!t || inFlight.current || finished.current || statusRef.current === 'quota') return;
       drive([...messagesRef.current, { role: 'user', content: t }], false);
     },
     [drive],
   );
 
   const generateNow = useCallback(() => {
-    if (inFlight.current || finished.current || messagesRef.current.length === 0) return;
+    if (inFlight.current || finished.current || statusRef.current === 'quota' || messagesRef.current.length === 0) return;
     drive(messagesRef.current, true);
   }, [drive]);
 

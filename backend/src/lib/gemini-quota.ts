@@ -28,7 +28,19 @@ export interface GeminiGenerateResult {
 /** Default cooldown when a 429 carries no parseable reset. */
 export const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 
+/** Ceiling for a derived cooldown. A parsed reset outside (now, now+MAX] is treated
+ *  as bogus (a relative value misread as a past epoch → would silently DISABLE the
+ *  cooldown; an absolute epoch misread as a delta → would STICK for hours) and
+ *  collapses to the default window (review: correctness + adversarial). */
+const MAX_COOLDOWN_MS = 60 * 60_000;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Clamp a derived cooldown target to a sane window, else fall back to the default. */
+function safeCooldown(resetAt: number | null, now: number): number {
+  if (resetAt !== null && resetAt > now && resetAt <= now + MAX_COOLDOWN_MS) return resetAt;
+  return now + DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+}
 
 export interface CheckBudgetOpts {
   now: number;
@@ -95,9 +107,9 @@ export function recordSuccess(capability: Capability, store: QuotaStore, opts: R
       remaining: parsed.remaining,
       resetAt: parsed.resetAt ?? undefined,
     });
-    // Headroom is gone — degrade proactively until the reset (or a default window).
+    // Headroom is gone — degrade proactively until the reset (clamped) or a default.
     if (parsed.remaining <= 0) {
-      store.setGeminiCooldown(capability, parsed.resetAt ?? opts.now + DEFAULT_RATE_LIMIT_COOLDOWN_MS);
+      store.setGeminiCooldown(capability, safeCooldown(parsed.resetAt, opts.now));
     }
   }
 }
@@ -115,18 +127,24 @@ export function recordRateLimited(capability: Capability, store: QuotaStore, opt
   const fromError = errorResponseHeaders(opts.error);
   const headers = { ...(fromError ?? {}), ...(opts.headers ?? {}) };
   const parsed = parseRateLimitHeaders(headers, opts.now);
-  const resetAt = parsed.resetAt ?? opts.now + DEFAULT_RATE_LIMIT_COOLDOWN_MS;
-  store.setGeminiCooldown(capability, resetAt);
+  store.setGeminiCooldown(capability, safeCooldown(parsed.resetAt, opts.now));
 }
 
-/** Duck-typed 429 detection across AI SDK APICallError + Google RESOURCE_EXHAUSTED shapes. */
+/** Duck-typed 429 detection across AI SDK APICallError + Google RESOURCE_EXHAUSTED
+ *  shapes. The STRUCTURED signal (statusCode 429 / a RESOURCE_EXHAUSTED status field)
+ *  is primary. The message fallback is intentionally NARROW — only unambiguous tokens
+ *  (`429`, `too many requests`, `resource_exhausted`) — so a stray "rate limit" /
+ *  "quota" substring in a non-429 error can't trip a cross-user global cooldown
+ *  (review: adversarial — over-broad classifier amplifies one error into a global lock). */
 export function isRateLimited(e: unknown): boolean {
   if (e && typeof e === 'object') {
     const status = (e as { statusCode?: unknown; status?: unknown }).statusCode ?? (e as { status?: unknown }).status;
     if (status === 429) return true;
+    const googleStatus = (e as { data?: { error?: { status?: unknown } } }).data?.error?.status;
+    if (typeof googleStatus === 'string' && /resource_exhausted/i.test(googleStatus)) return true;
   }
   const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-  return /\b429\b|rate.?limit|resource_exhausted|too many requests|quota exceeded/i.test(msg);
+  return /\b429\b|too many requests|resource_exhausted/i.test(msg);
 }
 
 interface ParsedRateLimit {

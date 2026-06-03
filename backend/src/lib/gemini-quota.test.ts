@@ -120,6 +120,29 @@ describe('gemini-quota: recordRateLimited', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.retryAfterMs).toBeGreaterThan(0);
   });
+
+  it('clamps a bogus PAST reset (relative value misread as epoch) to the default cooldown, not a disabled one', () => {
+    const s = store();
+    // x-ratelimit-reset:'30' parses as epoch-seconds 30 → 1970 (a past instant).
+    // Without the clamp this would set cooldownUntil in 1970 → reads as not-in-cooldown
+    // → silently DISABLES the 429 backoff. The clamp must keep a real cooldown.
+    recordRateLimited('copilot', s, { now: NOW, error: rateLimitError({ 'x-ratelimit-reset': '30' }) });
+    const r = checkBudget('copilot', s, { now: NOW, budget: 1000 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.retryAfterMs).toBeGreaterThan(0);
+      expect(r.retryAfterMs).toBeLessThanOrEqual(60_000); // collapsed to the default window
+    }
+  });
+
+  it('clamps an absurd FAR-FUTURE reset to the default cooldown (no multi-hour stuck state)', () => {
+    const s = store();
+    // retry-after as a huge delta → resetAt way beyond the 1h ceiling → clamp to default.
+    recordRateLimited('copilot', s, { now: NOW, error: rateLimitError({ 'retry-after': '999999' }) });
+    const r = checkBudget('copilot', s, { now: NOW, budget: 1000 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.retryAfterMs).toBeLessThanOrEqual(60_000);
+  });
 });
 
 describe('gemini-quota: isRateLimited', () => {
@@ -127,10 +150,19 @@ describe('gemini-quota: isRateLimited', () => {
     expect(isRateLimited(rateLimitError())).toBe(true);
   });
   it('detects a RESOURCE_EXHAUSTED message', () => {
-    expect(isRateLimited(new Error('google says RESOURCE_EXHAUSTED quota'))).toBe(true);
+    expect(isRateLimited(new Error('google says RESOURCE_EXHAUSTED'))).toBe(true);
+  });
+  it('detects a structured Google RESOURCE_EXHAUSTED status field', () => {
+    expect(isRateLimited({ data: { error: { status: 'RESOURCE_EXHAUSTED' } } })).toBe(true);
   });
   it('does not flag a generic error', () => {
     expect(isRateLimited(new Error('gemini 500 internal'))).toBe(false);
     expect(isRateLimited(new Error('timeout after 15000ms'))).toBe(false);
+  });
+  it('does NOT flag a non-429 error that merely mentions "rate limit" (no global-lock amplification)', () => {
+    // The narrowed classifier drops the loose "rate.?limit" / "quota exceeded" tokens
+    // so a benign error string can't trip a cross-user cooldown.
+    expect(isRateLimited(new Error('failed to configure rate limiting middleware'))).toBe(false);
+    expect(isRateLimited(new Error('daily quota exceeded for the docs API'))).toBe(false);
   });
 });

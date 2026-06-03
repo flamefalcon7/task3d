@@ -19,25 +19,30 @@ export interface QuotaExhaustedBody {
   retryAfterMs: number;
 }
 
-function numEnv(raw: string | undefined, fallback?: number): number | undefined {
+/** Resolve a POSITIVE env number. Blank / non-numeric → fallback. A value ≤ 0 is
+ *  treated as DISABLED (undefined), NOT "block everything": `=0` is the natural way
+ *  an operator expresses "turn this off", and the prior `>= cap` check would have
+ *  silently locked the feature into a permanent quota_exhausted state for everyone
+ *  (review: adversarial — config footgun). Mirrors preflight's `n > 0` guard. */
+function posEnv(raw: string | undefined, fallback?: number): number | undefined {
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return n > 0 ? n : undefined;
 }
 
 /**
  * Budget config from env:
  * - GEMINI_DAILY_BUDGET: global operator daily budget (R9). Default OFF (undefined)
- *   so nothing changes unless configured — needs live calibration.
+ *   so nothing changes unless configured — needs live calibration. Set ≤ 0 to disable.
  * - GEMINI_PER_ADDRESS_DAILY: per-address daily cap (R8). Default-ON at 50 — a
  *   generous bound real users never hit, but it blocks cheap zkLogin-wallet churn
- *   from draining the (uncalibrated) global budget. Set to a blank/non-numeric value
- *   to disable.
+ *   from draining the (uncalibrated) global budget. Set to 0 to disable.
  */
 export function geminiBudgetFromEnv(): { budget?: number; perAddressCap?: number } {
   return {
-    budget: numEnv(process.env.GEMINI_DAILY_BUDGET),
-    perAddressCap: numEnv(process.env.GEMINI_PER_ADDRESS_DAILY, 50),
+    budget: posEnv(process.env.GEMINI_DAILY_BUDGET),
+    perAddressCap: posEnv(process.env.GEMINI_PER_ADDRESS_DAILY, 50),
   };
 }
 
