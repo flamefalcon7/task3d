@@ -598,6 +598,22 @@ export function CreateModelPage() {
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  // Required-field validation: on a Mint attempt with missing required fields we
+  // highlight them (red border + inline message) instead of silently no-op'ing;
+  // each field clears its own highlight as soon as it's filled.
+  const [invalidFields, setInvalidFields] = useState<ReadonlySet<string>>(new Set());
+  const clearInvalid = useCallback((key: string) => {
+    setInvalidFields((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+  const fieldStyle = (key: string): CSSProperties =>
+    invalidFields.has(key)
+      ? { ...inputStyle, width: '100%', border: tokens.border.err }
+      : { ...inputStyle, width: '100%' };
 
   const { session, clearSession } = useSession();
   const account = useCurrentAccount();
@@ -670,10 +686,18 @@ export function CreateModelPage() {
   // The access fee can only be charged on ALLOW_LIST (purchase_access asserts
   // POLICY_ALLOW_LIST), so a value entered under ALLOW_LIST must not silently
   // ride into a PERMISSIONLESS/RESTRICTED publish if the creator switches back.
-  const onPolicyChange = useCallback((next: PolicyValue) => {
-    setPolicy(next);
-    if (next !== POLICY_ALLOW_LIST) setAccessFeeSui('');
-  }, []);
+  const onPolicyChange = useCallback(
+    (next: PolicyValue) => {
+      setPolicy(next);
+      // Leaving ALLOW_LIST clears the access fee AND its validation highlight
+      // (the field unmounts and is no longer required).
+      if (next !== POLICY_ALLOW_LIST) {
+        setAccessFeeSui('');
+        clearInvalid('accessFee');
+      }
+    },
+    [clearInvalid],
+  );
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
@@ -747,16 +771,23 @@ export function CreateModelPage() {
   );
 
   const onMint = useCallback(async () => {
-    if (!session || !signer || !glb || !name.trim()) return;
-    // plan-027 D-078 — the publish fee gate moved derive→access. ALLOW_LIST now
-    // requires access_fee > 0 (on-chain EAllowListNeedsFee); the derive fee may
-    // be 0. Mirror the on-chain assert here so the user gets a clear message
-    // pre-sign instead of an abort after the Walrus upload + encrypt window.
-    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) {
-      setMintError('Allow-list requires an unlock price greater than 0 SUI.');
-      setMintStatus('error');
+    // Non-user-fixable preconditions (the model must exist / be signed in).
+    if (!session || !signer || !glb) return;
+    // Validate required fields and HIGHLIGHT the missing ones instead of silently
+    // doing nothing. name is always required; ALLOW_LIST also requires access_fee
+    // > 0 (mirrors the on-chain EAllowListNeedsFee — surfaces here pre-sign so the
+    // user fixes it before the Walrus upload + encrypt window).
+    const missing = new Set<string>();
+    if (!name.trim()) missing.add('name');
+    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) missing.add('accessFee');
+    if (missing.size > 0) {
+      setInvalidFields(missing);
+      setMintError(null);
+      const firstId = missing.has('name') ? 'name-input' : 'access-fee-input';
+      document.querySelector<HTMLInputElement>(`[data-testid="${firstId}"]`)?.focus();
       return;
     }
+    setInvalidFields(new Set());
     setMintError(null);
     setMintStatus('uploading');
     try {
@@ -1134,10 +1165,19 @@ export function CreateModelPage() {
               <input
                 data-testid="name-input"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  clearInvalid('name');
+                }}
                 aria-required="true"
-                style={{ ...inputStyle, width: '100%' }}
+                aria-invalid={invalidFields.has('name')}
+                style={fieldStyle('name')}
               />
+              {invalidFields.has('name') && (
+                <span data-testid="name-required-error" style={{ ...monoLabel, color: tokens.color.err, marginTop: 4 }}>
+                  Model name is required
+                </span>
+              )}
             </label>
             <label style={fullRow}>
               <span style={sectionLabel}>TAGS (COMMA-SEPARATED)</span>
@@ -1179,13 +1219,23 @@ export function CreateModelPage() {
                 <input
                   data-testid="access-fee-input"
                   value={accessFeeSui}
-                  onChange={(e) => setAccessFeeSui(e.target.value)}
+                  onChange={(e) => {
+                    setAccessFeeSui(e.target.value);
+                    if (suiToMist(e.target.value) > 0n) clearInvalid('accessFee');
+                  }}
                   placeholder="e.g. 1"
-                  style={{ ...inputStyle, width: '100%' }}
+                  aria-invalid={invalidFields.has('accessFee')}
+                  style={fieldStyle('accessFee')}
                 />
-                <span data-testid="access-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                  One-time price to unlock this model (buy access). Buyers pay this once to view and fork it. Must be more than 0 SUI.
-                </span>
+                {invalidFields.has('accessFee') ? (
+                  <span data-testid="access-fee-required-error" style={{ ...monoLabel, color: tokens.color.err, marginTop: 4 }}>
+                    Unlock price must be greater than 0 SUI
+                  </span>
+                ) : (
+                  <span data-testid="access-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                    One-time price to unlock this model (buy access). Buyers pay this once to view and fork it. Must be more than 0 SUI.
+                  </span>
+                )}
               </label>
             )}
             <label>
@@ -1219,16 +1269,15 @@ export function CreateModelPage() {
               <MintButton
                 status={mintStatus}
                 uploadStage={uploadStage}
-                disabled={!name.trim()}
                 onClick={onMint}
                 errorMessage={mintError ?? undefined}
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
-              {/* Explain WHY Mint is disabled — a greyed button with no reason is
-                  confusing (the name field is the only mint prerequisite). */}
-              {!name.trim() && mintStatus === 'idle' && (
-                <p data-testid="mint-name-required" style={{ ...monoLabel, color: tokens.color.hint, marginTop: 8 }}>
-                  ↑ ENTER A MODEL NAME TO MINT
+              {/* Clicking Mint with missing required fields highlights them (below)
+                  rather than disabling the button with no explanation. */}
+              {invalidFields.size > 0 && mintStatus === 'idle' && (
+                <p data-testid="mint-missing-fields" style={{ ...monoLabel, color: tokens.color.err, marginTop: 8 }}>
+                  ↑ FILL THE HIGHLIGHTED REQUIRED FIELD{invalidFields.size > 1 ? 'S' : ''}
                 </p>
               )}
               {/* Pill scopes to the SILENT Walrus phases only (encoding +

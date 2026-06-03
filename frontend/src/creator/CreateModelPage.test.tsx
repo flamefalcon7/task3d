@@ -366,10 +366,6 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
-    // Empty name → Mint is disabled AND a hint explains why (no silent dead button).
-    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('mint-name-required')).toBeTruthy();
-
     // Choose allow-list + a positive access (unlock) fee. plan-027: the publish
     // gate is on access_fee now, not the derive fee.
     fireEvent.click(screen.getByTestId('policy-1'));
@@ -377,9 +373,6 @@ describe('CreateModelPage', () => {
 
     signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Sealed Model' } });
-    // Name entered → hint clears + Mint enables.
-    expect(screen.queryByTestId('mint-name-required')).toBeNull();
-    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(false);
     await act(async () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
@@ -420,14 +413,45 @@ describe('CreateModelPage', () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
 
-    // Guarded: the access-fee error fires; neither encryption nor any publish
-    // PTB runs.
-    expect(screen.getByText(/unlock price greater than 0/i)).toBeTruthy();
+    // Guarded: the access-fee field is highlighted with its error; neither
+    // encryption nor any publish PTB runs.
+    expect(screen.getByTestId('access-fee-required-error')).toBeTruthy();
     expect(encryptBaseMock).not.toHaveBeenCalled();
     expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
     expect(uploadBlobMock).not.toHaveBeenCalled();
     expect(uploadFilesMock).not.toHaveBeenCalled();
+  });
+
+  it('clicking Mint with a missing required field highlights it (not a silent no-op); filling clears it', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Mint is clickable (no silently-disabled button), and nothing is flagged yet.
+    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('name-required-error')).toBeNull();
+
+    // (generation already used signAndExecute to pay the Tripo fee — reset so we
+    // can assert the mint attempt itself fires no transaction.)
+    signAndExecuteMock.mockClear();
+
+    // Attempt to mint with an empty MODEL NAME → the field is highlighted with an
+    // inline error + a summary, and no transaction fires.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('name-required-error')).toBeTruthy();
+    expect(screen.getByTestId('mint-missing-fields')).toBeTruthy();
+    expect(signAndExecuteMock).not.toHaveBeenCalled();
+
+    // Filling the name clears the highlight + the summary.
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Model' } });
+    expect(screen.queryByTestId('name-required-error')).toBeNull();
+    expect(screen.queryByTestId('mint-missing-fields')).toBeNull();
   });
 
   it('U4: allow-list quilts the ciphertext + preview stills in ONE upload; passes their patch ids', async () => {
