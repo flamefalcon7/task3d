@@ -34,7 +34,13 @@ Ran ideate-context → brainstorm → plan → `/ce-work`. **ADR D-081** (reintr
 - **Fail-soft confirmed live (R10):** MemWal recall timed out (2s) mid-call → route still returned `available:true` with the question (empty memory context); copilot kept working.
 - Config: key in `backend/.env` (`GOOGLE_GENERATIVE_AI_API_KEY`), `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`, `VITE_TEST_WALLET=0` (real Slush).
 
-**Only remaining for L2:** user drives the in-browser chat on `/create` with real Slush (wallet-gated, agent-browser can't sign in) — servers are running (`:3001` backend, `:5173` frontend). Then the merge decision for `feat/memwal-riff-copilot`. Demo seed: reuse `seed-memory.ts`.
+**Hands-on UX polish pass (2026-06-03, real Slush + real Gemini key):** driven by the user testing the live flow end to end. All committed on the branch, all suites green (backend 199, frontend 972 +2 skipped).
+- **L2 copilot interaction (Q1):** synthesized prompt now delivered IN-PANEL (no jarring auto-snap to Write) — editable result + Generate gate (the real D-053 `SignConfirmation`, single instance) + Start-over, all on the brutalist design tokens. Toggle renamed "🧠 Brainstorm with AI".
+- **L2 copilot bugs found live + fixed:** (a) "Generate now" right after a question 400'd (relaxed the msg-array refine: "≥1 user msg" not "must end with user") AND then returned a *question* instead of synthesizing — fixed by appending a user "output the prompt now" turn (Gemini needs a user-terminated convo; also steers synthesis). (b) transient failures no longer hide the feature for the session — they show a retryable "⚠ That didn't go through / Try again" (was the P3 the reviewer flagged). (c) default model bumped to `gemini-2.5-flash` (2.0-flash retired → 404).
+- **Wait-state feedback (the "feels frozen" sweep):** shared `IndeterminateBar` (`ux/IndeterminateBar`) on Walrus upload (+ paint-yield before the blocking WASM encode so the label shows) and Tripo generation; defined the missing global `.spinner` so the **Seal decrypt** indicator (ModelDetailPage) is actually visible + a bar on the Launch unlock decrypt.
+- **Required-field validation (no silent dead buttons):** Mint highlights missing required fields on attempt (MODEL NAME + ALLOW_LIST unlock price) with inline errors that clear on fill; the part-naming Continue flags unnamed parts (red rows + "name the N highlighted parts") instead of a silent disabled button.
+
+**Only remaining for L2:** the merge decision for `feat/memwal-riff-copilot` (40 commits ahead of main: L0/L1 + L2 + UX polish). Optional: demo seed (reuse `seed-memory.ts`) for the "remembers you" hero. To run locally: `GOOGLE_GENERATIVE_AI_API_KEY` in `backend/.env` + `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`.
 
 ---
 
