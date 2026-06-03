@@ -93,6 +93,17 @@ export interface UseWalrusUploadOptions {
 // See docs/solutions/architecture-patterns/walrus-writefilesflow-popup-batching.
 const WALRUS_POPUP_COUNT_PER_QUILT = 2;
 
+// The Walrus WASM Reed-Solomon encode blocks the main thread (it is not run in a
+// worker). Without yielding first, the just-set 'encoding' stage never paints, so
+// the UI appears frozen with no feedback during the longest pre-popup phase. A
+// double-rAF lets React flush the state update and the browser paint the label
+// before the blocking encode begins. (It does not unblock the encode itself —
+// that needs a worker — but the user now sees an honest "encoding…" state.)
+const yieldToPaint = (): Promise<void> =>
+  typeof requestAnimationFrame === 'function'
+    ? new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    : Promise.resolve();
+
 export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [stage, setStage] = useState<UploadStage>('idle');
@@ -139,6 +150,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
 
       let lastStage: UploadStage = 'encoding';
       try {
+        await yieldToPaint(); // paint the 'encoding' label before the blocking WASM encode
         await flow.encode();
 
         lastStage = 'awaiting-register';
@@ -245,6 +257,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           setStage('encoding');
           lastStage = 'encoding';
           writeDiag(`pre-encode-${i}`, startedAt, { batchIndex: i });
+          await yieldToPaint(); // paint the 'encoding' label before the blocking WASM encode
           await flow.encode();
           writeDiag(`post-encode-${i}`, startedAt, { batchIndex: i });
 

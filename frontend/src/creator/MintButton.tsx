@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { UploadStage } from '../walrus/useWalrusUpload';
 import { buttonPrimary, monoLabel, tokens } from '../ux/tokens';
+import styles from './mintButton.module.css';
 
 export type MintStatus = 'idle' | 'uploading' | 'signing' | 'success' | 'error';
 
@@ -58,8 +59,9 @@ export function MintButton({
     } else if (uploadStage === 'awaiting-certify') {
       label = 'Step 2 of 3 — approve Walrus certify…';
     } else {
-      // encoding / fallback while waiting for the first stage
-      label = 'Preparing upload…';
+      // encoding / fallback while waiting for the first stage. The WASM encode
+      // blocks the main thread, so name it honestly rather than a vague "preparing".
+      label = 'Encoding for Walrus…';
     }
   } else if (status === 'signing') {
     label = 'Step 3 of 3 — approve Sui publish…';
@@ -81,6 +83,11 @@ export function MintButton({
       >
         {label}
       </button>
+      {busy && (
+        <div className={styles.track} data-testid="mint-progress" role="progressbar" aria-label={label}>
+          <div className={styles.fill} />
+        </div>
+      )}
       {status === 'error' && errorMessage && (
         <div style={{ marginTop: 12 }}>
           <span style={errorPrefix}>× FAILED ·</span>
