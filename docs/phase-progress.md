@@ -27,12 +27,21 @@ Phase 4 (hardening / demo-readiness). Feature: wrap the two paid third-party AI 
 ### 5-reviewer pass — DONE
 Ran correctness / testing / api-contract / adversarial / julik-frontend-races on the branch diff. Confirmed defects FIXED in `fix(quota): 5-reviewer pass …`: per-address counter desync (R8 now attempt-counted past the gate), `GEMINI_*=0`/negative config footgun (`posEnv` → `=0` disables), over-broad `isRateLimited` (narrowed + structured Google status), cooldown reset clamp (`safeCooldown`), copilot `quota` send guard. Deferred (low-impact) findings recorded in **OQ-031** (onGenerate unmount/session guard, shared-type promotion, a few test gaps).
 
-### Browser verification status
-- Compile + render-in-jsdom: green — the 60 `CreateModelPage.test.tsx` cases drive the REAL component through pre-flight-block / classified-error / quota-visible / keyless-hide paths; no new deps or dynamic imports.
-- **USER-RUN (wallet pause protocol):** the interactive demo arc — sign in → forced credit-dry pre-flight blocks pay with a visible message → post-payment refundable copy → caption/copilot "AI QUOTA REACHED" + auto-recover — is wallet + live-backend gated and cannot be driven in agent-browser's wallet-less Chromium. Hand off to the user for the real-Chrome+Slush pass before merge.
+### D-084 — never hide a built AI feature (user direction)
+Reversed AE7's keyless-hide: keyless now shows a VISIBLE disabled "AI UNAVAILABLE" (Copilot: "⚠ AI unavailable"), the only hide is the build flag `VITE_COPILOT_ENABLED`. Frontend-only (backend still returns `{available:false}`); AE7 frontend tests flipped. ADR D-084.
+
+### Browser verification — DONE (agent-browser, test-wallet auto-login + GET-mock / real-backend env)
+- ① pre-flight block: gen-error "temporarily unavailable", NO wallet/charge (`/tmp/verify-1-preflight-block.png`).
+- ② Gemini quota visible: Copilot "⏳ AI QUOTA REACHED — try again ~5m", toggle still visible (`/tmp/verify-2-quota-visible.png`).
+- ③ keyless: now shows "⚠ AI UNAVAILABLE", toggle still visible — NOT hidden (`/tmp/verify-3-keyless-unavailable.png`, post-D-084).
+- Also: headless backend self-check `backend/scripts/verify-degradation.ts` (real Tripo+Gemini keys) — ①②③ all PASS.
+- Caption "Describe with AI" real path needs `--headed` (Babylon WebGL); covered by jsdom tests + Copilot demonstrates the same logic.
+
+### Test + typecheck (final)
+- Backend **293 green** + tsc clean; Frontend **1006 green** + tsc clean.
 
 ### Next Concrete Step
-User-run the wallet-gated demo-arc verification (above), then merge `feat/ai-degradation-ux` → `main`.
+Shipped to `main`. Follow-ups: OQ-029 (finalize refundable contact string before 6/21), OQ-030 (auto-refund @ 8/27 mainnet window), OQ-031 (onGenerate guard + shared-type + minor test gaps), live-calibrate `TRIPO_PREFLIGHT_MIN_CREDITS` post-deploy.
 
 ### Blockers / Open Questions
 - **OQ-029** — finalize the refundable-failure contact destination (currently placeholder "the Tusk3D team"); before 6/21.
