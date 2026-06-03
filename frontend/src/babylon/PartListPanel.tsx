@@ -31,6 +31,11 @@ interface PartListPanelProps {
   maxHeight?: number | string;
   /** Test id suffix when multiple panels mount on one page. */
   testIdSuffix?: string;
+  /**
+   * Indices to highlight as "needs attention" (e.g. unnamed parts flagged on a
+   * Continue attempt). Rendered with an error border. Optional — /launch omits it.
+   */
+  flaggedIndices?: ReadonlySet<number>;
 }
 
 export function PartListPanel({
@@ -39,6 +44,7 @@ export function PartListPanel({
   onSelect,
   maxHeight = 320,
   testIdSuffix,
+  flaggedIndices,
 }: PartListPanelProps) {
   const tid = (key: string) =>
     testIdSuffix ? `part-list-${key}-${testIdSuffix}` : `part-list-${key}`;
@@ -67,14 +73,16 @@ export function PartListPanel({
     <div data-testid={tid('panel')} style={{ ...panelStyle, maxHeight }}>
       {parts.map((part) => {
         const active = part.index === selectedIndex;
+        const flagged = flaggedIndices?.has(part.index) ?? false;
         return (
           <button
             key={part.index}
             ref={active ? activeRowRef : null}
             type="button"
             data-testid={tid(`row-${part.index}`)}
+            data-flagged={flagged ? 'true' : undefined}
             onClick={() => onSelect(part.index)}
-            style={rowStyle(active)}
+            style={rowStyle(active, flagged)}
             aria-pressed={active}
           >
             <span style={indexStyle}>{formatIndex(part.index)}</span>
@@ -127,7 +135,14 @@ const emptyLabelStyle: CSSProperties = {
   color: tokens.color.hint,
 };
 
-function rowStyle(active: boolean): CSSProperties {
+function rowStyle(active: boolean, flagged = false): CSSProperties {
+  // active (accent) wins visually; an inactive flagged row gets the error border
+  // so unnamed parts stand out after a Continue attempt.
+  const border = active
+    ? `2px solid ${tokens.color.accent}`
+    : flagged
+      ? tokens.border.err
+      : tokens.border.hairline;
   return {
     display: 'flex',
     alignItems: 'center',
@@ -135,7 +150,7 @@ function rowStyle(active: boolean): CSSProperties {
     padding: '6px 8px',
     background: active ? tokens.color.ink : tokens.color.paperPure,
     color: active ? tokens.color.paper : tokens.color.ink,
-    border: active ? `2px solid ${tokens.color.accent}` : tokens.border.hairline,
+    border,
     cursor: 'pointer',
     textAlign: 'left',
     fontFamily: tokens.font.body,

@@ -1,11 +1,71 @@
 # Phase Progress
 
-## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — plan done + **U1 spike PASSED**; wrapper NOT yet built)
+## Last Updated: 2026-06-02 (MemWal **L2 conversational copilot — U1–U7 BUILT**; same branch `feat/memwal-riff-copilot`, not merged)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **19**
 - Days to demo day (7/20–21): ~48
 - Days to winners (8/27): ~86
+
+### MemWal L2 — Conversational Riff Copilot (BUILT, branch `feat/memwal-riff-copilot`, stacked on L0/L1, NOT merged)
+Ran ideate-context → brainstorm → plan → `/ce-work`. **ADR D-081** (reintroduce an LLM — Gemini — at the *prompt-authoring* seam; does NOT supersede D-023, which still governs the LLM-free generation-dispatch path). Plan: `docs/plans/2026-06-02-002-feat-memwal-l2-conversational-copilot-plan.md`. Origin: `docs/brainstorms/2026-06-02-memwal-l2-conversational-copilot-requirements.md` (R1–R14, AE1–AE7).
+
+**What it is:** an opt-in **"Chat with Copilot"** toggle on the Tripo path of `/create`. Gemini asks ≤3 turns (server-enforced hard cap, forced synthesis on turn 3), skips what it can infer from the user's recalled MemWal memory, and synthesizes a Tripo prompt **into the existing input box** (editable; never auto-generates). Fail-soft: no key / LLM error → toggle hidden, `/create` degrades to L0/L1 + raw textarea. On mint, only the final prompt is remembered (reuses the shipped remember-on-publish; no L1 pollution).
+
+**Units (per-commit, conventional, D-081-tagged):**
+- **U1** ADR D-081 + D-023 cross-ref (Status unchanged — it's a *separate seam*, not a reversal).
+- **U2** deps `ai@6` + `@ai-sdk/google@3` + `GOOGLE_GENERATIVE_AI_API_KEY` env (backend-only, inert when absent).
+- **U3** `backend/src/lib/copilot-client.ts` — Gemini single-shot synthesis; **server decides question-vs-prompt** from turnIndex/forceSynthesize (robust to LLM drift); INERT without key; typed `CopilotDegradedError`; clamps ≤1000 chars. *test-first.*
+- **U4** `backend/src/routes/copilot.ts` (`/api/copilot/turn`) — mirrors memory.ts: JWT bindNamespace (hard-401), server-derived turnIndex, per-address limiter (30/min), server-side personal recall→memoryContext (fail-soft), degraded→clean `{available:false}`+`x-copilot-degraded` (never 5xx, never leaks key). Registered in `app.ts`.
+- **U5** `frontend/src/creator/useRiffCopilot.ts` — bounded convo hook; token/seq/mounted guards + clear-on-token-change (mirrors useCreatorMemory); error/`available:false`→`available=false`; surfaces `synthesizedPrompt`; never auto-generates.
+- **U6** `frontend/src/creator/CopilotChat.tsx` + CreateModelPage integration — Write/Chat toggle (hidden when unavailable, R10/R13), synthesis→`setPrompt`+flip-to-Write (editable, AE5), remember-on-publish untouched. testids `copilot-toggle`/`copilot-chat`/`copilot-send`/`copilot-generate-now`.
+- **U7** docs (this block). Demo seed = **reuse** `backend/scripts/seed-memory.ts` (no new mechanism) so the history-aware greeting is real, not hardcoded (R14).
+
+**Tests:** copilot-client 10, copilot route 16 → backend full suite **196 green**, backend tsc **0**. useRiffCopilot 8 + CopilotChat 7 + CreateModelPage copilot-integration 8 → frontend creator suite **122 green**. Frontend tsc: my files **0 new** (40 pre-existing errors in unrelated track/landing/babylon test files — confirmed via stash that they predate this work).
+
+**5-reviewer pass DONE** (correctness/testing/api-contract/adversarial/julik-races). Fixed: synthesis modeled as a one-shot `synthSeq` event + `reset()` wired on toggle (was a second-session dead-end + edit-clobber, correctness P1 / julik P1·P2); recall+parse wrapped fail-soft (R10 — a malformed relayer record could 500); message-array must end with a user turn (rejects role-spoofed arrays); recalled memory fenced as reference-data-not-instructions (prompt-injection); +8 CreateModelPage integration tests (AE5 edit-drives-generation, toggle hide, synthesis fill, second-session reset). **Accepted/documented:** per-process limiter (single-instance demo, mirrors memory.ts), uniform fail-soft status flattening, no AbortController (mirrors useCreatorMemory), cross-account textarea residue (clearing prompt on token-change would wipe a normal JWT-refresh — worse than the rare wallet-switch case).
+
+**Added a default-OFF `VITE_COPILOT_ENABLED` gate** (non-secret feature flag): the toggle shows only when the flag is `true` AND the backend reports the LLM available — so a key-less 6/21 deploy stays clean (no broken-on-click toggle). Browser-verify: pre-wallet `/create` renders clean in the real Vite bundle, **0 console errors** (new modules resolve). Post-sign-in toggle behavior is wallet+key-gated → USER-RUN.
+
+**LIVE-VERIFIED (2026-06-03) with a real paid-tier Gemini key:**
+- Key works (free tier was `limit:0` in user's region → user enabled billing; `serviceTier: standard`). **Default model bumped `gemini-2.0-flash`→`gemini-2.5-flash`** (2.0 retired with a 404).
+- `backend/scripts/copilot-smoke.ts` (client→Gemini) + `copilot-route-smoke.ts` (full HTTP /api/copilot/turn via minted JWT) both green. Synthesis quality good out-of-box, **no system-prompt tuning needed**: e.g. "a treasure chest"→`Low-poly wooden treasure chest, metal bands, ornate lock, game asset.`
+- **Hero-shot confirmed live (R6/R7):** turn-0 with vehicle history → *"Welcome back! You've made some great ground vehicles like a low-poly red sports car… What's the primary purpose or style you envision for this flying vehicle?"*
+- **Fail-soft confirmed live (R10):** MemWal recall timed out (2s) mid-call → route still returned `available:true` with the question (empty memory context); copilot kept working.
+- Config: key in `backend/.env` (`GOOGLE_GENERATIVE_AI_API_KEY`), `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`, `VITE_TEST_WALLET=0` (real Slush).
+
+**Hands-on UX polish pass (2026-06-03, real Slush + real Gemini key):** driven by the user testing the live flow end to end. All committed on the branch, all suites green (backend 199, frontend 972 +2 skipped).
+- **L2 copilot interaction (Q1):** synthesized prompt now delivered IN-PANEL (no jarring auto-snap to Write) — editable result + Generate gate (the real D-053 `SignConfirmation`, single instance) + Start-over, all on the brutalist design tokens. Toggle renamed "🧠 Brainstorm with AI".
+- **L2 copilot bugs found live + fixed:** (a) "Generate now" right after a question 400'd (relaxed the msg-array refine: "≥1 user msg" not "must end with user") AND then returned a *question* instead of synthesizing — fixed by appending a user "output the prompt now" turn (Gemini needs a user-terminated convo; also steers synthesis). (b) transient failures no longer hide the feature for the session — they show a retryable "⚠ That didn't go through / Try again" (was the P3 the reviewer flagged). (c) default model bumped to `gemini-2.5-flash` (2.0-flash retired → 404).
+- **Wait-state feedback (the "feels frozen" sweep):** shared `IndeterminateBar` (`ux/IndeterminateBar`) on Walrus upload (+ paint-yield before the blocking WASM encode so the label shows) and Tripo generation; defined the missing global `.spinner` so the **Seal decrypt** indicator (ModelDetailPage) is actually visible + a bar on the Launch unlock decrypt.
+- **Required-field validation (no silent dead buttons):** Mint highlights missing required fields on attempt (MODEL NAME + ALLOW_LIST unlock price) with inline errors that clear on fill; the part-naming Continue flags unnamed parts (red rows + "name the N highlighted parts") instead of a silent disabled button.
+
+**Only remaining for L2:** the merge decision for `feat/memwal-riff-copilot` (40 commits ahead of main: L0/L1 + L2 + UX polish). Optional: demo seed (reuse `seed-memory.ts`) for the "remembers you" hero. To run locally: `GOOGLE_GENERATIVE_AI_API_KEY` in `backend/.env` + `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`.
+
+---
+
+## Last Updated: 2026-06-02 (MemWal "Riff Copilot" — **U1–U10 BUILT + reviewed + UX/relevance polish + live-API verified**; on branch, not merged)
+
+### Hackathon Tracker
+- Days to submission (6/21): **19**
+- Days to demo day (7/20–21): ~48
+- Days to winners (8/27): ~86
+
+### MemWal Riff Copilot — FULLY BUILT (branch `feat/memwal-riff-copilot`, off main, NOT merged)
+`/ce-work` ran the whole plan (D-080, docs/plans/2026-06-02-001-...). All 10 units committed (one commit each, conventional, D-080-tagged) + a review-fix commit. **Tests: shared 9, backend 170, frontend 919 (+2 skipped) — all green. tsc: backend 0; frontend 38 = pre-existing baseline, 0 added.**
+- **Personal recall (U1–U7, must-ship):** shared codec `shared/src/memory.ts` (escaped trailer) · backend `lib/memwal-client.ts` (fail-soft wrapper, 2s timeout) · `routes/memory.ts` (JWT→namespace proxy, hard-401 binding, fail-soft recall, address-keyed limiter) · frontend `useCreatorMemory.ts` (debounced SWR hook) · `PromptMemoryChips.tsx` · remember-on-publish in `CreateModelPage.tsx` (Tripo-only, objectChanges→modelId via `extractModelId.ts`) · `scripts/seed-memory.ts`.
+- **Global community recall (U8–U10):** dual-write gated on policy≠RESTRICTED (`memoryWrites` shared by route+seed) · global recall exclude-self + drop-missing-`c` + over-fetch×4 + operator denylist · `useCreatorMemory.recallCommunity` (parallel) · `CommunityRecall.tsx` (open-in-new-tab, mobile-collapse, a11y).
+- **5-reviewer pass done** (correctness, testing, api-contract, adversarial, julik-races). Trust boundaries all held. Fixed: clear chips on session-change (cross-account leak), normalize derived namespace (ADDRESS_RE vs auth-schema), shared `RecallChip` type, raised recall rate-limit (2 recalls/keystroke), +out-of-order-race & U5-publish-integration tests. Accepted (documented): per-process limiter/denylist (single-instance hackathon deploy), over-fetch heuristic, degraded-200 replaces chips.
+- **Browser verify:** pre-wallet PASSED (agent-browser — `/create` sign-in gate + landing render clean in the real Vite bundle, 0 console errors → new hook/components/shared-import resolve). Post-wallet (chips appear for a seeded account, click-to-fill, community open-in-new-tab) is **wallet-gated → USER-RUN**.
+- **Baked creds** in `backend/.env` (gitignored, MEMWAL_*). For a live demo: run `seed-memory.ts` (ideally point modelIds at real published models from 2–3 wallets) + set `VITE_TEST_WALLET=0` for real Slush.
+- **NOT merged.** Next: user post-wallet browser pass on `/create`, then merge decision.
+
+#### Post-build UX + quality pass (same session, also committed on the branch)
+Driven by live hands-on testing with the local dev servers + real Slush:
+- **Live API e2e verified (no wallet):** `backend/scripts/memwal-smoke.ts` mints JWTs for 2 addresses and drives the real relayer — proved dual-write, policy gate (RESTRICTED→personal only), exclude-self, RESTRICTED-not-in-global, codec round-trip, 401-on-unauth. This is the end-to-end backend↔relayer proof the unit tests mock.
+- **Legible agent presence:** added a persistent **`CopilotBar.tsx`** (`🧠 Riff Copilot` status line, always present once signed in: idle-invite / "Recalling from Walrus memory…"+spinner / found / neutral "No similar models found"). Sections now show skeleton + Walrus provenance line (`N · …Walrus`); the bar is the single "voice" (no duplicate captions). Loading status surfaced via `personalStatus`/`communityStatus` from the hook (SWR-safe, no stuck spinner). reduced-motion gated via `memoryRecall.module.css`.
+- **Relevance gate (the "why does 'z'/'penis' match a car" fix):** frontend min-query-length 3 + backend `MEMORY_MAX_DISTANCE` (cosine ceiling, default **0.66**, env-tunable). Probe-tuned: descriptive prompts ≤~0.62 kept; junk/vague (`penis` 0.709, bare `car` 0.710, `dog`) dropped. **Honest limitation captured in `memory.ts`:** a single global threshold can't perfectly separate relevant from irrelevant (junk overlaps real matches); real robustness needs a larger/diverse pool. Deferred option: profanity denylist for demo hardening.
+- Tests after polish: creator suite 100 green; backend memory 21; tsc 0 new. All committed.
 
 ### U1 spike result (2026-06-02 — on branch `spike/memwal-u1`, NOT merged)
 Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **All gates PASSED** against the live testnet relayer — full findings in **D-080 → "U1 Spike Findings"**. Headlines:
@@ -16,7 +76,7 @@ Ran the plan's spike-first U1 only (user scoped "U1 spike only, then stop"). **A
 - Throwaway repro: `backend/scripts/memwal-spike.ts` (lives on the spike branch).
 
 ### Where we are (read this first after compact)
-A **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK) into `/create`. Ran ideate → brainstorm → plan → ce-doc-review (twice) → **U1 spike (passed)**. Captured as **ADR D-080**. The wrapper/route/UI (U1 proper through U10) are **not built**.
+A **BONUS** feature: integrate **MemWal** (Walrus's AI-agent memory SDK) into `/create`. Ran ideate → brainstorm → plan → ce-doc-review (twice) → **U1 spike (passed)**. Captured as **ADR D-080**. *(Historical: this block is the spike-stage record. The whole plan U1–U10 is now BUILT — see the latest block at the top of this file.)*
 
 Artifacts (all committed, none built):
 - `docs/ideation/2026-06-02-memwal-integration-ideation.md` — 7 survivors.
@@ -31,7 +91,7 @@ Artifacts (all committed, none built):
 **Key facts verified from MemWal `dev` source:** no `ask()` method (use `recall`/`remember`/`withMemWal`); 1536-dim embeddings; the published prompt is **already public on-chain** (`Model3D.params_json = {prompt}`). *(Earlier "suiNetwork:testnet + staging relayer" note superseded by the U1 spike — see D-080 findings.)*
 
 ### Next concrete step
-Spike is done and green; the risk it gated is retired. This is still a bonus, NOT 6/21 critical path — **recommended: finish the core (plan-027/028 stack) before building the rest.** When ready, resume the plan from **U1 proper** (build `memwal-client.ts` wrapper, now de-risked) → U2–U10. The baked creds in `backend/.env` and the corrected facts in D-080 mean U1's build can skip re-discovery. Decide branch strategy then (the spike lives on `spike/memwal-u1`, off `main`).
+*(Superseded — U1–U10 are now built; see the top block.)* Remaining: user post-wallet browser pass on `/create` (real Slush + seeded pool), then merge `feat/memwal-riff-copilot` decision.
 
 ### Deferred / open (MemWal)
 - The "global = semantic search over already-public data" framing is the weaker half; handle at pitch time (personal = private-memory story; global = discovery layer on Walrus). Not a bug.

@@ -81,6 +81,7 @@ import {
   tokens,
   viewerWell,
 } from '../ux/tokens';
+import { IndeterminateBar } from '../ux/IndeterminateBar';
 import { useElapsedSeconds } from '../ux/useElapsedSeconds';
 
 const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
@@ -1485,6 +1486,9 @@ export function LaunchCollectionPage() {
                   >
                     {unlockLabel}
                   </button>
+                  {phase === 'decrypting' && (
+                    <IndeterminateBar testId="unlock-decrypt-progress" ariaLabel="Decrypting base" />
+                  )}
                 </div>
               </div>
             )}

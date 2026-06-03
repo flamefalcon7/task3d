@@ -64,3 +64,24 @@ a {
 *::after {
   box-sizing: border-box;
 }
+
+/* Loading spinner — used by the Seal decrypt indicator (ModelDetailPage) and any
+   small inline loader. The class was referenced but never defined, so the decrypt
+   "spinner" rendered invisibly (only the text showed → felt frozen). */
+.spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid rgba(0, 0, 0, 0.18);
+  border-top-color: #ff4500;
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: spinner-rotate 0.8s linear infinite;
+  }
+}
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

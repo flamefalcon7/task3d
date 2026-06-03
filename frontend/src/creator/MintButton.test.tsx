@@ -49,7 +49,7 @@ describe('MintButton', () => {
     );
   });
 
-  it('falls back to "Preparing upload…" while encoding', () => {
+  it('labels the encoding stage honestly ("Encoding for Walrus…")', () => {
     render(
       <MintButton
         status="uploading"
@@ -57,9 +57,16 @@ describe('MintButton', () => {
         onClick={() => {}}
       />,
     );
-    expect(screen.getByTestId('mint-button').textContent).toMatch(
-      /Preparing upload/,
-    );
+    expect(screen.getByTestId('mint-button').textContent).toMatch(/Encoding for Walrus/);
+  });
+
+  it('shows an indeterminate progress bar while busy, and none when idle', () => {
+    const { rerender } = render(<MintButton status="uploading" uploadStage="encoding" onClick={() => {}} />);
+    expect(screen.getByTestId('mint-progress')).toBeTruthy();
+    rerender(<MintButton status="signing" onClick={() => {}} />);
+    expect(screen.getByTestId('mint-progress')).toBeTruthy();
+    rerender(<MintButton status="idle" onClick={() => {}} />);
+    expect(screen.queryByTestId('mint-progress')).toBeNull();
   });
 
   it('shows step 3/3 (Sui publish) when signing', () => {

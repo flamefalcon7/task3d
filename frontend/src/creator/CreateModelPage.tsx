@@ -25,6 +25,14 @@ import {
   TRIPO_FEE_TREASURY,
 } from '../sui/modelTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
+import { useCreatorMemory } from './useCreatorMemory';
+import { CopilotBar } from './CopilotBar';
+import { PromptMemoryChips } from './PromptMemoryChips';
+import { CommunityRecall } from './CommunityRecall';
+import { CopilotChat } from './CopilotChat';
+import { useRiffCopilot } from './useRiffCopilot';
+import { IndeterminateBar } from '../ux/IndeterminateBar';
+import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
 import { encryptBase } from '../seal/envelope';
 import { HelpIcon } from '../ux/HelpIcon';
@@ -340,6 +348,8 @@ function TaggingStep({
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [labels, setLabels] = useState<Map<number, string>>(new Map());
+  // Parts flagged as unnamed on a Continue attempt — highlighted until named.
+  const [flaggedParts, setFlaggedParts] = useState<ReadonlySet<number>>(new Set());
   const [materialNames, setMaterialNames] = useState<(string | null)[]>([]);
   const [loaded, setLoaded] = useState(false);
   const skippedRef = useRef(false);
@@ -395,12 +405,31 @@ function TaggingStep({
       else next.delete(i);
       return next;
     });
+    // Naming a part clears its "unnamed" flag immediately.
+    if (label.trim().length > 0) {
+      setFlaggedParts((prev) => {
+        if (!prev.has(i)) return prev;
+        const next = new Set(prev);
+        next.delete(i);
+        return next;
+      });
+    }
   }, []);
 
   const allLabeled = partCount > 0 && labels.size === partCount;
 
   const emit = useCallback(() => {
-    if (!allLabeled) return;
+    if (!allLabeled) {
+      // Flag every unnamed part (red row) and jump to the first one, instead of
+      // a silently-disabled Continue with no indication of WHAT's missing.
+      const missing = new Set<number>();
+      for (let i = 0; i < partCount; i++) if (!labels.has(i)) missing.add(i);
+      setFlaggedParts(missing);
+      const first = missing.values().next().value;
+      if (first !== undefined) setSelectedIndex(first);
+      return;
+    }
+    setFlaggedParts(new Set());
     const out: string[] = [];
     for (let i = 0; i < partCount; i++) {
       // Safe-! after the allLabeled gate: every index 0..partCount-1 is in
@@ -479,6 +508,7 @@ function TaggingStep({
             onSelect={setSelectedIndex}
             testIdSuffix="tagging"
             maxHeight={180}
+            flaggedIndices={flaggedParts}
           />
           <div data-testid="label-editor" style={labelEditorBlock}>
             {selectedIndex == null ? (
@@ -508,8 +538,20 @@ function TaggingStep({
         </div>
       </div>
       <div style={taggingActionRow}>
-        <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
-          {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} NAMED`}
+        <span
+          data-testid="tag-progress"
+          style={{
+            ...monoLabel,
+            color: flaggedParts.size > 0 ? tokens.color.err : tokens.color.muted,
+            alignSelf: 'center',
+            marginRight: 'auto',
+          }}
+        >
+          {partCount === 0
+            ? 'LOADING PARTS…'
+            : flaggedParts.size > 0
+              ? `↑ NAME THE ${flaggedParts.size} HIGHLIGHTED PART${flaggedParts.size > 1 ? 'S' : ''}`
+              : `${labels.size} OF ${partCount} NAMED`}
         </span>
         <button
           type="button"
@@ -525,7 +567,7 @@ function TaggingStep({
           type="button"
           data-testid="continue-tagging"
           onClick={emit}
-          disabled={disabled || !allLabeled}
+          disabled={disabled || partCount === 0}
           style={buttonPrimary}
         >
           CONTINUE →
@@ -590,13 +632,60 @@ export function CreateModelPage() {
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  // Required-field validation: on a Mint attempt with missing required fields we
+  // highlight them (red border + inline message) instead of silently no-op'ing;
+  // each field clears its own highlight as soon as it's filled.
+  const [invalidFields, setInvalidFields] = useState<ReadonlySet<string>>(new Set());
+  const clearInvalid = useCallback((key: string) => {
+    setInvalidFields((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+  const fieldStyle = (key: string): CSSProperties =>
+    invalidFields.has(key)
+      ? { ...inputStyle, width: '100%', border: tokens.border.err }
+      : { ...inputStyle, width: '100%' };
 
   const { session, clearSession } = useSession();
   const account = useCurrentAccount();
   const { uploadBlob, uploadFiles, stage: uploadStage } = useWalrusUpload();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const suiClient = useSuiClient();
+  // Riff Copilot memory (D-080) — recall chips + remember-on-publish. Fail-soft.
+  const {
+    chips: memoryChips,
+    community: communityChips,
+    personalStatus,
+    communityStatus,
+    recallSimilar,
+    recallCommunity,
+    rememberCreation,
+  } = useCreatorMemory();
+  // L2 Riff Copilot (D-081) — conversational prompt authoring. Fail-soft: when
+  // unavailable (no key / LLM error) the toggle is hidden and /create degrades to
+  // the Write experience above. `chatMode` is a sub-mode of the Tripo path only.
+  const copilot = useRiffCopilot();
+  const [chatMode, setChatMode] = useState(false);
+  // Build-time opt-in (default OFF): the copilot toggle only appears when L2 is
+  // explicitly enabled AND the backend reports the LLM available at runtime. This
+  // keeps a key-less 6/21 deploy clean — no broken-on-click toggle for judges.
+  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
   const signer = useDappKitSigner(account?.address ?? null);
+
+  // When the copilot synthesizes a prompt, write it into the shared prompt state
+  // (which Generate reads). We do NOT snap back to Write — the panel delivers the
+  // drafted prompt in place so the conversation stays visible (Q1 UX option A).
+  // Keyed on synthSeq (one-shot per synthesis) so a later re-render never re-applies
+  // a stale value over the user's manual edit (review: julik P1/P2).
+  useEffect(() => {
+    if (copilot.synthSeq > 0 && copilot.synthesizedPrompt) {
+      setPrompt(copilot.synthesizedPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilot.synthSeq]);
 
   // plan-015 F1 — URL lifecycle is split across this effect (revoke on
   // glbUrl change/unmount) and setGlbBytes below (createObjectURL when new
@@ -631,10 +720,18 @@ export function CreateModelPage() {
   // The access fee can only be charged on ALLOW_LIST (purchase_access asserts
   // POLICY_ALLOW_LIST), so a value entered under ALLOW_LIST must not silently
   // ride into a PERMISSIONLESS/RESTRICTED publish if the creator switches back.
-  const onPolicyChange = useCallback((next: PolicyValue) => {
-    setPolicy(next);
-    if (next !== POLICY_ALLOW_LIST) setAccessFeeSui('');
-  }, []);
+  const onPolicyChange = useCallback(
+    (next: PolicyValue) => {
+      setPolicy(next);
+      // Leaving ALLOW_LIST clears the access fee AND its validation highlight
+      // (the field unmounts and is no longer required).
+      if (next !== POLICY_ALLOW_LIST) {
+        setAccessFeeSui('');
+        clearInvalid('accessFee');
+      }
+    },
+    [clearInvalid],
+  );
 
   const setGlbBytes = useCallback((bytes: Uint8Array) => {
     setGlb(bytes);
@@ -708,16 +805,23 @@ export function CreateModelPage() {
   );
 
   const onMint = useCallback(async () => {
-    if (!session || !signer || !glb || !name.trim()) return;
-    // plan-027 D-078 — the publish fee gate moved derive→access. ALLOW_LIST now
-    // requires access_fee > 0 (on-chain EAllowListNeedsFee); the derive fee may
-    // be 0. Mirror the on-chain assert here so the user gets a clear message
-    // pre-sign instead of an abort after the Walrus upload + encrypt window.
-    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) {
-      setMintError('Allow-list requires an unlock price greater than 0 SUI.');
-      setMintStatus('error');
+    // Non-user-fixable preconditions (the model must exist / be signed in).
+    if (!session || !signer || !glb) return;
+    // Validate required fields and HIGHLIGHT the missing ones instead of silently
+    // doing nothing. name is always required; ALLOW_LIST also requires access_fee
+    // > 0 (mirrors the on-chain EAllowListNeedsFee — surfaces here pre-sign so the
+    // user fixes it before the Walrus upload + encrypt window).
+    const missing = new Set<string>();
+    if (!name.trim()) missing.add('name');
+    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) missing.add('accessFee');
+    if (missing.size > 0) {
+      setInvalidFields(missing);
+      setMintError(null);
+      const firstId = missing.has('name') ? 'name-input' : 'access-fee-input';
+      document.querySelector<HTMLInputElement>(`[data-testid="${firstId}"]`)?.focus();
       return;
     }
+    setInvalidFields(new Set());
     setMintError(null);
     setMintStatus('uploading');
     try {
@@ -804,11 +908,33 @@ export function CreateModelPage() {
       const result = await signAndExecute({ transaction: tx });
       setTxDigest(result.digest);
       setMintStatus('success');
+      // U5 (D-080) — fire-and-forget: capture the published prompt + new model
+      // id into MemWal. Tripo-only (R4: uploads have no prompt). Reads only (no
+      // wallet popup); never blocks the success UI; never throws.
+      if (sourceMode === 'tripo' && prompt.trim()) {
+        const digest = result.digest;
+        const promptAtPublish = prompt;
+        void (async () => {
+          try {
+            await suiClient.waitForTransaction({ digest });
+            const tb = await suiClient.getTransactionBlock({
+              digest,
+              options: { showObjectChanges: true },
+            });
+            const modelId = extractCreatedModelId(tb.objectChanges ?? []);
+            if (modelId) {
+              void rememberCreation({ prompt: promptAtPublish, modelId, policy });
+            }
+          } catch {
+            /* fail-soft — memory must never disturb publish */
+          }
+        })();
+      }
     } catch (e) {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
     }
-  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute]);
+  }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
 
   if (!session) {
     return (
@@ -847,6 +973,22 @@ export function CreateModelPage() {
           ? `GENERATE AGAIN (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
           : `PAY ${Number(TRIPO_FEE_MIST) / 1e9} SUI & GENERATE`;
 
+  // D-053 — pre-sign fee confirmation. Single instance, placed either inside the
+  // copilot panel's done-state (chat mode) or below the textarea (write mode).
+  const generateConfirm = (
+    <SignConfirmation
+      testIdPrefix="generate-button"
+      buttonLabel={generateLabel}
+      disabled={genBusy || !prompt.trim()}
+      summary={[
+        { label: 'Tripo generation fee', amount: `${Number(TRIPO_FEE_MIST) / 1e9} SUI` },
+        { label: 'Estimated gas', amount: '~ 0.001 SUI', muted: true },
+      ]}
+      recipient={{ address: TRIPO_FEE_TREASURY, note: 'TRIPO_FEE_TREASURY (deployer)' }}
+      onConfirm={onGenerate}
+    />
+  );
+
   return (
     <div data-testid="create-page" style={pagePaper}>
       <main style={mainStyle}>
@@ -881,40 +1023,91 @@ export function CreateModelPage() {
         {sourceMode === 'tripo' ? (
           <div>
             <span style={sectionLabel}>PROMPT</span>
-            <textarea
-              data-testid="prompt-input"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
-              rows={3}
-              style={promptArea}
-            />
-            <div style={{ marginTop: 12 }}>
-              {/* D-053 — pre-sign confirmation panel before Slush popup. */}
-              <SignConfirmation
-                testIdPrefix="generate-button"
-                buttonLabel={generateLabel}
-                disabled={genBusy || !prompt.trim()}
-                summary={[
-                  {
-                    label: 'Tripo generation fee',
-                    amount: `${Number(TRIPO_FEE_MIST) / 1e9} SUI`,
-                  },
-                  {
-                    label: 'Estimated gas',
-                    amount: '~ 0.001 SUI',
-                    muted: true,
-                  },
-                ]}
-                recipient={{
-                  address: TRIPO_FEE_TREASURY,
-                  note: 'TRIPO_FEE_TREASURY (deployer)',
-                }}
-                onConfirm={onGenerate}
+            {/* L2 (D-081): opt-in Write/Chat sub-mode. Hidden unless enabled + the
+                copilot is available, so /create degrades to Write otherwise (R10/R13). */}
+            {copilotOn && (
+              <div role="radiogroup" aria-label="prompt mode" style={toggleRow} data-testid="copilot-toggle">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!chatMode}
+                  onClick={() => {
+                    // Flipping to Write abandons the chat turn (drops any in-flight
+                    // response so it can't stomp the textarea — review: julik #4).
+                    copilot.reset();
+                    setChatMode(false);
+                  }}
+                  style={toggleCell(!chatMode)}
+                >
+                  ✎ Write
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={chatMode}
+                  data-testid="copilot-toggle-chat"
+                  onClick={() => {
+                    // Start a fresh conversation when re-entering chat after one
+                    // already finished (review: correctness P1 — second-session dead-end).
+                    if (copilot.status === 'done') copilot.reset();
+                    setChatMode(true);
+                  }}
+                  style={toggleCell(chatMode)}
+                >
+                  🧠 Brainstorm with AI
+                </button>
+              </div>
+            )}
+            {chatMode && copilotOn ? (
+              <CopilotChat
+                messages={copilot.messages}
+                status={copilot.status}
+                onSend={copilot.sendAnswer}
+                onGenerateNow={copilot.generateNow}
+                draftPrompt={prompt}
+                onDraftChange={setPrompt}
+                onStartOver={copilot.reset}
+                onRetry={copilot.retry}
+                generateSlot={generateConfirm}
               />
+            ) : (
+              <>
+                <textarea
+                  data-testid="prompt-input"
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    recallSimilar(e.target.value);
+                    recallCommunity(e.target.value);
+                  }}
+                  onFocus={() => {
+                    recallSimilar(prompt);
+                    recallCommunity(prompt);
+                  }}
+                  placeholder="Describe the model — e.g., 'ornate wooden chest with brass fittings'"
+                  rows={3}
+                  style={promptArea}
+                />
+                <CopilotBar
+                  personalStatus={personalStatus}
+                  communityStatus={communityStatus}
+                  personalCount={memoryChips.length}
+                  communityCount={communityChips.length}
+                />
+                <PromptMemoryChips chips={memoryChips} currentPrompt={prompt} onPick={setPrompt} status={personalStatus} />
+                <CommunityRecall items={communityChips} status={communityStatus} />
+              </>
+            )}
+            <div style={{ marginTop: 12 }}>
+              {/* D-053 fee confirm: in chat mode it lives inside the copilot panel
+                  (generateSlot); here it renders for the Write path only. */}
+              {!(chatMode && copilotOn) && generateConfirm}
               {genBusy && (
                 <div style={{ marginTop: 8 }}>
-                  <span style={statusPill}>— SUI FEE-GATED · TWO-STEP, ~120S TYPICAL</span>
+                  <IndeterminateBar testId="generate-progress" ariaLabel={generateLabel} />
+                  <span style={{ ...statusPill, display: 'inline-block', marginTop: 6 }}>
+                    — SUI FEE-GATED · TWO-STEP, ~120S TYPICAL
+                  </span>
                 </div>
               )}
             </div>
@@ -1000,13 +1193,25 @@ export function CreateModelPage() {
         {haveModel && tagged && (
           <div data-testid="metadata-form" style={metadataGrid}>
             <label style={fullRow}>
-              <span style={sectionLabel}>MODEL NAME</span>
+              <span style={sectionLabel}>
+                MODEL NAME <span style={{ color: tokens.color.accent }}>*</span>
+              </span>
               <input
                 data-testid="name-input"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={{ ...inputStyle, width: '100%' }}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  clearInvalid('name');
+                }}
+                aria-required="true"
+                aria-invalid={invalidFields.has('name')}
+                style={fieldStyle('name')}
               />
+              {invalidFields.has('name') && (
+                <span data-testid="name-required-error" style={{ ...monoLabel, color: tokens.color.err, marginTop: 4 }}>
+                  Model name is required
+                </span>
+              )}
             </label>
             <label style={fullRow}>
               <span style={sectionLabel}>TAGS (COMMA-SEPARATED)</span>
@@ -1048,13 +1253,23 @@ export function CreateModelPage() {
                 <input
                   data-testid="access-fee-input"
                   value={accessFeeSui}
-                  onChange={(e) => setAccessFeeSui(e.target.value)}
+                  onChange={(e) => {
+                    setAccessFeeSui(e.target.value);
+                    if (suiToMist(e.target.value) > 0n) clearInvalid('accessFee');
+                  }}
                   placeholder="e.g. 1"
-                  style={{ ...inputStyle, width: '100%' }}
+                  aria-invalid={invalidFields.has('accessFee')}
+                  style={fieldStyle('accessFee')}
                 />
-                <span data-testid="access-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                  One-time price to unlock this model (buy access). Buyers pay this once to view and fork it. Must be more than 0 SUI.
-                </span>
+                {invalidFields.has('accessFee') ? (
+                  <span data-testid="access-fee-required-error" style={{ ...monoLabel, color: tokens.color.err, marginTop: 4 }}>
+                    Unlock price must be greater than 0 SUI
+                  </span>
+                ) : (
+                  <span data-testid="access-fee-hint" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                    One-time price to unlock this model (buy access). Buyers pay this once to view and fork it. Must be more than 0 SUI.
+                  </span>
+                )}
               </label>
             )}
             <label>
@@ -1088,11 +1303,17 @@ export function CreateModelPage() {
               <MintButton
                 status={mintStatus}
                 uploadStage={uploadStage}
-                disabled={!name.trim()}
                 onClick={onMint}
                 errorMessage={mintError ?? undefined}
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
+              {/* Clicking Mint with missing required fields highlights them (below)
+                  rather than disabling the button with no explanation. */}
+              {invalidFields.size > 0 && mintStatus === 'idle' && (
+                <p data-testid="mint-missing-fields" style={{ ...monoLabel, color: tokens.color.err, marginTop: 8 }}>
+                  ↑ FILL THE HIGHLIGHTED REQUIRED FIELD{invalidFields.size > 1 ? 'S' : ''}
+                </p>
+              )}
               {/* Pill scopes to the SILENT Walrus phases only (encoding +
                   relay-upload). The wallet-popup stages (awaiting-register /
                   awaiting-certify) already get a dedicated MintButton

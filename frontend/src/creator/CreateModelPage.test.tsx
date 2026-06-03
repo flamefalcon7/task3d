@@ -5,11 +5,14 @@ const useCurrentAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
 const signTxMock = vi.fn();
 const waitForTransactionMock = vi.fn(async () => ({})); // resolve immediately by default
+// U5 (D-080): remember-on-publish reads objectChanges to extract the new model
+// id. Default → no created Model3D, so non-U5 tests never trigger a remember.
+const getTransactionBlockMock = vi.fn(async () => ({ objectChanges: [] }) as { objectChanges: unknown[] });
 vi.mock('@mysten/dapp-kit', () => ({
   useCurrentAccount: () => useCurrentAccountMock(),
   useSignTransaction: () => ({ mutateAsync: signTxMock }),
   useSignAndExecuteTransaction: () => ({ mutateAsync: signAndExecuteMock }),
-  useSuiClient: () => ({ waitForTransaction: waitForTransactionMock }),
+  useSuiClient: () => ({ waitForTransaction: waitForTransactionMock, getTransactionBlock: getTransactionBlockMock }),
 }));
 
 const useSessionMock = vi.fn();
@@ -18,6 +21,29 @@ const isJwtExpiredMock = vi.fn((_jwt?: string) => false);
 vi.mock('../auth/useSession', () => ({
   useSession: () => useSessionMock(),
   isJwtExpired: (jwt: string) => isJwtExpiredMock(jwt),
+}));
+
+// L2 (D-081) — controllable Riff Copilot hook so the integration (toggle gate,
+// synthesis→fill→flip, second-session reset) can be driven without a backend.
+const copilotState = vi.hoisted(() => ({
+  messages: [] as { role: 'user' | 'assistant'; content: string }[],
+  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done',
+  available: true,
+  synthesizedPrompt: null as string | null,
+  synthSeq: 0,
+}));
+const copilotResetMock = vi.hoisted(() => vi.fn());
+const copilotSendMock = vi.hoisted(() => vi.fn());
+const copilotGenerateNowMock = vi.hoisted(() => vi.fn());
+const copilotRetryMock = vi.hoisted(() => vi.fn());
+vi.mock('./useRiffCopilot', () => ({
+  useRiffCopilot: () => ({
+    ...copilotState,
+    sendAnswer: copilotSendMock,
+    generateNow: copilotGenerateNowMock,
+    reset: copilotResetMock,
+    retry: copilotRetryMock,
+  }),
 }));
 
 const uploadBlobMock = vi.fn();
@@ -188,6 +214,16 @@ beforeEach(() => {
   });
   TAGGING_PART_COUNT_REF.current = 12;
   TAGGING_MATERIAL_NAMES_REF.current = null;
+  // Reset L2 copilot mock to defaults (available, idle, no synthesis).
+  copilotState.messages = [];
+  copilotState.status = 'idle';
+  copilotState.available = true;
+  copilotState.synthesizedPrompt = null;
+  copilotState.synthSeq = 0;
+  copilotResetMock.mockReset();
+  copilotSendMock.mockReset();
+  copilotGenerateNowMock.mockReset();
+  copilotRetryMock.mockReset();
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
   vi.stubGlobal('URL', Object.assign(URL, {
@@ -377,14 +413,45 @@ describe('CreateModelPage', () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
 
-    // Guarded: the access-fee error fires; neither encryption nor any publish
-    // PTB runs.
-    expect(screen.getByText(/unlock price greater than 0/i)).toBeTruthy();
+    // Guarded: the access-fee field is highlighted with its error; neither
+    // encryption nor any publish PTB runs.
+    expect(screen.getByTestId('access-fee-required-error')).toBeTruthy();
     expect(encryptBaseMock).not.toHaveBeenCalled();
     expect(buildPublishEncryptedPtbMock).not.toHaveBeenCalled();
     expect(buildPublishPtbMock).not.toHaveBeenCalled();
     expect(uploadBlobMock).not.toHaveBeenCalled();
     expect(uploadFilesMock).not.toHaveBeenCalled();
+  });
+
+  it('clicking Mint with a missing required field highlights it (not a silent no-op); filling clears it', async () => {
+    TAGGING_PART_COUNT_REF.current = 1;
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(1, ['a']);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
+
+    // Mint is clickable (no silently-disabled button), and nothing is flagged yet.
+    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('name-required-error')).toBeNull();
+
+    // (generation already used signAndExecute to pay the Tripo fee — reset so we
+    // can assert the mint attempt itself fires no transaction.)
+    signAndExecuteMock.mockClear();
+
+    // Attempt to mint with an empty MODEL NAME → the field is highlighted with an
+    // inline error + a summary, and no transaction fires.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('name-required-error')).toBeTruthy();
+    expect(screen.getByTestId('mint-missing-fields')).toBeTruthy();
+    expect(signAndExecuteMock).not.toHaveBeenCalled();
+
+    // Filling the name clears the highlight + the summary.
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Model' } });
+    expect(screen.queryByTestId('name-required-error')).toBeNull();
+    expect(screen.queryByTestId('mint-missing-fields')).toBeNull();
   });
 
   it('U4: allow-list quilts the ciphertext + preview stills in ONE upload; passes their patch ids', async () => {
@@ -585,6 +652,49 @@ describe('CreateModelPage', () => {
     return buildPublishPtbMock.mock.calls[0]![0] as { partLabels: string[]; tags: string[] };
   }
 
+  it('U5 (D-080): a successful Tripo publish remembers the prompt + extracted modelId + policy', async () => {
+    const MODEL_ID = '0x' + 'b'.repeat(64);
+    getTransactionBlockMock.mockResolvedValue({
+      objectChanges: [
+        { type: 'mutated', objectType: '0x2::coin::Coin', objectId: '0xgas' },
+        { type: 'created', objectType: '0xpkg::model3d::Model3D', objectId: MODEL_ID },
+      ],
+    });
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel(); // prompt 'a sword', default policy Open(2)
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('name-input')).toBeTruthy());
+    await driveMintAndCaptureArgs(); // names, signs, mints (digest PUBDIGEST456)
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+      expect(calls.length).toBe(1);
+    });
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/memory/remember')!;
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      prompt: 'a sword',
+      modelId: MODEL_ID,
+      policy: 2,
+    });
+  });
+
+  it('U5 (D-080): publish does NOT remember when objectChanges has no Model3D (degrade, not crash)', async () => {
+    getTransactionBlockMock.mockResolvedValue({ objectChanges: [] });
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('name-input')).toBeTruthy());
+    await driveMintAndCaptureArgs();
+    // Publish still succeeds; no remember fetch fired.
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+    expect(calls.length).toBe(0);
+  });
+
   it('TaggingStep renders after confirming a Tripo model (R1 framing-B copy + help icon)', async () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
@@ -604,21 +714,27 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('metadata-form')).toBeNull();
   });
 
-  it('AE2: Continue stays disabled until every part has ≥1 character', async () => {
+  it('AE2: Continue flags unnamed parts on attempt (no silent disabled button); naming clears them', async () => {
     TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
     const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
-    expect(continueBtn.disabled).toBe(true);
+    // Clickable, not silently disabled (partCount > 0).
+    expect(continueBtn.disabled).toBe(false);
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
-    // Label 4 of 5 — still disabled.
+
+    // Name 4 of 5, then attempt Continue → the 1 unnamed part is highlighted and
+    // the step does NOT advance.
     await labelAllParts(4);
-    expect(continueBtn.disabled).toBe(true);
-    expect(screen.getByTestId('tag-progress').textContent).toMatch(/4 OF 5 NAMED/);
-    // Label the last one — enables.
+    fireEvent.click(continueBtn);
+    expect(screen.getByTestId('part-list-row-4-tagging').getAttribute('data-flagged')).toBe('true');
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/NAME THE 1 HIGHLIGHTED PART/);
+    expect(screen.queryByTestId('metadata-form')).toBeNull();
+
+    // Naming the last part clears its highlight + restores the progress label.
     fireEvent.click(screen.getByTestId('pick-part-4'));
     fireEvent.change(screen.getByTestId('part-label-input'), { target: { value: 'tail' } });
-    expect(continueBtn.disabled).toBe(false);
+    expect(screen.getByTestId('part-list-row-4-tagging').getAttribute('data-flagged')).toBeNull();
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/5 OF 5 NAMED/);
   });
 
@@ -627,7 +743,7 @@ describe('CreateModelPage', () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
     const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
-    expect(continueBtn.disabled).toBe(true);
+    expect(continueBtn.disabled).toBe(false); // clickable; flags on attempt rather than disabling
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
     // One click fills all five parts.
     fireEvent.click(screen.getByTestId('auto-name-parts'));
@@ -855,5 +971,100 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('confirm-model'));
     await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
+  });
+});
+
+describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
+  beforeEach(() => vi.stubEnv('VITE_COPILOT_ENABLED', 'true'));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('keeps the toggle hidden when the feature flag is off (default-off safety)', () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', '');
+    render(<CreateModelPage />);
+    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
+    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+  });
+
+  it('shows the Write/Chat toggle when enabled and the copilot is available', () => {
+    render(<CreateModelPage />);
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    expect(screen.getByTestId('prompt-input')).toBeTruthy(); // Write is the default
+  });
+
+  it('hides the toggle and keeps the plain textarea when the copilot is unavailable (AE7/R13)', () => {
+    copilotState.available = false;
+    render(<CreateModelPage />);
+    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
+    // /create degrades to the shipped Write experience.
+    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+  });
+
+  it('clicking "Chat with Copilot" mounts the conversation panel', () => {
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-chat')).toBeTruthy();
+    expect(screen.queryByTestId('prompt-input')).toBeNull(); // textarea swapped out
+  });
+
+  it('a synthesized prompt is written into the shared prompt state (R3)', () => {
+    // Default mode is Write; the one-shot effect writes synthesis into `prompt`
+    // (no auto-snap — option A delivers it in-panel; here we assert the state lands).
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    const box = screen.getByTestId('prompt-input') as HTMLTextAreaElement;
+    expect(box.value).toBe('low-poly red sports car');
+  });
+
+  it('the synthesized prompt remains user-editable before generation (AE5)', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    const box = screen.getByTestId('prompt-input') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'low-poly red sports car with chrome wheels' } });
+    // Generate reads the live `prompt` state, so the edited value is what ships.
+    expect(box.value).toBe('low-poly red sports car with chrome wheels');
+  });
+
+  it('does NOT auto-switch to Write on synthesis — the panel stays in Chat (option A)', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter Chat
+    // status is 'done' → re-enter resets to a fresh chat; the panel is shown (not snapped to Write)
+    expect(screen.getByTestId('copilot-chat')).toBeTruthy();
+    expect(screen.queryByTestId('prompt-input')).toBeNull();
+  });
+
+  it('renders the real Generate gate inside the chat done-state, not duplicated below', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter Chat (done state)
+    const triggers = screen.getAllByTestId('generate-button-trigger');
+    expect(triggers.length).toBe(1); // exactly one SignConfirmation — in the panel, not also below
+    expect(screen.getByTestId('copilot-done')).toBeTruthy();
+  });
+
+  it('re-entering Chat after a finished conversation resets it (no second-session dead-end)', () => {
+    copilotState.status = 'done';
+    copilotState.messages = [
+      { role: 'user', content: 'a car' },
+      { role: 'assistant', content: 'low-poly red car' },
+    ];
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(copilotResetMock).toHaveBeenCalled();
+  });
+
+  it('flipping back to Write resets the copilot (abandons an in-flight turn)', () => {
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter chat
+    fireEvent.click(screen.getByText('✎ Write')); // back to write
+    expect(copilotResetMock).toHaveBeenCalled();
   });
 });
