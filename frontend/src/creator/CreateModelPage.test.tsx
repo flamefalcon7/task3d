@@ -714,21 +714,27 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('metadata-form')).toBeNull();
   });
 
-  it('AE2: Continue stays disabled until every part has ≥1 character', async () => {
+  it('AE2: Continue flags unnamed parts on attempt (no silent disabled button); naming clears them', async () => {
     TAGGING_PART_COUNT_REF.current = 5;
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
     const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
-    expect(continueBtn.disabled).toBe(true);
+    // Clickable, not silently disabled (partCount > 0).
+    expect(continueBtn.disabled).toBe(false);
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
-    // Label 4 of 5 — still disabled.
+
+    // Name 4 of 5, then attempt Continue → the 1 unnamed part is highlighted and
+    // the step does NOT advance.
     await labelAllParts(4);
-    expect(continueBtn.disabled).toBe(true);
-    expect(screen.getByTestId('tag-progress').textContent).toMatch(/4 OF 5 NAMED/);
-    // Label the last one — enables.
+    fireEvent.click(continueBtn);
+    expect(screen.getByTestId('part-list-row-4-tagging').getAttribute('data-flagged')).toBe('true');
+    expect(screen.getByTestId('tag-progress').textContent).toMatch(/NAME THE 1 HIGHLIGHTED PART/);
+    expect(screen.queryByTestId('metadata-form')).toBeNull();
+
+    // Naming the last part clears its highlight + restores the progress label.
     fireEvent.click(screen.getByTestId('pick-part-4'));
     fireEvent.change(screen.getByTestId('part-label-input'), { target: { value: 'tail' } });
-    expect(continueBtn.disabled).toBe(false);
+    expect(screen.getByTestId('part-list-row-4-tagging').getAttribute('data-flagged')).toBeNull();
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/5 OF 5 NAMED/);
   });
 
@@ -737,7 +743,7 @@ describe('CreateModelPage', () => {
     render(<CreateModelPage />);
     await generateAndConfirmTripoModel();
     const continueBtn = screen.getByTestId('continue-tagging') as HTMLButtonElement;
-    expect(continueBtn.disabled).toBe(true);
+    expect(continueBtn.disabled).toBe(false); // clickable; flags on attempt rather than disabling
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
     // One click fills all five parts.
     fireEvent.click(screen.getByTestId('auto-name-parts'));

@@ -348,6 +348,8 @@ function TaggingStep({
   const [partCount, setPartCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [labels, setLabels] = useState<Map<number, string>>(new Map());
+  // Parts flagged as unnamed on a Continue attempt — highlighted until named.
+  const [flaggedParts, setFlaggedParts] = useState<ReadonlySet<number>>(new Set());
   const [materialNames, setMaterialNames] = useState<(string | null)[]>([]);
   const [loaded, setLoaded] = useState(false);
   const skippedRef = useRef(false);
@@ -403,12 +405,31 @@ function TaggingStep({
       else next.delete(i);
       return next;
     });
+    // Naming a part clears its "unnamed" flag immediately.
+    if (label.trim().length > 0) {
+      setFlaggedParts((prev) => {
+        if (!prev.has(i)) return prev;
+        const next = new Set(prev);
+        next.delete(i);
+        return next;
+      });
+    }
   }, []);
 
   const allLabeled = partCount > 0 && labels.size === partCount;
 
   const emit = useCallback(() => {
-    if (!allLabeled) return;
+    if (!allLabeled) {
+      // Flag every unnamed part (red row) and jump to the first one, instead of
+      // a silently-disabled Continue with no indication of WHAT's missing.
+      const missing = new Set<number>();
+      for (let i = 0; i < partCount; i++) if (!labels.has(i)) missing.add(i);
+      setFlaggedParts(missing);
+      const first = missing.values().next().value;
+      if (first !== undefined) setSelectedIndex(first);
+      return;
+    }
+    setFlaggedParts(new Set());
     const out: string[] = [];
     for (let i = 0; i < partCount; i++) {
       // Safe-! after the allLabeled gate: every index 0..partCount-1 is in
@@ -487,6 +508,7 @@ function TaggingStep({
             onSelect={setSelectedIndex}
             testIdSuffix="tagging"
             maxHeight={180}
+            flaggedIndices={flaggedParts}
           />
           <div data-testid="label-editor" style={labelEditorBlock}>
             {selectedIndex == null ? (
@@ -516,8 +538,20 @@ function TaggingStep({
         </div>
       </div>
       <div style={taggingActionRow}>
-        <span data-testid="tag-progress" style={{ ...monoLabel, color: tokens.color.muted, alignSelf: 'center', marginRight: 'auto' }}>
-          {partCount === 0 ? 'LOADING PARTS…' : `${labels.size} OF ${partCount} NAMED`}
+        <span
+          data-testid="tag-progress"
+          style={{
+            ...monoLabel,
+            color: flaggedParts.size > 0 ? tokens.color.err : tokens.color.muted,
+            alignSelf: 'center',
+            marginRight: 'auto',
+          }}
+        >
+          {partCount === 0
+            ? 'LOADING PARTS…'
+            : flaggedParts.size > 0
+              ? `↑ NAME THE ${flaggedParts.size} HIGHLIGHTED PART${flaggedParts.size > 1 ? 'S' : ''}`
+              : `${labels.size} OF ${partCount} NAMED`}
         </span>
         <button
           type="button"
@@ -533,7 +567,7 @@ function TaggingStep({
           type="button"
           data-testid="continue-tagging"
           onClick={emit}
-          disabled={disabled || !allLabeled}
+          disabled={disabled || partCount === 0}
           style={buttonPrimary}
         >
           CONTINUE →
