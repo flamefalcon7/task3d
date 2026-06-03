@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { UploadStage } from '../walrus/useWalrusUpload';
 import { buttonPrimary, monoLabel, tokens } from '../ux/tokens';
-import styles from './mintButton.module.css';
+import { IndeterminateBar } from '../ux/IndeterminateBar';
 
 export type MintStatus = 'idle' | 'uploading' | 'signing' | 'success' | 'error';
 
@@ -83,11 +83,7 @@ export function MintButton({
       >
         {label}
       </button>
-      {busy && (
-        <div className={styles.track} data-testid="mint-progress" role="progressbar" aria-label={label}>
-          <div className={styles.fill} />
-        </div>
-      )}
+      {busy && <IndeterminateBar testId="mint-progress" ariaLabel={label} />}
       {status === 'error' && errorMessage && (
         <div style={{ marginTop: 12 }}>
           <span style={errorPrefix}>× FAILED ·</span>

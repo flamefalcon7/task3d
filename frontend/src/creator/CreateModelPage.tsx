@@ -31,6 +31,7 @@ import { PromptMemoryChips } from './PromptMemoryChips';
 import { CommunityRecall } from './CommunityRecall';
 import { CopilotChat } from './CopilotChat';
 import { useRiffCopilot } from './useRiffCopilot';
+import { IndeterminateBar } from '../ux/IndeterminateBar';
 import { extractCreatedModelId } from './extractModelId';
 import { getSealClient } from '../seal/sealClient';
 import { encryptBase } from '../seal/envelope';
@@ -1038,7 +1039,10 @@ export function CreateModelPage() {
               {!(chatMode && copilotOn) && generateConfirm}
               {genBusy && (
                 <div style={{ marginTop: 8 }}>
-                  <span style={statusPill}>— SUI FEE-GATED · TWO-STEP, ~120S TYPICAL</span>
+                  <IndeterminateBar testId="generate-progress" ariaLabel={generateLabel} />
+                  <span style={{ ...statusPill, display: 'inline-block', marginTop: 6 }}>
+                    — SUI FEE-GATED · TWO-STEP, ~120S TYPICAL
+                  </span>
                 </div>
               )}
             </div>
