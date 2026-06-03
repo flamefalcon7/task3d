@@ -6,17 +6,22 @@ import type { CopilotMessage, CopilotStatus } from './useRiffCopilot';
 afterEach(cleanup);
 
 function panel(over: Partial<Parameters<typeof CopilotChat>[0]> = {}) {
-  const onSend = vi.fn();
-  const onGenerateNow = vi.fn();
+  const onSend = over.onSend ?? vi.fn();
+  const onGenerateNow = over.onGenerateNow ?? vi.fn();
+  const onDraftChange = over.onDraftChange ?? vi.fn();
+  const onStartOver = over.onStartOver ?? vi.fn();
   render(
     <CopilotChat
       messages={over.messages ?? []}
       status={over.status ?? ('idle' as CopilotStatus)}
-      onSend={over.onSend ?? onSend}
-      onGenerateNow={over.onGenerateNow ?? onGenerateNow}
+      onSend={onSend}
+      onGenerateNow={onGenerateNow}
+      draftPrompt={over.draftPrompt ?? ''}
+      onDraftChange={onDraftChange}
+      onStartOver={onStartOver}
     />,
   );
-  return { onSend: over.onSend ?? onSend, onGenerateNow: over.onGenerateNow ?? onGenerateNow };
+  return { onSend, onGenerateNow, onDraftChange, onStartOver };
 }
 
 describe('CopilotChat', () => {
@@ -62,15 +67,29 @@ describe('CopilotChat', () => {
     expect((screen.getByTestId('copilot-send') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('done state hides the input and shows the drafted-prompt note', () => {
+  it('done state delivers the drafted prompt in place (editable field, no mode switch)', () => {
     panel({
       messages: [
         { role: 'user', content: 'a car' },
         { role: 'assistant', content: 'low-poly red car' },
       ],
       status: 'done',
+      draftPrompt: 'low-poly red car',
     });
-    expect(screen.queryByTestId('copilot-answer-input')).toBeNull();
-    expect(screen.getByTestId('copilot-done')).toBeTruthy();
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull(); // Q&A input gone
+    const result = screen.getByTestId('copilot-result') as HTMLTextAreaElement;
+    expect(result.value).toBe('low-poly red car'); // drafted prompt shown in place
+  });
+
+  it('editing the drafted prompt in the done state flows up via onDraftChange (AE5)', () => {
+    const { onDraftChange } = panel({ status: 'done', draftPrompt: 'low-poly red car' });
+    fireEvent.change(screen.getByTestId('copilot-result'), { target: { value: 'low-poly red car, chrome wheels' } });
+    expect(onDraftChange).toHaveBeenCalledWith('low-poly red car, chrome wheels');
+  });
+
+  it('Start over fires onStartOver', () => {
+    const { onStartOver } = panel({ status: 'done', draftPrompt: 'x' });
+    fireEvent.click(screen.getByTestId('copilot-start-over'));
+    expect(onStartOver).toHaveBeenCalled();
   });
 });

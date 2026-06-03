@@ -966,9 +966,11 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     expect(screen.queryByTestId('prompt-input')).toBeNull(); // textarea swapped out
   });
 
-  it('a synthesized prompt fills the existing input box and flips back to Write (R3/AE5)', () => {
+  it('a synthesized prompt is written into the shared prompt state (R3)', () => {
+    // Default mode is Write; the one-shot effect writes synthesis into `prompt`
+    // (no auto-snap — option A delivers it in-panel; here we assert the state lands).
     copilotState.synthesizedPrompt = 'low-poly red sports car';
-    copilotState.synthSeq = 1; // a synthesis has occurred → one-shot effect applies it
+    copilotState.synthSeq = 1;
     copilotState.status = 'done';
     render(<CreateModelPage />);
     const box = screen.getByTestId('prompt-input') as HTMLTextAreaElement;
@@ -984,6 +986,17 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     fireEvent.change(box, { target: { value: 'low-poly red sports car with chrome wheels' } });
     // Generate reads the live `prompt` state, so the edited value is what ships.
     expect(box.value).toBe('low-poly red sports car with chrome wheels');
+  });
+
+  it('does NOT auto-switch to Write on synthesis — the panel stays in Chat (option A)', () => {
+    copilotState.synthesizedPrompt = 'low-poly red sports car';
+    copilotState.synthSeq = 1;
+    copilotState.status = 'done';
+    render(<CreateModelPage />);
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat')); // enter Chat
+    // status is 'done' → re-enter resets to a fresh chat; the panel is shown (not snapped to Write)
+    expect(screen.getByTestId('copilot-chat')).toBeTruthy();
+    expect(screen.queryByTestId('prompt-input')).toBeNull();
   });
 
   it('re-entering Chat after a finished conversation resets it (no second-session dead-end)', () => {

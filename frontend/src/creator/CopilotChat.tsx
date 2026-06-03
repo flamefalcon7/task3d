@@ -3,8 +3,11 @@
 // Presentational: it renders the conversation and an answer box, and reports the
 // user's input up via onSend / onGenerateNow. All state (messages, status,
 // availability, the synthesized prompt) lives in useRiffCopilot, owned by the
-// parent (CreateModelPage) so the parent can gate the Write/Chat toggle on
-// availability and route the synthesized prompt into the existing input box.
+// parent (CreateModelPage). On synthesis the panel does NOT snap back to Write —
+// it delivers the drafted prompt IN PLACE (an editable field bound to the parent's
+// prompt state) so the conversation stays visible and the handoff is explicit
+// (plan-002 Q1 UX, option A). Generate lives below the panel and reads the same
+// prompt state, so the user edits here and generates without a mode switch.
 import { useState } from 'react';
 import type { CopilotMessage, CopilotStatus } from './useRiffCopilot';
 
@@ -13,6 +16,12 @@ export interface CopilotChatProps {
   status: CopilotStatus;
   onSend: (text: string) => void;
   onGenerateNow: () => void;
+  /** The live prompt state — shown editable in the done state (synthesis target). */
+  draftPrompt: string;
+  /** Edits to the drafted prompt flow back to the parent's prompt state. */
+  onDraftChange: (value: string) => void;
+  /** Discard this conversation and start a fresh one. */
+  onStartOver: () => void;
 }
 
 const panel: React.CSSProperties = {
@@ -33,7 +42,15 @@ const bubble = (role: CopilotMessage['role']): React.CSSProperties => ({
   whiteSpace: 'pre-wrap',
 });
 
-export function CopilotChat({ messages, status, onSend, onGenerateNow }: CopilotChatProps) {
+export function CopilotChat({
+  messages,
+  status,
+  onSend,
+  onGenerateNow,
+  draftPrompt,
+  onDraftChange,
+  onStartOver,
+}: CopilotChatProps) {
   const [draft, setDraft] = useState('');
   const busy = status === 'thinking';
   const done = status === 'done';
@@ -95,9 +112,24 @@ export function CopilotChat({ messages, status, onSend, onGenerateNow }: Copilot
         </div>
       )}
       {done && (
-        <p data-testid="copilot-done" style={{ margin: 0, fontSize: 14, opacity: 0.8 }}>
-          ✔ Prompt drafted — it's in the box above; edit it or generate.
-        </p>
+        <div data-testid="copilot-done" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+          <span style={{ fontSize: 13, opacity: 0.8 }}>✔ Prompt ready — edit it here, then Generate below.</span>
+          <textarea
+            data-testid="copilot-result"
+            value={draftPrompt}
+            onChange={(e) => onDraftChange(e.target.value)}
+            rows={3}
+            style={{ width: '100%', padding: '6px 10px', borderRadius: 6, resize: 'vertical' }}
+          />
+          <button
+            data-testid="copilot-start-over"
+            type="button"
+            onClick={onStartOver}
+            style={{ alignSelf: 'flex-start', fontSize: 13 }}
+          >
+            ↺ Start over
+          </button>
+        </div>
       )}
     </div>
   );

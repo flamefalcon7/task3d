@@ -624,14 +624,14 @@ export function CreateModelPage() {
   const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
   const signer = useDappKitSigner(account?.address ?? null);
 
-  // When the copilot synthesizes a prompt, drop it into the existing input box
-  // and flip back to Write so the user sees + edits it before generating (R3/AE5).
+  // When the copilot synthesizes a prompt, write it into the shared prompt state
+  // (which Generate reads). We do NOT snap back to Write — the panel delivers the
+  // drafted prompt in place so the conversation stays visible (Q1 UX option A).
   // Keyed on synthSeq (one-shot per synthesis) so a later re-render never re-applies
   // a stale value over the user's manual edit (review: julik P1/P2).
   useEffect(() => {
     if (copilot.synthSeq > 0 && copilot.synthesizedPrompt) {
       setPrompt(copilot.synthesizedPrompt);
-      setChatMode(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copilot.synthSeq]);
@@ -982,6 +982,9 @@ export function CreateModelPage() {
                 status={copilot.status}
                 onSend={copilot.sendAnswer}
                 onGenerateNow={copilot.generateNow}
+                draftPrompt={prompt}
+                onDraftChange={setPrompt}
+                onStartOver={copilot.reset}
               />
             ) : (
               <>
