@@ -7,14 +7,19 @@ import {
   type GenerateFn,
   type CopilotMessage,
 } from './copilot-client.js';
+import { buildQuotaStore } from './quota-store.js';
+import type { GeminiGenerateResult } from './gemini-quota.js';
 
 const KEY = 'test-gemini-key';
 const msgs = (n: number): CopilotMessage[] =>
   Array.from({ length: n }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` }));
 
+/** The widened generate seam returns { text, headers?, usage? } (U2). */
+const ok = (text: string): GeminiGenerateResult => ({ text });
+
 describe('copilot-client', () => {
   it('question mode: early turn with no force asks a question', async () => {
-    const generate: GenerateFn = vi.fn(async () => 'What color should it be?');
+    const generate: GenerateFn = vi.fn(async () => ok('What color should it be?'));
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
     expect(r.kind).toBe('question');
@@ -22,7 +27,7 @@ describe('copilot-client', () => {
   });
 
   it('forces synthesis at the turn cap even with sparse messages (AE2)', async () => {
-    const generate: GenerateFn = vi.fn(async () => 'low-poly red sports car, smooth shading');
+    const generate: GenerateFn = vi.fn(async () => ok('low-poly red sports car, smooth shading'));
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: MAX_TURNS - 1 });
     expect(r.kind).toBe('prompt');
@@ -30,7 +35,7 @@ describe('copilot-client', () => {
   });
 
   it('forceSynthesize short-circuits to a prompt at turn 0 (AE1)', async () => {
-    const generate: GenerateFn = vi.fn(async () => 'low-poly spaceship');
+    const generate: GenerateFn = vi.fn(async () => ok('low-poly spaceship'));
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0, forceSynthesize: true });
     expect(r.kind).toBe('prompt');
@@ -40,7 +45,7 @@ describe('copilot-client', () => {
     let captured: CopilotMessage[] = [];
     const generate: GenerateFn = vi.fn(async ({ messages }) => {
       captured = messages;
-      return 'low-poly biplane, game asset';
+      return ok('low-poly biplane, game asset');
     });
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     const r = await client.turn({
@@ -64,7 +69,7 @@ describe('copilot-client', () => {
     let captured: CopilotMessage[] = [];
     const generate: GenerateFn = vi.fn(async ({ messages }) => {
       captured = messages;
-      return 'What color?';
+      return ok('What color?');
     });
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
@@ -76,7 +81,7 @@ describe('copilot-client', () => {
     let capturedSystem = '';
     const generate: GenerateFn = vi.fn(async ({ system }) => {
       capturedSystem = system;
-      return 'Q?';
+      return ok('Q?');
     });
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     await client.turn({
@@ -92,7 +97,7 @@ describe('copilot-client', () => {
     let capturedSystem = '';
     const generate: GenerateFn = vi.fn(async ({ system }) => {
       capturedSystem = system;
-      return 'Q?';
+      return ok('Q?');
     });
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
@@ -110,7 +115,7 @@ describe('copilot-client', () => {
   });
 
   it('throws a typed degraded error on timeout', async () => {
-    const generate: GenerateFn = vi.fn(() => new Promise<string>(() => {})); // never resolves
+    const generate: GenerateFn = vi.fn(() => new Promise<GeminiGenerateResult>(() => {})); // never resolves
     const client = buildCopilotClient({ apiKey: KEY }, { generate, timeoutMs: 20 });
     await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
       CopilotDegradedError,
@@ -118,7 +123,7 @@ describe('copilot-client', () => {
   });
 
   it('is inert without an API key — never calls the model', async () => {
-    const generate: GenerateFn = vi.fn(async () => 'should not be called');
+    const generate: GenerateFn = vi.fn(async () => ok('should not be called'));
     const client = buildCopilotClient({}, { generate });
     expect(client.configured).toBe(false);
     await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
@@ -129,7 +134,7 @@ describe('copilot-client', () => {
 
   it('clamps an over-long synthesized prompt to the Tripo limit (R3)', async () => {
     const huge = 'x'.repeat(PROMPT_MAX_CHARS + 500);
-    const generate: GenerateFn = vi.fn(async () => huge);
+    const generate: GenerateFn = vi.fn(async () => ok(huge));
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     const r = await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0, forceSynthesize: true });
     expect(r.kind).toBe('prompt');
@@ -137,10 +142,40 @@ describe('copilot-client', () => {
   });
 
   it('throws degraded on empty model output', async () => {
-    const generate: GenerateFn = vi.fn(async () => '   ');
+    const generate: GenerateFn = vi.fn(async () => ok('   '));
     const client = buildCopilotClient({ apiKey: KEY }, { generate });
     await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
       CopilotDegradedError,
     );
+  });
+
+  // --- U2: quota recording inside the generate closure ---
+
+  it('records a self-count on success when a store is injected (no headers required)', async () => {
+    const store = buildQuotaStore({ path: ':memory:' });
+    const generate: GenerateFn = vi.fn(async () => ok('low-poly tree'));
+    const client = buildCopilotClient({ apiKey: KEY }, { generate, store });
+    await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
+    expect(store.getGeminiState('copilot', { now: Date.now() }).dailyCount).toBe(1);
+    store.close();
+  });
+
+  it('records a 429 cooldown then still throws degraded (slow-429 capture)', async () => {
+    const store = buildQuotaStore({ path: ':memory:' });
+    const rateLimit = Object.assign(new Error('429 Too Many Requests'), {
+      name: 'APICallError',
+      statusCode: 429,
+      responseHeaders: { 'retry-after': '120' },
+    });
+    const generate: GenerateFn = vi.fn(async () => {
+      throw rateLimit;
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate, store });
+    await expect(client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 })).rejects.toBeInstanceOf(
+      CopilotDegradedError,
+    );
+    // The 429 was recorded as a cooldown even though the call surfaced as degraded.
+    expect(store.getGeminiState('copilot', { now: Date.now() }).cooldownUntil).not.toBeNull();
+    store.close();
   });
 });

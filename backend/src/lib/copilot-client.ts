@@ -15,6 +15,13 @@
 // "available: false" response so /create degrades to L0/L1 + textarea (R10).
 import { generateText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { getQuotaStore, type QuotaStore } from './quota-store.js';
+import {
+  recordSuccess,
+  recordRateLimited,
+  isRateLimited,
+  type GeminiGenerateResult,
+} from './gemini-quota.js';
 
 export type CopilotMessage = { role: 'user' | 'assistant'; content: string };
 export type CopilotResult = { kind: 'question' | 'prompt'; text: string };
@@ -44,12 +51,14 @@ export interface CopilotClient {
   turn(input: CopilotTurnInput): Promise<CopilotResult>;
 }
 
-/** The generate seam — lets tests inject a fake model without a network call. */
+/** The generate seam — lets tests inject a fake model without a network call.
+ *  Returns the text plus the rate-limit signal (headers/usage) carried out of the
+ *  closure so the quota recorder sees a slow 429 before withTimeout masks it (U2). */
 export interface GenerateArgs {
   system: string;
   messages: CopilotMessage[];
 }
-export type GenerateFn = (args: GenerateArgs) => Promise<string>;
+export type GenerateFn = (args: GenerateArgs) => Promise<GeminiGenerateResult>;
 
 export interface CopilotEnv {
   apiKey?: string;
@@ -59,6 +68,9 @@ export interface CopilotDeps {
   generate?: GenerateFn;
   /** Model call timeout budget (ms). Default 15000 (LLM latency, not the 2s recall budget). */
   timeoutMs?: number;
+  /** Durable quota store for self-count + 429-cooldown recording (U1/U2). When
+   *  absent (unit tests), recording is skipped — the client stays fully functional. */
+  store?: QuotaStore;
 }
 
 /** At most this many copilot turns; the last is forced synthesis (R4). */
@@ -160,13 +172,31 @@ export function buildCopilotClient(env: CopilotEnv, deps: CopilotDeps = {}): Cop
 
   const model = env.model ?? DEFAULT_MODEL;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const generate: GenerateFn =
+  const store = deps.store;
+  const rawGenerate: GenerateFn =
     deps.generate ??
     (async ({ system, messages }) => {
       const google = createGoogleGenerativeAI({ apiKey: env.apiKey });
-      const { text } = await generateText({ model: google(model), system, messages });
-      return text;
+      const { text, response, usage } = await generateText({ model: google(model), system, messages });
+      return { text, headers: response?.headers, usage };
     });
+
+  // Wrap the raw model call so quota recording happens INSIDE the closure, where the
+  // raw 429/headers are in scope — BEFORE withTimeout (15s) can convert a slow 429
+  // into a generic timeout and silently degrade R6/R7 (U2 adversarial finding). When
+  // no store is injected (unit tests), this is a transparent pass-through.
+  const generate: GenerateFn = store
+    ? async (args) => {
+        try {
+          const r = await rawGenerate(args);
+          recordSuccess('copilot', store, { now: Date.now(), headers: r.headers, usage: r.usage });
+          return r;
+        } catch (e) {
+          if (isRateLimited(e)) recordRateLimited('copilot', store, { now: Date.now(), error: e });
+          throw e;
+        }
+      }
+    : rawGenerate;
 
   return {
     configured: true,
@@ -180,14 +210,14 @@ export function buildCopilotClient(env: CopilotEnv, deps: CopilotDeps = {}): Cop
       // the model just CONTINUES the chat (asks another question) instead of synthesizing.
       // Merge into the last user turn if there is one, else append a new user turn.
       const messages = synthesize ? withSynthesisInstruction(input.messages) : input.messages;
-      let raw: string;
+      let raw: GeminiGenerateResult;
       try {
         raw = await withTimeout(generate({ system, messages }), timeoutMs);
       } catch (e) {
         logError('turn', e);
         throw new CopilotDegradedError();
       }
-      const text = (raw ?? '').trim();
+      const text = (raw.text ?? '').trim();
       if (!text) throw new CopilotDegradedError('empty model output');
       return synthesize ? { kind: 'prompt', text: clamp(text, PROMPT_MAX_CHARS) } : { kind: 'question', text };
     },
@@ -196,13 +226,17 @@ export function buildCopilotClient(env: CopilotEnv, deps: CopilotDeps = {}): Cop
 
 let cached: CopilotClient | null = null;
 
-/** Lazily-constructed shared client from process.env (mirrors getMemwalClient). */
+/** Lazily-constructed shared client from process.env (mirrors getMemwalClient).
+ *  Injects the shared quota store ONLY when a key is present — a keyless deploy
+ *  stays inert (AE7) and never opens the DB. Resolved at request time, not import
+ *  time (R12). */
 export function getCopilotClient(): CopilotClient {
   if (!cached) {
-    cached = buildCopilotClient({
-      apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-      model: process.env.COPILOT_MODEL,
-    });
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    cached = buildCopilotClient(
+      { apiKey, model: process.env.COPILOT_MODEL },
+      apiKey ? { store: getQuotaStore() } : {},
+    );
   }
   return cached;
 }
