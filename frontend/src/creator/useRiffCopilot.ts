@@ -16,14 +16,20 @@ export type CopilotMessage = { role: 'user' | 'assistant'; content: string };
 
 // idle: not started · thinking: request in flight · asking: copilot returned a
 // question, awaiting the user · done: a prompt was synthesized (conversation over)
-// · error: a transient failure (retryable — the feature stays available).
-export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done' | 'error';
+// · error: a transient failure (retryable) · quota: the operator's Gemini quota is
+// exhausted (R6) — the toggle stays VISIBLE with a reset hint, auto-recovers (R7) ·
+// unavailable: the backend is keyless / not configured — VISIBLE but the panel shows
+// "AI unavailable" (no auto-recovery). Per D-084 a built feature is NEVER hidden at
+// runtime; the only hide is the build-time VITE_COPILOT_ENABLED flag.
+export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done' | 'error' | 'quota' | 'unavailable';
 
 interface TurnResponse {
   available: boolean;
   result?: { kind: 'question' | 'prompt'; text: string };
   turnIndex?: number;
   retryable?: boolean;
+  error?: string;
+  retryAfterMs?: number;
 }
 
 export interface UseRiffCopilot {
@@ -31,6 +37,8 @@ export interface UseRiffCopilot {
   status: CopilotStatus;
   /** false → the LLM/relayer is unavailable; the page should hide the toggle. */
   available: boolean;
+  /** When status==='quota', approximate ms until the quota resets (for the hint). */
+  retryAfterMs: number;
   /** Set when the copilot synthesizes; the page reads this to fill the input box. */
   synthesizedPrompt: string | null;
   /** Monotonic counter — bumps once per synthesis (even to identical text). The
@@ -56,6 +64,7 @@ export function useRiffCopilot(): UseRiffCopilot {
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [status, setStatus] = useState<CopilotStatus>('idle');
   const [available, setAvailable] = useState(true);
+  const [retryAfterMs, setRetryAfterMs] = useState(0);
   const [synthesizedPrompt, setSynthesizedPrompt] = useState<string | null>(null);
   const [synthSeq, setSynthSeq] = useState(0);
 
@@ -63,6 +72,10 @@ export function useRiffCopilot(): UseRiffCopilot {
   const seq = useRef(0);
   const inFlight = useRef(false);
   const finished = useRef(false);
+  // Latest status, read by the send guards without re-creating the callbacks (avoids
+  // a stale-closure read of `status`). Blocks a turn while a quota cooldown is active.
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const lastArgs = useRef<{ next: CopilotMessage[]; force: boolean } | null>(null);
   const mounted = useRef(true);
 
@@ -89,7 +102,19 @@ export function useRiffCopilot(): UseRiffCopilot {
     setStatus('idle');
     setSynthesizedPrompt(null);
     setAvailable(true);
+    setRetryAfterMs(0);
   }, [authToken]);
+
+  // Auto-recovery (R7): once a quota cooldown elapses, flip back to idle with no
+  // manual step. mounted.current is read INSIDE the timeout (not at setup) to avoid
+  // the stale-closure trap (checklist §5).
+  useEffect(() => {
+    if (status !== 'quota' || retryAfterMs <= 0) return;
+    const t = setTimeout(() => {
+      if (mounted.current) setStatus('idle');
+    }, retryAfterMs);
+    return () => clearTimeout(t);
+  }, [status, retryAfterMs]);
 
   const drive = useCallback(
     (next: CopilotMessage[], force: boolean) => {
@@ -112,10 +137,19 @@ export function useRiffCopilot(): UseRiffCopilot {
           });
           const data = res.ok ? ((await res.json()) as TurnResponse) : null;
           if (mySeq !== seq.current || !mounted.current || tokenRef.current !== token) return;
-          // Explicit "off" (no key / INERT) → hide the feature.
+          // Explicit "off" (no key / INERT) → show a VISIBLE "AI unavailable" panel,
+          // never hide (D-084). `available` stays informational; the page gates on the
+          // build flag, not on this.
           if (data && data.available === false) {
             setAvailable(false);
-            setStatus('idle');
+            setStatus('unavailable');
+            return;
+          }
+          // Quota exhausted (R6) → keep the toggle VISIBLE with a reset hint; the
+          // panel shows the message instead of the input. Auto-recovers (R7).
+          if (data && data.error === 'quota_exhausted') {
+            setRetryAfterMs(typeof data.retryAfterMs === 'number' ? data.retryAfterMs : 0);
+            setStatus('quota');
             return;
           }
           // Success — a question or the synthesized prompt.
@@ -156,15 +190,18 @@ export function useRiffCopilot(): UseRiffCopilot {
   const sendAnswer = useCallback(
     (text: string) => {
       const t = text.trim();
-      // Ignore empty input, in-flight requests, and sends after synthesis is done.
-      if (!t || inFlight.current || finished.current) return;
+      // Ignore empty input, in-flight requests, sends after synthesis, and sends
+      // while a quota cooldown is active (defense-in-depth: the panel hides the input
+      // in 'quota', but a stray caller mustn't fire a doomed turn that resets the
+      // visible countdown — review: julik).
+      if (!t || inFlight.current || finished.current || statusRef.current === 'quota') return;
       drive([...messagesRef.current, { role: 'user', content: t }], false);
     },
     [drive],
   );
 
   const generateNow = useCallback(() => {
-    if (inFlight.current || finished.current || messagesRef.current.length === 0) return;
+    if (inFlight.current || finished.current || statusRef.current === 'quota' || messagesRef.current.length === 0) return;
     drive(messagesRef.current, true);
   }, [drive]);
 
@@ -176,7 +213,8 @@ export function useRiffCopilot(): UseRiffCopilot {
     commit([]);
     setStatus('idle');
     setSynthesizedPrompt(null);
+    setRetryAfterMs(0);
   }, [commit]);
 
-  return { messages, status, available, synthesizedPrompt, synthSeq, retry, sendAnswer, generateNow, reset };
+  return { messages, status, available, retryAfterMs, synthesizedPrompt, synthSeq, retry, sendAnswer, generateNow, reset };
 }

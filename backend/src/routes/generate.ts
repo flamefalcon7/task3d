@@ -4,6 +4,12 @@ import type { GenerateResponse, Router, TripoParams } from '@overflow2026/shared
 import { promptRequestSchema } from '../lib/schema.js';
 import { buildLineageJson, buildLineageStub } from '../lib/lineage.js';
 import { TripoDisabledError } from '../agent/router.js';
+import {
+  TripoAuthError,
+  TripoTimeoutError,
+  TripoFailedError,
+  TripoFormatError,
+} from '../lib/tripo-client.js';
 import type { JwtSigner } from '../lib/jwt.js';
 import type { PaymentVerifier } from '../sui/paymentVerifier.js';
 
@@ -104,7 +110,33 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
       if (err instanceof TripoDisabledError) {
         return c.json({ error: 'tripo_disabled', message: err.message }, 400);
       }
-      throw err;
+      // Classify live-Tripo failures into typed codes + non-500 statuses (U5/R2) so
+      // the frontend can render honest, branchable messages instead of a raw 500.
+      // These all occur AFTER the pay-gate above, so when a payment was actually
+      // charged (paymentVerifier wired) we mark the post-payment failures refundable
+      // (R3) — the frontend shows the "fee may be refundable — contact us" copy. The
+      // U4 pre-flight is meant to catch credit-dry BEFORE payment; this is the residual
+      // safety net + covers any pre-flight bypass. NO automatic refund is issued here
+      // (manual/contact path only; auto-refund deferred — D-083). Bodies stay small +
+      // free of raw upstream HTML (the client already truncates upstream bodies).
+      const paid = !!deps.paymentVerifier;
+      if (err instanceof TripoAuthError) {
+        // Operator-side (key / credit misconfig) — framed as a temporary outage, not
+        // user-refundable. In practice the pre-flight's getBalance would also 401 and
+        // fail closed, so the user rarely reaches payment in this state.
+        return c.json({ error: 'tripo_unavailable' }, 503);
+      }
+      if (err instanceof TripoTimeoutError) {
+        return c.json({ error: 'tripo_timeout', ...(paid ? { refundable: true } : {}) }, 504);
+      }
+      if (err instanceof TripoFailedError) {
+        // Quota-out also arrives here (wrapped); treat as service-unavailable wording.
+        return c.json({ error: 'tripo_failed', ...(paid ? { refundable: true } : {}) }, 502);
+      }
+      if (err instanceof TripoFormatError) {
+        return c.json({ error: 'tripo_failed', ...(paid ? { refundable: true } : {}) }, 502);
+      }
+      throw err; // genuinely unknown (not a known Tripo class) — let it surface
     }
   });
 

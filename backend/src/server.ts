@@ -7,7 +7,9 @@ import { TripoClient } from './lib/tripo-client.js';
 import { assertJwtSecret, createJwtSigner, type JwtSigner } from './lib/jwt.js';
 import { buildAuthRoute } from './routes/auth.js';
 import { createIntegrationIndexer } from './events/integrationIndexer.js';
+import { createTripoBalancePoller } from './events/tripoBalancePoller.js';
 import { createPaymentVerifier } from './sui/paymentVerifier.js';
+import { getQuotaStore } from './lib/quota-store.js';
 import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST } from './sui/client.js';
 
 // D-023/D-033: the only content the backend generates is Tripo prompt-mode.
@@ -60,8 +62,24 @@ if (invokedDirectly) {
     treasury: TRIPO_FEE_TREASURY,
     feeMist: TRIPO_FEE_MIST,
   });
+  // plan-002 U4/D-083: Tripo balance poller (warms the durable quota store) + the
+  // pre-flight's live balance source. Only when Tripo is enabled + keyed; otherwise
+  // the pre-flight fails closed. The poller's interval is unref'd + lives only here
+  // (R12) so test imports never poll and a clean exit isn't blocked.
+  let balanceProvider: TripoClient | undefined;
+  const tripoApiKey = process.env.TRIPO_API_KEY?.trim();
+  if (process.env.TRIPO_ENABLED === 'true' && tripoApiKey) {
+    balanceProvider = new TripoClient(tripoApiKey);
+    createTripoBalancePoller({ client: balanceProvider, store: getQuotaStore() }).start();
+  }
   const jwt = buildJwt();
-  const app = buildApp({ router: buildRouter(), jwt, integrationIndexer: indexer, paymentVerifier });
+  const app = buildApp({
+    router: buildRouter(),
+    jwt,
+    integrationIndexer: indexer,
+    paymentVerifier,
+    balanceProvider,
+  });
   app.route('/api/auth', buildAuthRoute({ jwt }));
   serve({ fetch: app.fetch, port }, (info) => {
     // eslint-disable-next-line no-console

@@ -12,7 +12,8 @@ import { PartListPanel, type PartListItem } from '../babylon/PartListPanel';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import { TaggingCanvas } from '../babylon/TaggingCanvas';
 import { isUploadTaggable } from '../babylon/partMaterials';
-import { generate } from '../lib/api';
+import { generate, preflightGenerate, GenerateError } from '../lib/api';
+import { formatRetryAfter } from '../lib/formatRetryAfter';
 import { useWalrusUpload } from '../walrus/useWalrusUpload';
 import { useSession, isJwtExpired } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
@@ -58,7 +59,26 @@ import {
 // is gone (U9 removes the leftovers).
 
 type SourceMode = 'tripo' | 'upload';
-type GenStatus = 'idle' | 'paying' | 'generating' | 'error';
+type GenStatus = 'idle' | 'preflight' | 'paying' | 'generating' | 'error';
+
+// U6 (R2/R3/R10) — honest, classified generation messages. CONTACT_PATH is a
+// PLACEHOLDER pending the user's final support destination (open question); the
+// fee-refundable copy (R3) cannot be fully finalized until it's set.
+const CONTACT_PATH = 'the Tusk3D team';
+const GEN_MSG = {
+  // (1) pre-flight says credit is dry / server couldn't verify → not charged.
+  unavailable: 'Generation is temporarily unavailable — please try again shortly.',
+  // (2) the pre-flight request itself failed (distinct from a balance-dry answer).
+  preflightNetwork: "Couldn't check generation availability — please try again.",
+  // (3) post-payment failure the pre-flight couldn't catch (R3, refundable).
+  refundable: `Generation failed after payment. Your service fee may be refundable — contact ${CONTACT_PATH}.`,
+  // operator-side outage (Tripo key/credit misconfig) — no fee framing.
+  operatorOutage: 'Generation is temporarily unavailable — please try again shortly.',
+  sessionExpiredNotCharged:
+    'Your session expired. Please sign in again, then retry — you have not been charged.',
+  sessionExpired: 'Your session expired. Please sign in again, then retry.',
+  generic: 'Generation failed. Please try again.',
+} as const;
 
 const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46]; // 'glTF'
 const MAX_GLB_BYTES = 12 * 1024 * 1024;
@@ -673,14 +693,17 @@ export function CreateModelPage() {
   // Build-time opt-in (default OFF): the copilot toggle only appears when L2 is
   // explicitly enabled AND the backend reports the LLM available at runtime. This
   // keeps a key-less 6/21 deploy clean — no broken-on-click toggle for judges.
-  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && copilot.available;
+  // D-084: gate ONLY on the build flag — a built feature is never hidden at runtime.
+  // Keyless / quota / error all render as VISIBLE degraded states (driven by status),
+  // so an evaluator never mistakes a configured-but-degraded feature for "not built".
+  const copilotOn = import.meta.env.VITE_COPILOT_ENABLED === 'true';
   // Upload Captioning (D-082) — vision describe-on-upload. The editable DESCRIPTION
   // field shows for any upload (so a creator can hand-type one even with no key),
   // but the "Describe with AI" button only appears when captioning is available.
   // The caption is written personal-only on mint (R9). Fail-soft throughout (R11).
   const captioner = useUploadCaption();
   const [caption, setCaption] = useState('');
-  const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true' && captioner.available;
+  const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true'; // D-084 — flag only; never hide on keyless
   // A caption describes ONE specific uploaded model. Clear it (and reset the hook)
   // when the loaded model changes or we leave upload mode, so a stale caption can't
   // ride onto the next mint's params_json / personal-memory write (review:
@@ -800,11 +823,34 @@ export function CreateModelPage() {
     // SUI — otherwise the user pays and the gated /api/generate then 401s.
     if (isJwtExpired(session.jwt)) {
       clearSession();
-      setGenError('Your session expired. Please sign in again, then retry — you have not been charged.');
+      setGenError(GEN_MSG.sessionExpiredNotCharged);
       setGenStatus('error');
       return;
     }
     setGenError(null);
+
+    // Pre-flight BEFORE charging (R1): if we already know generation will fail
+    // (credit dry), block here and NEVER call signAndExecute — the creator is not
+    // charged. The button/section stays visible with the message (R10).
+    setGenStatus('preflight');
+    let pre;
+    try {
+      pre = await preflightGenerate(session.jwt);
+    } catch (e) {
+      if (e instanceof GenerateError && e.status === 401) {
+        clearSession();
+        setGenError(GEN_MSG.sessionExpired);
+        setGenStatus('error');
+        return;
+      }
+      pre = { available: false, reason: 'network' as const };
+    }
+    if (!pre.available) {
+      setGenError(pre.reason === 'network' ? GEN_MSG.preflightNetwork : GEN_MSG.unavailable);
+      setGenStatus('error');
+      return; // R1 — no signAndExecute, no charge
+    }
+
     try {
       setGenStatus('paying');
       const { tx } = buildPayForApiCallPtb();
@@ -826,14 +872,22 @@ export function CreateModelPage() {
       setGlbBytes(result.glbBytes);
       setGenStatus('idle');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Token expired mid-flight (after the pre-check, before/at the call).
-      // Clear the session so the page re-gates to sign-in.
-      if (/HTTP 401/.test(msg)) {
-        clearSession();
-        setGenError('Your session expired. Please sign in again, then retry.');
+      // Map the backend's classified error (U5) to honest copy. The fee was already
+      // charged here, so a refundable failure shows the "contact us" message (R3).
+      if (e instanceof GenerateError) {
+        if (e.status === 401 || e.code === 'auth_invalid' || e.code === 'auth_required') {
+          clearSession();
+          setGenError(GEN_MSG.sessionExpired);
+        } else if (e.refundable) {
+          setGenError(GEN_MSG.refundable);
+        } else if (e.code === 'tripo_unavailable') {
+          setGenError(GEN_MSG.operatorOutage);
+        } else {
+          setGenError(GEN_MSG.generic);
+        }
       } else {
-        setGenError(msg);
+        // Non-API failure (e.g. wallet rejection) — keep the raw message.
+        setGenError(e instanceof Error ? e.message : String(e));
       }
       setGenStatus('error');
     }
@@ -1030,7 +1084,7 @@ export function CreateModelPage() {
   }
 
   const haveModel = glb !== null;
-  const genBusy = genStatus === 'paying' || genStatus === 'generating';
+  const genBusy = genStatus === 'preflight' || genStatus === 'paying' || genStatus === 'generating';
 
   // plan-013 / polish-backlog §1 — Tripo is a two-step API (text_to_model
   // ≈ 15-30s, then mesh_segmentation ≈ 60-90s). The backend hides the
@@ -1039,7 +1093,9 @@ export function CreateModelPage() {
   // but enough to telegraph "two phases, you're still moving."
   const TRIPO_STEP1_TYPICAL_SECONDS = 30;
   const generateLabel =
-    genStatus === 'paying'
+    genStatus === 'preflight'
+      ? '— CHECKING…'
+      : genStatus === 'paying'
       ? `— APPROVING FEE (${genElapsed}s)`
       : genStatus === 'generating'
         ? genElapsed < TRIPO_STEP1_TYPICAL_SECONDS
@@ -1138,6 +1194,7 @@ export function CreateModelPage() {
               <CopilotChat
                 messages={copilot.messages}
                 status={copilot.status}
+                retryAfterMs={copilot.retryAfterMs}
                 onSend={copilot.sendAnswer}
                 onGenerateNow={copilot.generateNow}
                 draftPrompt={prompt}
@@ -1238,10 +1295,23 @@ export function CreateModelPage() {
                     type="button"
                     data-testid="caption-describe"
                     onClick={() => void onDescribe()}
-                    disabled={captioner.status === 'thinking'}
+                    // Disabled while in flight, while quota is exhausted (R6), or while
+                    // keyless/unconfigured (D-084) — the button always stays VISIBLE
+                    // (never hidden at runtime), only its label + enabled state change.
+                    disabled={
+                      captioner.status === 'thinking' ||
+                      captioner.status === 'quota' ||
+                      captioner.status === 'unavailable'
+                    }
                     style={buttonOutline}
                   >
-                    {captioner.status === 'thinking' ? 'DESCRIBING…' : '🧠 DESCRIBE WITH AI'}
+                    {captioner.status === 'thinking'
+                      ? 'DESCRIBING…'
+                      : captioner.status === 'quota'
+                        ? 'AI QUOTA REACHED'
+                        : captioner.status === 'unavailable'
+                          ? 'AI UNAVAILABLE'
+                          : '🧠 DESCRIBE WITH AI'}
                   </button>
                   {captioner.status === 'error' && (
                     <button
@@ -1254,6 +1324,18 @@ export function CreateModelPage() {
                     </button>
                   )}
                 </div>
+                {/* Quota: visible reset hint, NO retry button — recovery is automatic (R7). */}
+                {captioner.status === 'quota' && (
+                  <p data-testid="caption-quota" style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
+                    AI quota reached — try again {formatRetryAfter(captioner.retryAfterMs)}.
+                  </p>
+                )}
+                {/* Keyless / not configured (D-084): visible, never hidden; hand-typing stays available. */}
+                {captioner.status === 'unavailable' && (
+                  <p data-testid="caption-unavailable" style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
+                    AI captioning is unavailable right now — you can still type a description above.
+                  </p>
+                )}
                 {captioner.status === 'thinking' && (
                   <IndeterminateBar testId="caption-progress" ariaLabel="Describing model…" />
                 )}

@@ -10,6 +10,54 @@ export interface GenerateResult {
   lineageStub: Partial<LineageRecord>;
 }
 
+/** A classified /api/generate failure (U6/D-083). Carries the backend's typed
+ *  `error` code + HTTP status + the post-payment `refundable` flag so the page can
+ *  branch to honest copy without regex-matching a raw string. */
+export class GenerateError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    readonly refundable: boolean = false,
+  ) {
+    super(`generate_error:${code}`);
+    this.name = 'GenerateError';
+  }
+}
+
+/** Pre-flight availability result (U4). `available` is the only signal the client
+ *  acts on; `reason` is qualitative (never a credit level). `network` is set by the
+ *  client when the pre-flight request itself failed (distinct from a balance-dry
+ *  server answer). */
+export interface PreflightResult {
+  available: boolean;
+  reason?: string;
+}
+
+/**
+ * Ask the backend whether a generation can be attempted BEFORE charging the SUI fee
+ * (R1). Never throws for a normal unavailable answer — returns `{available:false}`.
+ * Throws GenerateError(401) on an expired session so the caller can re-gate; a
+ * network failure resolves to `{available:false, reason:'network'}` (fail-closed,
+ * no charge).
+ */
+export async function preflightGenerate(authToken?: string): Promise<PreflightResult> {
+  const headers: Record<string, string> = {};
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  let res: Response;
+  try {
+    res = await fetch('/api/generate/preflight', { method: 'GET', headers });
+  } catch {
+    return { available: false, reason: 'network' };
+  }
+  if (res.status === 401) throw new GenerateError('auth_invalid', 401);
+  if (!res.ok) return { available: false, reason: 'unknown' };
+  try {
+    return (await res.json()) as PreflightResult;
+  } catch {
+    return { available: false, reason: 'network' };
+  }
+}
+
 export async function generate(
   // D-033: Tripo prompt-mode is the only generation path. The backend reads
   // `prompt` off the body; we send the full TripoParams for forward-compat.
@@ -30,8 +78,18 @@ export async function generate(
     body: JSON.stringify(requestBody),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`generate: HTTP ${res.status} ${text}`);
+    // Surface the backend's classified error (U5) as a structured GenerateError so
+    // the page can map it to honest copy without parsing a raw string.
+    let code = 'unknown';
+    let refundable = false;
+    try {
+      const j = (await res.json()) as { error?: unknown; refundable?: unknown };
+      if (typeof j.error === 'string') code = j.error;
+      if (j.refundable === true) refundable = true;
+    } catch {
+      /* non-JSON body — keep the generic code */
+    }
+    throw new GenerateError(code, res.status, refundable);
   }
   const body = (await res.json()) as GenerateResponse;
   return {

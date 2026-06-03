@@ -501,3 +501,56 @@ Run the parity script across a corpus of real-world exporter GLBs; if a divergen
 
 ### To resolve (if pursued)
 Add an `onLoadError` callback from `TaggingCanvas`; on the upload route, treat a load failure as either auto-skip (`partLabels=[]`) or a surfaced "couldn't read this model" error with a re-pick affordance.
+
+---
+
+## OQ-029: Tripo refundable-failure contact destination is a placeholder
+
+**Status**: 🟡 Open — must finalize before 6/21 submission.
+**Surfaced**: 2026-06-03 (plan-002 / D-083 implementation; user chose "placeholder for now").
+
+### The gap
+R3's post-payment refundable message (`CreateModelPage.tsx` `GEN_MSG.refundable` via the `CONTACT_PATH` constant) currently reads "…contact **the Tusk3D team**" — a neutral placeholder. There is no concrete support destination (email / Discord invite / in-app form) wired, so a creator who hits a refundable post-payment Tripo failure has no actual channel to reach.
+
+### To resolve
+Pick the real destination and replace `CONTACT_PATH` in `frontend/src/creator/CreateModelPage.tsx` (single constant). Candidates: a support email (e.g. `support@tusk3d.space`), a Discord invite URL, or an in-app form. One-line change once decided.
+
+### Blocker level
+🟡 Open — not blocking the build, but the refundable copy is incomplete until set. Finalize during pre-submission polish.
+
+---
+
+## OQ-030: Automatic Tripo refund on post-payment failure — deferred (feasible, not built)
+
+**Status**: 🟢 Deferred — revisit before the 8/27 mainnet window. Captured in D-083 Alternatives.
+**Surfaced**: 2026-06-03 (user asked whether the backend could verify + auto-refund; decided to defer because testnet SUI isn't real money).
+
+### Context
+Auto-refunding the SUI service fee when a post-payment Tripo generation fails is **feasible**: the fee lands in `TRIPO_FEE_TREASURY` = the deployer's own wallet (D-034), so the operator controls the receiving address; the payer address + `feeMist` + the failure are all known at `generate.ts`'s catch (U5). What's missing is a **server-side signing path** — the backend today signs nothing on-chain (read-only `getTransactionBlock`); auto-sending from the treasury is a new hot-wallet attack surface, and needs a durable double-refund idempotency guard (the U1 `node:sqlite` store is the natural home) plus a refund-tx-can-itself-fail fallback to the existing manual-contact message.
+
+### Why deferred
+6/21 is a testnet submission (D-009) where SUI is faucet-free (low value now); the U4 pre-flight already catches the common credit-dry case before payment, so the residual auto-refund volume is tiny. The U5 error codes + U1 store are already shaped so turning this on later is additive.
+
+### To resolve
+At the 8/27 mainnet-readiness pass: ce-brainstorm → ce-plan a refund unit — operator refund keypair handling, `refunded(digest)` idempotency table in the quota store, "try auto-refund → on success show tx, on failure fall back to contact" flow, and an ADR. Until then R3 ships as the manual contact message (OQ-029).
+
+### Blocker level
+🟢 Deferred — no action for 6/21.
+
+---
+
+## OQ-031: Deferred findings from the D-083 5-reviewer pass
+
+**Status**: 🟢 Deferred — low-impact polish, none blocking 6/21.
+**Surfaced**: 2026-06-03 (5-reviewer pass on `feat/ai-degradation-ux`; the confirmed defects were fixed in commit `fix(quota): 5-reviewer pass …`).
+
+The reviewers' high-value findings were fixed in-branch (counter desync, config footgun, over-broad classifier, cooldown clamp, copilot quota guard). These lower-value items were deliberately deferred:
+
+1. **JULIK-1 (med): `onGenerate` has no unmount/session-change guard.** Its three awaits (pre-flight, pay+wait, generate) write state unconditionally on resolution — a mid-generate unmount fires a React setState warning, and a mid-generate session switch could write a stale GLB into the new account's page. Pre-existing pattern (the original `onGenerate` had the same gap; this work added one more await). The `genBusy` button gate already prevents a double-charge. Fix: mirror the hooks' `mounted`/`seq` guard (~12 lines) — bail on each post-await setState if unmounted or the session token changed. Low demo impact (wallet-gated, rare mid-flight switch).
+2. **API-contract (low): the Gemini quota response shape is duplicated** in `geminiQuotaGate.ts` (`QuotaExhaustedBody`), `useUploadCaption.ts` (`CaptionResponse`), and `useRiffCopilot.ts` (`TurnResponse`) with no compile-time link (unlike `GenerateResponse` which is in `@overflow2026/shared`). A field rename on one side wouldn't break the build. Fix: promote the degradation response union into `shared/src/types.ts`.
+3. **Testing gaps (low):** no test for `api.ts` `preflightGenerate`'s 401-throw / non-ok branches at the unit level (covered transitively via the page); no test for `quota-store.ts`'s DB-open error sanitization (the "never leak the fs path" branch); no test for the `'preflight'`/"CHECKING…" transient button state; no test for the slow-429-*after*-15s-timeout ordering (the closure fix is structurally correct but the timing case is unverified).
+4. **Residual (accepted):** the closure-level 429 capture records the cooldown for the *next* request; a 429 slower than the 15s `withTimeout` still returns generic-retryable on the *in-flight* request (self-corrects on retry).
+
+**To resolve**: pick up #1–#3 in a hardening/polish pass (good 8/27 mainnet-window candidates alongside OQ-030). 
+
+**Blocker level**: 🟢 Deferred.

@@ -16,6 +16,13 @@
 // degraded response so /create upload mode keeps working with no caption.
 import { generateText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { getQuotaStore, type QuotaStore } from './quota-store.js';
+import {
+  recordSuccess,
+  recordRateLimited,
+  isRateLimited,
+  type GeminiGenerateResult,
+} from './gemini-quota.js';
 
 /** One captured preview frame: base64-encoded WebP bytes + its media type. */
 export type CaptionFrame = { base64: string; mediaType: 'image/webp' };
@@ -50,7 +57,9 @@ export interface CaptionGenerateArgs {
   /** The single user message's content parts (one text instruction + one image per frame). */
   content: CaptionContentPart[];
 }
-export type CaptionGenerateFn = (args: CaptionGenerateArgs) => Promise<string>;
+/** Returns the text plus the rate-limit signal (headers/usage) carried out of the
+ *  closure so the quota recorder sees a slow 429 before withTimeout masks it (U2). */
+export type CaptionGenerateFn = (args: CaptionGenerateArgs) => Promise<GeminiGenerateResult>;
 
 export interface CaptionEnv {
   apiKey?: string;
@@ -60,6 +69,9 @@ export interface CaptionDeps {
   generate?: CaptionGenerateFn;
   /** Model call timeout budget (ms). Default 15000 (LLM latency). */
   timeoutMs?: number;
+  /** Durable quota store for self-count + 429-cooldown recording (U1/U2). When
+   *  absent (unit tests), recording is skipped — the client stays fully functional. */
+  store?: QuotaStore;
 }
 
 /** Caption length ceiling — mirrors the Tripo prompt input (1–1000 chars). */
@@ -131,27 +143,47 @@ export function buildCaptionClient(env: CaptionEnv, deps: CaptionDeps = {}): Cap
 
   const model = env.model ?? DEFAULT_MODEL;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const generate: CaptionGenerateFn =
+  const store = deps.store;
+  const rawGenerate: CaptionGenerateFn =
     deps.generate ??
     (async ({ system, content }) => {
       const google = createGoogleGenerativeAI({ apiKey: env.apiKey });
-      const { text } = await generateText({ model: google(model), system, messages: [{ role: 'user', content }] });
-      return text;
+      const { text, response, usage } = await generateText({
+        model: google(model),
+        system,
+        messages: [{ role: 'user', content }],
+      });
+      return { text, headers: response?.headers, usage };
     });
+
+  // Record quota INSIDE the closure (before withTimeout can mask a slow 429) — see
+  // copilot-client for the rationale. Transparent pass-through without a store.
+  const generate: CaptionGenerateFn = store
+    ? async (args) => {
+        try {
+          const r = await rawGenerate(args);
+          recordSuccess('caption', store, { now: Date.now(), headers: r.headers, usage: r.usage });
+          return r;
+        } catch (e) {
+          if (isRateLimited(e)) recordRateLimited('caption', store, { now: Date.now(), error: e });
+          throw e;
+        }
+      }
+    : rawGenerate;
 
   return {
     configured: true,
     async caption(input) {
       if (!input.frames || input.frames.length === 0) throw new CaptionDegradedError('no frames');
       const content = buildContent(input.frames);
-      let raw: string;
+      let raw: GeminiGenerateResult;
       try {
         raw = await withTimeout(generate({ system: SYSTEM, content }), timeoutMs);
       } catch (e) {
         logError('caption', e);
         throw new CaptionDegradedError();
       }
-      const text = (raw ?? '').trim();
+      const text = (raw.text ?? '').trim();
       if (!text) throw new CaptionDegradedError('empty model output');
       return clamp(text, CAPTION_MAX_CHARS);
     },
@@ -160,13 +192,16 @@ export function buildCaptionClient(env: CaptionEnv, deps: CaptionDeps = {}): Cap
 
 let cached: CaptionClient | null = null;
 
-/** Lazily-constructed shared client from process.env (mirrors getCopilotClient). */
+/** Lazily-constructed shared client from process.env (mirrors getCopilotClient).
+ *  Injects the shared quota store ONLY when a key is present — keyless stays inert
+ *  (AE7) and never opens the DB. Resolved at request time, not import time (R12). */
 export function getCaptionClient(): CaptionClient {
   if (!cached) {
-    cached = buildCaptionClient({
-      apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-      model: process.env.CAPTION_MODEL,
-    });
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    cached = buildCaptionClient(
+      { apiKey, model: process.env.CAPTION_MODEL },
+      apiKey ? { store: getQuotaStore() } : {},
+    );
   }
   return cached;
 }

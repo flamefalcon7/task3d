@@ -16,11 +16,16 @@ import { z } from 'zod';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import type { JwtSigner } from '../lib/jwt.js';
 import { getCaptionClient, CaptionDegradedError, type CaptionClient } from '../lib/caption-client.js';
+import { getQuotaStore, type QuotaStore } from '../lib/quota-store.js';
+import { checkGeminiQuota, quotaStateAfterFailure, quotaExhaustedBody } from './geminiQuotaGate.js';
 
 export interface CaptionRouteDeps {
   jwt?: JwtSigner;
   /** Defaults to the env-backed singleton; tests inject a fake. */
   client?: CaptionClient;
+  /** Durable quota store (U1); defaults to the shared singleton (single-connection
+   *  invariant — same handle the client closure records into). */
+  store?: QuotaStore;
 }
 
 // Mirror memory.ts/copilot.ts: auth layer mints JWTs for {1,64} hex; normalize to canonical 64-hex.
@@ -68,6 +73,7 @@ const captionSchema = z.object({
 export function buildCaptionRoute(deps: CaptionRouteDeps) {
   const route = new Hono();
   const getClient = () => deps.client ?? getCaptionClient();
+  const getStore = () => deps.store ?? getQuotaStore();
 
   // Verify JWT → bound Sui address. Returns the address or a 401 Response. NEVER
   // fail-soft on binding (mirrors memory.ts/copilot.ts).
@@ -115,22 +121,38 @@ export function buildCaptionRoute(deps: CaptionRouteDeps) {
 
     const client = getClient();
     // Not configured (no key) → clean degraded signal; the frontend hides the button.
+    // THE ONE sanctioned hide (AE7/R10).
     if (!client.configured) {
       c.header('x-caption-degraded', '1');
       return c.json({ available: false });
     }
 
+    // Budget gate (R6/R8/R9): spent budget / address cap / active 429 cooldown →
+    // VISIBLE quota state with a reset hint, NOT available:false.
+    const store = getStore();
+    const budget = checkGeminiQuota('caption', store, ns);
+    if (!budget.ok) {
+      c.header('x-caption-degraded', '1');
+      return c.json(quotaExhaustedBody(budget.retryAfterMs));
+    }
+    // Count the per-address attempt (R8) HERE — once past the gate — so an empty-output
+    // CaptionDegradedError can't skip it and desync the cap from the global count
+    // (review: adversarial — counter desync). Attempts ⊇ billed calls = safe bound.
+    store.recordGeminiUsage('caption', { scope: ns });
+
     try {
       const caption = await client.caption({ frames: parsed.data.frames });
       return c.json({ available: true, caption });
     } catch (e) {
-      // Configured but this call failed (Gemini hiccup/timeout/quota). TRANSIENT —
-      // return available:true + retryable so the button stays visible and offers a
-      // retry, never a 5xx that breaks the upload→mint flow. Never leak the key.
+      // Configured but this call failed. A recorded 429 (by the client closure) →
+      // VISIBLE quota state (R6); a non-429 hiccup/timeout stays generic-retryable.
+      // Either way available:true — never a 5xx, never the key.
       if (!(e instanceof CaptionDegradedError)) {
         console.warn('[caption] unexpected route error (degraded):', e instanceof Error ? e.message : e);
       }
       c.header('x-caption-degraded', '1');
+      const q = quotaStateAfterFailure('caption', store);
+      if (q.quota) return c.json(quotaExhaustedBody(q.retryAfterMs));
       return c.json({ available: true, error: 'unavailable', retryable: true });
     }
     },

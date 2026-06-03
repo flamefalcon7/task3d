@@ -21,12 +21,17 @@ import {
   type CopilotClient,
   type CopilotMessage,
 } from '../lib/copilot-client.js';
+import { getQuotaStore, type QuotaStore } from '../lib/quota-store.js';
+import { checkGeminiQuota, quotaStateAfterFailure, quotaExhaustedBody } from './geminiQuotaGate.js';
 
 export interface CopilotRouteDeps {
   jwt?: JwtSigner;
   /** Defaults to the env-backed singletons; tests inject fakes. */
   client?: CopilotClient;
   memory?: MemwalClient;
+  /** Durable quota store (U1); defaults to the shared singleton (single-connection
+   *  invariant — same handle the client closure records into). */
+  store?: QuotaStore;
 }
 
 // Mirror memory.ts: auth layer mints JWTs for {1,64} hex; normalize to canonical 64-hex.
@@ -91,6 +96,7 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
   const route = new Hono();
   const getClient = () => deps.client ?? getCopilotClient();
   const getMemory = () => deps.memory ?? getMemwalClient();
+  const getStore = () => deps.store ?? getQuotaStore();
 
   // Verify JWT → bound Sui address (the namespace). Returns the address or a 401
   // Response. NEVER fail-soft on binding (mirrors memory.ts).
@@ -136,11 +142,28 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
     const client = getClient();
 
     // Short-circuit when the copilot is not configured — clean degraded signal,
-    // no recall, no LLM attempt.
+    // no recall, no LLM attempt. THE ONE sanctioned hide (AE7/R10).
     if (!client.configured) {
       c.header('x-copilot-degraded', '1');
       return c.json({ available: false });
     }
+
+    // Budget gate (R6/R8/R9): if the daily operator budget OR this address's daily
+    // cap is spent, OR a 429 cooldown is active, report a VISIBLE quota state with a
+    // reset hint — NOT available:false. The feature stays present and auto-recovers.
+    const store = getStore();
+    const budget = checkGeminiQuota('copilot', store, ns);
+    if (!budget.ok) {
+      c.header('x-copilot-degraded', '1');
+      return c.json(quotaExhaustedBody(budget.retryAfterMs));
+    }
+    // Count the per-address attempt (R8) HERE — once past the gate — not on the
+    // success return: a model call that resolves but yields empty output throws
+    // CopilotDegradedError, which would skip a post-success increment and desync the
+    // per-address cap from the global count the client closure already advanced
+    // (review: adversarial — counter desync). Counting attempts is the conservative
+    // bound for an anti-abuse cap (billed calls ⊆ attempts).
+    store.recordGeminiUsage('copilot', { scope: ns });
 
     // Recall the caller's OWN past prompts (fail-soft: ANY failure — relayer error
     // OR a malformed record that throws in parseMemory — degrades to empty context;
@@ -162,15 +185,17 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
       const result = await client.turn({ messages, memoryContext, turnIndex, forceSynthesize });
       return c.json({ available: true, result, turnIndex });
     } catch (e) {
-      // The copilot IS configured but this call failed (Gemini hiccup/timeout/quota).
-      // This is TRANSIENT — return available:true + retryable so the client keeps the
-      // feature visible and offers a retry, rather than hiding it for the whole session
-      // (only `!client.configured` above means "off" → available:false). Never leak the
-      // key or raw model error.
+      // The copilot IS configured but this call failed. If the failure was a 429 the
+      // client closure already recorded a cooldown — surface the VISIBLE quota state
+      // (R6) so the client shows "retry ~X" and auto-recovers, instead of the generic
+      // retryable shape. A non-429 hiccup/timeout stays generic-retryable. Either way
+      // available:true (only `!client.configured` hides). Never leak the key.
       if (!(e instanceof CopilotDegradedError)) {
         console.warn('[copilot] unexpected route error (degraded):', e instanceof Error ? e.message : e);
       }
       c.header('x-copilot-degraded', '1');
+      const q = quotaStateAfterFailure('copilot', store);
+      if (q.quota) return c.json(quotaExhaustedBody(q.retryAfterMs));
       return c.json({ available: true, error: 'unavailable', retryable: true });
     }
   });

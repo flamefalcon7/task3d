@@ -231,6 +231,36 @@ export class TripoClient {
     throw new TripoTimeoutError(`Tripo task ${taskId} did not finish within ${maxWaitMs}ms`);
   }
 
+  // plan-002 U4 (D-083) — spendable Tripo credit for the generate pre-flight.
+  // GET /v2/openapi/user/balance → { code, data: { balance, frozen } }; spendable
+  // = balance − frozen (frozen credits are reserved by in-flight tasks). Reuses
+  // the same Bearer + AbortSignal + error-class conventions as the task calls.
+  async getBalance(): Promise<number> {
+    let res: Response;
+    try {
+      res = await fetch(`${TRIPO_BASE}/user/balance`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: this.signal(),
+      });
+    } catch (e) {
+      if (isAbortError(e)) {
+        throw new TripoTimeoutError(`Tripo getBalance timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw e;
+    }
+
+    if (res.status === 401) throw new TripoAuthError();
+    if (!res.ok) throw new TripoFailedError(`Tripo getBalance returned ${res.status}`);
+
+    const body = (await res.json()) as { data?: { balance?: number; frozen?: number } };
+    const balance = body?.data?.balance;
+    if (typeof balance !== 'number') {
+      throw new TripoFormatError('Tripo getBalance response missing data.balance');
+    }
+    const frozen = typeof body.data?.frozen === 'number' ? body.data.frozen : 0;
+    return balance - frozen;
+  }
+
   async downloadGlb(url: string): Promise<Uint8Array> {
     let res: Response;
     try {

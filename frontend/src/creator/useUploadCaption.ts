@@ -12,19 +12,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession, isJwtExpired } from '../auth/useSession';
 
 // idle: not started · thinking: request in flight · done: a caption came back ·
-// error: a transient failure (retryable — the feature stays available).
-export type CaptionStatus = 'idle' | 'thinking' | 'done' | 'error';
+// error: a transient failure (retryable) · quota: the operator's Gemini quota is
+// exhausted (R6) — VISIBLE with a reset hint, auto-recovers (R7) · unavailable: the
+// backend is keyless / not configured — VISIBLE but disabled with "AI UNAVAILABLE"
+// (does NOT auto-recover). Per D-084 a built feature is NEVER hidden at runtime; the
+// only hide is the build-time VITE_COPILOT_ENABLED flag (this build doesn't ship it).
+export type CaptionStatus = 'idle' | 'thinking' | 'done' | 'error' | 'quota' | 'unavailable';
 
 interface CaptionResponse {
   available: boolean;
   caption?: string;
   retryable?: boolean;
+  error?: string;
+  retryAfterMs?: number;
 }
 
 export interface UseUploadCaption {
   status: CaptionStatus;
   /** false → captioning is unavailable (no key / no session); page hides the button. */
   available: boolean;
+  /** When status==='quota', approximate ms until the quota resets (for the hint). */
+  retryAfterMs: number;
   /** Caption the given clean WebP frames. Resolves the description, or null on any failure. */
   describe: (frames: Uint8Array[]) => Promise<string | null>;
   /** Retry the last describe() after a transient error. */
@@ -51,6 +59,7 @@ export function useUploadCaption(): UseUploadCaption {
 
   const [status, setStatus] = useState<CaptionStatus>('idle');
   const [available, setAvailable] = useState(true);
+  const [retryAfterMs, setRetryAfterMs] = useState(0);
 
   const seq = useRef(0);
   const inFlight = useRef(false);
@@ -72,7 +81,19 @@ export function useUploadCaption(): UseUploadCaption {
     inFlight.current = false;
     setStatus('idle');
     setAvailable(true);
+    setRetryAfterMs(0);
   }, [authToken]);
+
+  // Auto-recovery (R7): once a quota cooldown elapses, flip back to idle with no
+  // manual step. The mounted.current read lives INSIDE the timeout callback (not
+  // captured at effect-setup) to avoid the stale-closure trap (checklist §5).
+  useEffect(() => {
+    if (status !== 'quota' || retryAfterMs <= 0) return;
+    const t = setTimeout(() => {
+      if (mounted.current) setStatus('idle');
+    }, retryAfterMs);
+    return () => clearTimeout(t);
+  }, [status, retryAfterMs]);
 
   const send = useCallback(async (frames: { base64: string; mediaType: 'image/webp' }[]): Promise<string | null> => {
     const token = tokenRef.current;
@@ -97,17 +118,25 @@ export function useUploadCaption(): UseUploadCaption {
       const data = res.ok ? ((await res.json()) as CaptionResponse) : null;
       // Stale response (a newer describe started, unmount, or token changed) → drop.
       if (mySeq !== seq.current || !mounted.current || tokenRef.current !== token) return null;
-      // Explicit "off" (no key / INERT) → hide the feature.
+      // Explicit "off" (no key / INERT) → show a VISIBLE "AI UNAVAILABLE" state, never
+      // hide (D-084 — a hidden feature reads as "not built" to an evaluator). `available`
+      // stays as the informational configured-flag; the page no longer hides on it.
       if (data && data.available === false) {
         setAvailable(false);
-        setStatus('idle');
+        setStatus('unavailable');
+        return null;
+      }
+      // Quota exhausted (R6) → stay VISIBLE with a reset hint; auto-recovers (R7).
+      if (data && data.error === 'quota_exhausted') {
+        setRetryAfterMs(typeof data.retryAfterMs === 'number' ? data.retryAfterMs : 0);
+        setStatus('quota');
         return null;
       }
       if (data && typeof data.caption === 'string' && data.caption) {
         setStatus('done');
         return data.caption;
       }
-      // Network !ok, 429, or available:true with no caption → TRANSIENT (retryable).
+      // Network !ok, or available:true with no caption → TRANSIENT (retryable).
       setStatus('error');
       return null;
     } catch {
@@ -133,7 +162,8 @@ export function useUploadCaption(): UseUploadCaption {
     seq.current++;
     inFlight.current = false;
     setStatus('idle');
+    setRetryAfterMs(0);
   }, []);
 
-  return { status, available, describe, retry, reset };
+  return { status, available, retryAfterMs, describe, retry, reset };
 }

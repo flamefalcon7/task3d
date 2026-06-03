@@ -67,7 +67,7 @@ describe('useUploadCaption', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
   });
 
-  it('available:false response → hides the feature, returns null (AE6)', async () => {
+  it('available:false response → status "unavailable" (visible, never hidden — D-084)', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ available: false }));
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useUploadCaption());
@@ -76,8 +76,10 @@ describe('useUploadCaption', () => {
       out = await result.current.describe(frames(4));
     });
     expect(out).toBeNull();
-    await waitFor(() => expect(result.current.available).toBe(false));
-    expect(result.current.status).toBe('idle');
+    // `available` stays informational (configured:false), but the feature is NOT
+    // hidden — the page renders it disabled via status 'unavailable'.
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(result.current.available).toBe(false);
   });
 
   it('transient failure keeps available, sets error, and retry() re-posts (AE6)', async () => {
@@ -150,5 +152,52 @@ describe('useUploadCaption', () => {
     expect(out).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.status).toBe('error');
+  });
+
+  // ----- U7: visible quota state + auto-recovery (R6/R7/R10) -----
+
+  it('AE4: quota_exhausted → status "quota", available stays true (NOT hidden), retryAfterMs carried', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ available: true, error: 'quota_exhausted', retryAfterMs: 90_000 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useUploadCaption());
+    await act(async () => {
+      await result.current.describe(frames(3));
+    });
+    expect(result.current.status).toBe('quota');
+    expect(result.current.available).toBe(true); // visible (R10)
+    expect(result.current.retryAfterMs).toBe(90_000);
+  });
+
+  it('AE5/R7: auto-recovers to idle once the cooldown elapses — no manual step', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async () =>
+        jsonResponse({ available: true, error: 'quota_exhausted', retryAfterMs: 5_000 }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const { result } = renderHook(() => useUploadCaption());
+      await act(async () => {
+        await result.current.describe(frames(3));
+      });
+      expect(result.current.status).toBe('quota');
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(result.current.status).toBe('idle'); // recovered, no retry() called
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('quota is distinct from a generic transient error', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ available: true, error: 'unavailable', retryable: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useUploadCaption());
+    await act(async () => {
+      await result.current.describe(frames(3));
+    });
+    expect(result.current.status).toBe('error'); // not 'quota'
   });
 });

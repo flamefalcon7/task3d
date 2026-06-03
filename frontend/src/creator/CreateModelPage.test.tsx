@@ -27,8 +27,9 @@ vi.mock('../auth/useSession', () => ({
 // synthesis→fill→flip, second-session reset) can be driven without a backend.
 const copilotState = vi.hoisted(() => ({
   messages: [] as { role: 'user' | 'assistant'; content: string }[],
-  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done',
+  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done' | 'quota',
   available: true,
+  retryAfterMs: 0,
   synthesizedPrompt: null as string | null,
   synthSeq: 0,
 }));
@@ -91,8 +92,9 @@ vi.mock('../babylon/PreviewCanvas', () => {
 // field is independent of this hook (it's plain state), so memory/params_json
 // tests drive it by typing directly.
 const captionState = vi.hoisted(() => ({
-  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error',
+  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error' | 'quota',
   available: true,
+  retryAfterMs: 0,
 }));
 const captionDescribeMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => 'low-poly red truck'));
 const captionRetryMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
@@ -101,6 +103,7 @@ vi.mock('./useUploadCaption', () => ({
   useUploadCaption: () => ({
     status: captionState.status,
     available: captionState.available,
+    retryAfterMs: captionState.retryAfterMs,
     describe: captionDescribeMock,
     retry: captionRetryMock,
     reset: captionResetMock,
@@ -239,6 +242,7 @@ beforeEach(() => {
   captureFramesMock.mockResolvedValue([new Uint8Array([1, 2, 3])]);
   captionState.status = 'idle';
   captionState.available = true;
+  captionState.retryAfterMs = 0;
   captionDescribeMock.mockReset();
   captionDescribeMock.mockResolvedValue('low-poly red truck');
   captionRetryMock.mockReset();
@@ -256,6 +260,7 @@ beforeEach(() => {
   copilotState.messages = [];
   copilotState.status = 'idle';
   copilotState.available = true;
+  copilotState.retryAfterMs = 0;
   copilotState.synthesizedPrompt = null;
   copilotState.synthSeq = 0;
   copilotResetMock.mockReset();
@@ -273,6 +278,27 @@ afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
 });
+
+// URL-aware fetch mock for the Tripo flow (U6): the generate flow now pre-flights
+// (GET /api/generate/preflight) BEFORE charging, then POSTs /api/generate. The
+// pre-flight answers available:true by default; pass overrides to exercise the
+// blocked-before-pay path and classified post-payment errors.
+function tripoFetchMock(opts: { preflight?: () => Response; generate?: () => Response } = {}) {
+  const okGlb = () =>
+    new Response(JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const okPreflight = () =>
+    new Response(JSON.stringify({ available: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  return vi.fn(async (url: string | URL) => {
+    if (String(url).includes('/api/generate/preflight')) return (opts.preflight ?? okPreflight)();
+    return (opts.generate ?? okGlb)();
+  });
+}
 
 describe('CreateModelPage', () => {
   it('gates on sign-in when there is no session', () => {
@@ -296,15 +322,7 @@ describe('CreateModelPage', () => {
 
   it('pays then generates, showing a preview + confirm step (Tripo path)', async () => {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
-    );
+    vi.stubGlobal('fetch', tripoFetchMock());
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
@@ -328,11 +346,16 @@ describe('CreateModelPage', () => {
     const signOrder = signAndExecuteMock.mock.invocationCallOrder[0]!;
     const waitOrder = waitForTransactionMock.mock.invocationCallOrder[0]!;
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-    const fetchOrder = fetchMock.mock.invocationCallOrder[0]!;
+    // The generate POST is the call to /api/generate carrying a body — distinct from
+    // the pre-flight (a bodyless GET to /api/generate/preflight, which fires first).
+    const genCallIndex = fetchMock.mock.calls.findIndex(
+      (c) => String(c[0]).endsWith('/api/generate') && (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(genCallIndex).toBeGreaterThanOrEqual(0);
+    const genOrder = fetchMock.mock.invocationCallOrder[genCallIndex]!;
     expect(signOrder).toBeLessThan(waitOrder);
-    expect(waitOrder).toBeLessThan(fetchOrder);
-    const firstCall = fetchMock.mock.calls[0]!;
-    const body = JSON.parse((firstCall[1] as RequestInit).body as string);
+    expect(waitOrder).toBeLessThan(genOrder); // waitForTransaction before the generate POST
+    const body = JSON.parse((fetchMock.mock.calls[genCallIndex]![1] as RequestInit).body as string);
     expect(body).toMatchObject({ prompt: 'a sword', paymentDigest: 'PAYDIGEST123' });
     expect(screen.getByTestId('confirm-model')).toBeTruthy();
   });
@@ -357,17 +380,103 @@ describe('CreateModelPage', () => {
     expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
   });
 
-  it('offers all three policies (Open/Allow-list/Restricted), defaulting to Open (D-076)', async () => {
+  // ----- U6: pre-flight before pay + classified generate errors (R1/R2/R3/R10) -----
+
+  async function clickGenerate() {
+    render(<CreateModelPage />);
+    fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
+    fireEvent.click(screen.getByTestId('generate-button-trigger'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-button-confirm'));
+    });
+  }
+
+  it('AE1: pre-flight available:false blocks payment — no signAndExecute, visible message (R1/R10)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'SHOULD_NOT_BE_CALLED' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        preflight: () =>
+          new Response(JSON.stringify({ available: false, reason: 'insufficient' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    expect(signAndExecuteMock).not.toHaveBeenCalled(); // R1 — never charged
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/temporarily unavailable/i);
+  });
+
+  it('pre-flight network failure → treated as unavailable (no charge), distinct message', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'SHOULD_NOT_BE_CALLED' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        preflight: () => {
+          throw new Error('network down');
+        },
+      }),
+    );
+    await clickGenerate();
+    expect(signAndExecuteMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/couldn't check generation availability/i);
+  });
+
+  it('AE3: a refundable post-payment failure shows the "fee may be refundable" copy (R3)', async () => {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'tripo_failed', refundable: true }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
     );
+    await clickGenerate();
+    expect(signAndExecuteMock).toHaveBeenCalledTimes(1); // payment WAS made
+    await waitFor(() => expect(screen.getByTestId('gen-error').textContent).toMatch(/may be refundable/i));
+  });
+
+  it('tripo_unavailable (operator outage) maps to the temporary-unavailable message', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'tripo_unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    await waitFor(() => expect(screen.getByTestId('gen-error').textContent).toMatch(/temporarily unavailable/i));
+    expect(screen.getByTestId('gen-error').textContent).not.toMatch(/refundable/i);
+  });
+
+  it('a 401 during generate clears the session (re-gates to sign-in)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal(
+      'fetch',
+      tripoFetchMock({
+        generate: () =>
+          new Response(JSON.stringify({ error: 'auth_invalid' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      }),
+    );
+    await clickGenerate();
+    await waitFor(() => expect(clearSessionMock).toHaveBeenCalled());
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/session expired/i);
+  });
+
+  it('offers all three policies (Open/Allow-list/Restricted), defaulting to Open (D-076)', async () => {
+    signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
+    vi.stubGlobal('fetch', tripoFetchMock());
 
     render(<CreateModelPage />);
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
@@ -646,15 +755,7 @@ describe('CreateModelPage', () => {
 
   async function generateAndConfirmTripoModel() {
     signAndExecuteMock.mockResolvedValue({ digest: 'PAYDIGEST123' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      ),
-    );
+    vi.stubGlobal('fetch', tripoFetchMock());
     fireEvent.change(screen.getByTestId('prompt-input'), { target: { value: 'a sword' } });
     fireEvent.click(screen.getByTestId('generate-button-trigger'));
     await act(async () => {
@@ -978,13 +1079,32 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('caption-describe')).toBeNull();
   });
 
-  it('U5 (D-082): captioning unavailable hides the AI button even with the flag on (AE6)', async () => {
+  it('D-084: keyless captioning stays VISIBLE as "AI UNAVAILABLE" (never hidden), hand-typing still works', async () => {
     vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
     captionState.available = false;
+    captionState.status = 'unavailable';
     render(<CreateModelPage />);
     await uploadToMetadataForm();
-    expect(screen.getByTestId('caption-input')).toBeTruthy();
-    expect(screen.queryByTestId('caption-describe')).toBeNull();
+    expect(screen.getByTestId('caption-input')).toBeTruthy(); // always-on hand-type field
+    const btn = screen.getByTestId('caption-describe') as HTMLButtonElement; // NOT hidden
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/AI UNAVAILABLE/i);
+    expect(screen.getByTestId('caption-unavailable')).toBeTruthy();
+  });
+
+  it('U7: caption quota → button stays VISIBLE, disabled "AI QUOTA REACHED" + reset hint, no RETRY (R6/R10)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.status = 'quota';
+    captionState.retryAfterMs = 90_000;
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    const btn = screen.getByTestId('caption-describe') as HTMLButtonElement;
+    expect(btn).toBeTruthy(); // NOT hidden (R10)
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/AI QUOTA REACHED/i);
+    expect(screen.getByTestId('caption-quota').textContent).toMatch(/~2m/); // reset hint
+    expect(screen.queryByTestId('caption-retry')).toBeNull(); // auto-recovery → no manual retry
   });
 
   it('U5 (D-082): describe is a soft no-op when the preview yields no frames', async () => {
@@ -1162,12 +1282,15 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     expect(screen.getByTestId('prompt-input')).toBeTruthy(); // Write is the default
   });
 
-  it('hides the toggle and keeps the plain textarea when the copilot is unavailable (AE7/R13)', () => {
+  it('D-084: keyless copilot stays VISIBLE — toggle shown, panel says "AI unavailable" (never hidden)', () => {
     copilotState.available = false;
+    copilotState.status = 'unavailable';
     render(<CreateModelPage />);
-    expect(screen.queryByTestId('copilot-toggle')).toBeNull();
-    // /create degrades to the shipped Write experience.
-    expect(screen.getByTestId('prompt-input')).toBeTruthy();
+    // Toggle is NOT hidden (gated on the build flag only, not on availability).
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull(); // input replaced by the message
   });
 
   it('clicking "Chat with Copilot" mounts the conversation panel', () => {
@@ -1175,6 +1298,18 @@ describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {
     fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
     expect(screen.getByTestId('copilot-chat')).toBeTruthy();
     expect(screen.queryByTestId('prompt-input')).toBeNull(); // textarea swapped out
+  });
+
+  it('U7: copilot quota → toggle stays visible; panel shows reset hint instead of input (R6/R10)', () => {
+    copilotState.status = 'quota';
+    copilotState.retryAfterMs = 90_000;
+    render(<CreateModelPage />);
+    // available stays true in quota, so the toggle is NOT hidden (R10).
+    expect(screen.getByTestId('copilot-toggle')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('copilot-toggle-chat'));
+    expect(screen.getByTestId('copilot-quota').textContent).toMatch(/~2m/);
+    // the answer input is replaced by the quota message — feature present, not hidden.
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull();
   });
 
   it('a synthesized prompt is written into the shared prompt state (R3)', () => {
