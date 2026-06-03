@@ -501,3 +501,38 @@ Run the parity script across a corpus of real-world exporter GLBs; if a divergen
 
 ### To resolve (if pursued)
 Add an `onLoadError` callback from `TaggingCanvas`; on the upload route, treat a load failure as either auto-skip (`partLabels=[]`) or a surfaced "couldn't read this model" error with a re-pick affordance.
+
+---
+
+## OQ-029: Tripo refundable-failure contact destination is a placeholder
+
+**Status**: 🟡 Open — must finalize before 6/21 submission.
+**Surfaced**: 2026-06-03 (plan-002 / D-083 implementation; user chose "placeholder for now").
+
+### The gap
+R3's post-payment refundable message (`CreateModelPage.tsx` `GEN_MSG.refundable` via the `CONTACT_PATH` constant) currently reads "…contact **the Tusk3D team**" — a neutral placeholder. There is no concrete support destination (email / Discord invite / in-app form) wired, so a creator who hits a refundable post-payment Tripo failure has no actual channel to reach.
+
+### To resolve
+Pick the real destination and replace `CONTACT_PATH` in `frontend/src/creator/CreateModelPage.tsx` (single constant). Candidates: a support email (e.g. `support@tusk3d.space`), a Discord invite URL, or an in-app form. One-line change once decided.
+
+### Blocker level
+🟡 Open — not blocking the build, but the refundable copy is incomplete until set. Finalize during pre-submission polish.
+
+---
+
+## OQ-030: Automatic Tripo refund on post-payment failure — deferred (feasible, not built)
+
+**Status**: 🟢 Deferred — revisit before the 8/27 mainnet window. Captured in D-083 Alternatives.
+**Surfaced**: 2026-06-03 (user asked whether the backend could verify + auto-refund; decided to defer because testnet SUI isn't real money).
+
+### Context
+Auto-refunding the SUI service fee when a post-payment Tripo generation fails is **feasible**: the fee lands in `TRIPO_FEE_TREASURY` = the deployer's own wallet (D-034), so the operator controls the receiving address; the payer address + `feeMist` + the failure are all known at `generate.ts`'s catch (U5). What's missing is a **server-side signing path** — the backend today signs nothing on-chain (read-only `getTransactionBlock`); auto-sending from the treasury is a new hot-wallet attack surface, and needs a durable double-refund idempotency guard (the U1 `node:sqlite` store is the natural home) plus a refund-tx-can-itself-fail fallback to the existing manual-contact message.
+
+### Why deferred
+6/21 is a testnet submission (D-009) where SUI is faucet-free (low value now); the U4 pre-flight already catches the common credit-dry case before payment, so the residual auto-refund volume is tiny. The U5 error codes + U1 store are already shaped so turning this on later is additive.
+
+### To resolve
+At the 8/27 mainnet-readiness pass: ce-brainstorm → ce-plan a refund unit — operator refund keypair handling, `refunded(digest)` idempotency table in the quota store, "try auto-refund → on success show tx, on failure fall back to contact" flow, and an ADR. Until then R3 ships as the manual contact message (OQ-029).
+
+### Blocker level
+🟢 Deferred — no action for 6/21.

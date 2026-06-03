@@ -3729,6 +3729,57 @@ Add an **opt-in** "Describe with AI" capability on `/create` upload mode: the fr
 
 ---
 
+## D-083: Third-party AI degradation UX + first persistent store (`node:sqlite`)
+
+**Status**: Accepted
+**Date**: 2026-06-03
+**Phase**: Phase 4 (hardening / demo-readiness)
+
+### Context
+
+Both paid third-party AI dependencies can run dry mid-demo and today both fail badly. **Tripo** (user-paid): the SUI fee is charged *before* Tripo runs, and `generate.ts` mapped only `TripoDisabledError` — every other live-Tripo error (incl. credit exhaustion as `TripoFailedError`) re-threw into a generic 500, so a credit-dry account meant the creator paid and got a 500. **Gemini** (operator-paid, copilot + caption): 429 collapsed into a generic transient error, and a proposed "hide when low" behavior would make a built feature vanish during evaluation (reads as "not implemented"). Origin: `docs/brainstorms/2026-06-03-third-party-ai-degradation-ux-requirements.md`; plan: `docs/plans/2026-06-03-002-feat-third-party-ai-degradation-ux-plan.md`.
+
+### Decision
+
+Wrap both dependencies in a degradation layer:
+
+- **SQLite driver = `node:sqlite`** (over `better-sqlite3`): zero-dependency, flag-free on the deploy's Node 22.22.3, synchronous `DatabaseSync` (keeps the rate-limiter call sites synchronous), and no native-addon cross-arch build risk (dev macOS arm64 → Linux x64 deploy). The backend's first persistent store (`backend/src/lib/quota-store.ts`) holds only durable-worthy state: cached Tripo balance + per-day Gemini counters keyed `(capability, scope, day)` + per-capability cooldown. Loaded via `createRequire` with a computed specifier (it's experimental, absent from `module.builtinModules`, and the Vite/vitest dep scanner matches the specifier text even in type-only imports).
+- **Gemini primary signal = self-counted daily usage**, headers as enrichment: Google does not guarantee `x-ratelimit-remaining` on 200s, so a header-only guard might never fire. **The 429-derived reset is authoritative for recovery; the self-count is an operator-overspend bound, not a mirror of Google's quota** — so the self-count rollover stays simple UTC date and a wrong-boundary divergence is acceptable (do NOT align to Pacific).
+- **Tripo pre-flight as a backend-only endpoint** (`GET /api/generate/preflight`) checked **before** charging the SUI fee — the credit threshold lives only in backend env, structurally avoiding the FE/BE fee-divergence bug (D-051). Pre-flight is a snapshot read (TOCTOU accepted, see Consequences).
+- **Report-don't-hide**: quota exhaustion is a distinct visible route signal (`{ available:true, error:'quota_exhausted', retryAfterMs }`) and a non-hiding frontend `'quota'` state that auto-recovers; `available:false` (keyless) stays the ONLY hide path.
+- New env (documented in `backend/.env.example`): `TUSK_DB_PATH`, `TRIPO_PREFLIGHT_MIN_CREDITS`, `TRIPO_BALANCE_POLL_MS`, `GEMINI_DAILY_BUDGET` (default off), `GEMINI_PER_ADDRESS_DAILY` (default-ON at 50).
+
+### Rationale
+
+- Cheapest demo-safe fix: pre-flight blocks the common credit-dry case before any charge; classification turns residual failures into honest copy; visible quota state means a judge never sees a 500 or a vanished feature.
+- Self-count-primary is the only reliable signal given Google's unguaranteed 200-headers; the real 429 + its reset remains the true recovery clock.
+- Per-address cap default-ON because the per-minute limiter is trivially reset by churning cheap zkLogin wallets; a generous daily cap (50) blocks that vector with zero real-user impact while the global budget stays uncalibrated.
+
+### Alternatives Considered
+
+- **`better-sqlite3`** — rejected: native-addon cross-arch build risk (dev arm64 → deploy x64); `node:sqlite` is dependency-free.
+- **Header-primary Gemini signal** — rejected: 200-response `x-ratelimit-remaining` is not guaranteed by Google, so the proactive guard might never fire.
+- **Automatic on-chain refund for post-payment Tripo failures** — **DEFERRED, not adopted** (user decision 2026-06-03). It is *feasible*: the fee lands in `TRIPO_FEE_TREASURY` = the deployer's own wallet (D-034), so the operator controls the receiving address, and the payer/amount/failure are all known at the catch. But it requires a **new server-side hot wallet** — the backend today signs **nothing** on-chain (read-only `getTransactionBlock`); auto-sending from the treasury is a materially larger attack surface (a compromised backend drains the treasury, not one fee). It also needs a durable double-refund idempotency guard (the U1 store is the natural home) and a refund-tx-can-itself-fail fallback. Deferred because the 6/21 submission is **testnet** (D-009) where SUI is faucet-free (low value now), and the U4 pre-flight already catches the common credit-dry case before payment. R3 ships as the manual "contact us" message; auto-refund is a clean fast-follow for the 8/27 mainnet window where it actually matters. The U5 error codes + U1 store are shaped so enabling it later is additive.
+- **Hide low-quota features** — rejected: a vanished feature reads as unbuilt to an evaluator (the whole point of report-don't-hide).
+
+### Consequences
+
+- ✅ No creator is charged for a generation the system already knows will fail (the common credit-dry case); no live-Tripo error class produces a raw 500.
+- ✅ Operator Gemini spend is bounded (global budget + default-ON per-address cap); quota/balance survive restart/redeploy (single instance + volume).
+- ✅ Every built AI feature stays visible under quota pressure and auto-recovers.
+- ⚠️ **Pre-flight TOCTOU**: credit can drop between the snapshot and the ~2–4-min two-step chain, or two concurrent callers can both pass one snapshot — so R1 is a "not charged when we already know it will fail" guarantee, NOT an absolute no-charge promise. The threshold is sized for `per-chain-cost × concurrency + buffer`; the U5 refundable message is the residual backstop; a store-side reservation counter is the fuller fix (deferred).
+- ⚠️ **Payment-replay restart window**: the `paymentVerifier` replay `Set` is in-memory, so a restart reopens a brief replay window bounded by Sui finality. Persisting the replay Set to SQLite is deferred (per-minute windows don't benefit; only daily counters + balance cache are persisted).
+- ⚠️ `node:sqlite` emits one `ExperimentalWarning`; pinned to the deploy's Node 22.22.3 (swap to `better-sqlite3` is mechanical if its API churns).
+- 🔮 Auto-refund (above), store-side credit reservation, replay-Set persistence, and the full `bindNamespace`/limiter dedupe across the three JWT-authed routes are deferred follow-ups.
+
+### Related
+
+- D-034 (Tripo SUI-fee-gate; treasury = deployer wallet), D-081 (copilot Gemini seam), D-082 (caption; keyless→hide = the sanctioned hide), D-051 (FE/BE fee-divergence precedent), D-009 (testnet 6/21 / mainnet 8/27)
+- plan: `docs/plans/2026-06-03-002-feat-third-party-ai-degradation-ux-plan.md`
+- origin: `docs/brainstorms/2026-06-03-third-party-ai-degradation-ux-requirements.md`
+
+---
+
 # Reserved Decision Numbers
 
-D-083 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-084 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

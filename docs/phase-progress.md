@@ -1,5 +1,42 @@
 # Phase Progress
 
+## Last Updated: 2026-06-03 (**Third-Party AI Degradation UX — U1–U8 BUILT**; branch `feat/ai-degradation-ux` off `main`, NOT merged)
+
+### Hackathon Tracker
+- Days to submission (6/21): **18 of 38**
+- Days to demo day (7/20–21): ~47
+- Days to winners (8/27): ~85
+
+### Current Phase
+Phase 4 (hardening / demo-readiness). Feature: wrap the two paid third-party AI deps (Tripo, Gemini) in a degradation layer so quota/failure never surfaces as a raw 500 or a vanished feature. **ADR D-083**. Plan: `docs/plans/2026-06-03-002-feat-third-party-ai-degradation-ux-plan.md`. Origin: `docs/brainstorms/2026-06-03-third-party-ai-degradation-ux-requirements.md` (R1–R12, AE1–AE7).
+
+### Completed This Session (8 units, per-commit, D-083-tagged)
+- **U1** `backend/src/lib/quota-store.ts` — first persistent store. `node:sqlite` `DatabaseSync` (loaded via createRequire + computed specifier — Vite dep-scanner can't externalize the experimental builtin). Cached Tripo balance + per-day Gemini counters keyed `(capability, scope, day)` + cooldown. Factory + `getQuotaStore()` singleton (single-connection invariant). 11 tests.
+- **U2** `gemini-quota.ts` (checkBudget/recordSuccess/recordRateLimited/isRateLimited; self-count primary, 429-reset authoritative) + widened the copilot/caption `generate` seam to `{text,headers?,usage?}` and record 429 **inside the closure** (before withTimeout masks a slow 429). 14 + updated client suites.
+- **U3** copilot + caption routes: `checkBudget` → visible `{available:true, error:'quota_exhausted', retryAfterMs}` (NOT available:false); per-address cap (R8) default-ON 50; `available:false` stays the only hide (AE7). Shared `geminiQuotaGate.ts`.
+- **U4** `tripoBalancePoller.ts` (mirrors integrationIndexer + **unref()**) + `tripo-client.getBalance()` + `GET /api/generate/preflight` (JWT + per-address limiter + single-flight live fetch; stale-TTL forces live re-query; fail-closed, no quantitative balance). Wired in server.ts invokedDirectly.
+- **U5** `generate.ts` — classify Tripo errors → typed codes + non-500 (`tripo_unavailable` 503 / `tripo_timeout` 504 / `tripo_failed` 502), `refundable:true` only when paid. New generate.test.ts.
+- **U6** `api.ts` `preflightGenerate` + structured `GenerateError`; `CreateModelPage.onGenerate` pre-flights before pay (R1, blocks without charge) + classified messages (`'preflight'` genStatus, "CHECKING…").
+- **U7** `formatRetryAfter.ts` + both Gemini hooks gain `'quota'` status + auto-recovery `useEffect` (mounted.current read inside the timeout); caption button "AI QUOTA REACHED" + hint (no retry); CopilotChat quota panel. Never-hide.
+- **U8** D-083 ADR + `.env.example` (5 new env vars + VITE_ security warning) + this block + OQ-029/030.
+
+### Test + typecheck status
+- Backend: **287 green**, tsc clean. Frontend: **1006 green**, tsc clean.
+
+### Next Concrete Step
+**5-reviewer pass** on the frontend-touching diff (correctness / testing / api-contract / adversarial / **julik-frontend-races**) + **full demo-arc browser-verify** (the wallet-gated generate flow is USER-RUN per the wallet pause protocol; pre-wallet `/create` render + the Gemini quota states are agent-browser-drivable). Then merge to `main`.
+
+### Blockers / Open Questions
+- **OQ-029** — finalize the refundable-failure contact destination (currently placeholder "the Tusk3D team"); before 6/21.
+- **OQ-030** — automatic Tripo refund deferred (feasible; needs a server hot wallet) → 8/27 mainnet window.
+- Live calibration of `TRIPO_PREFLIGHT_MIN_CREDITS` (diff balance across one real chain) is a post-deploy operational task.
+
+### Notes for Next Session
+- `node:sqlite` runtime default DB path is `./data/quota.db` (gitignored); deploy must mount a volume at `TUSK_DB_PATH`'s dir. The poller + balance source are wired ONLY in server.ts's invokedDirectly block (R12) — `buildApp` mounts the pre-flight route but resolves the store lazily at request time, so tests/imports never open the DB.
+- 2 `glb.ts` tsc errors seen intermittently are pre-existing (TS 5.7 TypedArray-generic, commit `77bb053`), unrelated.
+
+---
+
 ## Last Updated: 2026-06-03 (MemWal **Upload Captioning — U1–U6 BUILT**; branch `feat/memwal-upload-captioning` off `main`)
 
 ### Hackathon Tracker
