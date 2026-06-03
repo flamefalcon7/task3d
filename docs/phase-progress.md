@@ -20,9 +20,11 @@ Ran the remaining MemWal stretch: brainstorm → plan → `/ce-work`. **ADR D-08
 - **U5** CreateModelPage wiring — DESCRIPTION field + "Describe with AI" button in upload mode (gated `VITE_COPILOT_ENABLED && captioner.available`), `previewRef.captureFrames()`→describe→fill, IndeterminateBar on wait, `params_json` + personal-only remember branch (no `policy`). (7 new tests)
 - **U6** ADR D-082 + `.env.example` (CAPTION_MODEL note) + this block.
 
-**Tests:** backend **220 green** (was 199 + caption-client 9 + route 12), backend tsc clean (pre-existing 2 errors in `glb.ts` unrelated). Frontend **987 green**, frontend tsc **clean**.
+**Tests:** backend **221 green**, backend tsc clean (pre-existing 2 errors in `glb.ts` unrelated). Frontend **990 green** (2 pre-existing skips), frontend tsc **clean**.
 
-**STILL TODO:** browser-verify the upload→Describe→edit→mint arc (frontend protocol); 5-reviewer pass (frontend-touching: correctness/testing/api-contract/adversarial/julik-races); confirm D-082 wording; merge.
+**5-reviewer pass DONE** (correctness/testing/api-contract/adversarial/julik-races). Fixed: **bodyLimit(3 MB) on /api/caption** (was: `c.req.json()` buffered full body before zod caps → OOM vector); **clear caption + `captioner.reset()` on `glb`/sourceMode change** (was: a stale caption could ride onto the next model's `params_json` + personal-memory write — data-integrity, flagged by 2 reviewers); **`describe()` re-entrancy guard** + **textarea locked while `thinking`** (was: rapid clicks fired duplicate paid calls; a slow response could clobber a mid-flight edit); **skip `frameCameraToMeshes` in the caption capture** (was: re-frame mutated radius/target/limits that only-alpha-restore left lost — killed the camera race + pose loss). Added tests: 413 oversized body, latest-wins stale-drop, stale-caption-cleared-on-reupload, edit-lock-while-thinking. **Accepted (pre-existing/hackathon-scope, shared with copilot.ts):** per-address-only limiter + shared-key fan-out (no global key cap), rate-limit map no sweep, quota-vs-transient not distinguished, `frameStill`/`captureFrames` browser-only fns tested via DI seam not directly.
+
+**STILL TODO:** browser-verify the upload→Describe→edit arc (frontend protocol; mint is wallet-gated → USER-RUN); confirm D-082 wording; merge to `main`.
 
 ---
 
