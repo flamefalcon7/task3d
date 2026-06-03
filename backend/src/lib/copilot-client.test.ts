@@ -36,6 +36,42 @@ describe('copilot-client', () => {
     expect(r.kind).toBe('prompt');
   });
 
+  it('synthesis ends the conversation with a user "output the prompt" instruction (Generate-now after a question)', async () => {
+    let captured: CopilotMessage[] = [];
+    const generate: GenerateFn = vi.fn(async ({ messages }) => {
+      captured = messages;
+      return 'low-poly biplane, game asset';
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    const r = await client.turn({
+      messages: [
+        { role: 'user', content: 'a plane' },
+        { role: 'assistant', content: 'single or twin engine?' }, // trailing assistant
+      ],
+      memoryContext: [],
+      turnIndex: 1,
+      forceSynthesize: true,
+    });
+    expect(r.kind).toBe('prompt');
+    // Gemini needs a user-terminated conversation; the last turn must be a user
+    // turn that explicitly asks for the final prompt.
+    const last = captured.at(-1)!;
+    expect(last.role).toBe('user');
+    expect(last.content).toMatch(/final text-to-3D prompt/i);
+  });
+
+  it('does NOT append a synthesis instruction in question mode', async () => {
+    let captured: CopilotMessage[] = [];
+    const generate: GenerateFn = vi.fn(async ({ messages }) => {
+      captured = messages;
+      return 'What color?';
+    });
+    const client = buildCopilotClient({ apiKey: KEY }, { generate });
+    await client.turn({ messages: msgs(1), memoryContext: [], turnIndex: 0 });
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.content).not.toMatch(/final text-to-3D prompt/i);
+  });
+
   it('folds recalled memory into the system prompt (R6)', async () => {
     let capturedSystem = '';
     const generate: GenerateFn = vi.fn(async ({ system }) => {

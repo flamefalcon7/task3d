@@ -127,6 +127,23 @@ function clamp(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max).trimEnd();
 }
 
+const SYNTH_INSTRUCTION =
+  'Now output the FINAL text-to-3D prompt only — one concise low-poly / game-asset prompt. No questions, no preamble.';
+
+/**
+ * Ensure the conversation ends with a USER turn that explicitly asks for the final
+ * prompt. Gemini requires a user-terminated conversation, and an in-context user
+ * instruction reliably makes it synthesize instead of asking another question
+ * (which is what happens when "Generate now" fires right after a copilot question).
+ */
+function withSynthesisInstruction(messages: CopilotMessage[]): CopilotMessage[] {
+  const last = messages[messages.length - 1];
+  if (last?.role === 'user') {
+    return [...messages.slice(0, -1), { role: 'user', content: `${last.content}\n\n${SYNTH_INSTRUCTION}` }];
+  }
+  return [...messages, { role: 'user', content: SYNTH_INSTRUCTION }];
+}
+
 const INERT: CopilotClient = {
   configured: false,
   async turn() {
@@ -156,9 +173,16 @@ export function buildCopilotClient(env: CopilotEnv, deps: CopilotDeps = {}): Cop
     async turn(input) {
       const synthesize = input.forceSynthesize === true || input.turnIndex >= SYNTH_AT_TURN_INDEX;
       const system = buildSystem(input.memoryContext, synthesize);
+      // In synthesize mode, end the conversation with a USER turn carrying an explicit
+      // "output the prompt now" instruction. Two reasons: (1) Gemini's generateContent
+      // expects a user-terminated conversation — "Generate now" right after a copilot
+      // question leaves a trailing assistant turn; (2) without a final user instruction
+      // the model just CONTINUES the chat (asks another question) instead of synthesizing.
+      // Merge into the last user turn if there is one, else append a new user turn.
+      const messages = synthesize ? withSynthesisInstruction(input.messages) : input.messages;
       let raw: string;
       try {
-        raw = await withTimeout(generate({ system, messages: input.messages }), timeoutMs);
+        raw = await withTimeout(generate({ system, messages }), timeoutMs);
       } catch (e) {
         logError('turn', e);
         throw new CopilotDegradedError();
