@@ -62,6 +62,14 @@ export async function captureStillsWith(
 /** WebP quality for the watermarked stills — small + visually clean for thumbnails. */
 const WEBP_QUALITY = 0.85;
 
+/**
+ * Number of clean frames captured by default for Upload Captioning (D-082).
+ * Vision identification only needs a few angles; 4 keeps the multimodal payload
+ * tiny (each 512px WebP ~5 KB). Independent of DEFAULT_STILL_COUNT (which is in
+ * lockstep with the contract's MAX_PREVIEW_BLOBS — irrelevant to this read path).
+ */
+export const CAPTION_FRAME_COUNT = 4;
+
 /** Decode a base64 data URL (`data:image/<type>;base64,....`) to bytes. */
 function dataUrlToBytes(dataUrl: string): Uint8Array {
   const comma = dataUrl.indexOf(',');
@@ -100,6 +108,55 @@ export async function watermarkStill(dataUrl: string): Promise<Uint8Array> {
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.fillText(WATERMARK_TEXT, canvas.width - pad, canvas.height - pad);
   return dataUrlToBytes(canvas.toDataURL('image/webp', WEBP_QUALITY));
+}
+
+/**
+ * Browser implementation: re-encode a screenshot to WebP WITHOUT the watermark
+ * (D-082). Upload Captioning feeds these frames to Gemini vision (R6: clean
+ * frames, no stamped text that could distract the model). Same WebP encoding as
+ * `watermarkStill`, minus the lower-right text stamp. Browser-only.
+ */
+export async function frameStill(dataUrl: string): Promise<Uint8Array> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('captureStills: failed to load screenshot'));
+    el.src = dataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width || STILL_SIZE;
+  canvas.height = img.height || STILL_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('captureStills: 2D context unavailable');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return dataUrlToBytes(canvas.toDataURL('image/webp', WEBP_QUALITY));
+}
+
+/**
+ * Browser implementation: capture CLEAN (un-watermarked) turntable frames from a
+ * live Babylon engine + ArcRotateCamera for Upload Captioning (D-082). Restores
+ * the camera alpha afterward. Mirrors `captureStillsFromScene` but injects
+ * `frameStill` (no watermark). Unit tests exercise `captureStillsWith` instead.
+ */
+export async function captureFramesFromScene(
+  engine: Engine,
+  camera: ArcRotateCamera,
+  count: number = CAPTION_FRAME_COUNT,
+): Promise<Uint8Array[]> {
+  const startAlpha = camera.alpha;
+  try {
+    return await captureStillsWith(count, startAlpha, {
+      screenshot: async (alpha) => {
+        camera.alpha = alpha;
+        camera.getScene().render();
+        return Tools.CreateScreenshotAsync(engine, camera, { width: STILL_SIZE, height: STILL_SIZE });
+      },
+      watermark: frameStill,
+    });
+  } finally {
+    camera.alpha = startAlpha;
+    camera.getScene().render();
+  }
 }
 
 /**
