@@ -225,4 +225,47 @@ describe('TripoClient', () => {
       );
     });
   });
+
+  describe('getBalance (plan-002 U4)', () => {
+    it('returns spendable = balance − frozen and hits the balance endpoint with Bearer auth', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { code: 0, data: { balance: 500, frozen: 80 } }));
+      const client = new TripoClient('key');
+      const spendable = await client.getBalance();
+      expect(spendable).toBe(420);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.tripo3d.ai/v2/openapi/user/balance',
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer key' }) }),
+      );
+    });
+
+    it('treats a missing frozen field as 0', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { balance: 120 } }));
+      const client = new TripoClient('key');
+      expect(await client.getBalance()).toBe(120);
+    });
+
+    it('throws TripoAuthError on 401', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'unauthorized' }));
+      const client = new TripoClient('bad');
+      await expect(client.getBalance()).rejects.toBeInstanceOf(TripoAuthError);
+    });
+
+    it('throws TripoFailedError on a non-ok status', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(503, { error: 'down' }));
+      const client = new TripoClient('key');
+      await expect(client.getBalance()).rejects.toBeInstanceOf(TripoFailedError);
+    });
+
+    it('throws TripoFormatError when data.balance is absent', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: {} }));
+      const client = new TripoClient('key');
+      await expect(client.getBalance()).rejects.toBeInstanceOf(TripoFormatError);
+    });
+
+    it('throws TripoTimeoutError when the request is aborted', async () => {
+      fetchMock.mockRejectedValueOnce(new DOMException('aborted', 'TimeoutError'));
+      const client = new TripoClient('key', { requestTimeoutMs: 50 });
+      await expect(client.getBalance()).rejects.toBeInstanceOf(TripoTimeoutError);
+    });
+  });
 });
