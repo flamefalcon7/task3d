@@ -97,7 +97,7 @@ describe('useRiffCopilot', () => {
     expect(result.current.synthesizedPrompt).toBe('P');
   });
 
-  it('available:false response → fail-soft (available=false, no throw) (AE7)', async () => {
+  it('explicit available:false response → hides the feature (available=false) (AE7)', async () => {
     const fetchMock = vi.fn(async () => turnResponse({ available: false }));
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useRiffCopilot());
@@ -106,14 +106,39 @@ describe('useRiffCopilot', () => {
     expect(result.current.synthesizedPrompt).toBeNull();
   });
 
-  it('fetch rejection → fail-soft (available=false)', async () => {
+  it('fetch rejection → TRANSIENT error, feature stays available (no permanent hide)', async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error('network');
     });
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useRiffCopilot());
     act(() => result.current.sendAnswer('a car'));
-    await waitFor(() => expect(result.current.available).toBe(false));
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.available).toBe(true); // NOT hidden — user can retry
+  });
+
+  it('transient backend failure (available:true, no result) → error status, retry re-fires the same turn', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(turnResponse({ available: true, error: 'unavailable', retryable: true }))
+      .mockResolvedValueOnce(turnResponse({ available: true, result: { kind: 'question', text: 'Q?' }, turnIndex: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useRiffCopilot());
+    act(() => result.current.sendAnswer('a plane'));
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.available).toBe(true);
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.status).toBe('asking'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('429 (rate limit) → transient error, not a permanent hide', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) }) as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useRiffCopilot());
+    act(() => result.current.sendAnswer('a car'));
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.available).toBe(true);
   });
 
   it('reset clears the conversation', async () => {

@@ -10,6 +10,7 @@ function panel(over: Partial<Parameters<typeof CopilotChat>[0]> = {}) {
   const onGenerateNow = over.onGenerateNow ?? vi.fn();
   const onDraftChange = over.onDraftChange ?? vi.fn();
   const onStartOver = over.onStartOver ?? vi.fn();
+  const onRetry = over.onRetry ?? vi.fn();
   render(
     <CopilotChat
       messages={over.messages ?? []}
@@ -19,10 +20,11 @@ function panel(over: Partial<Parameters<typeof CopilotChat>[0]> = {}) {
       draftPrompt={over.draftPrompt ?? ''}
       onDraftChange={onDraftChange}
       onStartOver={onStartOver}
+      onRetry={onRetry}
       generateSlot={over.generateSlot}
     />,
   );
-  return { onSend, onGenerateNow, onDraftChange, onStartOver };
+  return { onSend, onGenerateNow, onDraftChange, onStartOver, onRetry };
 }
 
 describe('CopilotChat', () => {
@@ -101,6 +103,14 @@ describe('CopilotChat', () => {
       generateSlot: <button data-testid="gen-slot">Generate</button>,
     });
     expect(screen.getByTestId('gen-slot')).toBeTruthy();
+  });
+
+  it('error status shows a retry affordance (not a dead end) and fires onRetry', () => {
+    const { onRetry } = panel({ status: 'error', messages: [{ role: 'user', content: 'a car' }] });
+    expect(screen.getByTestId('copilot-error')).toBeTruthy();
+    expect(screen.queryByTestId('copilot-answer-input')).toBeNull(); // input hidden in error
+    fireEvent.click(screen.getByTestId('copilot-retry'));
+    expect(onRetry).toHaveBeenCalled();
   });
 
   it('does NOT render the generateSlot before synthesis (only in done)', () => {

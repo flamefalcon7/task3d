@@ -35,12 +35,14 @@ const copilotState = vi.hoisted(() => ({
 const copilotResetMock = vi.hoisted(() => vi.fn());
 const copilotSendMock = vi.hoisted(() => vi.fn());
 const copilotGenerateNowMock = vi.hoisted(() => vi.fn());
+const copilotRetryMock = vi.hoisted(() => vi.fn());
 vi.mock('./useRiffCopilot', () => ({
   useRiffCopilot: () => ({
     ...copilotState,
     sendAnswer: copilotSendMock,
     generateNow: copilotGenerateNowMock,
     reset: copilotResetMock,
+    retry: copilotRetryMock,
   }),
 }));
 
@@ -221,6 +223,7 @@ beforeEach(() => {
   copilotResetMock.mockReset();
   copilotSendMock.mockReset();
   copilotGenerateNowMock.mockReset();
+  copilotRetryMock.mockReset();
   vi.unstubAllGlobals();
   // jsdom lacks createObjectURL.
   vi.stubGlobal('URL', Object.assign(URL, {

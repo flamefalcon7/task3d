@@ -15,13 +15,15 @@ import { useSession, isJwtExpired } from '../auth/useSession';
 export type CopilotMessage = { role: 'user' | 'assistant'; content: string };
 
 // idle: not started · thinking: request in flight · asking: copilot returned a
-// question, awaiting the user · done: a prompt was synthesized (conversation over).
-export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done';
+// question, awaiting the user · done: a prompt was synthesized (conversation over)
+// · error: a transient failure (retryable — the feature stays available).
+export type CopilotStatus = 'idle' | 'thinking' | 'asking' | 'done' | 'error';
 
 interface TurnResponse {
   available: boolean;
   result?: { kind: 'question' | 'prompt'; text: string };
   turnIndex?: number;
+  retryable?: boolean;
 }
 
 export interface UseRiffCopilot {
@@ -35,6 +37,8 @@ export interface UseRiffCopilot {
    *  page keys its fill-the-box effect on this so each synthesis applies exactly
    *  once and a later re-render never re-stomps a manual edit (review: julik P1/P2). */
   synthSeq: number;
+  /** Retry the last turn after a transient error (status 'error'). */
+  retry: () => void;
   /** Append a user turn and advance the conversation. */
   sendAnswer: (text: string) => void;
   /** Force synthesis now from whatever has been gathered (the "Generate now" button). */
@@ -59,6 +63,7 @@ export function useRiffCopilot(): UseRiffCopilot {
   const seq = useRef(0);
   const inFlight = useRef(false);
   const finished = useRef(false);
+  const lastArgs = useRef<{ next: CopilotMessage[]; force: boolean } | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -93,6 +98,7 @@ export function useRiffCopilot(): UseRiffCopilot {
         setAvailable(false);
         return;
       }
+      lastArgs.current = { next, force }; // remember for retry()
       inFlight.current = true;
       commit(next);
       setStatus('thinking');
@@ -106,25 +112,33 @@ export function useRiffCopilot(): UseRiffCopilot {
           });
           const data = res.ok ? ((await res.json()) as TurnResponse) : null;
           if (mySeq !== seq.current || !mounted.current || tokenRef.current !== token) return;
-          if (!data || !data.available || !data.result) {
+          // Explicit "off" (no key / INERT) → hide the feature.
+          if (data && data.available === false) {
             setAvailable(false);
             setStatus('idle');
             return;
           }
-          if (data.result.kind === 'prompt') {
-            finished.current = true;
-            setSynthesizedPrompt(data.result.text);
-            setSynthSeq((n) => n + 1);
-            commit([...next, { role: 'assistant', content: data.result.text }]);
-            setStatus('done');
-          } else {
-            commit([...next, { role: 'assistant', content: data.result.text }]);
-            setStatus('asking');
+          // Success — a question or the synthesized prompt.
+          if (data && data.result) {
+            if (data.result.kind === 'prompt') {
+              finished.current = true;
+              setSynthesizedPrompt(data.result.text);
+              setSynthSeq((n) => n + 1);
+              commit([...next, { role: 'assistant', content: data.result.text }]);
+              setStatus('done');
+            } else {
+              commit([...next, { role: 'assistant', content: data.result.text }]);
+              setStatus('asking');
+            }
+            return;
           }
+          // Everything else (network !ok, 429, or available:true with no result) is
+          // TRANSIENT — keep the feature available and let the user retry. Do NOT
+          // flip available=false (that would hide the toggle for the whole session).
+          setStatus('error');
         } catch {
           if (mySeq === seq.current && mounted.current) {
-            setAvailable(false);
-            setStatus('idle');
+            setStatus('error');
           }
         } finally {
           if (mySeq === seq.current) inFlight.current = false;
@@ -133,6 +147,11 @@ export function useRiffCopilot(): UseRiffCopilot {
     },
     [commit],
   );
+
+  const retry = useCallback(() => {
+    if (inFlight.current || !lastArgs.current) return;
+    drive(lastArgs.current.next, lastArgs.current.force);
+  }, [drive]);
 
   const sendAnswer = useCallback(
     (text: string) => {
@@ -153,10 +172,11 @@ export function useRiffCopilot(): UseRiffCopilot {
     seq.current++;
     inFlight.current = false;
     finished.current = false;
+    lastArgs.current = null;
     commit([]);
     setStatus('idle');
     setSynthesizedPrompt(null);
   }, [commit]);
 
-  return { messages, status, available, synthesizedPrompt, synthSeq, sendAnswer, generateNow, reset };
+  return { messages, status, available, synthesizedPrompt, synthSeq, retry, sendAnswer, generateNow, reset };
 }

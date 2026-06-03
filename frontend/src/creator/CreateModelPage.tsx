@@ -1001,6 +1001,7 @@ export function CreateModelPage() {
                 draftPrompt={prompt}
                 onDraftChange={setPrompt}
                 onStartOver={copilot.reset}
+                onRetry={copilot.retry}
                 generateSlot={generateConfirm}
               />
             ) : (

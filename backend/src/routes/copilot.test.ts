@@ -71,15 +71,28 @@ describe('POST /turn — auth & validation', () => {
     expect(res.status).toBe(400);
   });
 
-  it('400 when the message array does not end with a user turn (rejects role-spoofed arrays)', async () => {
+  it('400 when the array has NO user message (rejects role-spoofed / all-assistant arrays)', async () => {
     const route = buildCopilotRoute({ jwt: stubJwt, client: fakeCopilot(), memory: fakeMemory() });
     const res = await post(route, {
       messages: [
-        { role: 'user', content: 'a car' },
-        { role: 'assistant', content: 'color?' },
+        { role: 'assistant', content: 'q1' },
+        { role: 'assistant', content: 'q2' },
       ],
     });
     expect(res.status).toBe(400);
+  });
+
+  it('accepts "Generate now" right after a copilot question (array ends with assistant)', async () => {
+    const client = fakeCopilot({ turn: vi.fn(async () => ({ kind: 'prompt' as const, text: 'p' })) });
+    const route = buildCopilotRoute({ jwt: stubJwt, client, memory: fakeMemory() });
+    const res = await post(route, {
+      messages: [
+        { role: 'user', content: 'a plane' },
+        { role: 'assistant', content: 'what style?' },
+      ],
+      forceSynthesize: true,
+    });
+    expect(res.status).toBe(200); // last msg is assistant, but a user message exists → allowed
   });
 
   it('400 on an oversized message array (cannot inflate the conversation past the cap)', async () => {
@@ -178,7 +191,7 @@ describe('POST /turn — behavior', () => {
     expect(memory.recall).not.toHaveBeenCalled();
   });
 
-  it('returns available:false when the copilot throws degraded (AE7) — never 5xx, never leaks', async () => {
+  it('a configured-but-failed turn is TRANSIENT (retryable), not "off" — never 5xx, never leaks', async () => {
     const client = fakeCopilot({
       turn: vi.fn(async () => {
         throw new CopilotDegradedError('gemini exploded with SECRET');
@@ -188,7 +201,8 @@ describe('POST /turn — behavior', () => {
     const res = await post(route, { messages: [{ role: 'user', content: 'a car' }] });
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual({ available: false });
+    // available:true (feature stays usable) + retryable — NOT available:false (which hides it).
+    expect(json).toEqual({ available: true, error: 'unavailable', retryable: true });
     expect(JSON.stringify(json)).not.toContain('SECRET');
     expect(res.headers.get('x-copilot-degraded')).toBe('1');
   });

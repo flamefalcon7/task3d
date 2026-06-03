@@ -24,6 +24,8 @@ export interface CopilotChatProps {
   onDraftChange: (value: string) => void;
   /** Discard this conversation and start a fresh one. */
   onStartOver: () => void;
+  /** Retry the last turn after a transient error. */
+  onRetry: () => void;
   /** The real (fee-gated) Generate control, rendered as the done-state primary action. */
   generateSlot?: ReactNode;
 }
@@ -62,11 +64,13 @@ export function CopilotChat({
   draftPrompt,
   onDraftChange,
   onStartOver,
+  onRetry,
   generateSlot,
 }: CopilotChatProps) {
   const [draft, setDraft] = useState('');
   const busy = status === 'thinking';
   const done = status === 'done';
+  const errored = status === 'error';
 
   const submit = () => {
     const t = draft.trim();
@@ -94,7 +98,19 @@ export function CopilotChat({
         </div>
       )}
 
-      {!done && (
+      {errored && (
+        <div
+          data-testid="copilot-error"
+          style={{ display: 'flex', alignItems: 'center', gap: tokens.space[2], marginTop: tokens.space[1] }}
+        >
+          <span style={{ ...microLabel, color: tokens.color.err }}>⚠ That didn't go through</span>
+          <button data-testid="copilot-retry" type="button" onClick={onRetry} style={buttonPrimary}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {!done && !errored && (
         <div style={{ display: 'flex', gap: tokens.space[2], marginTop: tokens.space[1] }}>
           <input
             data-testid="copilot-answer-input"

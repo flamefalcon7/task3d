@@ -61,14 +61,15 @@ const messageSchema = z.object({
 const turnSchema = z.object({
   // Bounded: at most one user seed + (question+answer)×MAX_TURNS keeps payloads small
   // and the turn count honest. Server still derives the cap from assistant count.
-  // The array must END with a user turn — a real copilot transcript always awaits
-  // the user; rejecting otherwise blocks role-spoofed / all-assistant arrays that
-  // would feed an ungrounded conversation to Gemini (review: adversarial role-spoof).
+  // Must contain at least one USER message — blocks role-spoofed / all-assistant
+  // arrays that would feed an ungrounded conversation to Gemini (review: adversarial
+  // role-spoof). NOT "must end with user": "Generate now" legitimately fires right
+  // after a copilot question, so the array can end with an assistant turn.
   messages: z
     .array(messageSchema)
     .min(1)
     .max(2 * MAX_TURNS + 1)
-    .refine((m) => m[m.length - 1]?.role === 'user', { message: 'last message must be from the user' }),
+    .refine((m) => m.some((x) => x.role === 'user'), { message: 'at least one user message required' }),
   forceSynthesize: z.boolean().optional(),
 });
 
@@ -161,13 +162,16 @@ export function buildCopilotRoute(deps: CopilotRouteDeps) {
       const result = await client.turn({ messages, memoryContext, turnIndex, forceSynthesize });
       return c.json({ available: true, result, turnIndex });
     } catch (e) {
-      // Any copilot failure (degraded/model/timeout) → clean unavailable signal.
-      // Never leak the key or raw model error to the client.
+      // The copilot IS configured but this call failed (Gemini hiccup/timeout/quota).
+      // This is TRANSIENT — return available:true + retryable so the client keeps the
+      // feature visible and offers a retry, rather than hiding it for the whole session
+      // (only `!client.configured` above means "off" → available:false). Never leak the
+      // key or raw model error.
       if (!(e instanceof CopilotDegradedError)) {
         console.warn('[copilot] unexpected route error (degraded):', e instanceof Error ? e.message : e);
       }
       c.header('x-copilot-degraded', '1');
-      return c.json({ available: false });
+      return c.json({ available: true, error: 'unavailable', retryable: true });
     }
   });
 
