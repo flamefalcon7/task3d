@@ -366,6 +366,10 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('continue-tagging'));
     await waitFor(() => expect(screen.getByTestId('metadata-form')).toBeTruthy());
 
+    // Empty name → Mint is disabled AND a hint explains why (no silent dead button).
+    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('mint-name-required')).toBeTruthy();
+
     // Choose allow-list + a positive access (unlock) fee. plan-027: the publish
     // gate is on access_fee now, not the derive fee.
     fireEvent.click(screen.getByTestId('policy-1'));
@@ -373,6 +377,9 @@ describe('CreateModelPage', () => {
 
     signAndExecuteMock.mockResolvedValue({ digest: 'ENCDIGEST' });
     fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'Sealed Model' } });
+    // Name entered → hint clears + Mint enables.
+    expect(screen.queryByTestId('mint-name-required')).toBeNull();
+    expect((screen.getByTestId('mint-button') as HTMLButtonElement).disabled).toBe(false);
     await act(async () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });

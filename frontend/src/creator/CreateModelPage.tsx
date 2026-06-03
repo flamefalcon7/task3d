@@ -1128,11 +1128,14 @@ export function CreateModelPage() {
         {haveModel && tagged && (
           <div data-testid="metadata-form" style={metadataGrid}>
             <label style={fullRow}>
-              <span style={sectionLabel}>MODEL NAME</span>
+              <span style={sectionLabel}>
+                MODEL NAME <span style={{ color: tokens.color.accent }}>*</span>
+              </span>
               <input
                 data-testid="name-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                aria-required="true"
                 style={{ ...inputStyle, width: '100%' }}
               />
             </label>
@@ -1221,6 +1224,13 @@ export function CreateModelPage() {
                 errorMessage={mintError ?? undefined}
                 explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
               />
+              {/* Explain WHY Mint is disabled — a greyed button with no reason is
+                  confusing (the name field is the only mint prerequisite). */}
+              {!name.trim() && mintStatus === 'idle' && (
+                <p data-testid="mint-name-required" style={{ ...monoLabel, color: tokens.color.hint, marginTop: 8 }}>
+                  ↑ ENTER A MODEL NAME TO MINT
+                </p>
+              )}
               {/* Pill scopes to the SILENT Walrus phases only (encoding +
                   relay-upload). The wallet-popup stages (awaiting-register /
                   awaiting-certify) already get a dedicated MintButton
