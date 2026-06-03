@@ -27,7 +27,14 @@ Ran ideate-context → brainstorm → plan → `/ce-work`. **ADR D-081** (reintr
 
 **Added a default-OFF `VITE_COPILOT_ENABLED` gate** (non-secret feature flag): the toggle shows only when the flag is `true` AND the backend reports the LLM available — so a key-less 6/21 deploy stays clean (no broken-on-click toggle). Browser-verify: pre-wallet `/create` renders clean in the real Vite bundle, **0 console errors** (new modules resolve). Post-sign-in toggle behavior is wallet+key-gated → USER-RUN.
 
-**To turn it on (user):** set `GOOGLE_GENERATIVE_AI_API_KEY` in `backend/.env` + `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`, restart both. Then exercise live + tune the synthesis system prompt in `backend/src/lib/copilot-client.ts` (ideation's top risk: LLM→Tripo quality, burns SUI to tune). Demo seed: reuse `seed-memory.ts`.
+**LIVE-VERIFIED (2026-06-03) with a real paid-tier Gemini key:**
+- Key works (free tier was `limit:0` in user's region → user enabled billing; `serviceTier: standard`). **Default model bumped `gemini-2.0-flash`→`gemini-2.5-flash`** (2.0 retired with a 404).
+- `backend/scripts/copilot-smoke.ts` (client→Gemini) + `copilot-route-smoke.ts` (full HTTP /api/copilot/turn via minted JWT) both green. Synthesis quality good out-of-box, **no system-prompt tuning needed**: e.g. "a treasure chest"→`Low-poly wooden treasure chest, metal bands, ornate lock, game asset.`
+- **Hero-shot confirmed live (R6/R7):** turn-0 with vehicle history → *"Welcome back! You've made some great ground vehicles like a low-poly red sports car… What's the primary purpose or style you envision for this flying vehicle?"*
+- **Fail-soft confirmed live (R10):** MemWal recall timed out (2s) mid-call → route still returned `available:true` with the question (empty memory context); copilot kept working.
+- Config: key in `backend/.env` (`GOOGLE_GENERATIVE_AI_API_KEY`), `VITE_COPILOT_ENABLED=true` in `frontend/.env.local`, `VITE_TEST_WALLET=0` (real Slush).
+
+**Only remaining for L2:** user drives the in-browser chat on `/create` with real Slush (wallet-gated, agent-browser can't sign in) — servers are running (`:3001` backend, `:5173` frontend). Then the merge decision for `feat/memwal-riff-copilot`. Demo seed: reuse `seed-memory.ts`.
 
 ---
 
