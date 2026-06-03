@@ -536,3 +536,21 @@ At the 8/27 mainnet-readiness pass: ce-brainstorm → ce-plan a refund unit — 
 
 ### Blocker level
 🟢 Deferred — no action for 6/21.
+
+---
+
+## OQ-031: Deferred findings from the D-083 5-reviewer pass
+
+**Status**: 🟢 Deferred — low-impact polish, none blocking 6/21.
+**Surfaced**: 2026-06-03 (5-reviewer pass on `feat/ai-degradation-ux`; the confirmed defects were fixed in commit `fix(quota): 5-reviewer pass …`).
+
+The reviewers' high-value findings were fixed in-branch (counter desync, config footgun, over-broad classifier, cooldown clamp, copilot quota guard). These lower-value items were deliberately deferred:
+
+1. **JULIK-1 (med): `onGenerate` has no unmount/session-change guard.** Its three awaits (pre-flight, pay+wait, generate) write state unconditionally on resolution — a mid-generate unmount fires a React setState warning, and a mid-generate session switch could write a stale GLB into the new account's page. Pre-existing pattern (the original `onGenerate` had the same gap; this work added one more await). The `genBusy` button gate already prevents a double-charge. Fix: mirror the hooks' `mounted`/`seq` guard (~12 lines) — bail on each post-await setState if unmounted or the session token changed. Low demo impact (wallet-gated, rare mid-flight switch).
+2. **API-contract (low): the Gemini quota response shape is duplicated** in `geminiQuotaGate.ts` (`QuotaExhaustedBody`), `useUploadCaption.ts` (`CaptionResponse`), and `useRiffCopilot.ts` (`TurnResponse`) with no compile-time link (unlike `GenerateResponse` which is in `@overflow2026/shared`). A field rename on one side wouldn't break the build. Fix: promote the degradation response union into `shared/src/types.ts`.
+3. **Testing gaps (low):** no test for `api.ts` `preflightGenerate`'s 401-throw / non-ok branches at the unit level (covered transitively via the page); no test for `quota-store.ts`'s DB-open error sanitization (the "never leak the fs path" branch); no test for the `'preflight'`/"CHECKING…" transient button state; no test for the slow-429-*after*-15s-timeout ordering (the closure fix is structurally correct but the timing case is unverified).
+4. **Residual (accepted):** the closure-level 429 capture records the cooldown for the *next* request; a 429 slower than the 15s `withTimeout` still returns generic-retryable on the *in-flight* request (self-corrects on retry).
+
+**To resolve**: pick up #1–#3 in a hardening/polish pass (good 8/27 mainnet-window candidates alongside OQ-030). 
+
+**Blocker level**: 🟢 Deferred.

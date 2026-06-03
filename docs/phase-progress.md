@@ -21,14 +21,23 @@ Phase 4 (hardening / demo-readiness). Feature: wrap the two paid third-party AI 
 - **U8** D-083 ADR + `.env.example` (5 new env vars + VITE_ security warning) + this block + OQ-029/030.
 
 ### Test + typecheck status
-- Backend: **287 green**, tsc clean. Frontend: **1006 green**, tsc clean.
+- Backend: **293 green**, tsc clean. Frontend: **1006 green**, tsc (`typecheck`/`tsc --noEmit`) clean.
+- NOTE: `pnpm build` (`tsc -b && vite build`) is RED on PRE-EXISTING type errors in unrelated test files (`useLedeRenderMode.test.tsx`, `racetrackScene.test.ts`, `fetchWithTimeout.test.ts` — landing/track/walrus, present on `main`, not touched by this branch). Not introduced here.
+
+### 5-reviewer pass — DONE
+Ran correctness / testing / api-contract / adversarial / julik-frontend-races on the branch diff. Confirmed defects FIXED in `fix(quota): 5-reviewer pass …`: per-address counter desync (R8 now attempt-counted past the gate), `GEMINI_*=0`/negative config footgun (`posEnv` → `=0` disables), over-broad `isRateLimited` (narrowed + structured Google status), cooldown reset clamp (`safeCooldown`), copilot `quota` send guard. Deferred (low-impact) findings recorded in **OQ-031** (onGenerate unmount/session guard, shared-type promotion, a few test gaps).
+
+### Browser verification status
+- Compile + render-in-jsdom: green — the 60 `CreateModelPage.test.tsx` cases drive the REAL component through pre-flight-block / classified-error / quota-visible / keyless-hide paths; no new deps or dynamic imports.
+- **USER-RUN (wallet pause protocol):** the interactive demo arc — sign in → forced credit-dry pre-flight blocks pay with a visible message → post-payment refundable copy → caption/copilot "AI QUOTA REACHED" + auto-recover — is wallet + live-backend gated and cannot be driven in agent-browser's wallet-less Chromium. Hand off to the user for the real-Chrome+Slush pass before merge.
 
 ### Next Concrete Step
-**5-reviewer pass** on the frontend-touching diff (correctness / testing / api-contract / adversarial / **julik-frontend-races**) + **full demo-arc browser-verify** (the wallet-gated generate flow is USER-RUN per the wallet pause protocol; pre-wallet `/create` render + the Gemini quota states are agent-browser-drivable). Then merge to `main`.
+User-run the wallet-gated demo-arc verification (above), then merge `feat/ai-degradation-ux` → `main`.
 
 ### Blockers / Open Questions
 - **OQ-029** — finalize the refundable-failure contact destination (currently placeholder "the Tusk3D team"); before 6/21.
 - **OQ-030** — automatic Tripo refund deferred (feasible; needs a server hot wallet) → 8/27 mainnet window.
+- **OQ-031** — deferred 5-reviewer findings (onGenerate guard + shared-type + test gaps).
 - Live calibration of `TRIPO_PREFLIGHT_MIN_CREDITS` (diff balance across one real chain) is a post-deploy operational task.
 
 ### Notes for Next Session
