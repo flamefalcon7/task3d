@@ -67,7 +67,7 @@ export const MAX_TURNS = 3;
 const SYNTH_AT_TURN_INDEX = MAX_TURNS - 1;
 /** Tripo prompt input ceiling (mirrors the /create textarea, 1–1000 chars). */
 export const PROMPT_MAX_CHARS = 1000;
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 const DEFAULT_TIMEOUT_MS = 15000;
 
 const BASE_ROLE = [
