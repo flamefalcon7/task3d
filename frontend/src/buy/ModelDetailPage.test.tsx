@@ -207,19 +207,6 @@ describe('ModelDetailPage', () => {
     expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
   });
 
-  it('routes to /launch via the fork CTA for a forkable model', () => {
-    useModelByIdMock.mockReturnValue({ model: makeModel(), loading: false, error: null });
-    renderAt('/model/0xMODEL');
-    expect((screen.getByTestId('fork-cta') as HTMLAnchorElement).getAttribute('href')).toBe('/launch');
-  });
-
-  it('shows a not-forkable note when the model has no standalone GLB', () => {
-    useModelByIdMock.mockReturnValue({ model: makeModel({ glbBlobId: '' }), loading: false, error: null });
-    renderAt('/model/0xMODEL');
-    expect(screen.queryByTestId('fork-cta')).toBeNull();
-    expect(screen.getByTestId('not-forkable')).toBeTruthy();
-  });
-
   it('renders loading state', () => {
     useModelByIdMock.mockReturnValue({ model: null, loading: true, error: null });
     renderAt('/model/0xMODEL');

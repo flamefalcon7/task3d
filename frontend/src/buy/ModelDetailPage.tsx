@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useSuiClient } from '@mysten/dapp-kit';
 import { useModelById, useDetailEntitlement } from './hooks';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
@@ -595,29 +595,6 @@ export function ModelDetailPage() {
           </div>
         )}
 
-        {/* Fork CTA. ALLOW_LIST forks happen on /launch once access is held;
-            PERMISSIONLESS forks freely. RESTRICTED non-creators can't fork. */}
-        {!isRestricted && model.glbBlobId ? (
-          <Link
-            to="/launch"
-            data-testid="fork-cta"
-            style={{
-              display: 'inline-block',
-              padding: '8px 14px',
-              background: '#ffb86b',
-              color: '#15171b',
-              borderRadius: 6,
-              fontWeight: 600,
-              textDecoration: 'none',
-            }}
-          >
-            Fork this into a collection →
-          </Link>
-        ) : !isRestricted ? (
-          <div data-testid="not-forkable" style={{ fontSize: 12, color: '#888' }}>
-            This model has no standalone GLB and can’t be forked.
-          </div>
-        ) : null}
       </div>
     </div>
   );
