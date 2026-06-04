@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { act, render } from '@testing-library/react';
 
 import { useLedeRenderMode } from './useLedeRenderMode';
@@ -68,7 +68,7 @@ function makeMatchMedia(initialMatches: boolean): {
 
 describe('useLedeRenderMode', () => {
   let originalMatchMedia: typeof window.matchMedia | undefined;
-  let getContextSpy: ReturnType<typeof vi.spyOn> | null = null;
+  let getContextSpy: MockInstance<HTMLCanvasElement['getContext']> | null = null;
 
   beforeEach(() => {
     originalMatchMedia = window.matchMedia;

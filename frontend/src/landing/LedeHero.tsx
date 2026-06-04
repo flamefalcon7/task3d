@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import {
   type AbstractMesh,
@@ -93,7 +93,7 @@ export function LedeHero(): JSX.Element {
     const engine = engineRef.current;
     if (!engine) return;
     const scene = new Scene(engine);
-    const camera = new ArcRotateCamera(
+    new ArcRotateCamera(
       'lede-cam',
       Math.PI / 4,
       Math.PI / 3,

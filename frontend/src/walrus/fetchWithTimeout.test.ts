@@ -86,7 +86,7 @@ describe('fetchBlobWithTimeout', () => {
     const result = await fetchBlobWithTimeout(URL, { timeoutMs: 3000 });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe(URL);
+    expect((fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[0]).toBe(URL);
     expect(result).toBeInstanceOf(ArrayBuffer);
     expect(result.byteLength).toBe(4);
     expect(new Uint8Array(result)).toEqual(new Uint8Array([1, 2, 3, 4]));

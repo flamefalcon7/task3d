@@ -7,7 +7,7 @@ import { newVariantRow, type VariantRow } from './VariantEditor';
 afterEach(() => cleanup());
 
 function makeVariants(count: number, palette?: Record<string, string>): VariantRow[] {
-  return Array.from({ length: count }, (_, i) =>
+  return Array.from({ length: count }, () =>
     newVariantRow({
       uniqueLabels: ['primary'],
       seed: palette ? { palette } : undefined,

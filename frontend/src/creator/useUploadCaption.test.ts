@@ -62,7 +62,7 @@ describe('useUploadCaption', () => {
     expect(body.frames.every((f) => f.mediaType === 'image/webp')).toBe(true);
     expect(body.frames.every((f) => typeof f.base64 === 'string' && f.base64.length > 0)).toBe(true);
     // posted to the caption endpoint with a bearer token
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/caption');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
   });

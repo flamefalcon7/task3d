@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { pagePaper } from '../ux/tokens';
 import { Masthead } from './Masthead';
 import { LedeHero } from './LedeHero';

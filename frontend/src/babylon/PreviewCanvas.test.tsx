@@ -490,15 +490,15 @@ describe('PreviewCanvas', () => {
     // AFTER the async load resolves and loadEpoch bumps; waitFor handles
     // the multi-tick wait for that chain to settle.
     await waitFor(() =>
-      expect(state.meshes[1].material.albedoColor!.r).toBeCloseTo(1),
+      expect(state.meshes[1]!.material.albedoColor!.r).toBeCloseTo(1),
     );
-    expect(state.meshes[1].material.albedoColor!.g).toBeCloseTo(0);
-    expect(state.meshes[2].material.albedoColor!.g).toBeCloseTo(1);
-    expect(state.meshes[2].material.albedoColor!.r).toBeCloseTo(0);
-    expect(state.meshes[3].material.albedoColor!.b).toBeCloseTo(1);
+    expect(state.meshes[1]!.material.albedoColor!.g).toBeCloseTo(0);
+    expect(state.meshes[2]!.material.albedoColor!.g).toBeCloseTo(1);
+    expect(state.meshes[2]!.material.albedoColor!.r).toBeCloseTo(0);
+    expect(state.meshes[3]!.material.albedoColor!.b).toBeCloseTo(1);
     // __root__ (state.meshes[0], 0 verts) was filtered out — its color is
     // untouched by the partColors overlay.
-    expect(state.meshes[0].material.albedoColor!.r).toBeCloseTo(0.5);
+    expect(state.meshes[0]!.material.albedoColor!.r).toBeCloseTo(0.5);
   });
 
   it('F3: picking __root__ (0 verts, filtered out) does NOT fire onPartClick', async () => {
