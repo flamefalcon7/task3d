@@ -179,6 +179,13 @@ const EEntitlementRequired:    u64 = 58; // ALLOW_LIST launch attempted via a no
 // D-085 — encrypted seal_id is not EXACTLY SEAL_ID_LEN (32) bytes. Closes audit
 // C-1 (seal_id prefix-truncation bypass); see validate_seal_publish + seal_approve_*.
 const ESealIdWrongLength:      u64 = 59;
+// D-086 — `mint_tokens` called on a collection whose quilt is already set (audit
+// H-1): the quilt is write-once so a cap holder cannot re-skin already-sold tokens.
+const EQuiltAlreadySet:        u64 = 60;
+// D-087 — audit guard batch.
+const EInvalidPolicy:          u64 = 61; // L-1: license.policy is not one of {0,1,2}
+const ESelfRegistrationNotAllowed: u64 = 62; // L-2: nft_creator self-registers a fake "Used by"
+const ECreatorCannotSelfPurchase:  u64 = 63; // L-3: base creator buys access to their own model
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -607,6 +614,15 @@ public(package) fun validate_publish_inputs(
     part_labels: &vector<String>,
     license: &LicenseTerms,
 ) {
+    // D-087 (L-1) — reject unknown policy values up front. `is_encrypted` is derived
+    // as `policy != PERMISSIONLESS`, so without a whitelist a stray value (e.g. 3)
+    // would be treated as encrypted-but-unforkable-by-entitlement. Only {0,1,2} valid.
+    assert!(
+        license.policy == POLICY_RESTRICTED
+            || license.policy == POLICY_ALLOW_LIST
+            || license.policy == POLICY_PERMISSIONLESS,
+        EInvalidPolicy,
+    );
     assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
     assert!(vector::length(tags) <= MAX_TAGS, ETooManyTags);
     let mut i = 0;
@@ -918,6 +934,11 @@ public entry fun purchase_access(
 ) {
     assert!(model.license.policy == POLICY_ALLOW_LIST, ENotPurchasable);
     let buyer = ctx.sender();
+    // D-087 (L-3) — the base creator must not self-purchase access to their own
+    // model: they already decrypt via seal_approve_creator, and a self-pay (fee
+    // routes back to themselves) only pollutes `buyers` + emits a misleading
+    // AccessPurchased event inflating purchase counts.
+    assert!(buyer != model.creator, ECreatorCannotSelfPurchase);
     // Duplicate-purchase guard (idempotency teeth): a wallet already holding an
     // entitlement for this model cannot re-purchase (no second charge / mint).
     assert!(!model.buyers.contains(buyer), EAlreadyHasEntitlement);
@@ -1199,6 +1220,13 @@ public entry fun mint_tokens(
         EBatchLenMismatch,
     );
     assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    // D-086 (H-1) — quilt is WRITE-ONCE. The collection is created with an empty
+    // quilt at launch (step 1); this step-3 entry sets the real (post-decrypt) quilt
+    // exactly once. A second call aborts, so a cap holder cannot retroactively
+    // re-skin already-sold NftTokens (which resolve art via collection.quilt_blob_id
+    // + their patch_id). Further minting is still possible via `mint_nft_token`,
+    // which does not touch the quilt.
+    assert!(string::is_empty(&collection.quilt_blob_id), EQuiltAlreadySet);
     collection.quilt_blob_id = quilt_blob_id;
 
     let n = vector::length(&token_names);
@@ -1291,6 +1319,10 @@ public entry fun register_integration(
 ) {
     let sender = ctx.sender();
 
+    // 0. D-087 (L-2) — the nft creator cannot self-register an integration on their
+    //    own collection: the fee would route straight back to themselves (free at
+    //    register_fee == 0), inflating the "Used by" count with a fake attestation.
+    assert!(sender != collection.nft_creator, ESelfRegistrationNotAllowed);
     // 1. Integration gate — the nft creator (cap holder) opens/closes this via
     //    set_integration_policy (defaults PERMISSIONLESS at launch). A
     //    collection-level (L2) decision, NOT the base model's L1 license (D-030).

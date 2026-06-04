@@ -14,15 +14,15 @@
 ## 修复追踪清单(按优先级)
 
 - [x] **C-1** seal_id 前缀截断绕过(Critical)— ✅ 已修(D-085:定长 32 字节 + 门内长度断言;90/90 Move 测试通过含红队回归)。⏳ 需 testnet republish 生效
-- [ ] **H-1** mint_tokens 可覆写 quilt + 无供应上限(High)— 一次性写锁 + max_supply
+- [x] **H-1** mint_tokens 可覆写 quilt(High)— ✅ 已修(D-086:quilt 一次性写锁 `EQuiltAlreadySet`)。供应上限(Info)按 (a) 推迟。
 - [ ] **M-1** ensure_collection_policy 非幂等(Medium)— singleton 守卫 + 主网冷存 Publisher
-- [ ] **M-2** royaltyOwedMist 客户端楼层(Medium,需核实)— 确认链上 royalty_rule::pay 自校
+- [x] **M-2** royaltyOwedMist 客户端楼层(Medium,需核实)— ✅ 已核实为**非漏洞,降级 Info**:链上 `royalty_rule::pay`(rev 7a07937)用 `policy::paid(request)`(链上真实价)算费 + `coin::value == amount` **精确相等**断言 → 无法少付;客户端值仅 UX,算错只会 abort。前端公式与链上一致。
 - [x] **M-3** seal_id 无最小长度(Medium)— ✅ 随 C-1 一并修(D-085:== 32)
-- [ ] **M-4** Seal 会话缓存断连不清(Medium)— disconnect 接入 clearAllSessions
+- [x] **M-4** Seal 会话缓存断连不清(Medium)— ✅ 已修(`clearSession` 接入 `clearAllSessions`,disconnect 链路覆盖;useSession 测试断言)
 - [ ] **M-5** JWT 存 localStorage + window 广播(Medium)— sessionStorage / event 校验
-- [ ] **L-1** unknown policy=3 缺白名单(Low)— assert policy∈{0,1,2}
-- [ ] **L-2** register_integration 自注册伪造(Low)— assert sender != nft_creator
-- [ ] **L-3** creator 自购 access(Low)— assert sender != creator
+- [x] **L-1** unknown policy=3 缺白名单(Low)— ✅ 已修(D-087:`EInvalidPolicy`)
+- [x] **L-2** register_integration 自注册伪造(Low)— ✅ 已修(D-087:`ESelfRegistrationNotAllowed`)
+- [x] **L-3** creator 自购 access(Low)— ✅ 已修(D-087:`ECreatorCannotSelfPurchase`)
 - [ ] **L-4** Walrus dep rev="main"(Low)— pin SHA
 - [ ] **L-5** loadKeypair 依赖 tree-shake(Low,需核实)— CI grep dist/
 - [ ] **L-6** MarketPage 用 deprecated @mysten/dapp-kit(Low)— 迁移
@@ -77,12 +77,20 @@
 **场景**: 无幂等守卫(合约注释 484 已自承)。Publisher 归 deployer 所有(init 第 445 行 public_transfer 给 sender),故仅 deployer 或被盗密钥可二次调用,产生第二个**空规则** TransferPolicy。买家可对空 policy 走 `confirm_request` 跳过版税。
 **修复**: singleton 守卫(policy id 存共享单例,已设则 abort)+ 主网 bootstrap 后立即把 Publisher / TransferPolicyCap 移冷钱包或 multisig。
 
-### M-2 · royaltyOwedMist() 版税楼层仅在客户端 ⚠️需人工核实
+### M-2 · royaltyOwedMist() 版税楼层仅在客户端 — ✅ 已核实为非漏洞(降级 Info)
 - **位置**: `frontend/src/sui/kioskTxBuilders.ts:50-53,166`
 - **命中来源**: sui-kiosk(High,条件性)
+- **核实日期**: 2026-06-04(读源:`~/.move/.../apps@7a07937/kiosk/sources/rules/royalty_rule.move`)
 
-**场景**: PTB 不强制用正确 priceMist 调用 `royalty_rule::pay`;链上是否拦截取决于已部署 `royalty_rule::pay` 是否自校金额。
-**需人工核实**: 读 `kioskAppsPackageId 0xe308…` 链上字节码。标准 Mysten royalty_rule **会**自校 → 降为 Info;非标准则升 Critical。注:该 package id 与 @mysten/kiosk SDK 默认值不同(networkConfig.ts:59 注释已标),更需确认。
+**核实结论(非漏洞)**: 已部署的 Mysten `royalty_rule::pay` 自校金额:
+```move
+let paid = policy::paid(request);              // 链上记录的真实成交价(kiosk::purchase 写入)
+let amount = fee_amount(policy, paid);          // 费用在链上从真实价算出
+assert!(coin::value(&payment) == amount, EInsufficientAmount);  // 精确相等
+```
+版税由**链上** `policy::paid(request)`(攻击者无法伪造的真实价)算出,且断言**精确相等**(连多付都不行)→ **无法少付版税**。客户端 `royaltyOwedMist()` 仅为 UX 拆币;算错只会让 tx abort,无资损、无绕过。已核对前端公式 `max(price·bp/10000, min)` 与链上 `fee_amount` 在边界处完全等价。
+
+**残留(非安全,robustness)**: `==` 是零容差 —— 若链上 policy Config 的 `amount_bp`/`min_amount` 与前端常量漂移,则**每笔** Kiosk 购买都会 abort。靠 `networkConfig.test.ts` parity 测试守住即可(与 kiosk 轨道 L-7 的 package-id 漂移提示同源)。
 
 ### M-3 · seal_id 无最小长度下限(放大 C-1)
 - **位置**: `contracts/model3d/sources/model3d.move:639-640,700`

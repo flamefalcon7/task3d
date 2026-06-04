@@ -2185,8 +2185,11 @@ fun fork_encrypted_allow_list(
     let (model, entitlement) = buy_access_encrypted_allow_list(sc, system, clk);
 
     sc.next_tx(NFT_CREATOR);
+    // D-076 — the encrypted step-1 launches with an EMPTY quilt (the variants are
+    // baked AFTER decrypt and pinned by mint_tokens in step 3). D-086 — this is what
+    // lets the write-once mint_tokens set the quilt exactly once.
     model3d::launch_collection_with_entitlement(
-        &model, &entitlement, coin::mint_for_testing<SUI>(0, sc.ctx()), quilt(), sc.ctx());
+        &model, &entitlement, coin::mint_for_testing<SUI>(0, sc.ctx()), s(b""), sc.ctx());
 
     sc.next_tx(NFT_CREATOR);
     let cap = sc.take_from_sender<NftCollectionCreatorCap>();
@@ -2602,21 +2605,22 @@ fun publish_encrypted_rejects_over_length_seal_id() {
     sc.end();
 }
 
-// D-085 — the length rule is keyed off is_encrypted = (policy != PERMISSIONLESS),
-// so an UNKNOWN policy (e.g. 3) is treated as encrypted and a short seal_id is
-// still rejected. Guards the audit L-1 (unknown-policy) interaction with C-1's fix.
-#[test, expected_failure(abort_code = model3d::ESealIdWrongLength)]
-fun publish_encrypted_unknown_policy_short_seal_id_rejected() {
+// D-087 (L-1) — an UNKNOWN policy value (e.g. 3) is rejected up front by
+// validate_publish_inputs (EInvalidPolicy), which runs before the seal-field /
+// seal_id-length checks. (Pre-D-087 this same input reached the D-085 length guard;
+// now the policy whitelist catches it first — the unknown-policy state is impossible.)
+#[test, expected_failure(abort_code = model3d::EInvalidPolicy)]
+fun publish_encrypted_rejects_unknown_policy() {
     let mut sc = ts::begin(CREATOR);
     let mut system = system::new_for_testing(sc.ctx());
     sc.next_tx(CREATOR);
     let clk = clock::create_for_testing(sc.ctx());
     let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
     let b = mint_blob(&mut system, sc.ctx());
-    // policy = 3 (unknown) → is_encrypted true; 16-byte seal_id → length rule fires.
+    // policy = 3 (unknown) → EInvalidPolicy in validate_publish_inputs.
     model3d::publish_encrypted(
         &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
-        empty_part_labels(), b"k", b"dummy-seal-id-01", vector<string::String>[],
+        empty_part_labels(), b"k", b"dummy-seal-id-01dummy-seal-id-01", vector<string::String>[],
         new_license_terms(3, 0, 500, true, true, 0), &clk, sc.ctx(),
     );
 
@@ -2820,6 +2824,75 @@ fun mint_tokens_sets_quilt_and_batch_mints() {
 
     destroy_collection_cap_for_testing(cap);
     destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-086 (H-1) — a SECOND mint_tokens with a different quilt (the rug attempt) aborts
+// EQuiltAlreadySet: the quilt is write-once, so a cap holder cannot retroactively
+// re-skin already-minted/sold tokens.
+#[test, expected_failure(abort_code = model3d::EQuiltAlreadySet)]
+fun mint_tokens_second_call_aborts_quilt_already_set() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let (model, mut collection, cap) = fork_encrypted_allow_list(&mut sc, &mut system, &clk);
+
+    sc.next_tx(NFT_CREATOR);
+    // First call sets the quilt (collection launched empty).
+    model3d::mint_tokens(&cap, &mut collection, s(b"bakedQuiltId"),
+        str_vec(b"t", 2), str_vec(b"p", 2), sc.ctx());
+    // Second call with a DIFFERENT quilt — must abort EQuiltAlreadySet.
+    model3d::mint_tokens(&cap, &mut collection, s(b"rugQuiltId"),
+        str_vec(b"t", 1), str_vec(b"p", 1), sc.ctx());
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-087 (L-2) — the nft creator cannot self-register an integration on their own
+// collection (would inflate the "Used by" count with a free fake attestation).
+#[test, expected_failure(abort_code = model3d::ESelfRegistrationNotAllowed)]
+fun register_integration_by_nft_creator_aborts() {
+    let mut sc = ts::begin(CREATOR);
+    let (system, clk, model, mut collection, cap) = launch_for_test(&mut sc, default_license());
+
+    // The collection's nft_creator is NFT_CREATOR (launch_for_test launches as them);
+    // having them register on their own collection must abort.
+    sc.next_tx(NFT_CREATOR);
+    let payment = coin::mint_for_testing<SUI>(0, sc.ctx());
+    register_integration(&mut collection, payment, APP_META, &clk, sc.ctx());
+
+    destroy_collection_cap_for_testing(cap);
+    destroy_collection_for_testing(collection);
+    destroy_model_for_testing(model);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-087 (L-3) — the base creator cannot self-purchase access to their own model
+// (they already decrypt via seal_approve_creator; self-pay just pollutes metrics).
+#[test, expected_failure(abort_code = model3d::ECreatorCannotSelfPurchase)]
+fun purchase_access_by_creator_aborts() {
+    let fee: u64 = 1_000_000;
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let license = new_license_terms(policy_allow_list(), 0, 500, true, true, fee);
+    let mut model = mint_base_model(&mut system, &clk, license, sc.ctx());
+
+    // Still in CREATOR's tx context → buyer == model.creator → aborts.
+    model3d::purchase_access(&mut model, coin::mint_for_testing<SUI>(fee, sc.ctx()), sc.ctx());
+
     destroy_model_for_testing(model);
     clock::destroy_for_testing(clk);
     system.destroy_for_testing();

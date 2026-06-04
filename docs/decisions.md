@@ -3876,6 +3876,56 @@ With a fixed 32-byte length, the only 32-byte prefix of `[V][nonce]` is `V` itse
 
 ---
 
+## D-086: Fix H-1 — `mint_tokens` quilt rug (write-once quilt)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening · **Hardens D-076** (3-step encrypted fork)
+
+### Context
+Audit H-1 (High): `mint_tokens` (cap-gated) unconditionally did `collection.quilt_blob_id = quilt_blob_id` on every call (`model3d.move`). NftTokens store only `patch_id`; the frontend resolves art as `collection.quilt_blob_id + patch_id`. After selling tokens, the cap holder could call `mint_tokens` again with a different quilt and **retroactively re-skin every already-sold token** — an insider rug.
+
+### Decision
+Make the quilt **write-once**: `assert!(string::is_empty(&collection.quilt_blob_id), EQuiltAlreadySet)` before the assignment (new abort code `EQuiltAlreadySet = 60`). The encrypted flow launches the collection with an empty quilt (D-076, step 1); `mint_tokens` (step 3) sets it once; any later call aborts. Further minting stays possible via `mint_nft_token`, which does not touch the quilt — so no rug path remains.
+
+### Alternatives Considered
+- **`quilt_locked: bool` flag** — equivalent, adds a struct field for no gain. Rejected.
+- **Add `max_supply`/`minted_count` (the audit's separate Info finding)** — deferred: the *rug* is the High and is closed here; unbounded minting is only a concern if the product promises limited editions, and it would change every launch entry's signature + frontend. Revisit if scarcity becomes a product promise.
+
+### Consequences
+- ✅ Closes the High rug. ⚠️ `mint_tokens` is now one-shot per collection (intended). ⚠️ New abort code 60. ⚠️ Ships in the D-085 republish. Supply cap still open (Info, deferred).
+- Test: `mint_tokens_second_call_aborts_quilt_already_set`. The `fork_encrypted_allow_list` test helper was corrected to launch with an empty quilt (it previously masked the overwrite).
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (H-1). Files: `model3d.move` (`mint_tokens`, `EQuiltAlreadySet`), `model3d_tests.move`.
+
+---
+
+## D-087: Audit guard-assert batch (L-1 / L-2 / L-3)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Three low-severity audit findings, each a missing authorization/validation guard.
+
+### Decision
+Add three asserts + abort codes:
+- **L-1** `EInvalidPolicy = 61` — `validate_publish_inputs` rejects a `license.policy` outside `{RESTRICTED, ALLOW_LIST, PERMISSIONLESS}`. (Closes the audit's unknown-policy gap; `is_encrypted` is derived as `policy != PERMISSIONLESS`, so a stray value was treated as encrypted-but-unforkable.)
+- **L-2** `ESelfRegistrationNotAllowed = 62` — `register_integration` aborts if `sender == collection.nft_creator` (no free fake "Used by" self-attestation).
+- **L-3** `ECreatorCannotSelfPurchase = 63` — `purchase_access` aborts if `buyer == model.creator` (creator already decrypts via `seal_approve_creator`; self-pay only pollutes `buyers`/metrics).
+
+### Consequences
+- ✅ Closes L-1/L-2/L-3. ⚠️ 3 new abort codes (61–63), no struct changes.
+- ⚠️ **Interaction with D-085**: L-1 runs before the seal_id length check, so `policy=3` now aborts `EInvalidPolicy` first. The D-085 test `publish_encrypted_unknown_policy_short_seal_id_rejected` was renamed to `publish_encrypted_rejects_unknown_policy` and now expects `EInvalidPolicy` (the unknown-policy state is structurally impossible).
+- Tests: `publish_encrypted_rejects_unknown_policy`, `register_integration_by_nft_creator_aborts`, `purchase_access_by_creator_aborts`.
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (L-1, L-2, L-3). Files: `model3d.move`, `model3d_tests.move`.
+
+---
+
 # Reserved Decision Numbers
 
-D-086 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-088 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

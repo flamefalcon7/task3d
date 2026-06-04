@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-06-04 (**Security audit (Seal/Move/frontend) + D-085 Critical fix shipped to working tree, NOT committed**)
+## Last Updated: 2026-06-04 (**Security audit remediation — D-085 committed; D-086/D-087/M-4 + M-2 verify in working tree, NOT committed**)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **17 of 38**
@@ -16,13 +16,21 @@ Phase 4 — security hardening. Ran a read-only multi-agent audit (sui-dev-agent
 - **Tests** — 4 fixtures bumped to 32-byte seal_ids + 2 new regression tests incl. the C-1 red-team case. **`sui move test` = 90/90 PASS, `sui move build` clean (no warnings).**
 - **Docs** — ADR D-085 in `decisions.md`; root-cause + B-vs-A tradeoff in `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`; audit checklist C-1/M-3 marked done; OQ-032 (C-1 testnet repro + v1.1 Alt-A revisit).
 
+### Second remediation batch (this session, on branch `fix/seal-id-prefix-bypass`)
+- **D-085 — COMMITTED** as `490180c` (C-1 + M-3; 5 regression tests; reviewed by sui-red-team [C-1 CLOSED] + ce-correctness).
+- **M-2 — verified NON-issue** (downgraded Info): on-chain `royalty_rule::pay` (rev 7a07937) computes the fee from `policy::paid(request)` + asserts `coin::value == amount` (exact) → no underpay; client value is non-load-bearing. Audit report updated.
+- **D-086 — fixed H-1** (mint_tokens quilt rug): write-once quilt (`EQuiltAlreadySet`). Supply cap (Info) deferred per user (option a).
+- **D-087 — fixed L-1/L-2/L-3**: `EInvalidPolicy` (policy whitelist) / `ESelfRegistrationNotAllowed` / `ECreatorCannotSelfPurchase`.
+- **M-4 — fixed** (frontend): `clearSession` calls `clearAllSessions()`; the account-switch `useEffect` now routes through `clearSession` too, so a SILENT account switch (the common shared-device case) also wipes the Seal cache — not just the disconnect button. Two useSession assertions.
+- **Review** — `ce-correctness-reviewer` on the batch diff: **D-086/D-087 correct & regression-free**; one low M-4 completeness gap (account-switch bypassed the wipe) — **fixed** as above. Residuals accepted: `clearAllSessions` wipes all addresses (no multi-address flow today); `mint_tokens` empty-quilt-first ordering quirk (benign, cap-gated).
+- **Tests**: `sui move test` **96/96**, build clean; `useSession.test.tsx` **10/10**; renamed the D-085 unknown-policy test to expect `EInvalidPolicy`. ADRs D-086/D-087 + audit checklist updated.
+
 ### In Progress / Not Done
-- **NOT committed** — all D-085 changes are in the working tree on `main`. Suggest a branch + commit (`fix(contract): close seal_id prefix-truncation bypass (D-085, audit C-1)`).
-- **Testnet republish pending** — D-085 only takes effect after republish (new package id → `networkConfig` update + Seal re-bind). Demo re-publishes fresh models.
-- Frontend: **no change needed** (client already emits 32-byte seal_id at `CreateModelPage.tsx:952`).
+- **NOT committed** — D-086/D-087/M-4 + the M-2 doc update are uncommitted on `fix/seal-id-prefix-bypass`. Suggest a second commit.
+- **Testnet republish pending** — D-085/D-086/D-087 (contract) only take effect after republish (new package id → `networkConfig` update + Seal re-bind). Demo re-publishes fresh models.
 
 ### Next Concrete Step
-Commit D-085 on a branch. Then triage the remaining audit "需人工核实" items (M-1 mainnet ceremony, M-2 `royalty_rule::pay` on-chain check, N-1 Enoki key type, N-2 UpgradeCap) and the deferred backend/Walrus tracks (post-demo).
+Commit the D-086/D-087/M-4 batch. Then the only remaining pre-submission item is **N-1** (confirm Enoki `VITE_ENOKI_API_KEY` is the public/origin-locked key — portal check, user). Defer: M-1 (deployer-gated on testnet), M-5, L-4–L-8, N-2/N-3/N-4, and the backend/Walrus tracks (post-demo).
 
 ---
 
