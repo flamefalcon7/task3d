@@ -84,6 +84,12 @@ export interface QuotaStore {
   setGeminiCooldown(capability: Capability, resetAt: number): void;
   /** Persist opportunistic header enrichment from a successful call. */
   setGeminiRemaining(capability: Capability, headers: { remaining: number; resetAt?: number }): void;
+  /** True if `digest` has already been consumed as a Tripo payment (D-088). */
+  isPaymentSpent(digest: string): boolean;
+  /** Atomically mark `digest` spent. Returns true if newly inserted, false if a
+   *  prior/concurrent call already marked it — the false case IS the replay signal
+   *  (closes the check-then-add race the in-memory Set had). */
+  markPaymentSpent(digest: string, spentAt: number): boolean;
   close(): void;
 }
 
@@ -133,6 +139,10 @@ export function buildQuotaStore(opts: QuotaStoreOptions): QuotaStore {
         remaining INTEGER,
         reset_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS spent_payments (
+        digest TEXT PRIMARY KEY,
+        spent_at INTEGER NOT NULL
+      );
     `);
   } catch (e) {
     console.error('[quota-store] failed to open/init DB (degraded):', e instanceof Error ? e.message : e);
@@ -161,6 +171,13 @@ export function buildQuotaStore(opts: QuotaStoreOptions): QuotaStore {
   const remainingSet = db.prepare(
     `INSERT INTO gemini_meta (capability, remaining, reset_at) VALUES (?, ?, ?)
      ON CONFLICT(capability) DO UPDATE SET remaining = excluded.remaining, reset_at = excluded.reset_at`,
+  );
+  const spentGet = db.prepare('SELECT 1 FROM spent_payments WHERE digest = ?');
+  // INSERT OR IGNORE: a no-op on an existing digest. We read `changes` to learn
+  // whether THIS call inserted it (1) or it was already present (0) — the atomic
+  // check-and-mark that makes the false return the authoritative replay signal.
+  const spentMark = db.prepare(
+    'INSERT OR IGNORE INTO spent_payments (digest, spent_at) VALUES (?, ?)',
   );
 
   return {
@@ -203,6 +220,15 @@ export function buildQuotaStore(opts: QuotaStoreOptions): QuotaStore {
 
     setGeminiRemaining(capability, headers): void {
       remainingSet.run(capability, headers.remaining, headers.resetAt ?? null);
+    },
+
+    isPaymentSpent(digest): boolean {
+      return spentGet.get(digest) !== undefined;
+    },
+
+    markPaymentSpent(digest, spentAt): boolean {
+      const res = spentMark.run(digest, spentAt) as { changes?: number | bigint };
+      return Number(res.changes ?? 0) > 0;
     },
 
     close(): void {

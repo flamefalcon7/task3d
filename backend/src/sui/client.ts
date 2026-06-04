@@ -56,6 +56,13 @@ export const NETWORK = loadNetworkConfig();
 export const TRIPO_FEE_TREASURY = process.env.TRIPO_FEE_TREASURY ?? NETWORK.deployerAddress;
 export const TRIPO_FEE_MIST = BigInt(process.env.TRIPO_FEE_MIST ?? '400000000');
 
+// D-089 (audit B-4) — the identity allowed the self-pay verifier bypass. This is
+// the OPERATOR (the deployer who runs /create against their own treasury), NOT
+// the treasury: decoupling them means a treasury pointed at a shared/user wallet
+// can't hand that user free generations. Defaults to the deployer; set
+// TRIPO_FEE_OPERATOR explicitly in any deploy whose treasury differs from it.
+export const TRIPO_FEE_OPERATOR = process.env.TRIPO_FEE_OPERATOR ?? NETWORK.deployerAddress;
+
 // Override with SUI_RPC_URL (comma-separated) in env; otherwise public testnet
 // fullnode + one fallback (mirrors frontend TESTNET_RPC_ENDPOINTS).
 export const RPC_ENDPOINTS: readonly string[] =

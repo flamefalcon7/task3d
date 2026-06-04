@@ -116,6 +116,41 @@ describe('quota-store: Gemini cooldown + header enrichment', () => {
   });
 });
 
+describe('quota-store: spent payments (D-088 durable replay guard)', () => {
+  const DIGEST = 'AuzWcL4fUbgLL3uvaqPfwpuzYU5p9EGa4Uqr1fVk2yab';
+
+  it('isPaymentSpent is false until marked, true after', () => {
+    const s = memStore();
+    expect(s.isPaymentSpent(DIGEST)).toBe(false);
+    expect(s.markPaymentSpent(DIGEST, DAY1)).toBe(true); // newly inserted
+    expect(s.isPaymentSpent(DIGEST)).toBe(true);
+  });
+
+  it('markPaymentSpent returns false on a second (replay) mark — the atomic signal', () => {
+    const s = memStore();
+    expect(s.markPaymentSpent(DIGEST, DAY1)).toBe(true);
+    expect(s.markPaymentSpent(DIGEST, DAY1_LATE)).toBe(false);
+  });
+
+  it('distinct digests are tracked independently', () => {
+    const s = memStore();
+    s.markPaymentSpent(DIGEST, DAY1);
+    expect(s.isPaymentSpent('a-different-digest')).toBe(false);
+  });
+
+  it('spent digests survive a re-open (durable across restart / instances)', () => {
+    const path = tempPath();
+    const a = buildQuotaStore({ path });
+    expect(a.markPaymentSpent(DIGEST, DAY1)).toBe(true);
+    a.close();
+
+    const b = buildQuotaStore({ path });
+    openStores.push(b);
+    expect(b.isPaymentSpent(DIGEST)).toBe(true);
+    expect(b.markPaymentSpent(DIGEST, DAY2)).toBe(false); // still rejected after "restart"
+  });
+});
+
 describe('quota-store: cold/empty + durability', () => {
   it('empty store returns zero/null sentinels, never throws', () => {
     const s = memStore();

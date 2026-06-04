@@ -10,7 +10,7 @@ import { createIntegrationIndexer } from './events/integrationIndexer.js';
 import { createTripoBalancePoller } from './events/tripoBalancePoller.js';
 import { createPaymentVerifier } from './sui/paymentVerifier.js';
 import { getQuotaStore } from './lib/quota-store.js';
-import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST } from './sui/client.js';
+import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST, TRIPO_FEE_OPERATOR } from './sui/client.js';
 
 // D-023/D-033: the only content the backend generates is Tripo prompt-mode.
 // Tripo is wired in only when TRIPO_ENABLED=true; otherwise prompt requests
@@ -61,6 +61,10 @@ if (invokedDirectly) {
     client: getSuiClient(),
     treasury: TRIPO_FEE_TREASURY,
     feeMist: TRIPO_FEE_MIST,
+    // D-088: durable replay guard (survives restart / shared across instances).
+    store: getQuotaStore(),
+    // D-089: only the deployer/operator gets the self-pay bypass.
+    operatorAddress: TRIPO_FEE_OPERATOR,
   });
   // plan-002 U4/D-083: Tripo balance poller (warms the durable quota store) + the
   // pre-flight's live balance source. Only when Tripo is enabled + keyed; otherwise
