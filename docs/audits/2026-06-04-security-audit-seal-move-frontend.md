@@ -28,7 +28,7 @@
 - [ ] **L-6** MarketPage 用 deprecated @mysten/dapp-kit(Low)— 迁移
 - [ ] **L-7** fresh-kiosk 路径非 PersonalKiosk(Low)
 - [ ] **L-8** priceMist 无客户端校验(Low)
-- [ ] **N-1** Enoki API key 进 bundle(Info,需核实)— 确认 public key + origin 锁定
+- [x] **N-1** Enoki API key 进 bundle(Info,需核实)— ✅ 当前**无暴露**:key 未提交、不在本地 `.env.local`、项目**尚未部署**。转为**部署时清单项**:部署时 `VITE_ENOKI_API_KEY` 必须填 Enoki **public**(`enoki_public_…`)key 且在 Enoki Portal 锁 Allowed Origins。
 - [ ] **N-2** package UpgradeCap 处置未知(Info,需核实)— 主网前 burn/multisig
 - [ ] **N-3** verifyKeyServers:false(Info)— 主网翻 true
 - [ ] **N-4** glb_blob_id 未与 Blob.id 交叉校验 / 无 Blob 认证检查(Info)
@@ -152,7 +152,10 @@ assert!(coin::value(&payment) == amount, EInsufficientAmount);  // 精确相等
 
 ## ⚪ INFO / 需人工核实
 
-### N-1 · Enoki API key 进 bundle ⚠️需人工核实
+### N-1 · Enoki API key 进 bundle — ✅ 当前无暴露(转部署时清单)
+- **核实(2026-06-04)**: `VITE_ENOKI_API_KEY` 未提交(仅 `.env.example` 模板)、不在本地 `frontend/.env.local`(本地走 test-wallet,Enoki 未启用)、项目尚未部署到生产 → **没有可被读取的 bundle**。
+- **部署时清单项**(README/deploy 时执行):`VITE_ENOKI_API_KEY` 必须是 Enoki **public** key(`enoki_public_…`,设计上可进浏览器);Enoki Portal 锁定 Allowed Origins 到真实域名;切勿填 `enoki_private_…`(后端密钥)。
+
 - **位置**: `frontend/src/main.tsx:10`(`VITE_ENOKI_API_KEY`)→ `WalletProvider.tsx:51`(`registerEnokiWallets({ apiKey })`)
 - **命中来源**: sui-zklogin(原评 High)→ 审计员下调为 **需核实**
 - `registerEnokiWallets` 是前端 SDK,用的应是 Enoki **公钥**(设计上就该在浏览器、由 portal 的 allowed-origins 锁定)。**请确认**该 key 在 Enoki portal 是 public 且已锁 origin → 正常;若误用 private/secret key → 才是真 High 泄漏。
