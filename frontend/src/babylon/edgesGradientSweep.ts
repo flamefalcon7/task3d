@@ -49,6 +49,13 @@ type MeshLike = AbstractMesh & {
   dispose: () => void;
 };
 
+type EdgesMat = {
+  clipPlane?: Plane | null;
+  alpha?: number;
+  disableLighting?: boolean;
+  dispose?: () => void;
+};
+
 export interface EdgesGradientSweepControl {
   /**
    * Freeze the sweep at a specific progress (0..1) along the union-bbox X axis,
@@ -147,9 +154,9 @@ export function setupEdgesGradientSweep(
     // Clone shares its material reference with the original by default; cloning
     // the material gives us an independent slot to drop alpha + write clipPlane
     // onto without bleeding back into the original PBR render.
-    let edgesMat: { clipPlane?: Plane | null; alpha?: number; disableLighting?: boolean; dispose?: () => void } | null = null;
+    let edgesMat: EdgesMat | null = null;
     if (original.material && typeof original.material.clone === 'function') {
-      edgesMat = original.material.clone(`${original.name ?? 'mesh'}__edgesMat_${i}`) as typeof edgesMat;
+      edgesMat = original.material.clone(`${original.name ?? 'mesh'}__edgesMat_${i}`) as EdgesMat;
     }
     if (!edgesMat) {
       // Without an independent material, the clone would still reference the

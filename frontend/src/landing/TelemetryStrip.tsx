@@ -3,6 +3,7 @@
 // KD-2 (field order), KD-4 (●live/●cache status semantics), KD-7 (mount
 // position). Display-only — no wallet, no transactional logic.
 
+import type { JSX } from 'react';
 import styles from './TelemetryStrip.module.css';
 import { useTelemetryData } from './useTelemetryData';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';

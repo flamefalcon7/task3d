@@ -3825,6 +3825,156 @@ At runtime, **a built AI feature is never hidden** — keyless / not-configured 
 
 ---
 
+## D-085: Fix seal_id prefix-truncation bypass — fixed 32-byte seal_id + equality-semantics decrypt gate
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 (Seal content protection) — security hardening
+
+### Context
+
+The 2026-06-04 security audit (Seal/Move/frontend, see `docs/audits/2026-06-04-security-audit-seal-move-frontend.md`) found a **Critical** confidentiality break (finding C-1), confirmed independently by two reviewer agents.
+
+The Seal decrypt gates (`seal_approve_entitlement` / `seal_approve_creator`) bind a ciphertext to a model via `is_prefix(model.seal_id, id)`, where the full Seal identity is `id = [seal_id][nonce]`. `seal_id` was a **caller-supplied, variable-length** `vector<u8>` (only bounded `<= 64`), made globally unique at publish by `SealIdRegistry` (D-075 Resolution G).
+
+The flaw: registry **exact-match** uniqueness ≠ **prefix-freeness**. An attacker reads a victim's public `seal_id` `V` (32 bytes), publishes their own throwaway RESTRICTED model with `seal_id = P = V[0:k]` (a strict **shorter** prefix). `P != V`, so the registry accepts it; yet `is_prefix(P, [V][nonce])` is true, and the attacker is their own model's creator — so `seal_approve_creator` passes for the **victim's** identity and the key servers release the key. The attacker decrypts the victim's GLB for free. (Root-cause analysis: `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`.)
+
+### Decision
+
+Enforce that an encrypted model's `seal_id` is **exactly `SEAL_ID_LEN` (32) bytes**:
+- `new_model` asserts `!is_encrypted || vector::length(&seal_id) == SEAL_ID_LEN` (after the is_encrypted-derived consistency guard, so an empty seal_id on an encrypted policy still surfaces as the more-specific `ESealFieldsInconsistent`).
+- Both `seal_approve_*` gates re-assert `vector::length(&model.seal_id) == SEAL_ID_LEN` before `is_prefix` (defense in depth).
+- New abort code `ESealIdWrongLength = 59`; the old `<= 64` bound (`ESealIdTooLong = 43`) is retired (ABI history, not reused).
+
+With a fixed 32-byte length, the only 32-byte prefix of `[V][nonce]` is `V` itself — which the registry already forbids copying — so `is_prefix` now amounts to an exact equality to a registry-locked value. **No frontend change**: the client already generates a random 32-byte seal_id (`CreateModelPage.tsx:952`).
+
+### Rationale
+
+- Closes C-1 (and audit M-3, the missing seal_id min-length) with a ~6-line contract change.
+- Preserves the single-tx "one wallet popup" encrypt-then-publish flow (R3/AE1).
+- Cryptographically equivalent to the stronger object-id binding for any executable attack (256-bit random seal_id; brute-forcing a specific `V` is 2^256).
+
+### Alternatives Considered
+
+- **Derive `seal_id = object::id(model)` on-chain (Alt A)** — strictly removes attacker control (structurally unforgeable). Rejected for v1: the object id is unknown before the object exists, and the GLB is encrypted *before* publish, so it requires a two-phase publish (publish placeholder → read id → encrypt → stamp) = an extra tx + wallet popup + new partial-init state to audit. Deferred as a possible **v1.1 hardening** (see open-questions). The UX/gas/audit-surface comparison is documented in the solutions writeup.
+- **Make the registry prefix-relation-aware** — complex and unnecessary once the length is fixed.
+- **Keep variable length, change gate to explicit equality on `id[0:32]`** — functionally identical to fixing the length, but leaves the attacker-controlled length degree of freedom; fixing the length is simpler and self-documenting.
+
+### Consequences
+
+- ✅ Closes the only Critical from the audit; closes M-3. 90/90 Move tests pass, incl. a red-team regression (`publish_encrypted_rejects_short_prefix_of_victim_seal_id`).
+- ⚠️ New abort code 59 (ABI history — never reuse). `ESealIdTooLong` (43) retired.
+- ⚠️ Requires a testnet **republish** to take effect (new package id → `networkConfig` update + Seal re-binding). Models published under the old package keep the old gate; demo re-publishes fresh models.
+- 🔮 If encrypted content becomes high-value before mainnet, revisit Alt A (object-id binding) as the permanent foundation.
+
+### Related
+
+- Hardens **D-075** (Seal envelope + is_prefix gate + SealIdRegistry).
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (C-1, M-3).
+- Root-cause + Alt-A tradeoff: `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`.
+- Files: `contracts/model3d/sources/model3d.move` (SEAL_ID_LEN, ESealIdWrongLength, `new_model`, `validate_seal_publish`, `seal_approve_entitlement`, `seal_approve_creator`), `contracts/model3d/tests/model3d_tests.move`.
+
+---
+
+## D-086: Fix H-1 — `mint_tokens` quilt rug (write-once quilt)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening · **Hardens D-076** (3-step encrypted fork)
+
+### Context
+Audit H-1 (High): `mint_tokens` (cap-gated) unconditionally did `collection.quilt_blob_id = quilt_blob_id` on every call (`model3d.move`). NftTokens store only `patch_id`; the frontend resolves art as `collection.quilt_blob_id + patch_id`. After selling tokens, the cap holder could call `mint_tokens` again with a different quilt and **retroactively re-skin every already-sold token** — an insider rug.
+
+### Decision
+Make the quilt **write-once**: `assert!(string::is_empty(&collection.quilt_blob_id), EQuiltAlreadySet)` before the assignment (new abort code `EQuiltAlreadySet = 60`). The encrypted flow launches the collection with an empty quilt (D-076, step 1); `mint_tokens` (step 3) sets it once; any later call aborts. Further minting stays possible via `mint_nft_token`, which does not touch the quilt — so no rug path remains.
+
+### Alternatives Considered
+- **`quilt_locked: bool` flag** — equivalent, adds a struct field for no gain. Rejected.
+- **Add `max_supply`/`minted_count` (the audit's separate Info finding)** — deferred: the *rug* is the High and is closed here; unbounded minting is only a concern if the product promises limited editions, and it would change every launch entry's signature + frontend. Revisit if scarcity becomes a product promise.
+
+### Consequences
+- ✅ Closes the High rug. ⚠️ `mint_tokens` is now one-shot per collection (intended). ⚠️ New abort code 60. ⚠️ Ships in the D-085 republish. Supply cap still open (Info, deferred).
+- Test: `mint_tokens_second_call_aborts_quilt_already_set`. The `fork_encrypted_allow_list` test helper was corrected to launch with an empty quilt (it previously masked the overwrite).
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (H-1). Files: `model3d.move` (`mint_tokens`, `EQuiltAlreadySet`), `model3d_tests.move`.
+
+---
+
+## D-087: Audit guard-assert batch (L-1 / L-2 / L-3)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Three low-severity audit findings, each a missing authorization/validation guard.
+
+### Decision
+Add three asserts + abort codes:
+- **L-1** `EInvalidPolicy = 61` — `validate_publish_inputs` rejects a `license.policy` outside `{RESTRICTED, ALLOW_LIST, PERMISSIONLESS}`. (Closes the audit's unknown-policy gap; `is_encrypted` is derived as `policy != PERMISSIONLESS`, so a stray value was treated as encrypted-but-unforkable.)
+- **L-2** `ESelfRegistrationNotAllowed = 62` — `register_integration` aborts if `sender == collection.nft_creator` (no free fake "Used by" self-attestation).
+- **L-3** `ECreatorCannotSelfPurchase = 63` — `purchase_access` aborts if `buyer == model.creator` (creator already decrypts via `seal_approve_creator`; self-pay only pollutes `buyers`/metrics).
+
+### Consequences
+- ✅ Closes L-1/L-2/L-3. ⚠️ 3 new abort codes (61–63), no struct changes.
+- ⚠️ **Interaction with D-085**: L-1 runs before the seal_id length check, so `policy=3` now aborts `EInvalidPolicy` first. The D-085 test `publish_encrypted_unknown_policy_short_seal_id_rejected` was renamed to `publish_encrypted_rejects_unknown_policy` and now expects `EInvalidPolicy` (the unknown-policy state is structurally impossible).
+- Tests: `publish_encrypted_rejects_unknown_policy`, `register_integration_by_nft_creator_aborts`, `purchase_access_by_creator_aborts`.
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (L-1, L-2, L-3). Files: `model3d.move`, `model3d_tests.move`.
+
+---
+
+## D-088: Durable Tripo-payment replay guard + recency window (audit B-1)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Audit Track 4–5 finding **B-1** (High, adversarially upheld): the off-chain Tripo fee-gate (`paymentVerifier.ts`, D-034) validated a transfer's success / sender / amount / destination but (a) never bound the digest to the specific generation request, and (b) guarded against double-spend only with a per-process in-memory `Set`. A backend restart/redeploy or a second load-balanced instance wiped the set, letting a single valid payment digest be replayed to fund unlimited generations — the operator pays the Tripo credits (~60–120/gen).
+
+### Decision
+Two-part fix, backend-only:
+1. **Durable replay guard.** Persist consumed digests in the existing SQLite quota store (`spent_payments(digest PK, spent_at)`) via `isPaymentSpent` / `markPaymentSpent`. `markPaymentSpent` is an atomic `INSERT OR IGNORE` whose `changes === 0` return is the authoritative replay signal — closing the old check-then-add race. The verifier accepts an injected `store`; with none (unit tests) it falls back to the legacy in-memory `Set`.
+2. **Recency window.** Reject a payment tx older than `maxAgeMs` (default 1h) via its `timestampMs`, so an old unrelated transfer to the treasury can't be replayed as fresh payment. If the RPC omits `timestampMs` the check is skipped (no false-reject of a just-landed tx); the durable spent-set still binds it.
+
+Full **per-request binding** (a server-issued nonce embedded in the transfer PTB) is **deferred to v1.1** — it touches frontend + PTB shape and is heavier than the crunch warrants. Tracked as **OQ-033**. The durable spent-set + recency window closes the practical replay: pre-mainnet there is no payment history to mine, and "1 payment = 1 generation" holds because each digest is consumable exactly once, durably.
+
+### Consequences
+- ✅ B-1 closed for practical purposes; survives restart + shared across instances.
+- ✅ New `payment_stale` reason; `payment_replayed` now durable.
+- ⚠️ The recency window assumes the RPC returns `timestampMs` for checkpointed txs; a missing field degrades to spent-set-only (documented, not fail-closed to avoid false rejects).
+- 🔮 OQ-033: v1.1 may add full request-binding (Option B) for defence-in-depth.
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` §Track 4–5 (B-1). Files: `backend/src/lib/quota-store.ts`, `backend/src/sui/paymentVerifier.ts`, `backend/src/server.ts`. Supersedes the in-memory-only guard noted in D-034. See OQ-033.
+
+---
+
+## D-089: Self-pay verifier bypass gated on explicit operator identity (audit B-4)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Audit Track 4–5 finding **B-4** (Medium): the verifier short-circuited to `ok` whenever `sender === treasury`, skipping the amount check (a deployer paying their own treasury nets the +fee balanceChange to ~-gas, so the normal check would wrongly fail). But the gate keyed on the *treasury*, not the operator. If a deploy ever pointed `TRIPO_FEE_TREASURY` at a shared/multisig/sponsor address that is also a legitimate user wallet, that user would get unlimited free generations (any self-tx digest passes, amount unchecked).
+
+### Decision
+Gate the bypass on an explicit `operatorAddress` (the deployer who legitimately runs `/create` against their own treasury), introduced as `TRIPO_FEE_OPERATOR` (defaults to `NETWORK.deployerAddress`). The bypass fires only when `operatorAddress` is set AND `sender === operatorAddress`; when unset, no bypass. This decouples the self-pay exception from the treasury config, so a treasury pointed at a user wallet no longer grants that user the bypass. `.env.example` documents that any deploy whose treasury differs from the deployer must set `TRIPO_FEE_OPERATOR` explicitly.
+
+### Consequences
+- ✅ B-4 closed: structural `sender == treasury` coincidence no longer grants free generations.
+- ⚠️ Existing self-pay tests updated to pass `operatorAddress` (the deployer==treasury demo scenario still works once the operator is configured, which production wiring does by default).
+- 🔮 The recency + durable-replay guard (D-088) still applies on the operator path.
+
+### Related
+- Audit: §Track 4–5 (B-4). Files: `backend/src/sui/paymentVerifier.ts`, `backend/src/sui/client.ts`, `backend/src/server.ts`. Related: D-034 (fee model), D-088.
+
+---
+
 # Reserved Decision Numbers
 
-D-085 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-090 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

@@ -62,7 +62,14 @@ const VERSION: u64 = 2;
 // (a BCS EncryptedObject — a few hundred bytes); `seal_id` is the client's random
 // per-model Seal-identity prefix (32 bytes today); 1024 / 64 are generous ceilings.
 const MAX_SEALED_KEY_LEN:   u64 = 1024;
-const MAX_SEAL_ID_LEN:      u64 = 64;
+// D-085 — the encrypted seal_id is FIXED at exactly 32 bytes (was a <=64 upper
+// bound, MAX_SEAL_ID_LEN, retired). A variable-length, caller-supplied seal_id let
+// an attacker register a STRICT SHORTER prefix of a victim's seal_id and pass the
+// `is_prefix` decrypt gate (audit C-1). Fixing the length makes the only valid
+// prefix-match an exact equality to the registry-locked seal_id — which the
+// SealIdRegistry already forbids copying. The honest client already emits a random
+// 32-byte seal_id, so this is invisible to legitimate publishes.
+const SEAL_ID_LEN:          u64 = 32;
 const MAX_PREVIEW_BLOBS:    u64 = 8;
 
 // Cap on the per-license `derivative_royalty_bps` field (D-004: 30%).
@@ -141,7 +148,8 @@ const EPartLabelTooLong:     u64 = 40;
 const EAllowListNeedsFee:    u64 = 41;
 // D-075 — Seal envelope field bounds.
 const ESealedKeyTooLong:     u64 = 42;
-const ESealIdTooLong:        u64 = 43;
+// Code 43 (ESealIdTooLong, a <=64 upper bound) retired by D-085 — seal_id is now a
+// FIXED 32 bytes, enforced by ESealIdWrongLength (59). Not reused (ABI history).
 const ETooManyPreviews:      u64 = 44;
 // D-075 — Seal field/policy consistency: `is_encrypted` (derived from policy)
 // must agree with the presence of sealed_key + seal_id, and previews/seal fields
@@ -168,6 +176,16 @@ const EAlreadyHasEntitlement:  u64 = 55; // wallet already holds an entitlement 
 const EEntitlementModelMismatch: u64 = 56; // entitlement.model_id != id(model)
 const ENotEntitlementHolder:   u64 = 57; // entitlement.holder != ctx.sender()
 const EEntitlementRequired:    u64 = 58; // ALLOW_LIST launch attempted via a non-entitlement entry
+// D-085 — encrypted seal_id is not EXACTLY SEAL_ID_LEN (32) bytes. Closes audit
+// C-1 (seal_id prefix-truncation bypass); see validate_seal_publish + seal_approve_*.
+const ESealIdWrongLength:      u64 = 59;
+// D-086 — `mint_tokens` called on a collection whose quilt is already set (audit
+// H-1): the quilt is write-once so a cap holder cannot re-skin already-sold tokens.
+const EQuiltAlreadySet:        u64 = 60;
+// D-087 — audit guard batch.
+const EInvalidPolicy:          u64 = 61; // L-1: license.policy is not one of {0,1,2}
+const ESelfRegistrationNotAllowed: u64 = 62; // L-2: nft_creator self-registers a fake "Used by"
+const ECreatorCannotSelfPurchase:  u64 = 63; // L-3: base creator buys access to their own model
 
 const MAX_TAGS:             u64 = 16;
 const MAX_TAG_LEN:          u64 = 32;
@@ -249,10 +267,14 @@ public struct Model3D has key, store {
     // D-075 — Seal envelope fields (empty/0 on the PERMISSIONLESS path):
     //   sealed_key — the Seal-wrapped AES-256-GCM key (BCS EncryptedObject) that
     //     decrypts the (now ciphertext) blob at `glb_blob_id`.
-    //   seal_id    — the client's random per-model Seal-identity PREFIX. Made
-    //     globally unique at publish via SealIdRegistry (D-075 Resolution G), so
-    //     `is_prefix(seal_id, id)` in seal_approve binds a ciphertext to exactly
-    //     one model and the copy attack is impossible.
+    //   seal_id    — the client's random per-model Seal-identity PREFIX, FIXED at
+    //     exactly SEAL_ID_LEN (32) bytes (D-085). Made globally unique at publish via
+    //     SealIdRegistry (D-075 Resolution G). Uniqueness alone is NOT enough: the
+    //     copy attack (exact duplicate) is blocked by the registry, but a SHORTER
+    //     prefix of a victim's seal_id is NOT an exact duplicate yet still satisfies
+    //     `is_prefix` (audit C-1). The 32-byte FIXED length closes that — the only
+    //     32-byte prefix of a victim's identity is the victim's own seal_id, which
+    //     the registry forbids copying. So is_prefix here amounts to exact equality.
     //   seal_version — VERSION at publish; asserted in seal_approve (tripwire).
     sealed_key: vector<u8>,
     seal_id: vector<u8>,
@@ -273,11 +295,14 @@ public struct Model3D has key, store {
 
 // D-075 — singleton registry of every `seal_id` ever used, bootstrapped once in
 // `init` and shared. `publish_encrypted` asserts a new model's `seal_id` is absent
-// here before recording it, guaranteeing global uniqueness. That uniqueness is the
-// load-bearing defense behind the `is_prefix(model.seal_id, id)` binding in
-// seal_approve: without it, an attacker could publish a throwaway model carrying a
-// victim's `seal_id`, fork it cheaply, and decrypt the victim's ciphertext (see
-// D-075 Resolution G). The Table value is unit `true` (set membership).
+// here before recording it, guaranteeing global uniqueness. Uniqueness blocks the
+// COPY attack (an exact-duplicate seal_id). It does NOT by itself make the
+// `is_prefix(model.seal_id, id)` binding unforgeable: a strict SHORTER prefix of a
+// victim's seal_id is not an exact duplicate, so the registry would accept it, yet
+// it still prefix-matches the victim's identity (audit C-1). D-085 closes that by
+// FIXING seal_id at exactly SEAL_ID_LEN (32) bytes in validate_seal_publish, so the
+// registry's exact-match uniqueness and the gate's prefix-match coincide. The Table
+// value is unit `true` (set membership).
 public struct SealIdRegistry has key {
     id: UID,
     used: Table<vector<u8>, bool>,
@@ -589,6 +614,15 @@ public(package) fun validate_publish_inputs(
     part_labels: &vector<String>,
     license: &LicenseTerms,
 ) {
+    // D-087 (L-1) — reject unknown policy values up front. `is_encrypted` is derived
+    // as `policy != PERMISSIONLESS`, so without a whitelist a stray value (e.g. 3)
+    // would be treated as encrypted-but-unforkable-by-entitlement. Only {0,1,2} valid.
+    assert!(
+        license.policy == POLICY_RESTRICTED
+            || license.policy == POLICY_ALLOW_LIST
+            || license.policy == POLICY_PERMISSIONLESS,
+        EInvalidPolicy,
+    );
     assert!(license.derivative_royalty_bps <= MAX_DERIVATIVE_ROYALTY_BPS, ERoyaltyTooHigh);
     assert!(vector::length(tags) <= MAX_TAGS, ETooManyTags);
     let mut i = 0;
@@ -637,7 +671,13 @@ public(package) fun validate_seal_publish(
     );
     // D-075 — Seal envelope field bounds.
     assert!(vector::length(sealed_key) <= MAX_SEALED_KEY_LEN, ESealedKeyTooLong);
-    assert!(vector::length(seal_id) <= MAX_SEAL_ID_LEN, ESealIdTooLong);
+    // D-085 — the encrypted seal_id's EXACT 32-byte length is enforced in `new_model`
+    // (after the is_encrypted-derived consistency guard), so an EMPTY seal_id on an
+    // encrypted policy surfaces as the more specific ESealFieldsInconsistent rather
+    // than a length error. (This validator is bounds-only and policy-agnostic on the
+    // seal_id; `seal_id` is unused here now but kept in the signature for the tests
+    // that exercise this validator directly.)
+    let _ = seal_id;
     assert!(vector::length(preview_blob_ids) <= MAX_PREVIEW_BLOBS, ETooManyPreviews);
     let mut pv = 0;
     let npv = vector::length(preview_blob_ids);
@@ -701,6 +741,11 @@ public(package) fun new_model(
     assert!(has_key == is_encrypted, ESealFieldsInconsistent);
     assert!(has_id == is_encrypted, ESealFieldsInconsistent);
     assert!(is_encrypted || vector::is_empty(&preview_blob_ids), ESealFieldsInconsistent);
+    // D-085 — encrypted seal_id is FIXED at exactly SEAL_ID_LEN (32) bytes (closes
+    // audit C-1: a shorter, caller-chosen prefix of a victim's seal_id would satisfy
+    // the `is_prefix` decrypt gate). Checked AFTER the consistency guard above, so an
+    // empty seal_id on an encrypted policy stays an ESealFieldsInconsistent error.
+    assert!(!is_encrypted || vector::length(&seal_id) == SEAL_ID_LEN, ESealIdWrongLength);
 
     // Fixed Blob lifecycle (see fn-header note): transferred to creator BEFORE
     // model construction. Walrus storage stays paid for the registered epoch
@@ -889,6 +934,11 @@ public entry fun purchase_access(
 ) {
     assert!(model.license.policy == POLICY_ALLOW_LIST, ENotPurchasable);
     let buyer = ctx.sender();
+    // D-087 (L-3) — the base creator must not self-purchase access to their own
+    // model: they already decrypt via seal_approve_creator, and a self-pay (fee
+    // routes back to themselves) only pollutes `buyers` + emits a misleading
+    // AccessPurchased event inflating purchase counts.
+    assert!(buyer != model.creator, ECreatorCannotSelfPurchase);
     // Duplicate-purchase guard (idempotency teeth): a wallet already holding an
     // entitlement for this model cannot re-purchase (no second charge / mint).
     assert!(!model.buyers.contains(buyer), EAlreadyHasEntitlement);
@@ -1170,6 +1220,13 @@ public entry fun mint_tokens(
         EBatchLenMismatch,
     );
     assert!(string::length(&quilt_blob_id) <= MAX_BLOB_ID_LEN, EBlobIdMalformed);
+    // D-086 (H-1) — quilt is WRITE-ONCE. The collection is created with an empty
+    // quilt at launch (step 1); this step-3 entry sets the real (post-decrypt) quilt
+    // exactly once. A second call aborts, so a cap holder cannot retroactively
+    // re-skin already-sold NftTokens (which resolve art via collection.quilt_blob_id
+    // + their patch_id). Further minting is still possible via `mint_nft_token`,
+    // which does not touch the quilt.
+    assert!(string::is_empty(&collection.quilt_blob_id), EQuiltAlreadySet);
     collection.quilt_blob_id = quilt_blob_id;
 
     let n = vector::length(&token_names);
@@ -1262,6 +1319,10 @@ public entry fun register_integration(
 ) {
     let sender = ctx.sender();
 
+    // 0. D-087 (L-2) — the nft creator cannot self-register an integration on their
+    //    own collection: the fee would route straight back to themselves (free at
+    //    register_fee == 0), inflating the "Used by" count with a fake attestation.
+    assert!(sender != collection.nft_creator, ESelfRegistrationNotAllowed);
     // 1. Integration gate — the nft creator (cap holder) opens/closes this via
     //    set_integration_policy (defaults PERMISSIONLESS at launch). A
     //    collection-level (L2) decision, NOT the base model's L1 license (D-030).
@@ -1311,9 +1372,12 @@ public entry fun register_integration(
 //
 // `id` is the Seal identity the client passed to `SealClient.encrypt`:
 // `[ model.seal_id ][ nonce ]` (Seal prepends the package id itself, so `id` here
-// is the inner bytes only). The prefix check binds the ciphertext to THIS model
-// via its registry-unique `seal_id` — a cap (or creator) for one model cannot
-// unlock another model's blob.
+// is the inner bytes only). The prefix check binds the ciphertext to THIS model via
+// its `seal_id`, which D-085 fixes at exactly SEAL_ID_LEN (32) bytes AND the
+// registry makes globally unique — together these make is_prefix amount to exact
+// equality, so a cap (or creator) for one model cannot unlock another model's blob.
+// (Fixed length is load-bearing: without it a shorter prefix would forge the bind —
+// audit C-1. The gates re-assert the length as defense in depth.)
 
 // Returns true iff `prefix` is a prefix of `word`.
 fun is_prefix(prefix: &vector<u8>, word: &vector<u8>): bool {
@@ -1343,6 +1407,11 @@ entry fun seal_approve_entitlement(
 ) {
     assert!(entitlement.model_id == object::id(model), EEntitlementModelMismatch);
     assert!(entitlement.holder == ctx.sender(), ENotEntitlementHolder);
+    // D-085 — defense in depth: the `is_prefix` binding is only sound when seal_id
+    // is the canonical fixed length (a SHORTER seal_id is prefix-collidable — audit
+    // C-1). Re-assert it at the gate so even a model built via some future path that
+    // bypassed validate_seal_publish cannot present a short seal_id here.
+    assert!(vector::length(&model.seal_id) == SEAL_ID_LEN, ESealIdWrongLength);
     assert!(is_prefix(&model.seal_id, &id), EIdPrefixMismatch);
     assert!(model.seal_version == VERSION, ESealVersionMismatch);
 }
@@ -1353,6 +1422,9 @@ entry fun seal_approve_creator(
     model: &Model3D,
     ctx: &TxContext,
 ) {
+    // D-085 — defense in depth (see seal_approve_entitlement): seal_id must be the
+    // canonical fixed length for the prefix binding to amount to an exact equality.
+    assert!(vector::length(&model.seal_id) == SEAL_ID_LEN, ESealIdWrongLength);
     assert!(is_prefix(&model.seal_id, &id), EIdPrefixMismatch);
     assert!(ctx.sender() == model.creator, ENotBaseCreator);
     assert!(model.seal_version == VERSION, ESealVersionMismatch);

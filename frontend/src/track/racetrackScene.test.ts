@@ -88,6 +88,11 @@ const M = vi.hoisted(() => {
         onKeyboardObservable: { add: ReturnType<typeof vi.fn> };
         render: ReturnType<typeof vi.fn>;
         dispose: ReturnType<typeof vi.fn>;
+        environmentTexture: unknown;
+        environmentIntensity: number;
+        fogMode: number;
+        fogDensity: number;
+        fogColor: unknown;
       },
       lastCarContainer: null as null | {
         meshes: Array<{

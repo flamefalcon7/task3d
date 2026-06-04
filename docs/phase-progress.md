@@ -1,5 +1,78 @@
 # Phase Progress
 
+## Last Updated: 2026-06-04 (**Audit Track 4–5 backend+Walrus run + all-Medium remediation — in working tree on `fix/seal-id-prefix-bypass`, NOT committed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **17 of 38**
+- Days to demo day (7/20–21): ~46
+- Days to winners (8/27): ~84
+
+### Current Phase
+Phase 4 — security hardening. Ran the deferred audit **Track 4–5** (backend TS/Hono + Walrus), read-only Workflow (4 dimensions + adversarial verify), then implemented **all 7 confirmed Medium + the 1 High** per plan `docs/plans/agile-orbiting-pearl.md`. Report updated: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` §Track 4–5.
+
+### Completed This Session
+- **Track 4–5 audit** — 8 agents, read-only, no mcp-server build, no chain tx. Adversarial verify DROPPED 2 false-High (W-6 SSRF, W-7 namespace); confirmed B-1 (High) + 6 Medium. "@mysten/walrus unpinned" refuted (pinned).
+- **B-1 (High) → D-088** — durable replay guard: `spent_payments` SQLite table + atomic `INSERT OR IGNORE` (`isPaymentSpent`/`markPaymentSpent`) wired into `paymentVerifier.ts` + injected in `server.ts`; + 1h recency window. Full per-request binding (Option B) deferred → OQ-033.
+- **B-4 (Med) → D-089** — self-pay bypass gated on explicit `TRIPO_FEE_OPERATOR` (default deployer) not `sender==treasury`. `client.ts` + `.env.example`.
+- **B-3 (Med)** — `/challenge` per-IP rate limit (30/min) + nonce Map 100k cap (sweep→evict-oldest) in `auth.ts`.
+- **W-2 (Med)** — 50k cap + evict-oldest on the limiter `hits` Map in `collections.ts` / `memory.ts` / `auth.ts`.
+- **W-1 (Med)** — `cdn-worker/src/worker.js`: drop `url.search` from origin fetch + cache key (pathname-only).
+- **W-3 (Med)** — `WALRUS_AGGREGATOR` env-driven via `VITE_WALRUS_AGGREGATOR` (testnet default) in `frontend/src/walrus/aggregator.ts` + `.env.example`.
+- **W-4 (Med)** — `BLOB_ID_RE` charset guard in aggregator.ts (malformed id → ''/null) + worker id-segment charset check (400).
+- **B-2 (Med)** — `memwal-spike.ts` writes the delegate key to a 0600 gitignored file (`backend/.env.memwal-delegate`), prints only the path; error handler message-only.
+- **Tests** — backend **306** pass (+paymentVerifier/quota-store/auth additions); worker smoke **6/6** (new `cdn-worker/test/`); frontend aggregator **13** + TrackPage suite pass. Frontend `tsc -b` is **pre-existingly red (46 errors, unrelated)** — flagged separately.
+- **Browser-verified** (`/browse`, agent-browser): 4/4 thumbnails resolve real on-chain ids, 0 empty/broken, no new console errors (W-4 doesn't false-reject real base64url ids; W-3 default resolves).
+- **6-reviewer pass** (correctness/adversarial/security/testing/api-contract/julik-races): no exploitable bypass. Found + **fixed 1 real defect** — `TrackPage.tsx:252` direct `fetch(glbUrlForToken())` of the new ''-return → added `if (!url)` guard + recency-fail-open + retry tests.
+- **Docs** — ADR D-088/D-089; audit report remediation table + residuals; OQ-033 (Option B) + OQ-034 (residual hardening). `docs/decisions.md` reserved marker → D-090.
+
+### In Progress / Not Done
+- The earlier Move/frontend batch (D-085 `490180c`, D-086/D-087/M-4 `5b2d4d8`, N-1 `e7d6d8c`) is **already committed** on `fix/seal-id-prefix-bypass`. This Track 4–5 remediation was committed on top in 6 scoped batches (B-1/B-4+D-088/089 · B-3/W-2 · W-1 · W-3/W-4+TrackPage · B-2 · docs).
+- **Pre-existing frontend `tsc -b` failure (46 errors)** in Babylon/test files unrelated to this work — surfaced during verification; the frontend `pnpm test` (which runs `tsc -b` first) cannot go green until addressed. Worth a separate cleanup pass.
+- **Testnet republish still pending** for the contract fixes (D-085/D-086/D-087) — they only take effect after republish (new package id → networkConfig + Seal re-bind).
+- **Branch not yet merged to `main`** — `fix/seal-id-prefix-bypass` holds the full audit-remediation stack (C-1/H-1/Move guards + Track 4–5). Merge when ready.
+
+### Next Concrete Step
+Decide on merging `fix/seal-id-prefix-bypass` → `main`. Then resolve N-1 (Enoki key portal check) for submission. Defer: OQ-033/OQ-034, the pre-existing frontend tsc cleanup, testnet republish.
+
+### Notes for Next Session
+The frontend tsc red (46 errors) is NOT from this work (confirmed via `git stash`: same 46 on clean HEAD). The backend SQLite store (`quota-store.ts`) now also holds `spent_payments` — its file is `TUSK_DB_PATH` (default `./data/quota.db`); a fresh deploy starts with an empty spent-set (acceptable — durability is per-deployment-lifetime, which is the point).
+
+---
+
+## Last Updated: 2026-06-04 (**Security audit remediation — D-085 committed; D-086/D-087/M-4 + M-2 verify in working tree, NOT committed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **17 of 38**
+- Days to demo day (7/20–21): ~46
+- Days to winners (8/27): ~84
+
+### Current Phase
+Phase 4 — security hardening. Ran a read-only multi-agent audit (sui-dev-agents plugin) over Seal / Move+red-team / frontend signing (backend+Walrus deferred). Report: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (1 Critical, 1 High, 5 Med, 8 Low, 4 Info).
+
+### Completed This Session
+- **Audit** — 6 agents via Workflow, read-only, no mcp-server build, no chain tx. All findings ground-truthed against source.
+- **D-085 — fixed C-1 (Critical) seal_id prefix-truncation bypass** (also closes M-3). Contract change in `contracts/model3d/sources/model3d.move`: `SEAL_ID_LEN=32` + `ESealIdWrongLength=59`; `new_model` asserts encrypted seal_id `== 32` (after consistency guard); both `seal_approve_*` gates re-assert length; corrected the misleading "exact-uniqueness ⇒ unforgeable" comments. Chose fixed-length (Alt B) over object-id binding (Alt A) — keeps 1-wallet-popup, ~6 lines, equiv security; Alt A deferred to v1.1 (OQ-032).
+- **Tests** — 4 fixtures bumped to 32-byte seal_ids + 2 new regression tests incl. the C-1 red-team case. **`sui move test` = 90/90 PASS, `sui move build` clean (no warnings).**
+- **Docs** — ADR D-085 in `decisions.md`; root-cause + B-vs-A tradeoff in `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`; audit checklist C-1/M-3 marked done; OQ-032 (C-1 testnet repro + v1.1 Alt-A revisit).
+
+### Second remediation batch (this session, on branch `fix/seal-id-prefix-bypass`)
+- **D-085 — COMMITTED** as `490180c` (C-1 + M-3; 5 regression tests; reviewed by sui-red-team [C-1 CLOSED] + ce-correctness).
+- **M-2 — verified NON-issue** (downgraded Info): on-chain `royalty_rule::pay` (rev 7a07937) computes the fee from `policy::paid(request)` + asserts `coin::value == amount` (exact) → no underpay; client value is non-load-bearing. Audit report updated.
+- **D-086 — fixed H-1** (mint_tokens quilt rug): write-once quilt (`EQuiltAlreadySet`). Supply cap (Info) deferred per user (option a).
+- **D-087 — fixed L-1/L-2/L-3**: `EInvalidPolicy` (policy whitelist) / `ESelfRegistrationNotAllowed` / `ECreatorCannotSelfPurchase`.
+- **M-4 — fixed** (frontend): `clearSession` calls `clearAllSessions()`; the account-switch `useEffect` now routes through `clearSession` too, so a SILENT account switch (the common shared-device case) also wipes the Seal cache — not just the disconnect button. Two useSession assertions.
+- **Review** — `ce-correctness-reviewer` on the batch diff: **D-086/D-087 correct & regression-free**; one low M-4 completeness gap (account-switch bypassed the wipe) — **fixed** as above. Residuals accepted: `clearAllSessions` wipes all addresses (no multi-address flow today); `mint_tokens` empty-quilt-first ordering quirk (benign, cap-gated).
+- **Tests**: `sui move test` **96/96**, build clean; `useSession.test.tsx` **10/10**; renamed the D-085 unknown-policy test to expect `EInvalidPolicy`. ADRs D-086/D-087 + audit checklist updated.
+
+### In Progress / Not Done
+- **NOT committed** — D-086/D-087/M-4 + the M-2 doc update are uncommitted on `fix/seal-id-prefix-bypass`. Suggest a second commit.
+- **Testnet republish pending** — D-085/D-086/D-087 (contract) only take effect after republish (new package id → `networkConfig` update + Seal re-bind). Demo re-publishes fresh models.
+
+### Next Concrete Step
+Commit the D-086/D-087/M-4 batch. Then the only remaining pre-submission item is **N-1** (confirm Enoki `VITE_ENOKI_API_KEY` is the public/origin-locked key — portal check, user). Defer: M-1 (deployer-gated on testnet), M-5, L-4–L-8, N-2/N-3/N-4, and the backend/Walrus tracks (post-demo).
+
+---
+
 ## Last Updated: 2026-06-03 (**Third-Party AI Degradation UX — U1–U8 BUILT**; branch `feat/ai-degradation-ux` off `main`, NOT merged)
 
 ### Hackathon Tracker

@@ -412,7 +412,7 @@ describe('TaggingCanvas', () => {
     );
     await waitFor(() =>
       // PBR mount with no overlay keeps wireframe false on the loaded meshes.
-      expect(state.meshes[1].material!.wireframe).toBe(false),
+      expect(state.meshes[1]!.material!.wireframe).toBe(false),
     );
     rerender(
       <TaggingCanvas
@@ -424,12 +424,12 @@ describe('TaggingCanvas', () => {
     );
     // Filtered meshes 1-3 (skipping __root__) all have wireframe=true.
     await waitFor(() =>
-      expect(state.meshes[1].material!.wireframe).toBe(true),
+      expect(state.meshes[1]!.material!.wireframe).toBe(true),
     );
-    expect(state.meshes[2].material!.wireframe).toBe(true);
-    expect(state.meshes[3].material!.wireframe).toBe(true);
+    expect(state.meshes[2]!.material!.wireframe).toBe(true);
+    expect(state.meshes[3]!.material!.wireframe).toBe(true);
     // __root__ (filtered out) stays untouched.
-    expect(state.meshes[0].material!.wireframe).toBe(false);
+    expect(state.meshes[0]!.material!.wireframe).toBe(false);
   });
 
   it('F14: mode="pbr" restores baseline alpha and wireframe after a SOLO transition', async () => {
@@ -445,7 +445,7 @@ describe('TaggingCanvas', () => {
     // SOLO dims non-highlighted meshes to alpha 0.2 after the load + mode
     // effect resolve. waitFor handles the multi-tick async chain.
     await waitFor(() =>
-      expect(state.meshes[2].material!.alpha).toBeCloseTo(0.2),
+      expect(state.meshes[2]!.material!.alpha).toBeCloseTo(0.2),
     );
     rerender(
       <TaggingCanvas
@@ -457,10 +457,10 @@ describe('TaggingCanvas', () => {
     );
     // PBR restores baseline alpha (1) on every mesh.
     await waitFor(() =>
-      expect(state.meshes[2].material!.alpha).toBeCloseTo(1),
+      expect(state.meshes[2]!.material!.alpha).toBeCloseTo(1),
     );
-    expect(state.meshes[1].material!.alpha).toBeCloseTo(1);
-    expect(state.meshes[3].material!.alpha).toBeCloseTo(1);
+    expect(state.meshes[1]!.material!.alpha).toBeCloseTo(1);
+    expect(state.meshes[3]!.material!.alpha).toBeCloseTo(1);
   });
 
   it('F14: omits auto-rotate observers when autoRotate=false (default)', async () => {

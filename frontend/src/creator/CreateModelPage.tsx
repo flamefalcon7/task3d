@@ -290,12 +290,6 @@ const taggingCanvasWell: CSSProperties = {
   border: tokens.border.primary,
 };
 
-const taggingPanel: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
-};
-
 const taggingHeaderRow: CSSProperties = {
   display: 'flex',
   alignItems: 'center',

@@ -16,6 +16,7 @@ const EXPIRED_JWT = makeJwt(-3600); // -1h
 
 const mockSignPersonalMessage = vi.fn();
 const mockDisconnect = vi.fn();
+const mockClearAllSessions = vi.fn();
 let mockAccount: { address: string } | null = { address: ADDRESS };
 
 // plan-016 U3 — useSession now routes through the wrapper hooks. Mock
@@ -27,6 +28,11 @@ vi.mock('@mysten/dapp-kit', () => ({
 
 vi.mock('../wallet/useAppAccount', () => ({
   useAppAccount: () => mockAccount,
+}));
+
+// M-4 (audit) — useSession wipes the Seal SessionKey cache on clearSession/disconnect.
+vi.mock('../seal/sessionKey', () => ({
+  clearAllSessions: () => mockClearAllSessions(),
 }));
 
 vi.mock('../wallet/useAppSigner', () => ({
@@ -53,6 +59,7 @@ beforeEach(() => {
   localStorage.clear();
   mockSignPersonalMessage.mockReset();
   mockDisconnect.mockReset();
+  mockClearAllSessions.mockReset();
   fetchMock.mockReset();
   mockAccount = { address: ADDRESS };
   vi.stubGlobal('fetch', fetchMock);
@@ -147,6 +154,8 @@ describe('useSession', () => {
     expect(result.current.session).toBeNull();
     expect(localStorage.getItem('overflow2026.session')).toBeNull();
     expect(mockDisconnect).toHaveBeenCalled();
+    // M-4 — the Seal session cache is wiped in lockstep.
+    expect(mockClearAllSessions).toHaveBeenCalled();
   });
 
   it('clears cached session when connected wallet address changes', async () => {
@@ -160,6 +169,8 @@ describe('useSession', () => {
       expect(result.current.session).toBeNull();
     });
     expect(localStorage.getItem('overflow2026.session')).toBeNull();
+    // M-4 — a silent account switch wipes the Seal cache too (shares clearSession).
+    expect(mockClearAllSessions).toHaveBeenCalled();
   });
 
   it('cross-component sync — signIn in one hook instance updates a sibling instance', async () => {

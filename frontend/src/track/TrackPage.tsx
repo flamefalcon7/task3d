@@ -250,6 +250,11 @@ export function TrackPage() {
     (async () => {
       try {
         const url = glbUrlForToken(selected);
+        // glbUrlForToken returns '' for a missing/malformed blob id (audit W-4).
+        // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
+        // which would slip past the !res.ok check and fail later as a confusing
+        // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
+        if (!url) throw new Error('This token has no loadable model.');
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
         const carGlbBytes = new Uint8Array(await res.arrayBuffer());

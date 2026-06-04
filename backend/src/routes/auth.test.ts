@@ -45,6 +45,63 @@ describe('POST /api/auth/challenge', () => {
     const res = await postJson(app, '/api/auth/challenge', { address: 'not-an-address' });
     expect(res.status).toBe(400);
   });
+
+  it('rate-limits a /challenge flood from one IP with 429 (audit B-3)', async () => {
+    // Low limit so the test is fast; the limiter keys on x-forwarded-for.
+    const app = mountAuth({ jwt: createJwtSigner(VALID_SECRET), maxChallengesPerWindow: 3 });
+    const fire = () =>
+      app.request('/api/auth/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.7' },
+        body: JSON.stringify({ address: ADDRESS }),
+      });
+    expect((await fire()).status).toBe(200);
+    expect((await fire()).status).toBe(200);
+    expect((await fire()).status).toBe(200);
+    const limited = await fire(); // 4th in-window
+    expect(limited.status).toBe(429);
+    expect((await limited.json()) as { error: string }).toEqual({ error: 'rate_limited' });
+  });
+
+  it('rate limit is per-IP — a different IP is unaffected (audit B-3)', async () => {
+    const app = mountAuth({ jwt: createJwtSigner(VALID_SECRET), maxChallengesPerWindow: 1 });
+    const fire = (ip: string) =>
+      app.request('/api/auth/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ address: ADDRESS }),
+      });
+    expect((await fire('198.51.100.1')).status).toBe(200);
+    expect((await fire('198.51.100.1')).status).toBe(429); // same IP tripped
+    expect((await fire('198.51.100.2')).status).toBe(200); // distinct IP fine
+  });
+});
+
+describe('createInMemoryNonceStore: bounded memory (audit B-3)', () => {
+  it('evicts the oldest entry when at the max-entries ceiling', () => {
+    let t = 1_000;
+    const store = createInMemoryNonceStore(() => t, 60_000, 2); // cap = 2
+    store.put('n1', { address: ADDRESS, expiresAt: t + 5 * 60_000 });
+    store.put('n2', { address: ADDRESS, expiresAt: t + 5 * 60_000 });
+    expect(store.size()).toBe(2);
+    store.put('n3', { address: ADDRESS, expiresAt: t + 5 * 60_000 }); // over cap
+    expect(store.size()).toBe(2);
+    // n1 (oldest) was evicted; n2 + n3 remain.
+    expect(store.take('n1')).toBeUndefined();
+    expect(store.take('n3')).toBeDefined();
+  });
+
+  it('prefers evicting expired entries over live ones when at the ceiling', () => {
+    let t = 1_000;
+    const store = createInMemoryNonceStore(() => t, 60_000, 2);
+    store.put('expired', { address: ADDRESS, expiresAt: t + 1_000 });
+    store.put('live', { address: ADDRESS, expiresAt: t + 5 * 60_000 });
+    t += 2_000; // 'expired' is now past its TTL
+    store.put('fresh', { address: ADDRESS, expiresAt: t + 5 * 60_000 }); // triggers sweep
+    expect(store.size()).toBe(2);
+    expect(store.take('live')).toBeDefined(); // live entry survived
+    expect(store.take('fresh')).toBeDefined();
+  });
 });
 
 describe('POST /api/auth/verify', () => {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { CaptionStatus } from './useUploadCaption';
+import type { CopilotStatus } from './useRiffCopilot';
 
 const useCurrentAccountMock = vi.fn();
 const signAndExecuteMock = vi.fn();
@@ -27,7 +29,7 @@ vi.mock('../auth/useSession', () => ({
 // synthesis→fill→flip, second-session reset) can be driven without a backend.
 const copilotState = vi.hoisted(() => ({
   messages: [] as { role: 'user' | 'assistant'; content: string }[],
-  status: 'idle' as 'idle' | 'thinking' | 'asking' | 'done' | 'quota',
+  status: 'idle' as CopilotStatus,
   available: true,
   retryAfterMs: 0,
   synthesizedPrompt: null as string | null,
@@ -92,7 +94,7 @@ vi.mock('../babylon/PreviewCanvas', () => {
 // field is independent of this hook (it's plain state), so memory/params_json
 // tests drive it by typing directly.
 const captionState = vi.hoisted(() => ({
-  status: 'idle' as 'idle' | 'thinking' | 'done' | 'error' | 'quota',
+  status: 'idle' as CaptionStatus,
   available: true,
   retryAfterMs: 0,
 }));
@@ -1037,15 +1039,19 @@ describe('CreateModelPage', () => {
     fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'low-poly red truck' } });
     await driveMintAndCaptureArgs();
 
-    const args = buildPublishPtbMock.mock.calls[0]![0] as { paramsJson: string };
+    const args = (buildPublishPtbMock.mock.calls[0]! as unknown as [{ paramsJson: string }])[0];
     expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload', caption: 'low-poly red truck' });
 
     await waitFor(() => {
-      const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+      const calls = (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter(
+        (c) => c[0] === '/api/memory/remember',
+      );
       expect(calls.length).toBe(1);
     });
     const body = JSON.parse(
-      (fetchMock.mock.calls.find((c) => c[0] === '/api/memory/remember')![1] as RequestInit).body as string,
+      ((fetchMock.mock.calls as unknown as [string, RequestInit][]).find(
+        (c) => c[0] === '/api/memory/remember',
+      )![1]).body as string,
     );
     // Caption stored as the prompt + model id, and crucially NO policy → personal-only.
     expect(body).toEqual({ prompt: 'low-poly red truck', modelId: MODEL_ID });
@@ -1065,9 +1071,11 @@ describe('CreateModelPage', () => {
     // do NOT type a caption
     await driveMintAndCaptureArgs();
 
-    const args = buildPublishPtbMock.mock.calls[0]![0] as { paramsJson: string };
+    const args = (buildPublishPtbMock.mock.calls[0]! as unknown as [{ paramsJson: string }])[0];
     expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload' });
-    const calls = fetchMock.mock.calls.filter((c) => c[0] === '/api/memory/remember');
+    const calls = (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter(
+      (c) => c[0] === '/api/memory/remember',
+    );
     expect(calls.length).toBe(0);
   });
 

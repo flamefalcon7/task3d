@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useDisconnectWallet } from '@mysten/dapp-kit';
 import { useAppAccount } from '../wallet/useAppAccount';
 import { useAppSigner } from '../wallet/useAppSigner';
+import { clearAllSessions } from '../seal/sessionKey';
 
 const STORAGE_KEY = 'overflow2026.session';
 
@@ -125,15 +126,26 @@ export function useSession(): UseSession {
     return () => window.removeEventListener(SESSION_EVENT, handler);
   }, []);
 
-  // If the connected wallet address changes (user switches account), wipe
-  // the cached session — its JWT is bound to a different address.
+  // Clearing the auth session also wipes the Seal SessionKey cache (M-4, audit):
+  // a signed, decrypt-capable SessionKey must never outlive the auth session it
+  // belongs to. Defined here so BOTH the account-switch teardown below and
+  // `disconnect` share one path — otherwise a silent account switch (the common
+  // shared-device case) would leave the previous account's key resident in memory.
+  const clearSession = useCallback(() => {
+    setSession(null);
+    writeStoredSession(null);
+    broadcastSession(null);
+    clearAllSessions();
+  }, []);
+
+  // If the connected wallet address changes (user switches account), tear the
+  // session down — its JWT is bound to a different address — including the Seal
+  // cache (via clearSession), so an account switch behaves like a disconnect.
   useEffect(() => {
     if (session && account && session.address !== account.address) {
-      setSession(null);
-      writeStoredSession(null);
-      broadcastSession(null);
+      clearSession();
     }
-  }, [account, session]);
+  }, [account, session, clearSession]);
 
   const signIn = useCallback(async (): Promise<Session> => {
     if (!account || !signer) {
@@ -165,12 +177,6 @@ export function useSession(): UseSession {
     broadcastSession(next);
     return next;
   }, [account, signer]);
-
-  const clearSession = useCallback(() => {
-    setSession(null);
-    writeStoredSession(null);
-    broadcastSession(null);
-  }, []);
 
   const disconnect = useCallback(() => {
     clearSession();
