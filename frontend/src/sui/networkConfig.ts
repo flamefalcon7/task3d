@@ -35,24 +35,26 @@
 // Re-bootstrapped a fresh TransferPolicy<NftToken> (royalty rule only,
 // D-036 carry-forward).
 //
-// v11 (plan-027 follow-up): fresh republish of v10. Lets the base CREATOR launch
-// their OWN ALLOW_LIST base without buying an entitlement (relaxes the
-// launch_collection/_with_tokens ALLOW_LIST rejection to allow sender==creator);
-// non-creators still require the entitlement path. Otherwise identical to v10
-// (purchase_access + AccessEntitlement + seal_approve_entitlement; VERSION still 2,
-// seal gate unchanged). Re-bootstrapped a fresh TransferPolicy<NftToken>.
-// Supersedes v10 0x01baf4fc… (abandoned on testnet).
+// v12 (security audit remediation D-085/D-086/D-087): fresh republish of v11.
+// Tightens on-chain validation — D-085 fixed 32-byte seal_id, D-086 mint_tokens
+// quilt write-once, D-087 policy whitelist + no self-registration/self-purchase.
+// Mechanically upgrade-compatible, BUT per contracts/UPGRADE.md v7/D-040 a
+// DENY-tightening change must be a FRESH republish: a compatible upgrade leaves
+// the old package id callable, so a crafted PTB against it would bypass the new
+// asserts. VERSION still 2 (seal gate semantics unchanged). Re-bootstrapped a
+// fresh TransferPolicy<NftToken> (royalty rule only). Supersedes v11 0x1cf8aa4d…
+// (abandoned on testnet).
 export const TESTNET = {
   network: 'testnet' as const,
   chainId: '4c78adac',
   model3dPackageId:
-    '0x1cf8aa4d81788469a5ccfe8f6e119872c2afa7840b02f76013273421c90b3b6a',
+    '0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1',
   publisherId:
-    '0x4fd038cd98f98e7ef566ef3d44cc8687794abc439b95210831594c28619d9eb7',
+    '0x0e23f9126e154da89039d64edbf2ae5fe8e394fbd743fda1f17f218691c36c9c',
   transferPolicyId:
-    '0x2e35d5bf67021c61f84361abfd890e08753c6928c61f69970a388454a9b22c6a',
+    '0x8f7ef10d646e64494ce4463f7567d6de8cf9fcb6af43b5f61d4e78dae5ac1317',
   transferPolicyCapId:
-    '0xa0040ab6ba1177e4fecb116a689da6389214c73d93f069a00a9c3c40efe69d19',
+    '0xe8a9586a6b1337ed0fccea3c3018fff8a075f05ff366029deb7ef81f8f2f17d2',
   deployerAddress:
     '0x3116881ca3ebeb80f4ec82f1f11572d6341875d6c3f2cbeaf6990fb5723591ed',
   // Resolved at U5/U17 by reading the deployed TransferPolicy's rules — the
@@ -60,11 +62,11 @@ export const TESTNET = {
   // address (unchanged from v2/v3). This is NOT the @mysten/kiosk SDK default.
   kioskAppsPackageId:
     '0xe308bb3ed5367cd11a9c7f7e7aa95b2f3c9a8f10fa1d2b3cff38240f7898555d',
-  // D-075 — the shared SealIdRegistry bootstrapped in the v11 `init`
-  // (publish digest 4B8Nv5NF…). The encrypted publish/forge PTBs read this
+  // D-075 — the shared SealIdRegistry freshly created in the v12 `init`
+  // (publish digest 9gzrkk2s…). The encrypted publish/forge PTBs read this
   // for the seal_id global-uniqueness assert (Resolution G).
   sealIdRegistryId:
-    '0xb303ecb4506a5fb532395e94ad0f6aa01c9ac543467ac73f19a5230cfd4a69a8',
+    '0x048e36ee5e3d4a4f7dd76db394891ccecf51fde8f928269a8a486aa58254e850',
 } as const;
 
 // Public testnet RPC endpoints. Primary + 1 fallback per U5 spec.

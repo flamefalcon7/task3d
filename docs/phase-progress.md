@@ -26,13 +26,12 @@ Phase 4 — security hardening. Ran the deferred audit **Track 4–5** (backend 
 - **Docs** — ADR D-088/D-089; audit report remediation table + residuals; OQ-033 (Option B) + OQ-034 (residual hardening). `docs/decisions.md` reserved marker → D-090.
 
 ### In Progress / Not Done
-- The earlier Move/frontend batch (D-085 `490180c`, D-086/D-087/M-4 `5b2d4d8`, N-1 `e7d6d8c`) is **already committed** on `fix/seal-id-prefix-bypass`. This Track 4–5 remediation was committed on top in 6 scoped batches (B-1/B-4+D-088/089 · B-3/W-2 · W-1 · W-3/W-4+TrackPage · B-2 · docs).
-- **Pre-existing frontend `tsc -b` failure (46 errors)** in Babylon/test files unrelated to this work — surfaced during verification; the frontend `pnpm test` (which runs `tsc -b` first) cannot go green until addressed. Worth a separate cleanup pass.
-- **Testnet republish still pending** for the contract fixes (D-085/D-086/D-087) — they only take effect after republish (new package id → networkConfig + Seal re-bind).
-- **Branch not yet merged to `main`** — `fix/seal-id-prefix-bypass` holds the full audit-remediation stack (C-1/H-1/Move guards + Track 4–5). Merge when ready.
+- Merged to `main` (`2171c6b`, --no-ff) — the full audit-remediation stack (C-1/H-1/Move guards + Track 4–5).
+- **Frontend `tsc -b` cleanup DONE** (`799efff`) — the 46 pre-existing errors are fixed; `pnpm --dir frontend test` now green (1014 pass).
+- **Testnet republish DONE (v12)** — fresh republish of v11 for the audit DENY-tightening (per UPGRADE.md v7/D-040: a compatible upgrade would leave the old id callable as a bypass). New package `0xbf0affb8…`, SealIdRegistry `0x048e36ee…`, TransferPolicy `0x8f7ef10d…` (+cap `0xe8a9586a…`), publisher `0x0e23f912…`, upgrade_cap `0xf420fabf…`. publish digest `9gzrkk2s…`, bootstrap `3S71jY8U…`. testnet.json + networkConfig.ts + Published.toml updated; parity test + backend config test green; SealIdRegistry confirmed live on-chain. Supersedes v11 `0x1cf8aa4d…` (abandoned). v11 demo models are now unreadable by the app — re-publish fresh at demo time.
 
 ### Next Concrete Step
-Decide on merging `fix/seal-id-prefix-bypass` → `main`. Then resolve N-1 (Enoki key portal check) for submission. Defer: OQ-033/OQ-034, the pre-existing frontend tsc cleanup, testnet republish.
+Resolve N-1 (Enoki key portal check) for submission. Defer: OQ-033/OQ-034. Note: the testnet republish (v12) is live — a quick browser smoke of the live app against the fresh package (publish a model end-to-end) is worth doing before the demo since v12 starts with empty state.
 
 ### Notes for Next Session
 The frontend tsc red (46 errors) is NOT from this work (confirmed via `git stash`: same 46 on clean HEAD). The backend SQLite store (`quota-store.ts`) now also holds `spent_payments` — its file is `TUSK_DB_PATH` (default `./data/quota.db`); a fresh deploy starts with an empty spent-set (acceptable — durability is per-deployment-lifetime, which is the point).
