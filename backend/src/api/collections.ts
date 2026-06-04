@@ -18,11 +18,19 @@ const OBJECT_ID_RE = /^0x[0-9a-fA-F]{64}$/;
 // would be needed behind multiple instances.
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 60;
+// Cap the limiter map (audit W-2): a flood of distinct (spoofable) IPs would
+// otherwise grow it unbounded — a slow memory-exhaustion vector. Evict the
+// oldest key when at the ceiling.
+const MAX_KEYS = 50_000;
 const hits = new Map<string, { count: number; resetAt: number }>();
 
 function rateLimited(ip: string, now = Date.now()): boolean {
   const entry = hits.get(ip);
   if (!entry || now >= entry.resetAt) {
+    if (hits.size >= MAX_KEYS) {
+      const oldest = hits.keys().next().value;
+      if (oldest !== undefined) hits.delete(oldest);
+    }
     hits.set(ip, { count: 1, resetAt: now + WINDOW_MS });
     return false;
   }

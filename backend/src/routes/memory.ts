@@ -105,10 +105,18 @@ const WINDOW_MS = 60_000;
 // community), so sustained typing must not self-throttle the demo. Recall is
 // debounced + cheap; the denylist is the real spam lever (review).
 const MAX_PER_WINDOW = 600;
+// Cap the limiter map (audit W-2): an attacker controlling many distinct (cheaply
+// generated) addresses would otherwise grow it unbounded — a slow memory-
+// exhaustion DoS. Evict the oldest key when at the ceiling.
+const MAX_KEYS = 50_000;
 const hits = new Map<string, { count: number; resetAt: number }>();
 function rateLimited(address: string, now = Date.now()): boolean {
   const entry = hits.get(address);
   if (!entry || now >= entry.resetAt) {
+    if (hits.size >= MAX_KEYS) {
+      const oldest = hits.keys().next().value;
+      if (oldest !== undefined) hits.delete(oldest);
+    }
     hits.set(address, { count: 1, resetAt: now + WINDOW_MS });
     return false;
   }

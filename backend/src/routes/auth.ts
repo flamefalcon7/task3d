@@ -7,6 +7,13 @@ import type { JwtSigner } from '../lib/jwt.js';
 const NONCE_BYTES = 32;
 const NONCE_TTL_MS = 5 * 60 * 1000;
 
+// Hard ceiling on live nonces (audit B-3). The TTL sweep bounds memory under
+// honest load, but a flood of /challenge calls within one TTL window could still
+// pile up faster than the 60s sweep evicts. This cap makes the store O(1)-bounded
+// regardless of request rate: at the ceiling, `put` evicts the oldest entry
+// (insertion order) before inserting. 100k × ~120B ≈ 12MB worst case.
+const DEFAULT_MAX_NONCES = 100_000;
+
 interface NonceEntry {
   address: string;
   expiresAt: number;
@@ -34,6 +41,7 @@ export interface NonceStore {
 export function createInMemoryNonceStore(
   now: () => number = Date.now,
   sweepIntervalMs: number = DEFAULT_SWEEP_INTERVAL_MS,
+  maxEntries: number = DEFAULT_MAX_NONCES,
 ): NonceStore {
   const map = new Map<string, NonceEntry>();
 
@@ -52,6 +60,18 @@ export function createInMemoryNonceStore(
 
   return {
     put(nonce, entry) {
+      // Bound memory regardless of request rate (audit B-3): at the ceiling,
+      // sweep first (cheap, evicts expired), then evict the oldest live entry
+      // by insertion order if still full. A legitimate sign-in completes within
+      // the TTL, so an evicted abandoned/attacker nonce simply 401s on /verify.
+      if (map.size >= maxEntries) {
+        sweep();
+        while (map.size >= maxEntries) {
+          const oldest = map.keys().next().value;
+          if (oldest === undefined) break;
+          map.delete(oldest);
+        }
+      }
       map.set(nonce, entry);
     },
     take(nonce) {
@@ -72,6 +92,14 @@ function challengeMessage(nonce: string): string {
   return `overflow2026 sign-in: ${nonce}`;
 }
 
+// Per-IP fixed-window limiter for /challenge (audit B-3). Mirrors the inline
+// shape in api/collections.ts. State is per-`buildAuthRoute` instance (not
+// module-global) so test routes don't share a window. The `hits` map is itself
+// capped (W-2) so a flood of distinct spoofed IPs can't grow it unbounded.
+const DEFAULT_CHALLENGE_WINDOW_MS = 60_000;
+const DEFAULT_MAX_CHALLENGES_PER_WINDOW = 30;
+const MAX_LIMITER_KEYS = 50_000;
+
 export interface AuthDeps {
   jwt: Pick<JwtSigner, 'signSession'>;
   nonces?: NonceStore;
@@ -82,6 +110,10 @@ export interface AuthDeps {
     signature: string,
     options: { address: string },
   ) => Promise<unknown>;
+  /** Override the /challenge per-IP rate limit (default 30/min). */
+  maxChallengesPerWindow?: number;
+  /** Override the rate-limit window (default 60s). */
+  rateLimitWindowMs?: number;
 }
 
 export function buildAuthRoute(deps: AuthDeps) {
@@ -90,9 +122,34 @@ export function buildAuthRoute(deps: AuthDeps) {
   const generateNonce = deps.generateNonce ?? (() => randomBytes(NONCE_BYTES).toString('hex'));
   const verify = deps.verifyMessage ?? verifyPersonalMessageSignature;
 
+  const windowMs = deps.rateLimitWindowMs ?? DEFAULT_CHALLENGE_WINDOW_MS;
+  const maxPerWindow = deps.maxChallengesPerWindow ?? DEFAULT_MAX_CHALLENGES_PER_WINDOW;
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  const challengeRateLimited = (ip: string): boolean => {
+    const t = now();
+    const entry = hits.get(ip);
+    if (!entry || t >= entry.resetAt) {
+      // Cap the limiter map (W-2): evict the oldest key when at the ceiling so a
+      // flood of distinct (spoofable) IPs can't grow it without bound.
+      if (hits.size >= MAX_LIMITER_KEYS) {
+        const oldest = hits.keys().next().value;
+        if (oldest !== undefined) hits.delete(oldest);
+      }
+      hits.set(ip, { count: 1, resetAt: t + windowMs });
+      return false;
+    }
+    entry.count += 1;
+    return entry.count > maxPerWindow;
+  };
+
   const app = new Hono();
 
   app.post('/challenge', async (c) => {
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    if (challengeRateLimited(ip)) {
+      return c.json({ error: 'rate_limited' }, 429);
+    }
+
     const body = await c.req.json().catch(() => null);
     const parsed = challengeRequestSchema.safeParse(body);
     if (!parsed.success) {
