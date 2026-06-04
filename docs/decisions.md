@@ -3825,6 +3825,57 @@ At runtime, **a built AI feature is never hidden** — keyless / not-configured 
 
 ---
 
+## D-085: Fix seal_id prefix-truncation bypass — fixed 32-byte seal_id + equality-semantics decrypt gate
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 (Seal content protection) — security hardening
+
+### Context
+
+The 2026-06-04 security audit (Seal/Move/frontend, see `docs/audits/2026-06-04-security-audit-seal-move-frontend.md`) found a **Critical** confidentiality break (finding C-1), confirmed independently by two reviewer agents.
+
+The Seal decrypt gates (`seal_approve_entitlement` / `seal_approve_creator`) bind a ciphertext to a model via `is_prefix(model.seal_id, id)`, where the full Seal identity is `id = [seal_id][nonce]`. `seal_id` was a **caller-supplied, variable-length** `vector<u8>` (only bounded `<= 64`), made globally unique at publish by `SealIdRegistry` (D-075 Resolution G).
+
+The flaw: registry **exact-match** uniqueness ≠ **prefix-freeness**. An attacker reads a victim's public `seal_id` `V` (32 bytes), publishes their own throwaway RESTRICTED model with `seal_id = P = V[0:k]` (a strict **shorter** prefix). `P != V`, so the registry accepts it; yet `is_prefix(P, [V][nonce])` is true, and the attacker is their own model's creator — so `seal_approve_creator` passes for the **victim's** identity and the key servers release the key. The attacker decrypts the victim's GLB for free. (Root-cause analysis: `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`.)
+
+### Decision
+
+Enforce that an encrypted model's `seal_id` is **exactly `SEAL_ID_LEN` (32) bytes**:
+- `new_model` asserts `!is_encrypted || vector::length(&seal_id) == SEAL_ID_LEN` (after the is_encrypted-derived consistency guard, so an empty seal_id on an encrypted policy still surfaces as the more-specific `ESealFieldsInconsistent`).
+- Both `seal_approve_*` gates re-assert `vector::length(&model.seal_id) == SEAL_ID_LEN` before `is_prefix` (defense in depth).
+- New abort code `ESealIdWrongLength = 59`; the old `<= 64` bound (`ESealIdTooLong = 43`) is retired (ABI history, not reused).
+
+With a fixed 32-byte length, the only 32-byte prefix of `[V][nonce]` is `V` itself — which the registry already forbids copying — so `is_prefix` now amounts to an exact equality to a registry-locked value. **No frontend change**: the client already generates a random 32-byte seal_id (`CreateModelPage.tsx:952`).
+
+### Rationale
+
+- Closes C-1 (and audit M-3, the missing seal_id min-length) with a ~6-line contract change.
+- Preserves the single-tx "one wallet popup" encrypt-then-publish flow (R3/AE1).
+- Cryptographically equivalent to the stronger object-id binding for any executable attack (256-bit random seal_id; brute-forcing a specific `V` is 2^256).
+
+### Alternatives Considered
+
+- **Derive `seal_id = object::id(model)` on-chain (Alt A)** — strictly removes attacker control (structurally unforgeable). Rejected for v1: the object id is unknown before the object exists, and the GLB is encrypted *before* publish, so it requires a two-phase publish (publish placeholder → read id → encrypt → stamp) = an extra tx + wallet popup + new partial-init state to audit. Deferred as a possible **v1.1 hardening** (see open-questions). The UX/gas/audit-surface comparison is documented in the solutions writeup.
+- **Make the registry prefix-relation-aware** — complex and unnecessary once the length is fixed.
+- **Keep variable length, change gate to explicit equality on `id[0:32]`** — functionally identical to fixing the length, but leaves the attacker-controlled length degree of freedom; fixing the length is simpler and self-documenting.
+
+### Consequences
+
+- ✅ Closes the only Critical from the audit; closes M-3. 90/90 Move tests pass, incl. a red-team regression (`publish_encrypted_rejects_short_prefix_of_victim_seal_id`).
+- ⚠️ New abort code 59 (ABI history — never reuse). `ESealIdTooLong` (43) retired.
+- ⚠️ Requires a testnet **republish** to take effect (new package id → `networkConfig` update + Seal re-binding). Models published under the old package keep the old gate; demo re-publishes fresh models.
+- 🔮 If encrypted content becomes high-value before mainnet, revisit Alt A (object-id binding) as the permanent foundation.
+
+### Related
+
+- Hardens **D-075** (Seal envelope + is_prefix gate + SealIdRegistry).
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (C-1, M-3).
+- Root-cause + Alt-A tradeoff: `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`.
+- Files: `contracts/model3d/sources/model3d.move` (SEAL_ID_LEN, ESealIdWrongLength, `new_model`, `validate_seal_publish`, `seal_approve_entitlement`, `seal_approve_creator`), `contracts/model3d/tests/model3d_tests.move`.
+
+---
+
 # Reserved Decision Numbers
 
-D-085 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-086 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

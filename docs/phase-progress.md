@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-06-04 (**Security audit (Seal/Move/frontend) + D-085 Critical fix shipped to working tree, NOT committed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **17 of 38**
+- Days to demo day (7/20–21): ~46
+- Days to winners (8/27): ~84
+
+### Current Phase
+Phase 4 — security hardening. Ran a read-only multi-agent audit (sui-dev-agents plugin) over Seal / Move+red-team / frontend signing (backend+Walrus deferred). Report: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (1 Critical, 1 High, 5 Med, 8 Low, 4 Info).
+
+### Completed This Session
+- **Audit** — 6 agents via Workflow, read-only, no mcp-server build, no chain tx. All findings ground-truthed against source.
+- **D-085 — fixed C-1 (Critical) seal_id prefix-truncation bypass** (also closes M-3). Contract change in `contracts/model3d/sources/model3d.move`: `SEAL_ID_LEN=32` + `ESealIdWrongLength=59`; `new_model` asserts encrypted seal_id `== 32` (after consistency guard); both `seal_approve_*` gates re-assert length; corrected the misleading "exact-uniqueness ⇒ unforgeable" comments. Chose fixed-length (Alt B) over object-id binding (Alt A) — keeps 1-wallet-popup, ~6 lines, equiv security; Alt A deferred to v1.1 (OQ-032).
+- **Tests** — 4 fixtures bumped to 32-byte seal_ids + 2 new regression tests incl. the C-1 red-team case. **`sui move test` = 90/90 PASS, `sui move build` clean (no warnings).**
+- **Docs** — ADR D-085 in `decisions.md`; root-cause + B-vs-A tradeoff in `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md`; audit checklist C-1/M-3 marked done; OQ-032 (C-1 testnet repro + v1.1 Alt-A revisit).
+
+### In Progress / Not Done
+- **NOT committed** — all D-085 changes are in the working tree on `main`. Suggest a branch + commit (`fix(contract): close seal_id prefix-truncation bypass (D-085, audit C-1)`).
+- **Testnet republish pending** — D-085 only takes effect after republish (new package id → `networkConfig` update + Seal re-bind). Demo re-publishes fresh models.
+- Frontend: **no change needed** (client already emits 32-byte seal_id at `CreateModelPage.tsx:952`).
+
+### Next Concrete Step
+Commit D-085 on a branch. Then triage the remaining audit "需人工核实" items (M-1 mainnet ceremony, M-2 `royalty_rule::pay` on-chain check, N-1 Enoki key type, N-2 UpgradeCap) and the deferred backend/Walrus tracks (post-demo).
+
+---
+
 ## Last Updated: 2026-06-03 (**Third-Party AI Degradation UX — U1–U8 BUILT**; branch `feat/ai-degradation-ux` off `main`, NOT merged)
 
 ### Hackathon Tracker

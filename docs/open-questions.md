@@ -554,3 +554,17 @@ The reviewers' high-value findings were fixed in-branch (counter desync, config 
 **To resolve**: pick up #1–#3 in a hardening/polish pass (good 8/27 mainnet-window candidates alongside OQ-030). 
 
 **Blocker level**: 🟢 Deferred.
+
+---
+
+## OQ-032: Seal C-1 — testnet reproduction + v1.1 object-id binding revisit
+
+**Surfaced**: 2026-06-04 (security audit C-1; fix shipped as D-085).
+
+D-085 fixed the seal_id prefix-truncation bypass on-chain (fixed 32-byte seal_id; 90/90 Move tests incl. red-team regression). Two follow-ups remain:
+
+1. **Testnet reproduction of C-1 (pre-fix), to confirm Seal key-server semantics.** The on-chain legs were verified from source, but the one runtime assumption — that the key servers release the key for identity `id` purely on `seal_approve(id, attacker_model)` not aborting against the latest package, with no extra `id`↔`model` binding — could not be confirmed statically (it is standard Seal behaviour + matches the module's own header comment). Optional now that the fix is in, but worth a one-off confirmation before mainnet: on the OLD package, publish a victim ALLOW_LIST/RESTRICTED model, publish an attacker model with `seal_id = victim_seal_id[0:16]`, run the decrypt flow with `seal_approve_creator(attacker_model)` against the victim identity, and verify shares are (were) released.
+
+2. **v1.1 hardening: revisit Alt A (derive `seal_id = object::id(model)`).** D-085 chose fixed-length (B) over object-id binding (A) for v1 because A needs a two-phase publish (extra tx/popup + new partial-init state). B fully closes C-1 and is cryptographically equivalent for any executable attack, but A is *structurally* unforgeable. If encrypted content becomes high-value before mainnet (8/27), evaluate migrating to A. Tradeoff documented in `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md` and D-085 Alternatives.
+
+**Blocker level**: 🟢 Deferred (fix already shipped; these are confirmation + future-hardening).

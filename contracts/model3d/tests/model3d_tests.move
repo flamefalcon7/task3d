@@ -788,7 +788,8 @@ fun mint_base_model(
     // doesn't touch the registry, so a constant dummy seal_id is fine here.
     let encrypted = model3d::license_policy(&license) != policy_permissionless();
     let sealed_key = if (encrypted) { b"dummy-sealed-key" } else { vector<u8>[] };
-    let seal_id = if (encrypted) { b"dummy-seal-id-01" } else { vector<u8>[] };
+    // D-085 — encrypted seal_id is FIXED at 32 bytes. (16-byte ASCII × 2 = 32.)
+    let seal_id = if (encrypted) { b"dummy-seal-id-01dummy-seal-id-01" } else { vector<u8>[] };
     new_model(
         b,
         s(b"car"),
@@ -2130,13 +2131,14 @@ fun register_integration_metadata_too_long_aborts() {
 // D-074 / D-075 / D-076 — Seal content protection
 // ===========================================================================
 
-// A Seal identity correctly prefix-bound to mint_base_model's dummy seal_id
-// (b"dummy-seal-id-01"). is_prefix(seal_id, this) holds.
-fun valid_seal_id(): vector<u8> { b"dummy-seal-id-01--nonce--" }
+// A Seal identity correctly prefix-bound to mint_base_model's 32-byte dummy seal_id
+// (b"dummy-seal-id-01dummy-seal-id-01"). is_prefix(seal_id, this) holds: this is
+// [32-byte seal_id][nonce]. D-085 — the seal_id prefix must be exactly 32 bytes.
+fun valid_seal_id(): vector<u8> { b"dummy-seal-id-01dummy-seal-id-01--nonce--" }
 
 // plan-027 — Build an ENCRYPTED ALLOW_LIST base (access_fee > 0) and have
 // NFT_CREATOR buy access, returning (model, entitlement). model.seal_id ==
-// b"dummy-seal-id-01"; the entitlement is held by NFT_CREATOR and bound to model.
+// b"dummy-seal-id-01dummy-seal-id-01"; the entitlement is held by NFT_CREATOR and bound to model.
 // Consumes the access-fee coin routed to CREATOR. Leaves the caller in
 // NFT_CREATOR's tx context (the entitlement holder). The seal_approve_entitlement
 // tests consume this directly (no collection/cap needed — the gate is the
@@ -2464,14 +2466,14 @@ fun publish_encrypted_records_seal_fields() {
     let b = mint_blob(&mut system, sc.ctx());
     model3d::publish_encrypted(
         &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
-        empty_part_labels(), b"keybytes", b"unique-seal-id-1", vector<string::String>[],
+        empty_part_labels(), b"keybytes", b"unique-seal-id-1unique-seal-id-1", vector<string::String>[],
         new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
     );
 
     sc.next_tx(CREATOR);
     let m = sc.take_shared<Model3D>();
     assert!(model3d::is_encrypted(&m), 610);
-    assert!(*model3d::seal_id(&m) == b"unique-seal-id-1", 611);
+    assert!(*model3d::seal_id(&m) == b"unique-seal-id-1unique-seal-id-1", 611);
     assert!(*model3d::sealed_key(&m) == b"keybytes", 612);
     assert!(model3d::seal_version(&m) == 2, 613); // plan-027 — VERSION bumped 1→2
     ts::return_shared(m);
@@ -2495,16 +2497,151 @@ fun publish_encrypted_duplicate_seal_id_aborts() {
     let b1 = mint_blob(&mut system, sc.ctx());
     model3d::publish_encrypted(
         &mut registry, b1, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
-        empty_part_labels(), b"k1", b"dup-seal-id", vector<string::String>[],
+        empty_part_labels(), b"k1", b"dup-seal-id-00000000000000000000", vector<string::String>[],
         new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
     );
 
     sc.next_tx(CREATOR);
     let b2 = mint_blob(&mut system, sc.ctx());
-    // Same seal_id -> aborts ESealIdReused.
+    // Same (32-byte) seal_id -> aborts ESealIdReused.
     model3d::publish_encrypted(
         &mut registry, b2, s(b"car"), s(b"{}"), s(b"B"), empty_tags(), s(b"lin"), s(b"glbB"),
-        empty_part_labels(), b"k2", b"dup-seal-id", vector<string::String>[],
+        empty_part_labels(), b"k2", b"dup-seal-id-00000000000000000000", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-085 — `publish_encrypted` rejects a seal_id that is not EXACTLY 32 bytes.
+// (31 bytes here.) Closes audit C-1's enabling degree of freedom.
+#[test, expected_failure(abort_code = model3d::ESealIdWrongLength)]
+fun publish_encrypted_rejects_wrong_length_seal_id() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    // 31 bytes (16 + 15) — one short of SEAL_ID_LEN.
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"k", b"dummy-seal-id-01dummy-seal-id-0", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-085 — RED-TEAM REGRESSION for audit C-1 (seal_id prefix-truncation bypass).
+// A victim publishes an encrypted model with a 32-byte seal_id V. An attacker tries
+// to publish their OWN model carrying a STRICT SHORTER prefix of V (the first 16
+// bytes) — the move that, pre-D-085, the registry's exact-match guard let through
+// and which then satisfied is_prefix against the victim's identity. With the fixed
+// 32-byte length rule the attacker's publish aborts ESealIdWrongLength, so the
+// prefix model can never exist and the decrypt gate is never reachable with it.
+#[test, expected_failure(abort_code = model3d::ESealIdWrongLength)]
+fun publish_encrypted_rejects_short_prefix_of_victim_seal_id() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+
+    // Victim: a well-formed 32-byte seal_id V. Succeeds.
+    let bv = mint_blob(&mut system, sc.ctx());
+    model3d::publish_encrypted(
+        &mut registry, bv, s(b"car"), s(b"{}"), s(b"V"), empty_tags(), s(b"lin"), s(b"glbV"),
+        empty_part_labels(), b"kv", b"victim-seal-id-1victim-seal-id-1", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    // Attacker (a third party — BUYER): V[0:16], a strict 16-byte prefix of the
+    // victim's seal_id. Not an exact duplicate (the registry would accept it) — but
+    // now blocked by the length rule before it can ever reach the decrypt gate.
+    sc.next_tx(BUYER);
+    let ba = mint_blob(&mut system, sc.ctx());
+    model3d::publish_encrypted(
+        &mut registry, ba, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"ka", b"victim-seal-id-1", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-085 — `publish_encrypted` rejects an OVER-length seal_id (33 bytes) too: the
+// rule is exact-equality (== 32), not an upper bound. Locks the upper edge.
+#[test, expected_failure(abort_code = model3d::ESealIdWrongLength)]
+fun publish_encrypted_rejects_over_length_seal_id() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    // 33 bytes (32 + 1) — one over SEAL_ID_LEN.
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"k", b"dummy-seal-id-01dummy-seal-id-01X", vector<string::String>[],
+        new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-085 — the length rule is keyed off is_encrypted = (policy != PERMISSIONLESS),
+// so an UNKNOWN policy (e.g. 3) is treated as encrypted and a short seal_id is
+// still rejected. Guards the audit L-1 (unknown-policy) interaction with C-1's fix.
+#[test, expected_failure(abort_code = model3d::ESealIdWrongLength)]
+fun publish_encrypted_unknown_policy_short_seal_id_rejected() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    // policy = 3 (unknown) → is_encrypted true; 16-byte seal_id → length rule fires.
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"k", b"dummy-seal-id-01", vector<string::String>[],
+        new_license_terms(3, 0, 500, true, true, 0), &clk, sc.ctx(),
+    );
+
+    model3d::destroy_seal_id_registry_for_testing(registry);
+    clock::destroy_for_testing(clk);
+    system.destroy_for_testing();
+    sc.end();
+}
+
+// D-085 — abort-code PRECEDENCE: an EMPTY seal_id on an encrypted policy must surface
+// as the more-specific ESealFieldsInconsistent (the consistency guard runs BEFORE the
+// length assert in new_model), NOT ESealIdWrongLength. Protects the ordering intent
+// against a future reorder.
+#[test, expected_failure(abort_code = model3d::ESealFieldsInconsistent)]
+fun publish_encrypted_empty_seal_id_is_inconsistent_not_length() {
+    let mut sc = ts::begin(CREATOR);
+    let mut system = system::new_for_testing(sc.ctx());
+    sc.next_tx(CREATOR);
+    let clk = clock::create_for_testing(sc.ctx());
+    let mut registry = model3d::new_seal_id_registry_for_testing(sc.ctx());
+    let b = mint_blob(&mut system, sc.ctx());
+    // Encrypted policy but EMPTY seal_id (and a non-empty key) → has_id != is_encrypted.
+    model3d::publish_encrypted(
+        &mut registry, b, s(b"car"), s(b"{}"), s(b"A"), empty_tags(), s(b"lin"), s(b"glbA"),
+        empty_part_labels(), b"k", vector<u8>[], vector<string::String>[],
         new_license_terms(policy_restricted(), 0, 500, true, true, 0), &clk, sc.ctx(),
     );
 
@@ -2590,7 +2727,7 @@ fun seal_approve_entitlement_aborts_on_id_prefix_mismatch() {
     let clk = clock::create_for_testing(sc.ctx());
     let (model, entitlement) = buy_access_encrypted_allow_list(&mut sc, &mut system, &clk);
 
-    // id not prefixed by model.seal_id (b"dummy-seal-id-01"). Sender is still the holder.
+    // id not prefixed by model.seal_id (b"dummy-seal-id-01dummy-seal-id-01"). Sender is still the holder.
     model3d::seal_approve_entitlement_for_testing(b"WRONG-prefix-bytes", &entitlement, &model, sc.ctx());
 
     model3d::destroy_entitlement_for_testing(entitlement);
