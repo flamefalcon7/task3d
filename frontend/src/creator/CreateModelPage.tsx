@@ -1080,12 +1080,16 @@ export function CreateModelPage() {
   const haveModel = glb !== null;
   const genBusy = genStatus === 'preflight' || genStatus === 'paying' || genStatus === 'generating';
 
-  // plan-013 / polish-backlog §1 — Tripo is a two-step API (text_to_model
-  // ≈ 15-30s, then mesh_segmentation ≈ 60-90s). The backend hides the
-  // split, but at 70+ seconds of a single "GENERATING" pill users start
-  // to believe it's stuck. Split the label on a 30s threshold — imprecise
-  // but enough to telegraph "two phases, you're still moving."
-  const TRIPO_STEP1_TYPICAL_SECONDS = 30;
+  // plan-013 / polish-backlog §1 — Tripo is a two-step API. Measured
+  // 2026-06-04: text_to_model ≈ 60s, then mesh_segmentation ≈ 120s, so a
+  // full generation is ~3 min. The backend hides the split, but on a single
+  // static "GENERATING" pill users believe it's stuck. Split the label so it
+  // flips to step 2 around the real ~60s step-1 boundary (was 30s, which
+  // mislabeled the back half of step 1 as step 2), and past the typical
+  // ~3-min mark add a "still working" reassurance so the long segmentation
+  // tail doesn't read as frozen. Backend poll budgets: 180s / 240s.
+  const TRIPO_STEP1_TYPICAL_SECONDS = 60;
+  const TRIPO_TOTAL_TYPICAL_SECONDS = 180;
   const generateLabel =
     genStatus === 'preflight'
       ? '— CHECKING…'
@@ -1094,7 +1098,9 @@ export function CreateModelPage() {
       : genStatus === 'generating'
         ? genElapsed < TRIPO_STEP1_TYPICAL_SECONDS
           ? `— STEP 1/2: GENERATING MESH (${genElapsed}s)`
-          : `— STEP 2/2: SEGMENTING PARTS (${genElapsed}s)`
+          : genElapsed < TRIPO_TOTAL_TYPICAL_SECONDS
+            ? `— STEP 2/2: SEGMENTING PARTS (${genElapsed}s)`
+            : `— STEP 2/2: ALMOST THERE, HANG ON (${genElapsed}s)`
         : haveModel
           ? `GENERATE AGAIN (${Number(TRIPO_FEE_MIST) / 1e9} SUI)`
           : `PAY ${Number(TRIPO_FEE_MIST) / 1e9} SUI & GENERATE`;
