@@ -2,11 +2,13 @@
   "name": "tusk3d-walrus-cdn",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Cloudflare Worker fronting a Walrus aggregator with immutable edge caching + failover (Tusk3D read-path CDN, D-073 / plan-018)",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node test/worker.smoke.mjs"
   },
   "devDependencies": {
     "wrangler": "^3.90.0"

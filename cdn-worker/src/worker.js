@@ -48,9 +48,26 @@ export default {
       return new Response('Not Found', { status: 404 });
     }
 
+    // Validate the blob-id segment (audit W-4). `new URL` already resolves literal
+    // `../`, so the startsWith check above rejects those; the remaining vector is
+    // ENCODED traversal (%2e, %2F) that survives normalization. Allow only the two
+    // shapes aggregator.ts ever produces — a bare blob id or a by-quilt-patch-id
+    // slice, base64url charset only — so `%`, `.`, and extra slashes are rejected
+    // before we build the origin URL or a cache key.
+    const suffix = url.pathname.slice('/v1/blobs/'.length);
+    if (!/^(by-quilt-patch-id\/)?[A-Za-z0-9_-]+$/.test(suffix)) {
+      return new Response('Bad Request: invalid blob id', {
+        status: 400,
+        headers: { 'cache-control': 'no-store' },
+      });
+    }
+
     const cache = caches.default;
-    // Cache key is always a GET on this URL — the path identifies immutable content.
-    const cacheKey = new Request(url.toString(), { method: 'GET' });
+    // Cache key is pathname-only (audit W-1): the path alone identifies immutable
+    // content. Dropping the query string means `?x=1` variants can't fork the
+    // cache, and (with the search also stripped from the origin fetch below) a
+    // caller can't smuggle aggregator query params under a blob's immutable key.
+    const cacheKey = new Request(new URL(url.pathname, url.origin).toString(), { method: 'GET' });
 
     const hit = await cache.match(cacheKey);
     if (hit) {
@@ -63,7 +80,10 @@ export default {
     let lastError = 'no aggregators configured';
 
     for (const base of aggregators) {
-      const originUrl = base + url.pathname + url.search;
+      // Pathname only — never forward url.search to the aggregator (audit W-1):
+      // the Walrus v1 blob read path needs no query params, and forwarding them
+      // would let a caller poison the edge cache under the blob's 1-year TTL.
+      const originUrl = base + url.pathname;
       try {
         // Outbound subrequest: uses the aggregator's own host/SNI -> no 403, no 1014.
         const origin = await fetch(originUrl, { method: 'GET', headers: { accept: '*/*' } });
