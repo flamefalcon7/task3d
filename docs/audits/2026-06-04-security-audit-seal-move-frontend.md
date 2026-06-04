@@ -204,18 +204,124 @@ assert!(coin::value(&payment) == amount, EInsufficientAmount);  // 精确相等
 
 ---
 
-## 推迟项(fallback,demo 后补)
+## Track 4–5(后端 TS/Hono + Walrus 存储层)—— 2026-06-04 补审
 
-后端 TS/Hono 与 Walrus 层未审。zkLogin/frontend agent 顺带浮出的后端线索供后续跟进:
-- `/api/auth/challenge` 无限速 → 内存 nonce Map 可被打爆(DoS),`backend/src/routes/auth.ts:95-107`
-- CORS 仅 `localhost`,上生产会断或被迫开 `*`,`backend/src/app.ts:34`
-- auth nonce 未绑定 origin/session(跨源预计算挑战),`backend/src/routes/auth.ts:95-106`
-- nonce schema `z.string().min(1)` 过松,`backend/src/lib/schema.ts:39`
+> 原 fallback 推迟项,已于 2026-06-04 用 4-dimension 只读 Workflow 补齐(每个 High/Critical 经对抗复核)。全程只读 · 未 build mcp-server · 未发链上交易。
+> 编号前缀:`B-` = 后端,`W-` = Walrus。下列严重度为**对抗复核后的最终值**(标注降级/驳回)。
+
+### 🟠 High(1)
+
+#### B-1 · PaymentVerifier 不绑定生成请求 + 内存态防重放 → SUI 付费门可被 digest 重放绕过
+`backend/src/sui/paymentVerifier.ts:36-92`(消费方 `backend/src/routes/generate.ts:61-73`)
+- **复核结论**:维持 High;`needs_human_verification = true`(建议 testnet 实测一遍重放)。
+- **攻击**:`verify(digest, payer)` 只校验①tx 成功 ②`sender==payer` ③有一笔到 treasury 的 SUI balanceChange `>= feeMist`。**从不校验这笔交易是"为哪次生成"付的**——无 nonce、无 per-request 标记、无 PTB 形状校验。于是 payer 历史上任意一笔 `>= 费用`、打给 treasury 的旧交易(打赏/退款/上一次生成的 digest)都能复用为新生成的付款凭证。唯一拦阻是 `const spent = new Set<string>()`(:36)——**进程内、非持久**:后端重启/重部署(hackathon/demo 频繁)即清空,所有用过的 digest 重新可用;多实例负载均衡下每实例各放行一次。净效果:用一张有效付款 digest 反复白嫖 Tripo credits(~60–120 credits/次)。
+- **修复**:把付款绑定到请求——客户端在转账 PTB 内带一个服务端下发的一次性 nonce,verify 时断言 tx 含该 nonce;或让 digest 指向合约标记"已消费"的付款对象。`spent` 集落到现成的 SQLite quota-store(唯一约束 on digest),让防重放跨重启/跨实例生效。再加一个"交易须新近"(时间窗)校验拒绝陈旧历史转账。
+
+### 🟡 Medium(6)
+
+#### B-2 · provisioning 脚本把 delegate 私钥明文打印到 stdout
+`backend/scripts/memwal-spike.ts:136`(`OWNER_KEY` 于 :32-36,错误处理 :143)
+- **复核结论**:坐实但 High→**Medium**(私钥每次运行新生成、非提交进文件;blast radius 仅 testnet、默认 inert 的 Riff Copilot 记忆层,无资金/链上权限)。
+- **攻击**:`console.log('delegate.privateKey ...', delegate.privateKey)` 把跨全 namespace 的 MemWal delegate 私钥打到 stdout(终端 scrollback / CI 日志 / shell history)。`.env.example` 把该脚本写成官方 provisioning 路径,所以这是预期操作流而非死脚手架。`console.error('SPIKE ERROR:', e)` 还会 dump 完整 error 对象。
+- **修复**:不要打印私钥;若必须输出,只写到 `0600` 的 gitignore 文件或从 secrets manager 读;脚本按自己 header 所述"用完即删";`console.error` 改 `e instanceof Error ? e.message : String(e)`。
+
+#### B-3 · `/api/auth/challenge` 无限速 + nonce Map 无界 → DoS/内存耗尽
+`backend/src/routes/auth.ts:95-107`(store :34-67;`app.ts:34` / `server.ts:42` 无 limiter)
+- **攻击**:每个 well-formed 地址都无条件插一条 5min TTL 的 NonceEntry,sweep 每 60s 才跑且只清已过期项;稳态内存 = 请求速率 × 5min 存活 nonce,脚本刷可达百万级,OOM 杀死单 Node 进程(整后端宕)。无需鉴权(本就是发 challenge 的公开端点)。
+- **修复**:给 `/challenge` 加 per-IP 固定窗限速(复用 `collections.ts` 现成 pattern)+ Map 容量上限(超限拒新/逐旧);生产按 `auth.ts:18` 注释迁 Redis(原生 TTL)。
+
+#### B-4 · PaymentVerifier `sender==treasury` 直接放行、**不校验金额**
+`backend/src/sui/paymentVerifier.ts:68-71`
+- **攻击**:`sender==treasury` 时立即 `ok:true`,跳过金额校验。注释称 treasury 默认=deployer(D-034),"自己骗自己"无意义——但代码判的是 `sender==treasury` 而非 `sender==deployer`。一旦运营把 `TRIPO_FEE_TREASURY` 设成共享/multisig/sponsor 地址、且它**同时是某用户钱包**,该用户无限免费生成(任意自转 digest 都过、金额不校验)。且此路径只靠 `spent` 集,继承 B-1 的重启重放弱点。
+- **修复**:把 bypass 绑到显式 `OPERATOR_ADDRESS` 而非 `sender===treasury` 巧合;并仍要求 digest 是 `>= feeMist` 的自转账。明文规定生产 treasury 必须与任何用户钱包不同。
+
+#### W-1 · CDN Worker 把 `url.search` 原样转发给 aggregator → 边缘缓存投毒
+`cdn-worker/src/worker.js:66`
+- **攻击**:`originUrl = base + url.pathname + url.search`,调用方可对 `/v1/blobs/<id>` 任意追加 query。若 aggregator 将来识别某参数改变响应字节(`?format=raw|gzip`、签名参数等),外部调用方即可控制某 blobId 在 **1 年不可变 TTL** 下缓存的内容,污染该 blob 对所有后续读者。
+- **修复**:构造 originUrl 前整段去掉 `url.search`(Walrus v1 blob 读路径不需要 query):`const originUrl = base + url.pathname;`。
+
+#### W-2 · `memory.ts` 限速器 `hits` Map 无界 → 慢速内存耗尽 DoS
+`backend/src/routes/memory.ts:154-157, 181-184`
+- **攻击**:限速按地址 600/min(宽松),但底层 `hits` Map 无容量上限——攻击者用大量(可轻易生成的)Sui 地址各发一次请求,每个地址塞一条存活 60s 的项,把 Map 撑爆。无全局/IP 级限速兜底。
+- **修复**:`hits` Map 加容量上限(如 5 万)+ 溢出逐旧 / LR;并在 Hono 中间件加一层全局(IP 级)限速。
+
+#### W-3 · `WALRUS_AGGREGATOR` 硬编码 testnet → 上主网静默读错网络
+`frontend/src/walrus/aggregator.ts:8`
+- **攻击**:module 级常量指向 testnet aggregator,无 env override。8/27 前上主网(CLAUDE.md 要求)后,所有 blob 读 URL 仍解析到 testnet:主网 blob 在 testnet aggregator 返回 404,**所有模型预览/GLB 下载在切主网瞬间全断**且需改码重部署;更糟,主网 blobId 与 testnet 同 ID 不同内容会串读错字节。
+- **修复**:换成 build-time env(`VITE_WALRUS_AGGREGATOR` / `VITE_NETWORK`)驱动,参照现有 `networkConfig.ts` 的 package-id 选网 pattern 收口。
+
+#### W-4 · blobId 来自链上数据未做格式校验 → 路径穿越/缓存键风险
+`frontend/src/walrus/aggregator.ts:17-19`(+ `cdn-worker/src/worker.js:66`)
+- **攻击**:`glbUrlForSummary` 直接拼 `patchId/glbBlobId/blobId`。攻击者在链上发一个 `blobId` 为 `../../../etc/passwd` 或 `%2F` 编码 dot-segment 的恶意 Model3D,前端/Worker 即拼出非预期 aggregator 路径并按 `/v1/blobs/` 缓存键缓存。
+- **修复**:拼 URL 前校验 blobId 匹配 `^[A-Za-z0-9_-]{20,60}$`(Walrus base64url 格式),不符则抛错/占位;Worker 侧同样校验后再构造 originUrl。
+
+### 🟢 Low(7)
+
+| 编号 | 标题 | 位置 |
+|---|---|---|
+| B-5 | CORS 仅 `localhost`、未 env 驱动(上生产会断,或被迫开 `*`/反射 Origin 泄漏 Bearer API);**因用 Bearer 非 cookie,CORS 非主鉴权边界故降 Low** | `backend/src/app.ts:34` |
+| B-6 | 登录 nonce 未绑 origin/audience(签名串 `overflow2026 sign-in: ${nonce}` 无 domain/chain);现单后端下仅硬化项,建议 SIWS 风格 | `backend/src/routes/auth.ts:71-73,126-133` |
+| B-7 | `capVerifier` type gate 在 RPC 缺 `type` 字段时**跳过**(fail-open),退化为只看 owner+collection_id;改 `typeof !== 'string' \|\| !==expected` fail-closed | `backend/src/sui/capVerifier.ts:61-64` |
+| B-8 | per-IP 限速取 `X-Forwarded-For` 首跳(客户端可伪造,每请求换 IP 绕限速 + 撑大 hits Map);应取受信代理跳 | `backend/src/api/collections.ts:37` |
+| B-9 | 单用户一次 429 触发**全局跨用户** Gemini 冷却(整 capability 对所有人 quota_exhausted);已被窄化分类器+冷却钳制收敛,运营付费模型下可接受 | `backend/src/lib/gemini-quota.ts:126-131` |
+| B-10 | Tripo 字段漂移时把签名 CDN 输出 URL 整条 log(短时签名链接,可被读日志者临时下载运营付费资产;非凭证) | `backend/src/lib/tripo-client.ts:210-214` |
+| W-5 | `@mysten-incubation/memwal@0.0.6` 为 incubation 预发布包(lockfile 已精确锁版本,但成熟度低、delegate key 直传该 SDK);主网前请求 Mysten 安审 | `backend/package.json:19` |
+
+### ⚪ Info / 已驳回 / 跨轨已解
+
+- **W-6(驳回)**:`MEMWAL_SERVER_URL` "SSRF" → 复核**驳回**降 Low。值仅来自 server 端 env、无任何攻击者可达输入路径,不构成 SSRF;能改该 env 的人本就能直接读 `MEMWAL_DELEGATE_KEY`,前置条件 ≥ 收益。剩一条 Low 硬化:启动校验 `https://` 防误配 http 明文外发。`backend/src/lib/memwal-client.ts:119`
+- **W-7(驳回)**:`MemwalClient.remember()` namespace 未校验 → 复核**驳回**降 Info。穷举所有 caller,namespace 一律服务端从 JWT sub 派生 + 正则校验 + normalize,客户端无字段可传;攻击依赖"假想的未来 caller",属纵深硬化非现存漏洞。`backend/src/routes/memory.ts`
+- **W-8(跨轨已解)**:`collection.ts:98` encryptedBase cap 校验的"冷启动 RPC 失败 fail-open?"疑问 → auth 轨已读 `capVerifier.ts:85` 证实 **RPC error fail-closed**(返 false),非问题。建议仍在 `server.ts` 预注入 capVerifier 以纳入测试覆盖。
+- **B-11(Info,配置 footgun)**:`paymentDigest` 为 `.optional()`,付费门仅当 `deps.paymentVerifier` 接线时才强制;`buildServerApp` 路径未接 verifier → 经该路径部署会**整门跳过**白嫖。建议 fail-closed(prompt-mode 该收费却无 verifier 时 503)+ 付费/鉴权路由 schema 加 `.strict()`。`backend/src/lib/schema.ts` / `backend/src/routes/generate.ts:61`
+- **W-9(确认 clean,正向)**:后端**从不接触明文 AES key**。forker 解密后的 GLB 明文仅进 `/api/collection/build` 做材质替换、内存即弃(`collection.ts:97` 注释 NO plaintext persistence);Seal-wrap 的 32B key + sealId 只走链上 PTB(`modelTxBuilders.ts:197-198`),不入任何后端 API。信封加密架构对"后端不见 key"实现正确。
+- **供应链澄清**:audit brief 提的"`@mysten/walrus` unpin 到 main 分支"**未坐实**——`frontend` 锁 `1.1.7`、`backend` 锁 memwal `0.0.6`,pnpm-lock 均精确解析,无 floating VCS ref。
+- **确认 clean(后端)**:无提交私钥(`git grep` suiprivkey1/AIza/sk- 皆空,`.env*` 均 gitignore);3rd-party key 仅作 `Authorization: Bearer` header、从不 stringify/log/返回;JWT 无 alg-confusion(`jwt.ts` 显式钉 HS256 + zod 二次校验 + sub 正则)、secret 启动 `assertJwtSecret` 硬校验;受保护路由命名空间一律从 JWT sub 派生**无 IDOR**;`nonce z.string().min(1)` 经复核**非漏洞**(server 自生成 256-bit nonce,客户端弱串仅会 miss Map 返 401)。
+
+### 严重度汇总(Track 4–5,复核后)
+
+| 级别 | 数量 | 编号 |
+|---|---|---|
+| 🟠 High | 1 | B-1 |
+| 🟡 Medium | 6 | B-2 · B-3 · B-4 · W-1 · W-2 · W-3 · W-4(注:W-4 与 W-3 同属 aggregator,共 6 项 Medium) |
+| 🟢 Low | 7 | B-5…B-10 · W-5 |
+| ⚪ Info/驳回/已解 | 6 | W-6 · W-7 · W-8 · W-9 · B-11 · 供应链澄清 |
+
+**Step 3 人工 triage 必做(需人工核实)**:B-1(testnet 实测 digest 重放,`needs_human_verification`)· W-3(切主网前必修,否则读路径全断)。
+
+### ✅ 修复状态(2026-06-04,全部 Medium 一起修)
+
+经 plan(`docs/plans/agile-orbiting-pearl.md`)+ 6-reviewer pass(ce-correctness / ce-adversarial / ce-security / ce-testing / ce-api-contract / ce-julik-frontend-races)落地。Backend 306 测试 + worker smoke 6 + 前端 aggregator 13 全绿;`/browse` 浏览器实测 4/4 缩略图真链 ID 正常解析(W-4 不误杀)。
+
+| 编号 | 状态 | 落地 |
+|---|---|---|
+| 🟠 B-1 | ✅ 修复(D-088) | spent_payments SQLite 表 + 原子 INSERT OR IGNORE 防重放(跨重启/实例)+ 1h recency 窗。完整 per-request 绑定(Option B)推迟 v1.1 → **OQ-033** |
+| 🟡 B-2 | ✅ 修复 | delegate 私钥改写入 0600 gitignore 文件(`backend/.env.memwal-delegate`)仅打印路径;错误处理仅打 message |
+| 🟡 B-3 | ✅ 修复 | `/challenge` per-IP 限速(默认 30/min,429)+ nonce Map 100k 上限(sweep 后逐最旧)|
+| 🟡 B-4 | ✅ 修复(D-089) | 自付旁路改 gate 在显式 `TRIPO_FEE_OPERATOR`(默认 deployer),非 `sender==treasury` |
+| 🟡 W-1 | ✅ 修复 | worker 不再转发 `url.search`;缓存键 pathname-only |
+| 🟡 W-2 | ✅ 修复 | collections/memory/auth 限速 Map 加 50k 上限 + 逐最旧 |
+| 🟡 W-3 | ✅ 修复 | `WALRUS_AGGREGATOR` 改 `VITE_WALRUS_AGGREGATOR` env 驱动(testnet 默认)|
+| 🟡 W-4 | ✅ 修复 | aggregator.ts `BLOB_ID_RE` charset 守卫(畸形 ID→''/null)+ worker id 段 charset 校验(400)|
+
+**Review pass 结论**:对抗 + 安全 reviewer 均未发现可利用绕过(防重放原子性 ✓、worker 穿越/投毒已闭合 ✓、operator 旁路外部不可达 ✓)。发现并已修 **1 个真实缺陷**:`TrackPage.tsx:252` 是唯一直接 `fetch(glbUrlForToken())` 的调用方(其余走 PreviewCanvas 的 `!glbUrl` 守卫),W-4 的 ''-返回会让 `fetch('')` 命中 app HTML(`res.ok` 仍 true)→ 已加 `if (!url)` 守卫 + 测试。
+
+**已记录残留(非阻断,见 OQ-034)**:
+- operator 旁路仍跳过金额/收款校验 —— 但仅 deployer-key 签发的 JWT 可达(非外部升级),且自付 NET≈-gas 本就过不了金额校验,属 D-034/D-089 既定取舍。
+- recency 窗在 RPC 缺 `timestampMs` 时 fail-open(已加测试锁定该契约)—— 窄:已 checkpoint 的旧 tx 必带 timestamp;spent-set 仍绑定每 digest 一次。
+- 限速 Map 逐最旧在 50k 满时可被"刷满→重置某 key 窗口",自限(成本 = MAX_KEYS 次请求);W-2 主目标(限内存)已达成。
+- `encryptedFork.ts:231` / `LaunchCollectionPage.tsx:526` 直接拼 `WALRUS_AGGREGATOR`+链上 ID,绕过 `blobUrl()` —— 生产指向 CDN worker 时由 worker 兜底校验;raw aggregator(本地 dev)无 W-4 防护。→ **OQ-034**
+- W-2 Map-cap 分支无直接单测(逻辑与已测的 nonce-store 逐出一致)→ **OQ-034**
 
 ---
 
 ## 附:Workflow 运行元数据
 
+**Track 1–3**(Seal/Move/frontend,2026-06-04 早):
 - 6 agents · 434,039 subagent tokens · 201 tool uses · 507s
 - agentType: sui-security-guard-subagent / sui-developer-subagent / sui-red-team-subagent / sui-kiosk-subagent / sui-frontend-subagent / sui-zklogin-subagent
 - 原始结构化输出: `tasks/wzy5rdwi0.output`(Run ID `wf_5de7c7d8-3e9`)
+
+**Track 4–5**(后端/Walrus,2026-06-04 补审):
+- 8 agents · 370,039 subagent tokens · 157 tool uses · 376s
+- 4 dimension 并行 + High/Critical 对抗复核:ce-security-reviewer / sui-security-guard-subagent / ce-api-contract-reviewer / sui-walrus-subagent / ce-adversarial-reviewer
+- 原始结构化输出: `tasks/wnc6emf8k.output`(Run ID `wf_cc39a5c8-615`)

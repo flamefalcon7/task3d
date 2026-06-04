@@ -1,5 +1,44 @@
 # Phase Progress
 
+## Last Updated: 2026-06-04 (**Audit Track 4–5 backend+Walrus run + all-Medium remediation — in working tree on `fix/seal-id-prefix-bypass`, NOT committed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **17 of 38**
+- Days to demo day (7/20–21): ~46
+- Days to winners (8/27): ~84
+
+### Current Phase
+Phase 4 — security hardening. Ran the deferred audit **Track 4–5** (backend TS/Hono + Walrus), read-only Workflow (4 dimensions + adversarial verify), then implemented **all 7 confirmed Medium + the 1 High** per plan `docs/plans/agile-orbiting-pearl.md`. Report updated: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` §Track 4–5.
+
+### Completed This Session
+- **Track 4–5 audit** — 8 agents, read-only, no mcp-server build, no chain tx. Adversarial verify DROPPED 2 false-High (W-6 SSRF, W-7 namespace); confirmed B-1 (High) + 6 Medium. "@mysten/walrus unpinned" refuted (pinned).
+- **B-1 (High) → D-088** — durable replay guard: `spent_payments` SQLite table + atomic `INSERT OR IGNORE` (`isPaymentSpent`/`markPaymentSpent`) wired into `paymentVerifier.ts` + injected in `server.ts`; + 1h recency window. Full per-request binding (Option B) deferred → OQ-033.
+- **B-4 (Med) → D-089** — self-pay bypass gated on explicit `TRIPO_FEE_OPERATOR` (default deployer) not `sender==treasury`. `client.ts` + `.env.example`.
+- **B-3 (Med)** — `/challenge` per-IP rate limit (30/min) + nonce Map 100k cap (sweep→evict-oldest) in `auth.ts`.
+- **W-2 (Med)** — 50k cap + evict-oldest on the limiter `hits` Map in `collections.ts` / `memory.ts` / `auth.ts`.
+- **W-1 (Med)** — `cdn-worker/src/worker.js`: drop `url.search` from origin fetch + cache key (pathname-only).
+- **W-3 (Med)** — `WALRUS_AGGREGATOR` env-driven via `VITE_WALRUS_AGGREGATOR` (testnet default) in `frontend/src/walrus/aggregator.ts` + `.env.example`.
+- **W-4 (Med)** — `BLOB_ID_RE` charset guard in aggregator.ts (malformed id → ''/null) + worker id-segment charset check (400).
+- **B-2 (Med)** — `memwal-spike.ts` writes the delegate key to a 0600 gitignored file (`backend/.env.memwal-delegate`), prints only the path; error handler message-only.
+- **Tests** — backend **306** pass (+paymentVerifier/quota-store/auth additions); worker smoke **6/6** (new `cdn-worker/test/`); frontend aggregator **13** + TrackPage suite pass. Frontend `tsc -b` is **pre-existingly red (46 errors, unrelated)** — flagged separately.
+- **Browser-verified** (`/browse`, agent-browser): 4/4 thumbnails resolve real on-chain ids, 0 empty/broken, no new console errors (W-4 doesn't false-reject real base64url ids; W-3 default resolves).
+- **6-reviewer pass** (correctness/adversarial/security/testing/api-contract/julik-races): no exploitable bypass. Found + **fixed 1 real defect** — `TrackPage.tsx:252` direct `fetch(glbUrlForToken())` of the new ''-return → added `if (!url)` guard + recency-fail-open + retry tests.
+- **Docs** — ADR D-088/D-089; audit report remediation table + residuals; OQ-033 (Option B) + OQ-034 (residual hardening). `docs/decisions.md` reserved marker → D-090.
+
+### In Progress / Not Done
+- The earlier Move/frontend batch (D-085 `490180c`, D-086/D-087/M-4 `5b2d4d8`, N-1 `e7d6d8c`) is **already committed** on `fix/seal-id-prefix-bypass`. This Track 4–5 remediation was committed on top in 6 scoped batches (B-1/B-4+D-088/089 · B-3/W-2 · W-1 · W-3/W-4+TrackPage · B-2 · docs).
+- **Pre-existing frontend `tsc -b` failure (46 errors)** in Babylon/test files unrelated to this work — surfaced during verification; the frontend `pnpm test` (which runs `tsc -b` first) cannot go green until addressed. Worth a separate cleanup pass.
+- **Testnet republish still pending** for the contract fixes (D-085/D-086/D-087) — they only take effect after republish (new package id → networkConfig + Seal re-bind).
+- **Branch not yet merged to `main`** — `fix/seal-id-prefix-bypass` holds the full audit-remediation stack (C-1/H-1/Move guards + Track 4–5). Merge when ready.
+
+### Next Concrete Step
+Decide on merging `fix/seal-id-prefix-bypass` → `main`. Then resolve N-1 (Enoki key portal check) for submission. Defer: OQ-033/OQ-034, the pre-existing frontend tsc cleanup, testnet republish.
+
+### Notes for Next Session
+The frontend tsc red (46 errors) is NOT from this work (confirmed via `git stash`: same 46 on clean HEAD). The backend SQLite store (`quota-store.ts`) now also holds `spent_payments` — its file is `TUSK_DB_PATH` (default `./data/quota.db`); a fresh deploy starts with an empty spent-set (acceptable — durability is per-deployment-lifetime, which is the point).
+
+---
+
 ## Last Updated: 2026-06-04 (**Security audit remediation — D-085 committed; D-086/D-087/M-4 + M-2 verify in working tree, NOT committed**)
 
 ### Hackathon Tracker

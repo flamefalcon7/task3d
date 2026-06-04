@@ -568,3 +568,28 @@ D-085 fixed the seal_id prefix-truncation bypass on-chain (fixed 32-byte seal_id
 2. **v1.1 hardening: revisit Alt A (derive `seal_id = object::id(model)`).** D-085 chose fixed-length (B) over object-id binding (A) for v1 because A needs a two-phase publish (extra tx/popup + new partial-init state). B fully closes C-1 and is cryptographically equivalent for any executable attack, but A is *structurally* unforgeable. If encrypted content becomes high-value before mainnet (8/27), evaluate migrating to A. Tradeoff documented in `docs/solutions/design-patterns/seal-id-prefix-binding-fixed-length-2026-06-04.md` and D-085 Alternatives.
 
 **Blocker level**: 🟢 Deferred (fix already shipped; these are confirmation + future-hardening).
+
+---
+
+## OQ-033: PaymentVerifier v1.1 — full per-request binding (Option B)
+
+**Surfaced**: 2026-06-04 (audit Track 4–5 B-1; fix shipped as D-088).
+
+D-088 closed the practical replay (durable spent-set + 1h recency window). The deferred **Option B** is full per-request binding: the client embeds a server-issued one-time nonce in the transfer PTB (as a pure arg / memo object), and `verify()` asserts the tx contains it — so a payment can only ever satisfy the exact generation it was made for, even before the spent-set/recency apply. Deferred because it touches backend + frontend + PTB shape (frontend-touching, full review) and is heavier than the 6/21 crunch warrants; the durable guard suffices pre-mainnet (no payment history to mine). Also: the recency window **fail-opens** when the RPC omits `timestampMs` (documented + tested) — Option B removes that reliance. Revisit before mainnet (8/27) if prompt-mode payments become high-value.
+
+**Blocker level**: 🟢 Deferred (practical replay already closed by D-088).
+
+---
+
+## OQ-034: Audit Track 4–5 residual hardening (low, post-demo)
+
+**Surfaced**: 2026-06-04 (6-reviewer pass on the Medium-batch remediation).
+
+Non-blocking residuals the reviewers surfaced; none reachable as an external exploit, all deferred to a post-demo hardening pass:
+
+1. **W-4 defense-in-depth gap — direct aggregator concatenation.** `frontend/src/collection/encryptedFork.ts:231` and `LaunchCollectionPage.tsx:526` build `${WALRUS_AGGREGATOR}/v1/blobs/…${onChainId}` directly, bypassing `aggregator.ts`'s `blobUrl()` `BLOB_ID_RE` guard. Defended-in-depth only when `VITE_WALRUS_AGGREGATOR` points at the CDN worker (which re-validates); a raw-aggregator fallback (local dev / unset env) has no charset guard there. Fix: export `blobUrl()` and route both sites through it.
+2. **W-2 Map-cap has no direct unit test.** The 50k-key oldest-eviction branch in `collections.ts` / `memory.ts` / `auth.ts` limiters is unreachable via the route without 50k keys and the function is private. Logic is identical to the *tested* nonce-store eviction. Fix: extract a small injectable-cap limiter factory (mirror `createInMemoryNonceStore`) and assert the eviction.
+3. **Limiter eviction-reset primitive.** At 50k keys, flooding distinct keys can evict a throttled key and reset its window (self-limiting: costs ~MAX_KEYS requests). Optional hardening: prefer evicting an *expired* entry before a live one (as the nonce store already does).
+4. **operator bypass skips amount/destination** (paymentVerifier) — only reachable by a deployer-key-signed JWT (not external), and self-pay NET≈-gas can't pass the amount check anyway. Accepted D-034/D-089 tradeoff; noted for completeness.
+
+**Blocker level**: 🟢 Deferred (post-demo / 8/27 mainnet-window polish).

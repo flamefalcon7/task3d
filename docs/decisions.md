@@ -3926,6 +3926,55 @@ Add three asserts + abort codes:
 
 ---
 
+## D-088: Durable Tripo-payment replay guard + recency window (audit B-1)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Audit Track 4–5 finding **B-1** (High, adversarially upheld): the off-chain Tripo fee-gate (`paymentVerifier.ts`, D-034) validated a transfer's success / sender / amount / destination but (a) never bound the digest to the specific generation request, and (b) guarded against double-spend only with a per-process in-memory `Set`. A backend restart/redeploy or a second load-balanced instance wiped the set, letting a single valid payment digest be replayed to fund unlimited generations — the operator pays the Tripo credits (~60–120/gen).
+
+### Decision
+Two-part fix, backend-only:
+1. **Durable replay guard.** Persist consumed digests in the existing SQLite quota store (`spent_payments(digest PK, spent_at)`) via `isPaymentSpent` / `markPaymentSpent`. `markPaymentSpent` is an atomic `INSERT OR IGNORE` whose `changes === 0` return is the authoritative replay signal — closing the old check-then-add race. The verifier accepts an injected `store`; with none (unit tests) it falls back to the legacy in-memory `Set`.
+2. **Recency window.** Reject a payment tx older than `maxAgeMs` (default 1h) via its `timestampMs`, so an old unrelated transfer to the treasury can't be replayed as fresh payment. If the RPC omits `timestampMs` the check is skipped (no false-reject of a just-landed tx); the durable spent-set still binds it.
+
+Full **per-request binding** (a server-issued nonce embedded in the transfer PTB) is **deferred to v1.1** — it touches frontend + PTB shape and is heavier than the crunch warrants. Tracked as **OQ-033**. The durable spent-set + recency window closes the practical replay: pre-mainnet there is no payment history to mine, and "1 payment = 1 generation" holds because each digest is consumable exactly once, durably.
+
+### Consequences
+- ✅ B-1 closed for practical purposes; survives restart + shared across instances.
+- ✅ New `payment_stale` reason; `payment_replayed` now durable.
+- ⚠️ The recency window assumes the RPC returns `timestampMs` for checkpointed txs; a missing field degrades to spent-set-only (documented, not fail-closed to avoid false rejects).
+- 🔮 OQ-033: v1.1 may add full request-binding (Option B) for defence-in-depth.
+
+### Related
+- Audit: `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` §Track 4–5 (B-1). Files: `backend/src/lib/quota-store.ts`, `backend/src/sui/paymentVerifier.ts`, `backend/src/server.ts`. Supersedes the in-memory-only guard noted in D-034. See OQ-033.
+
+---
+
+## D-089: Self-pay verifier bypass gated on explicit operator identity (audit B-4)
+
+**Status**: Accepted
+**Date**: 2026-06-04
+**Phase**: Phase 4 — security hardening
+
+### Context
+Audit Track 4–5 finding **B-4** (Medium): the verifier short-circuited to `ok` whenever `sender === treasury`, skipping the amount check (a deployer paying their own treasury nets the +fee balanceChange to ~-gas, so the normal check would wrongly fail). But the gate keyed on the *treasury*, not the operator. If a deploy ever pointed `TRIPO_FEE_TREASURY` at a shared/multisig/sponsor address that is also a legitimate user wallet, that user would get unlimited free generations (any self-tx digest passes, amount unchecked).
+
+### Decision
+Gate the bypass on an explicit `operatorAddress` (the deployer who legitimately runs `/create` against their own treasury), introduced as `TRIPO_FEE_OPERATOR` (defaults to `NETWORK.deployerAddress`). The bypass fires only when `operatorAddress` is set AND `sender === operatorAddress`; when unset, no bypass. This decouples the self-pay exception from the treasury config, so a treasury pointed at a user wallet no longer grants that user the bypass. `.env.example` documents that any deploy whose treasury differs from the deployer must set `TRIPO_FEE_OPERATOR` explicitly.
+
+### Consequences
+- ✅ B-4 closed: structural `sender == treasury` coincidence no longer grants free generations.
+- ⚠️ Existing self-pay tests updated to pass `operatorAddress` (the deployer==treasury demo scenario still works once the operator is configured, which production wiring does by default).
+- 🔮 The recency + durable-replay guard (D-088) still applies on the operator path.
+
+### Related
+- Audit: §Track 4–5 (B-4). Files: `backend/src/sui/paymentVerifier.ts`, `backend/src/sui/client.ts`, `backend/src/server.ts`. Related: D-034 (fee model), D-088.
+
+---
+
 # Reserved Decision Numbers
 
-D-088 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-090 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
