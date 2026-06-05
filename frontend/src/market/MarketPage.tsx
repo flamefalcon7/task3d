@@ -171,6 +171,27 @@ const cardMeta: CSSProperties = {
   fontSize: 11,
 };
 
+// Click target: the preview well + name navigate to the collection detail
+// page. Reproduces gridCell's column gap so wrapping two children in one Link
+// doesn't collapse the spacing; the buy/list controls stay OUTSIDE the link.
+const cardLink: CSSProperties = {
+  textDecoration: 'none',
+  color: 'inherit',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  cursor: 'pointer',
+};
+
+// Small accent affordance so the card reads as clickable.
+const cardDetailHint: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.accent,
+  letterSpacing: '1px',
+  fontSize: 10,
+  marginTop: 4,
+};
+
 const priceRow: CSSProperties = {
   paddingTop: 12,
   borderTop: tokens.border.divider,
@@ -469,12 +490,8 @@ export function MarketPage() {
                 const royalty = royaltyOwedMist(l.priceMist);
                 const total = l.priceMist + royalty;
                 const royaltyPct = (Number(royalty) / Number(l.priceMist)) * 100;
-                return (
-                  <div
-                    key={l.tokenId}
-                    data-testid={`listing-${l.tokenId}`}
-                    style={gridCell}
-                  >
+                const preview = (
+                  <>
                     <div style={cardWell}>
                       {l.patchId ? (
                         <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
@@ -487,7 +504,28 @@ export function MarketPage() {
                     <div>
                       <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
                       <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
+                      {l.collectionId && <div style={cardDetailHint}>VIEW COLLECTION →</div>}
                     </div>
+                  </>
+                );
+                return (
+                  <div
+                    key={l.tokenId}
+                    data-testid={`listing-${l.tokenId}`}
+                    style={gridCell}
+                  >
+                    {l.collectionId ? (
+                      <Link
+                        to={`/collection/${l.collectionId}`}
+                        data-testid={`listing-details-${l.tokenId}`}
+                        aria-label={`View details for ${l.name || l.tokenId}`}
+                        style={cardLink}
+                      >
+                        {preview}
+                      </Link>
+                    ) : (
+                      preview
+                    )}
                     <div style={priceRow}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={priceMain}>{mistToSui(l.priceMist)} SUI</span>
@@ -526,21 +564,39 @@ export function MarketPage() {
           )}
           {sellable.length > 0 && (
             <div style={cardGrid}>
-              {sellable.map((t, idx) => (
+              {sellable.map((t, idx) => {
+                const preview = (
+                  <>
+                    <div style={cardWell}>
+                      {t.patchId || t.blobId ? (
+                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                      ) : (
+                        <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                      )}
+                      <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
+                      <span style={cardLayerBadge}>YOURS</span>
+                    </div>
+                    <div>
+                      <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
+                      <div style={cardMeta}>{truncate(t.tokenId)}</div>
+                      {t.collectionId && <div style={cardDetailHint}>VIEW COLLECTION →</div>}
+                    </div>
+                  </>
+                );
+                return (
                 <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
-                  <div style={cardWell}>
-                    {t.patchId || t.blobId ? (
-                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
-                    ) : (
-                      <span style={cardWellPlaceholder}>— NO PREVIEW</span>
-                    )}
-                    <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
-                    <span style={cardLayerBadge}>YOURS</span>
-                  </div>
-                  <div>
-                    <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
-                    <div style={cardMeta}>{truncate(t.tokenId)}</div>
-                  </div>
+                  {t.collectionId ? (
+                    <Link
+                      to={`/collection/${t.collectionId}`}
+                      data-testid={`owned-details-${t.tokenId}`}
+                      aria-label={`View details for ${t.name || t.tokenId}`}
+                      style={cardLink}
+                    >
+                      {preview}
+                    </Link>
+                  ) : (
+                    preview
+                  )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: tokens.border.divider }}>
                     <input
                       data-testid={`price-${t.tokenId}`}
@@ -563,7 +619,8 @@ export function MarketPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

@@ -125,6 +125,15 @@ describe('MarketPage', () => {
     expect(screen.getByTestId('no-listings')).toBeTruthy();
   });
 
+  it('links the listing preview to its collection detail page (buy button excluded)', () => {
+    useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
+    renderPage();
+    const link = screen.getByTestId(`listing-details-${TOKEN}`) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/collection/0xc1');
+    // Clicking BUY must not also navigate — the button lives outside the link.
+    expect(screen.getByTestId(`buy-${TOKEN}`).closest('a')).toBeNull();
+  });
+
   it('renders a listing and buys it via the purchase builder', async () => {
     useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
     renderPage();
