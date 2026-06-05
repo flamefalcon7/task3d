@@ -3,8 +3,12 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useCollectionById } from '../integration/useCollections';
 import { useModelIndex } from '../browse/useModelIndex';
-import { glbUrlForSummary } from '../walrus/aggregator';
+import {
+  previewStillUrlsForSummary,
+  thumbSourceForSummary,
+} from '../walrus/aggregator';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { TurntablePreview } from '../ux/TurntablePreview';
 import {
   card,
   displayHeadline,
@@ -226,11 +230,12 @@ export function CollectionDetailPage() {
   const name = baseModel?.name
     ? `${baseModel.name} collection`
     : `Collection ${truncate(collection.collectionId)}`;
-  // Only build a preview url when the base model actually carries a GLB source.
-  const previewUrl =
-    baseModel && (baseModel.patchId || baseModel.glbBlobId || baseModel.blobId)
-      ? glbUrlForSummary(baseModel)
-      : '';
+  // plan-026 D-075 — encrypted L1 bases render their PUBLIC preview still
+  // (turntable <img>), NEVER the ciphertext glbBlobId as a GLB. Mirrors
+  // CollectionCard: thumbSourceForSummary picks glb vs still; no source →
+  // placeholder.
+  const thumb = baseModel ? thumbSourceForSummary(baseModel) : null;
+  const stills = baseModel ? previewStillUrlsForSummary(baseModel) : [];
 
   return (
     <div style={pagePaper} data-testid="collection-detail">
@@ -249,8 +254,17 @@ export function CollectionDetailPage() {
 
         <div style={twoCol}>
           <div style={previewWell}>
-            {previewUrl ? (
-              <PreviewCanvas glbUrl={previewUrl} />
+            {!thumb ? (
+              <span style={previewPlaceholder}>— NO PREVIEW</span>
+            ) : thumb.kind === 'glb' && thumb.url ? (
+              <PreviewCanvas glbUrl={thumb.url} />
+            ) : thumb.url ? (
+              <TurntablePreview
+                urls={stills}
+                testId="collection-preview-still"
+                alt={`${name} preview`}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
             ) : (
               <span style={previewPlaceholder}>— NO PREVIEW</span>
             )}
