@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { useOwnedTokens, useTokenById, type OwnedToken } from './useOwnedTokens';
 import { glbUrlForToken } from '../walrus/aggregator';
@@ -12,17 +12,25 @@ import { getPb, setPb } from './personalBest';
 import { ResultOverlay } from './ResultOverlay';
 import { formatHudTime } from './formatLapTime';
 import { Countdown } from './Countdown';
-import { displayHeadline, eyebrow, monoLabel, tokens } from '../ux/tokens';
+import {
+  RAGE_RACING,
+  arcadeLabel,
+  arcadeTitle,
+  studioCredit,
+  wordmark,
+} from './rageRacing/brand';
 
-// Phase 3 U6 / U11 — /track page. Wraps the Babylon scene in a React shell:
-// query owned NftTokens → render carousel + canvas → rebuild scene each time
-// the selected token changes. D-004: show a loading overlay while the Walrus
-// fetch + scene-build is in flight (critical for the demo recording so the
-// canvas doesn't go blank during the swap).
+// /track is reskinned as "RAGE RACING by Deksat Studio" — a third-party indie
+// game that imports a Tusk3D collection and drives it (plan 2026-06-05-001).
+// The chrome (Tusk3D masthead) is hidden on this route (HIDDEN_ROUTES in
+// ux/TopNav). NOTHING here should read as a Tusk3D feature: the identity, copy,
+// and palette all belong to Rage Racing. The only nod back to Tusk3D is the
+// on-canvas provenance caption — which is the POINT: it proves the car is a
+// Tusk3D/Walrus asset running in someone else's game.
 //
-// Brutalist editorial styling per D-044: chrome recedes, full-bleed black
-// canvas, mono uppercase HUDs without borders, italic-serif empty/error
-// states. The page IS the well.
+// All hooks, refs, effects, override modes (?model= / ?blob=), and data-testids
+// are preserved verbatim from the pre-reskin page — this is a styling + copy
+// swap, not a behavior change.
 
 interface LastResult {
   lapMs: number;
@@ -30,11 +38,17 @@ interface LastResult {
   isNewPb: boolean;
 }
 
-// Page-level styles.
+// Truncate a chain/Walrus id for the provenance caption.
+function truncateId(id: string, head = 6, tail = 4): string {
+  if (!id || id.length <= head + tail + 1) return id;
+  return `${id.slice(0, head)}…${id.slice(-tail)}`;
+}
+
+// Page-level styles (Electric Arcade — see rageRacing/brand).
 
 const wellPage: CSSProperties = {
-  background: tokens.color.well,
-  color: tokens.color.wellInk,
+  background: RAGE_RACING.color.surface,
+  color: RAGE_RACING.color.ink,
   minHeight: '100vh',
 };
 
@@ -51,24 +65,13 @@ const pageHeader: CSSProperties = {
   marginBottom: 16,
 };
 
-const wellEyebrow: CSSProperties = {
-  ...eyebrow,
-  color: 'rgba(255,255,255,0.7)',
-};
-
-const wellHeadline: CSSProperties = {
-  ...displayHeadline,
-  color: tokens.color.wellInk,
-  fontSize: 28,
-};
-
 const canvasShell: CSSProperties = {
   position: 'relative',
   width: '100%',
   height: '68vh',
-  background: tokens.color.well,
+  background: RAGE_RACING.color.surface,
   overflow: 'hidden',
-  border: '1.5px solid rgba(255,255,255,0.15)',
+  border: `1.5px solid rgba(255,229,0,0.25)`,
 };
 
 const sceneOverlay: CSSProperties = {
@@ -78,7 +81,7 @@ const sceneOverlay: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   background: 'rgba(0, 0, 0, 0.85)',
-  color: tokens.color.wellInk,
+  color: RAGE_RACING.color.ink,
 };
 
 const sceneOverlayCenter: CSSProperties = {
@@ -86,31 +89,54 @@ const sceneOverlayCenter: CSSProperties = {
   padding: 24,
 };
 
+// HUD — keep the literal "Lap:"/"Best:" prefixes readable (not uppercased).
 const hudLap: CSSProperties = {
   position: 'absolute',
   top: 16,
   left: 24,
-  ...monoLabel,
-  color: tokens.color.wellInk,
+  fontFamily: RAGE_RACING.font.mono,
+  color: RAGE_RACING.color.ink,
   letterSpacing: '2px',
   fontSize: 18,
-  textTransform: 'none',
 };
 
 const hudBest: CSSProperties = {
   position: 'absolute',
   top: 16,
   right: 24,
-  ...monoLabel,
-  color: 'rgba(255,255,255,0.7)',
+  fontFamily: RAGE_RACING.font.mono,
+  color: RAGE_RACING.color.inkDim,
   letterSpacing: '1.5px',
   fontSize: 13,
-  textTransform: 'none',
+};
+
+// Provenance caption — the proof line. Bottom-left of the canvas, HUD-style.
+const provenanceBox: CSSProperties = {
+  position: 'absolute',
+  left: 16,
+  bottom: 14,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  pointerEvents: 'none',
+};
+
+const provenanceHead: CSSProperties = {
+  ...arcadeLabel,
+  color: RAGE_RACING.color.accent,
+  fontSize: 10,
+};
+
+const provenanceSub: CSSProperties = {
+  fontFamily: RAGE_RACING.font.mono,
+  fontSize: 10,
+  letterSpacing: '1px',
+  color: RAGE_RACING.color.inkFaint,
 };
 
 const driveHint: CSSProperties = {
-  ...monoLabel,
-  color: 'rgba(255,255,255,0.5)',
+  ...arcadeLabel,
+  color: RAGE_RACING.color.inkFaint,
   marginTop: 16,
   textTransform: 'none',
   letterSpacing: '0.5px',
@@ -123,24 +149,23 @@ const emptyStack: CSSProperties = {
   alignItems: 'flex-start',
 };
 
-const emptyTitle: CSSProperties = {
-  ...displayHeadline,
-  color: tokens.color.wellInk,
-  fontSize: 36,
-};
-
 const emptySub: CSSProperties = {
-  ...monoLabel,
-  color: 'rgba(255,255,255,0.6)',
+  ...arcadeLabel,
+  color: RAGE_RACING.color.inkDim,
   letterSpacing: '0.5px',
   textTransform: 'none',
 };
 
-const emptyLink: CSSProperties = {
-  ...monoLabel,
-  color: tokens.color.accent,
-  textDecoration: 'underline',
-};
+// Rage Racing masthead — wordmark + studio credit. Replaces the Tusk3D
+// "— L3 / DRIVE / Tiny Racetrack." editorial header.
+function RageRacingHeader() {
+  return (
+    <div style={pageHeader}>
+      <h1 style={wordmark}>{RAGE_RACING.game}</h1>
+      <span style={studioCredit}>{RAGE_RACING.studioCredit}</span>
+    </div>
+  );
+}
 
 export function TrackPage() {
   const account = useCurrentAccount();
@@ -254,7 +279,7 @@ export function TrackPage() {
         // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
         // which would slip past the !res.ok check and fail later as a confusing
         // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
-        if (!url) throw new Error('This token has no loadable model.');
+        if (!url) throw new Error('This car has no loadable model.');
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
         const carGlbBytes = new Uint8Array(await res.arrayBuffer());
@@ -402,13 +427,10 @@ export function TrackPage() {
     return (
       <div style={wellPage} data-testid="track-needs-signin">
         <div style={wellMain}>
-          <div style={pageHeader}>
-            <span style={wellEyebrow}>— L3 / DRIVE</span>
-            <h1 style={wellHeadline}>Tiny Racetrack.</h1>
-          </div>
+          <RageRacingHeader />
           <div style={emptyStack}>
-            <p style={emptyTitle}>Connect a wallet.</p>
-            <p style={emptySub}>TO DRIVE THE NFTS YOU OWN</p>
+            <p style={arcadeTitle}>Connect your wallet to hit the track.</p>
+            <p style={emptySub}>RAGE RACING LOADS THE CARS YOU OWN ON-CHAIN</p>
           </div>
         </div>
       </div>
@@ -418,7 +440,10 @@ export function TrackPage() {
     return (
       <div style={wellPage} data-testid="track-loading-variants">
         <div style={wellMain}>
-          <p style={{ ...monoLabel, color: 'rgba(255,255,255,0.7)' }}>— LOADING YOUR NFTS</p>
+          <RageRacingHeader />
+          <p style={{ ...arcadeLabel, color: RAGE_RACING.color.inkDim }}>
+            — LOADING YOUR GARAGE
+          </p>
         </div>
       </div>
     );
@@ -427,32 +452,35 @@ export function TrackPage() {
     return (
       <div style={wellPage} data-testid="track-variants-error">
         <div style={wellMain}>
-          <p style={{ ...monoLabel, color: tokens.color.err, textTransform: 'none', letterSpacing: '0.5px' }}>
-            × FAILED · Couldn't load your NFTs: {tokensError.message}
+          <RageRacingHeader />
+          <p
+            style={{
+              ...arcadeLabel,
+              color: RAGE_RACING.color.err,
+              textTransform: 'none',
+              letterSpacing: '0.5px',
+            }}
+          >
+            × FAILED · Couldn't load your cars: {tokensError.message}
           </p>
         </div>
       </div>
     );
   }
   if (tokensList.length === 0) {
+    // R8 — Rage Racing voice, NO Tusk3D-internal route as the primary CTA.
+    // The game doesn't send you "back to the marketplace"; it just tells you
+    // it needs a car from the collection it reads.
     return (
       <div style={wellPage} data-testid="track-empty">
         <div style={wellMain}>
-          <div style={pageHeader}>
-            <span style={wellEyebrow}>— L3 / DRIVE</span>
-            <h1 style={wellHeadline}>Tiny Racetrack.</h1>
-          </div>
+          <RageRacingHeader />
           <div style={emptyStack}>
-            <p style={emptyTitle}>Nothing to drive yet.</p>
+            <p style={arcadeTitle}>Your garage is empty.</p>
             <p style={emptySub}>
-              MINT A COLLECTION ON{' '}
-              <Link to="/launch" style={emptyLink}>/LAUNCH</Link>{' '}
-              OR BUY ONE ON{' '}
-              <Link to="/market" style={emptyLink}>/MARKET</Link>.
+              RAGE RACING DRIVES CARS MINTED FROM A TUSK3D COLLECTION — ACQUIRE
+              ONE TO ROLL OUT.
             </p>
-            <Link to="/browse" data-testid="track-empty-browse" style={emptyLink}>
-              ← BROWSE
-            </Link>
           </div>
         </div>
       </div>
@@ -462,10 +490,7 @@ export function TrackPage() {
   return (
     <div style={wellPage} data-testid="track-page">
       <div style={wellMain}>
-        <div style={pageHeader}>
-          <span style={wellEyebrow}>— L3 / DRIVE</span>
-          <h1 style={wellHeadline}>Tiny Racetrack.</h1>
-        </div>
+        <RageRacingHeader />
         <CarCarousel
           tokens={tokensList}
           selectedIdx={selectedIdx}
@@ -480,7 +505,7 @@ export function TrackPage() {
           {sceneLoading && (
             <div data-testid="track-scene-loading" style={sceneOverlay}>
               <div style={sceneOverlayCenter}>
-                <p style={{ ...monoLabel, fontSize: 14, letterSpacing: '2px' }}>
+                <p style={{ ...arcadeLabel, fontSize: 14, letterSpacing: '2px' }}>
                   — LOADING TRACK · BABYLON + HAVOK
                 </p>
               </div>
@@ -489,10 +514,10 @@ export function TrackPage() {
           {sceneError && !sceneLoading && (
             <div data-testid="track-scene-error" style={{ ...sceneOverlay, background: 'rgba(40, 0, 0, 0.85)' }}>
               <div style={sceneOverlayCenter}>
-                <p style={{ ...monoLabel, color: tokens.color.err, fontSize: 14, letterSpacing: '2px', marginBottom: 8 }}>
+                <p style={{ ...arcadeLabel, color: RAGE_RACING.color.err, fontSize: 14, letterSpacing: '2px', marginBottom: 8 }}>
                   × LOAD FAILED
                 </p>
-                <p style={{ ...monoLabel, color: tokens.color.wellInk, textTransform: 'none', letterSpacing: '0.5px' }}>
+                <p style={{ ...arcadeLabel, color: RAGE_RACING.color.ink, textTransform: 'none', letterSpacing: '0.5px' }}>
                   {sceneError}
                 </p>
               </div>
@@ -519,6 +544,20 @@ export function TrackPage() {
               <div data-testid="track-hud-best" style={hudBest}>
                 Best: {pb !== null ? formatHudTime(pb) : '—'}
               </div>
+              {/* Provenance caption (R7) — the proof line. This car is a Tusk3D
+                  asset stored on Walrus, running in a different studio's game.
+                  Shows real on-chain / Walrus ids from the selected token. */}
+              {selected && (
+                <div data-testid="track-provenance" style={provenanceBox}>
+                  <span style={provenanceHead}>◇ Imported asset · Sui + Walrus</span>
+                  <span style={provenanceSub}>
+                    {selected.collectionId
+                      ? `collection ${truncateId(selected.collectionId)} · `
+                      : ''}
+                    walrus {truncateId(selected.blobId || selected.patchId || '—')}
+                  </span>
+                </div>
+              )}
             </>
           )}
           {lastResult && (
@@ -530,7 +569,11 @@ export function TrackPage() {
             />
           )}
         </div>
-        <p style={driveHint}>WASD or arrow keys to drive. Press <kbd style={{ fontFamily: tokens.font.mono, padding: '0 4px', border: '1px solid rgba(255,255,255,0.3)' }}>R</kbd> to retry.</p>
+        <p style={driveHint}>
+          WASD or arrow keys to drive. Press{' '}
+          <kbd style={{ fontFamily: RAGE_RACING.font.mono, padding: '0 4px', border: '1px solid rgba(255,255,255,0.3)' }}>R</kbd>{' '}
+          to retry.
+        </p>
       </div>
     </div>
   );

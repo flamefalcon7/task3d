@@ -148,16 +148,45 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-needs-signin')).toBeTruthy();
   });
 
-  it('shows the "buy first" empty state with zero owned variants', () => {
+  it('AE3 — empty state is in Rage Racing voice with NO inward Tusk3D CTA', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
+      loading: false,
+      error: null,
+    });
+    const { container } = renderPage();
+    expect(screen.getByTestId('track-empty')).toBeTruthy();
+    // R8 — no link back into Tusk3D routes as the primary CTA.
+    expect(screen.queryByTestId('track-empty-browse')).toBeNull();
+    const inwardLinks = Array.from(container.querySelectorAll('a')).filter((a) =>
+      ['/browse', '/launch', '/market'].includes(a.getAttribute('href') ?? ''),
+    );
+    expect(inwardLinks).toHaveLength(0);
+  });
+
+  it('AE1 — renders the Rage Racing wordmark, not the Tusk3D track header', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
       loading: false,
       error: null,
     });
     renderPage();
-    expect(screen.getByTestId('track-empty')).toBeTruthy();
-    const link = screen.getByTestId('track-empty-browse') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/browse');
+    expect(screen.getByText('RAGE RACING')).toBeTruthy();
+    expect(screen.queryByText('Tiny Racetrack.')).toBeNull();
+    expect(screen.queryByText(/L3 \/ DRIVE/)).toBeNull();
+  });
+
+  it('AE2 — shows a Sui + Walrus provenance caption for the selected car', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa', blobId: 'blob-abcdef123456' })],
+      loading: false,
+      error: null,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    renderPage();
+    const prov = screen.getByTestId('track-provenance');
+    expect(prov.textContent).toMatch(/Sui \+ Walrus/);
+    expect(prov.textContent).toMatch(/walrus/);
   });
 
   it('renders the carousel + canvas when variants exist', () => {
