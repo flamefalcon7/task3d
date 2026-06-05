@@ -504,7 +504,7 @@ export function MarketPage() {
                     <div>
                       <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
                       <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
-                      {l.collectionId && <div style={cardDetailHint}>VIEW COLLECTION →</div>}
+                      <div style={cardDetailHint}>VIEW DETAILS →</div>
                     </div>
                   </>
                 );
@@ -514,18 +514,14 @@ export function MarketPage() {
                     data-testid={`listing-${l.tokenId}`}
                     style={gridCell}
                   >
-                    {l.collectionId ? (
-                      <Link
-                        to={`/collection/${l.collectionId}`}
-                        data-testid={`listing-details-${l.tokenId}`}
-                        aria-label={`View details for ${l.name || l.tokenId}`}
-                        style={cardLink}
-                      >
-                        {preview}
-                      </Link>
-                    ) : (
-                      preview
-                    )}
+                    <Link
+                      to={`/nft/${l.tokenId}`}
+                      data-testid={`listing-details-${l.tokenId}`}
+                      aria-label={`View details for ${l.name || l.tokenId}`}
+                      style={cardLink}
+                    >
+                      {preview}
+                    </Link>
                     <div style={priceRow}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={priceMain}>{mistToSui(l.priceMist)} SUI</span>
@@ -579,24 +575,20 @@ export function MarketPage() {
                     <div>
                       <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
                       <div style={cardMeta}>{truncate(t.tokenId)}</div>
-                      {t.collectionId && <div style={cardDetailHint}>VIEW COLLECTION →</div>}
+                      <div style={cardDetailHint}>VIEW DETAILS →</div>
                     </div>
                   </>
                 );
                 return (
                 <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
-                  {t.collectionId ? (
-                    <Link
-                      to={`/collection/${t.collectionId}`}
-                      data-testid={`owned-details-${t.tokenId}`}
-                      aria-label={`View details for ${t.name || t.tokenId}`}
-                      style={cardLink}
-                    >
-                      {preview}
-                    </Link>
-                  ) : (
-                    preview
-                  )}
+                  <Link
+                    to={`/nft/${t.tokenId}`}
+                    data-testid={`owned-details-${t.tokenId}`}
+                    aria-label={`View details for ${t.name || t.tokenId}`}
+                    style={cardLink}
+                  >
+                    {preview}
+                  </Link>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: tokens.border.divider }}>
                     <input
                       data-testid={`price-${t.tokenId}`}

@@ -1,5 +1,4 @@
 import type { CSSProperties } from 'react';
-import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useCollectionById } from '../integration/useCollections';
 import { useModelIndex } from '../browse/useModelIndex';
@@ -9,6 +8,7 @@ import {
 } from '../walrus/aggregator';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { TurntablePreview } from '../ux/TurntablePreview';
+import { CopyId } from '../ux/CopyId';
 import {
   card,
   displayHeadline,
@@ -132,61 +132,12 @@ const metaValue: CSSProperties = {
   color: tokens.color.ink,
 };
 
-const copyChip: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 10,
-  alignSelf: 'flex-start',
-  background: tokens.color.paper,
-  border: tokens.border.divider,
-  borderRadius: 0,
-  padding: '4px 8px',
-  cursor: 'pointer',
-  fontFamily: tokens.font.mono,
-  fontSize: 12,
-  color: tokens.color.ink,
-};
-
-const copyTag: CSSProperties = {
-  ...monoLabel,
-  fontSize: 9,
-  color: tokens.color.accent,
-};
-
 const registerLink: CSSProperties = {
   ...monoLabel,
   color: tokens.color.accent,
   textDecoration: 'none',
   letterSpacing: '1px',
 };
-
-// Copyable id chip — truncated id + COPY affordance, flips to ✓ COPIED for ~1.2s.
-function CopyId({ value, testId }: { value: string; testId: string }) {
-  const [copied, setCopied] = useState(false);
-  if (!value) return <span style={metaValue}>—</span>;
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      // clipboard blocked (insecure context / permissions) — no-op, the id
-      // is still visible to select manually.
-    }
-  };
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      onClick={onCopy}
-      style={copyChip}
-      title={`Copy ${value}`}
-    >
-      <code>{truncate(value)}</code>
-      <span style={copyTag}>{copied ? '✓ COPIED' : 'COPY'}</span>
-    </button>
-  );
-}
 
 export function CollectionDetailPage() {
   const { slug } = useParams<{ slug: string }>();

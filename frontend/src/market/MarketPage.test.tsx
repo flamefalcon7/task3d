@@ -125,11 +125,11 @@ describe('MarketPage', () => {
     expect(screen.getByTestId('no-listings')).toBeTruthy();
   });
 
-  it('links the listing preview to its collection detail page (buy button excluded)', () => {
+  it('links the listing preview to its single-NFT detail page (buy button excluded)', () => {
     useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
     renderPage();
     const link = screen.getByTestId(`listing-details-${TOKEN}`) as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/collection/0xc1');
+    expect(link.getAttribute('href')).toBe(`/nft/${TOKEN}`);
     // Clicking BUY must not also navigate — the button lives outside the link.
     expect(screen.getByTestId(`buy-${TOKEN}`).closest('a')).toBeNull();
   });
