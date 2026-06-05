@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { useOwnedTokens, useTokenById, type OwnedToken } from './useOwnedTokens';
 import { glbUrlForToken } from '../walrus/aggregator';
+import { SignInButton } from '../auth/SignInButton';
 import { CarCarousel } from './carCarousel';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
@@ -17,6 +18,7 @@ import {
   arcadeLabel,
   arcadeTitle,
   studioCredit,
+  truncateId,
   wordmark,
 } from './rageRacing/brand';
 
@@ -36,12 +38,6 @@ interface LastResult {
   lapMs: number;
   previousPbMs: number | null;
   isNewPb: boolean;
-}
-
-// Truncate a chain/Walrus id for the provenance caption.
-function truncateId(id: string, head = 6, tail = 4): string {
-  if (!id || id.length <= head + tail + 1) return id;
-  return `${id.slice(0, head)}…${id.slice(-tail)}`;
 }
 
 // Page-level styles (Electric Arcade — see rageRacing/brand).
@@ -124,7 +120,6 @@ const provenanceBox: CSSProperties = {
 const provenanceHead: CSSProperties = {
   ...arcadeLabel,
   color: RAGE_RACING.color.accent,
-  fontSize: 10,
 };
 
 const provenanceSub: CSSProperties = {
@@ -154,6 +149,24 @@ const emptySub: CSSProperties = {
   color: RAGE_RACING.color.inkDim,
   letterSpacing: '0.5px',
   textTransform: 'none',
+};
+
+// De-emphasised exit affordance for the connect / empty states. R8 keeps the
+// inward route OUT of the primary CTA, but a third-party game still needs an
+// escape hatch and a "where do I get a car" pointer — both kept secondary.
+const secondaryLink: CSSProperties = {
+  ...arcadeLabel,
+  color: RAGE_RACING.color.accent,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  textDecoration: 'none',
+};
+
+// Constrain the (neutral, non-Tusk3D-branded) SignInButton so it reads as the
+// game's own connect affordance, not a stretched chrome element.
+const signInWrap: CSSProperties = {
+  maxWidth: 280,
+  width: '100%',
 };
 
 // Rage Racing masthead — wordmark + studio credit. Replaces the Tusk3D
@@ -431,6 +444,9 @@ export function TrackPage() {
           <div style={emptyStack}>
             <p style={arcadeTitle}>Connect your wallet to hit the track.</p>
             <p style={emptySub}>RAGE RACING LOADS THE CARS YOU OWN ON-CHAIN</p>
+            <div style={signInWrap}>
+              <SignInButton />
+            </div>
           </div>
         </div>
       </div>
@@ -481,6 +497,9 @@ export function TrackPage() {
               RAGE RACING DRIVES CARS MINTED FROM A TUSK3D COLLECTION — ACQUIRE
               ONE TO ROLL OUT.
             </p>
+            <Link to="/market" data-testid="track-empty-market" style={secondaryLink}>
+              Get a car on the marketplace →
+            </Link>
           </div>
         </div>
       </div>
@@ -554,7 +573,8 @@ export function TrackPage() {
                     {selected.collectionId
                       ? `collection ${truncateId(selected.collectionId)} · `
                       : ''}
-                    walrus {truncateId(selected.blobId || selected.patchId || '—')}
+                    walrus {selected.blobId ? 'blob' : 'patch'}{' '}
+                    {truncateId(selected.blobId || selected.patchId || '—')}
                   </span>
                 </div>
               )}

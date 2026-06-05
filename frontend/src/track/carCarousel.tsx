@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { OwnedToken } from './useOwnedTokens';
-import { RAGE_RACING } from './rageRacing/brand';
+import { RAGE_RACING, truncateId } from './rageRacing/brand';
 
 // Rage Racing garage strip — horizontal row of the cars the player owns,
 // IMPORTED from a Tusk3D collection (plan 2026-06-05-001). Click a tile to
@@ -11,11 +11,6 @@ import { RAGE_RACING } from './rageRacing/brand';
 // Reskinned to the Electric Arcade identity (rageRacing/brand): near-black
 // background, electric-yellow selected state — DELIBERATELY not Tusk3D's
 // orangered, so the strip reads as a different studio's UI.
-
-function truncate(addr: string, head = 4, tail = 4): string {
-  if (!addr || addr.length <= head + tail + 1) return addr;
-  return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
-}
 
 // Pure objectId-hash → CSS color. Deterministic so the same variant always
 // gets the same swatch, gives the carousel some visual variety without
@@ -90,7 +85,7 @@ const tileId: CSSProperties = {
 
 const selectedLabel: CSSProperties = {
   fontFamily: RAGE_RACING.font.mono,
-  color: RAGE_RACING.color.accent,
+  color: RAGE_RACING.color.secondary,
   fontSize: 9,
   letterSpacing: '1.5px',
   textTransform: 'uppercase',
@@ -116,8 +111,8 @@ export function CarCarousel({
           >
             <div aria-hidden style={{ ...tileSwatch, background: swatch(t.tokenId) }} />
             <div style={tileBody}>
-              <span style={tileName}>{t.name || `Car ${truncate(t.tokenId)}`}</span>
-              <span style={tileId}>imported · {truncate(t.tokenId)}</span>
+              <span style={tileName}>{t.name || `Car ${truncateId(t.tokenId, 4)}`}</span>
+              <span style={tileId}>imported · {truncateId(t.tokenId, 4)}</span>
               {selected && <span style={selectedLabel}>▶ in garage</span>}
             </div>
           </button>

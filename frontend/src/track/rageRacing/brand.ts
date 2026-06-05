@@ -34,9 +34,16 @@ export const RAGE_RACING = {
   },
   // Studio / game strings — the identity a viewer reads on screen.
   game: 'RAGE RACING',
-  studio: 'Deksat Studio',
   studioCredit: 'by Deksat Studio',
 } as const;
+
+// Truncate a chain / Walrus id for compact display (provenance caption, garage
+// tile ids). Shared by TrackPage + carCarousel so the ellipsis/guard logic has
+// one home. `!id` and the short-id fast path both return the input verbatim.
+export function truncateId(id: string, head = 6, tail = 4): string {
+  if (!id || id.length <= head + tail + 1) return id;
+  return `${id.slice(0, head)}…${id.slice(-tail)}`;
+}
 
 // --- Ready-to-spread style helpers (mirror the eyebrow/headline/monoLabel
 // pattern from ux/tokens so TrackPage stays ergonomic) ---
