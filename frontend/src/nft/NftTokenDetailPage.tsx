@@ -198,16 +198,13 @@ export function NftTokenDetailPage() {
               <CopyId value={token.baseModelId} testId="copy-model-id" />
             </div>
 
-            <div style={actions}>
-              <Link to={`/track?model=${token.tokenId}`} data-testid="nft-drive" style={actionLink}>
-                Drive on the track →
-              </Link>
-              {token.collectionId && (
+            {token.collectionId && (
+              <div style={actions}>
                 <Link to={`/collection/${token.collectionId}`} data-testid="nft-collection" style={actionLink}>
                   View collection →
                 </Link>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -54,14 +54,15 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('NftTokenDetailPage', () => {
-  it('renders the token name, its own variant preview, and links out to track + collection', () => {
+  it('renders the token name, its own variant preview, and a View-collection link', () => {
     useTokenByIdMock.mockReturnValue({ token: token(), loading: false, error: null });
     renderAt(TOK);
     expect(screen.getByTestId('nft-name').textContent).toMatch(/Racer A/);
     // Preview uses the token's OWN quilt patch (its variant model), not the base model.
     expect(screen.getByTestId('preview-canvas').getAttribute('data-glb')).toMatch(/pTok/);
-    expect((screen.getByTestId('nft-drive') as HTMLAnchorElement).getAttribute('href')).toBe(`/track?model=${TOK}`);
     expect((screen.getByTestId('nft-collection') as HTMLAnchorElement).getAttribute('href')).toBe('/collection/0xcoll');
+    // No "drive on the track" — not every NFT is a drivable car.
+    expect(screen.queryByTestId('nft-drive')).toBeNull();
   });
 
   it('resolves the token by id (self-sufficient on direct load)', () => {
