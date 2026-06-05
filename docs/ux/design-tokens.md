@@ -6,6 +6,8 @@
 
 This document is the single source of truth for the visual system. Every screen, every component, every state must reference values from here. If you find yourself reaching for a value not in this doc, stop and add it here first, then use it.
 
+> **Scoped exception — `/track` (Rage Racing), D-091.** The `/track` page is deliberately reskinned to look like a *third-party game* ("Rage Racing by Deksat Studio") that integrated a Tusk3D collection — its whole job is to NOT read as a Tusk3D surface (see D-091 and `docs/plans/2026-06-05-001-feat-rage-racing-track-reskin-plan.md`). It is the one route exempt from this document: it sources its identity from `frontend/src/track/rageRacing/brand.ts` (the "Electric Arcade" palette, the **Oswald** display face, and weights 600/700), not from the tokens here. The exemption is route-scoped — every other route, including the rest of the demo arc, still obeys this doc. A `brand.test.ts` guard asserts the Rage Racing accent/display-face never collide with these tokens, so the two systems can't silently converge.
+
 ---
 
 ## 1. Vibe
