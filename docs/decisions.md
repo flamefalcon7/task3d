@@ -3975,6 +3975,44 @@ Gate the bypass on an explicit `operatorAddress` (the deployer who legitimately 
 
 ---
 
+## D-090: Split MemWal memory ownership — per-user-address-owned personal accounts, deployer-owned global
+
+**Status**: Proposed
+**Date**: 2026-06-05
+**Phase**: Post-6/21 roadmap (does not touch submission scope)
+
+### Context
+D-080 shipped MemWal as a single deployer-owned `MemWalAccount` with isolation by `namespace` string: personal memory under `namespace = wallet address`, global community recall under `namespace = 'global'`. Both namespaces live in the **same deployer-owned account** — so personal memory is deployer-custodied, not user-owned. D-080 explicitly deferred "real per-user MemWal accounts" ("2 on-chain txs + browser key mgmt") and flagged the namespace seam as the forward-compatible stepping stone ("🔮 real per-user ownership build on this"). This ADR records the target architecture and the path, without changing current code.
+
+### Decision (proposed)
+Move **personal** memory to a per-user `MemWalAccount` **owned by the user's own Sui address**; keep **global** memory on the existing deployer-owned account + `'global'` namespace, unchanged. Recommended first cut is **backend-custodial, lazy-provisioned**:
+- On a user's first `remember`, lazily provision their MemWalAccount (`createAccount` + `addDelegateKey`, signed by the user's wallet — 1–2 popups), fail-soft if declined (fall back to today's behavior).
+- Store each user's `accountId` + delegate key in the existing `node:sqlite` store (D-083). The account is owned by the user's address (they can revoke the delegate); the delegate key is backend-held (semi-custodial).
+- Refactor the personal path only: `getMemwalClient()` singleton → `getMemwalClientForUser(address)` (per-user client, cached). The `MemwalClient` `remember(namespace, text)` / `recall(namespace, query)` interface is unchanged. The global path keeps the deployer singleton. Split the current `memoryWrites` dual-write into "personal → user client / global → deployer singleton."
+
+### Rationale
+- **Honest ownership claim**: lets the pitch truthfully say "users own their creative memory on Walrus under their own address" — removes the D-080 honesty caveat (namespace isolation ≠ ownership).
+- **The code seam already exists** (D-080 deliberately): namespace-per-call + a clean `MemwalClient` interface, so the app-layer change is a contained refactor. The hard work is the account/key model + onboarding UX, not the refactor.
+- **Backend-custodial first** keeps the existing backend-writes-memory flow and the JWT-derived-namespace anti-spoof design (R7) intact; non-custodial is a later, heavier step.
+
+### Alternatives Considered
+- **Browser non-custodial (delegate key in the browser, memory calls client-side)** — true self-sovereign, but requires browser key management + moving memory calls off the backend + reworking R7 anti-spoof. Heavier; revisit after the custodial cut.
+- **Keep deployer-owned single account (status quo)** — fine for the hackathon; rejected as the long-term target because it can't back a real ownership claim.
+- **Per-user accounts for global too** — rejected: global is intentionally a shared deployer-curated pool (denylist break-glass, dual-write of non-RESTRICTED prompts).
+
+### Consequences
+- ✅ Real per-user ownership of personal memory; pitch "What's next" gains a concrete, honest roadmap item.
+- ⚠️ New onboarding friction (1–2 wallet popups on first memory use) — mitigate with lazy provisioning + fail-soft.
+- ⚠️ Mainnet cost question: who sponsors each user's Walrus storage + provisioning gas (Enoki sponsor vs user-paid)? Open; testnet relayer still sponsors.
+- ⚠️ Backend now holds per-user delegate keys (semi-custodial) until the non-custodial step.
+- 🔮 Non-custodial browser-held keys is the eventual end state; this custodial cut is forward-compatible with it.
+
+### Related
+- D-080 (current single-account + namespace architecture), D-081 (copilot consuming recall), D-083 (`node:sqlite` store for the key/account map)
+- Files (future): `backend/src/lib/memwal-client.ts` (singleton → per-user), `backend/src/routes/memory.ts` (`memoryWrites` split), a frontend lazy-provisioning flow
+
+---
+
 # Reserved Decision Numbers
 
-D-090 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-091 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

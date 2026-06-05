@@ -32,14 +32,19 @@ Anchor every slide to one of those.
 
 ## Slide 2 — The problem (1 slide, 25 sec)
 
-**Headline:** *"Two things today's NFT stacks fake: composable variant storage, and real access control."*
+**Headline:** *"Every 3D game asset lives or dies inside someone else's company."*
 
-**Three bullets:**
-- **Storage**: N paint-variants of one mesh, stored one-blob-per-variant, is N× Walrus stores + N mint txs. Walrus quilt batching packs up to 4 variants into 1 blob — **4× fewer stores, at any N** (`⌈N/4⌉` quilts).
-- **Access**: marketplaces gate "ownership" with off-chain mutable metadata + centralized IPFS pinning — nothing protocol-guaranteed. Tusk3D makes access a **soulbound Move object** and encrypts the content with **Seal**, so only that on-chain object can decrypt it.
-- **Recognizable product**: composable collections (1 base mesh, N skins — BAYC traits) is what real creator economies ship, not 1-mint-per-asset.
+**Root cause (one line):** a centralized platform owns the assets, the payment rails, AND the licensing rules. One chokepoint — pain on both sides:
 
-**Visual:** a split — left "BAYC traits diagram (8 hats × 6 fur × 5 backgrounds = 240 variants)"; right two stacked rows: "one-blob-per-variant = N× stores" vs "quilt = 1 blob, N byte-range patches (4× fewer)".
+**Two columns, one cause:**
+- **Creators get erased.** The platform dies and takes the work *and* the income with it. Google Poly shut down 2021 — irreplaceable glTF/GLB work, gone. FlippedNormals is closing **March 2026** — 3,500 creators' storefronts + income, to zero. Even alive: sold once, no derivative cut, royalties strippable.
+- **Buyers get rented.** 30% platform cut on every sale, and a finite catalog you can't always find what you need in.
+
+**The kicker (why this is a Walrus problem):** a web2 platform *structurally cannot* promise your asset survives its own death — the company can always die or change terms. Only decentralized storage (**Walrus**) + on-chain rules (**Sui Move**) can. Tusk3D removes the chokepoint: asset on Walrus, rules on Sui.
+
+**Visual:** left — a "PLATFORM CLOSED / 404" headstone over scattered asset thumbnails (Poly 2021 · FlippedNormals 2026). Right — Tusk3D: asset on Walrus (no company), rules on Sui (enforced), both surviving the dead platform. Small source footer: TechCrunch 2020 (Poly), CG Channel 2026 (FlippedNormals).
+
+> Evidence + sourcing: `docs/brainstorms/2026-06-05-problem-evidence-centralized-3d-platforms.md`. Enforcement honesty: derive fee is enforced on-chain at fork (shipped); secondary resale royalty needs Kiosk (roadmap) — don't overclaim "enforced" uniformly.
 
 ---
 
@@ -93,6 +98,7 @@ If presenting live, this is where you run the actual demo — `/create` (encrypt
 **Three rows:**
 - **Mainnet by 8/27** (Sui Overflow winners deadline) — D-009. Mainnet deploy is mechanical given the testnet path is proven.
 - **Sui Kiosk + TransferPolicy** — protocol-level royalty enforcement on `NftToken` resales. Kiosk wiring in progress.
+- **User-owned MemWal memory** — today personal recall is namespace-isolated under one deployer account; next, each user's personal creative memory lives in a MemWalAccount **owned by their own Sui address** (global community recall stays deployer-curated). D-090. Turns "isolated" into genuinely "owned on Walrus."
 - **Deeper L2 + integrations** — `IntegrationRecord` already lets games register against a collection (gameDev pays a register fee). Next: richer royalty cascading + more game integrations.
 
 ---
