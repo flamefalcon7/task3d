@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-06-05 (**Rage Racing /track reskin — DONE on branch `feat/rage-racing-track-reskin`, NOT yet merged / no PR**)
+## Last Updated: 2026-06-05 (**Rage Racing reskin + market/collection/NFT detail UX — DONE on branch `feat/rage-racing-track-reskin`, 14 commits, NOT yet merged / no PR**)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **16 of 38**
@@ -8,22 +8,26 @@
 - Days to winners (8/27): ~83
 
 ### Current Phase
-Phase 3/4 — demo polish. Reskinned `/track` into **"Rage Racing by Deksat Studio"** so the racetrack reads as a *third-party game integrating a Tusk3D collection*, not an in-app feature tab — the visible proof of the composability thesis for the demo video. Brainstorm `docs/brainstorms/2026-06-05-rage-racing-thirdparty-game-reskin.md`; plan `docs/plans/2026-06-05-001-feat-rage-racing-track-reskin-plan.md` (Approach A, frontend-only).
+Phase 3/4 — demo polish. Two threads this session, both on `feat/rage-racing-track-reskin`: (1) reskinned `/track` into **"Rage Racing by Deksat Studio"** (third-party-game look = composability proof; brainstorm `docs/brainstorms/2026-06-05-rage-racing-thirdparty-game-reskin.md`, plan `docs/plans/2026-06-05-001-...-plan.md`, Approach A); (2) marketplace detail UX — `/market` cards now click through to a new **single-NFT detail page**, and the stale collection page was rebuilt on the token system.
 
 ### Completed This Session
 - **U2** — `frontend/src/track/rageRacing/brand.ts` Electric Arcade identity (surface `#0B0B0F`, accent `#FFE500`, secondary `#FF2D7E`, Oswald display via `index.html`) + `brand.test.ts` collision guard (accent/font ≠ Tusk3D).
 - **U1** — removed "Track" from `NAV_ITEMS` + added `/track` to `HIDDEN_ROUTES` in `ux/TopNav.tsx` (masthead hidden, same seam as `/dev/compare`); nav tests updated.
 - **U3** — reskinned `TrackPage.tsx`: RAGE RACING wordmark + "by Deksat Studio", Rage Racing voice on all states, **no inward `/launch`/`/market`/`/browse` CTA**, + on-canvas **Sui + Walrus provenance caption** (real `blobId`/`collectionId` from selected token). All hooks/effects/override-modes/testids preserved verbatim.
 - **U4** — reskinned `carCarousel.tsx` to the garage strip (brand accent on selected, imported-car voice) + new `carCarousel.test.tsx`.
-- **Review fix** — locked the wordmark italic explicitly in `brand.ts` (was inheriting the global `h1{font-style:italic}` reset).
-- **Verification** — frontend `tsc -b` clean; full vitest **1021 pass / 2 skip**; agent-browser confirmed `/track` has no Tusk3D chrome + Rage Racing identity, `/market` keeps the nav minus Track. Screenshot captured.
-- **Commits** (branch `feat/rage-racing-track-reskin`): U2, U1, U3, U4, review-fix — 5 commits, NOT merged, no PR yet.
+- **Reskin review** — full 10-reviewer `ce-code-review` pass (D-091 ADR + `design-tokens.md` carve-out for the /track exception; fixed: stranded-user connect/exit affordances, dedup truncateId, accurate provenance blob/patch label, dead code). correctness/julik-races/agent-native all clean — logic preserved verbatim.
+
+**Marketplace detail UX (2nd thread):**
+- **`/market` click-through** — listing + owned cards' preview+name now link to detail; BUY/LIST stay outside the link ("VIEW DETAILS →"). Wording de-carified: **"Your cars." → "Your NFTs."** + sign-in/empty/confirm copy (not every model is a car).
+- **`/nft/:tokenId`** (new `nft/NftTokenDetailPage`) — standalone single-NFT page; resolves by id (`useTokenById`, works on direct load), shows the NFT's OWN variant model, copyable Token/Collection/Base-Model ids, View-collection link. **No "Drive on track"** (not every NFT is a car). Buy/list deliberately stay on `/market`.
+- **`/collection/:slug` rebuilt** — was a stale Phase-3 dark theme with no preview; now on D-044 tokens + 3D preview (`thumbSourceForSummary`, encrypted-safe) + copyable ids. Shared `ux/CopyId` extracted (NFT + collection consumers).
+- **Verification** — `npm run test` **1027 pass / 2 skip**; browser-verified against real testnet data (collection `0x51453952…` and token `0x1008…b878` both render their model; the missing-preview report was env/timing, not a code bug — base model is plaintext + GLB serves 200).
 
 ### Next Concrete Step
-Decide merge path for `feat/rage-racing-track-reskin` (open PR via ce-commit-push-pr, or fast-forward merge to main). Plan status still `active` — flip to `completed` on merge. Optional future upgrades deferred in the plan: Approach B (separate domain) + Approach C (wire `/integrate` attestation into the demo narrative).
+Decide merge path for `feat/rage-racing-track-reskin` (14 commits): open PR via ce-commit-push-pr, OR fast-forward merge to main. **Two logical threads share the branch** (reskin + marketplace UX) — split into 2 PRs if clean review separation matters, else ship together. Plan status still `active` → flip to `completed` on merge.
 
 ### Notes for Next Session
-Reskin is presentation-only — zero contract/Walrus/Sui-read changes, so it's independent of the v12 republish state. The provenance caption pulls real ids straight off the selected `OwnedToken`. End-to-end driving still needs a real wallet + owned NftToken (agent-browser can't drive Babylon/wallet — verify the drive in real Chrome at demo time).
+All of it is frontend-only — zero contract/Walrus/Sui-read changes, independent of the v12 republish. Deferred (optional): reskin Approach B (separate domain) / C (wire `/integrate` attestation into demo); Buy/List ON the `/nft` page (needs kiosk+price lookup wired in). End-to-end wallet-gated flows (driving, buy, list) still need real Chrome + Slush at demo time — agent-browser can't drive Babylon/wallet.
 
 ---
 
