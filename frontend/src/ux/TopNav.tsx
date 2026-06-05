@@ -8,7 +8,10 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; path: string }> = [
   { label: 'Create', path: '/create' },
   { label: 'Launch', path: '/launch' },
   { label: 'Market', path: '/market' },
-  { label: 'Track', path: '/track' },
+  // '/track' is intentionally NOT a nav item: it's reskinned as "Rage Racing"
+  // (a third-party game) and must not present as a Tusk3D feature tab. It's
+  // reachable via the race-on-mint deep link and direct URL. See HIDDEN_ROUTES
+  // below and plan 2026-06-05-001.
 ];
 
 const brandStyle: CSSProperties = {
@@ -78,9 +81,11 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-// NavGuard hides the chrome on /dev/compare (developer tool, not editorial).
-// Co-located with TopNav so the conditional-hide test stays self-contained.
-const HIDDEN_ROUTES: ReadonlyArray<string> = ['/dev/compare'];
+// NavGuard hides the chrome on /dev/compare (developer tool, not editorial)
+// and on /track (reskinned as the third-party "Rage Racing" game — the Tusk3D
+// masthead must not appear over it). Co-located with TopNav so the
+// conditional-hide test stays self-contained.
+const HIDDEN_ROUTES: ReadonlyArray<string> = ['/dev/compare', '/track'];
 
 export function NavGuard() {
   const location = useLocation();
