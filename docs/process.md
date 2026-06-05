@@ -1,5 +1,7 @@
 # Current Process — Phase 3 Code-Complete
 
+> ⚠️ **STALE as of 2026-06-05 — describes the retired Phase-3 architecture.** The on-chain artifacts, struct shapes, entry functions, and endpoints below predate D-029/D-074/D-075/D-078 and the v12 republish. Authoritative current state: `contracts/model3d/sources/model3d.move`, `docs/decisions.md` (through D-089), and `README.md`. Key deltas: package is now **v12 `0xbf0affb8…02d1`** (not `0x18a480b3…`); architecture is L1 `Model3D` + `AccessEntitlement` → L2 `NftCollection` + `NftToken` (`Collection`/`Access` deleted); Seal encryption shipped; procedural generators removed (D-033). Needs a full rewrite during Phase 5 docs cleanup.
+
 Last updated: **2026-05-16 PM** (after U6 + dev-server bring-up fixes + D-023 LLM router removal)
 Branch: `feat/phase-2-sui-integration` (10 Phase 3 commits ahead of base)
 Test totals: Move 37 + Backend 130 + Frontend 158 = **325 tests, all green**

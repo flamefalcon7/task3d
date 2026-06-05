@@ -1,76 +1,101 @@
 # Tusk3D
 
-A Sui-native **composable creator economy** for low-poly 3D game assets — mint a 16-variant car collection in 3 wallet signatures, then drive the cars you buy in a Babylon + Havok racing scene. All on Walrus + Sui.
+**Carve. Mint. Riff.** — a Sui-native composable creator economy for low-poly 3D game assets.
 
-> **Status**: Sui Overflow 2026 hackathon submission. Phase 3 code complete; testnet contract live at `0x18a480b3...c3`. Demo recording pending.
-> Built for [Sui Overflow 2026](https://overflow.sui.io/), **Walrus track**.
+A creator carves a base 3D model (Tripo prompt or GLB upload) and publishes it to [Walrus](https://docs.wal.app/) with a Move-enforced license. Buyers pay once for a **soulbound access entitlement**; holders can **fork** the base into a tradeable NFT collection of paint-variants — batched into Walrus quilts — and the variants you own load straight into a Babylon + Havok racing scene. Restricted content is encrypted with [Seal](https://seal-docs.wal.app/) and unlocked only by the on-chain entitlement.
+
+> **Status**: Sui Overflow 2026 submission, **Walrus track**. Live on **Sui testnet** — package `0xbf0affb8…02d1`. Security-audited (D-085…D-089). Demo recording in progress.
+> Built for [Sui Overflow 2026](https://overflow.sui.io/). Submission deadline **2026-06-21**.
 
 ---
 
 ## What it does
 
-Creators publish 3D model **collections** to [Walrus](https://docs.wal.app/) (decentralized storage). Each collection is N paint-variants of one base mesh, batched into a single Walrus quilt so 16 variants cost 2 wallet popups + 1 Sui PTB (not 32 + 16). Buyers pay for **soulbound Access NFTs** on Sui and immediately drive their car in a Babylon + Havok rigid-body racing scene. All ownership and licensing is **protocol-enforced on Sui Move** — not platform-enforced.
+Most "NFT collection" products ship N variants of one base mesh (think BAYC traits) but pay for it with N storage uploads and a wall of wallet popups, and they gate access with mutable off-chain metadata. Tusk3D makes both protocol-native on Sui + Walrus:
 
-### Architecture (Phase 3, code-complete)
+- **One base, paid access, real forks.** A creator publishes a `Model3D` (the base content) once. Buyers pay an `access_fee` **a single time** for a soulbound `AccessEntitlement` — a permanent, non-transferable receipt. That entitlement is both the consumer view *and* the precondition to forking.
+- **Forks are tradeable collections.** An entitlement holder pays a per-launch derive fee to `launch_collection`, receives a soulbound creator cap, and mints `NftToken`s — paint-variants of the base mesh batched into **Walrus quilts** (up to 4 variants share one blob as internal byte-range patches; `⌈N/4⌉` quilts overall — **4× fewer stores** than one-blob-per-variant). Tokens are Kiosk-placeable and resell under their own `TransferPolicy`.
+- **Owned assets are playable.** The same Walrus quilt-patch URL that mints on-chain is the URL the [Tiny Racetrack](#the-demo-arc) loads — your car drives in a Havok rigid-body scene. No re-export, no second source of truth.
+- **Restricted content is actually private.** `allow_list` / `restricted` bases are encrypted with Seal envelope encryption; decryption is gated by the on-chain `AccessEntitlement`, not by a server check.
+
+### Architecture (live on testnet)
 
 ```
-L1  Collection    Creator publishes the shared Walrus quilt blob.
-                  License policy: restricted / allow_list / permissionless.
-                  ↓
-    Model3D       N variants reference (collection_id, patch_id).
-                  Each variant is its own Sui shared object.
-                  ↓
-L3  Access        Soulbound Move object (key only, no store).
-                  Buyer holds it forever; can't be transferred.
+L1  Model3D              Creator publishes a base GLB to Walrus + sets LicenseTerms
+    + AccessEntitlement    (policy: permissionless | allow_list | restricted, access_fee,
+                           derivative_mint_fee, royalty_bps). allow_list/restricted bases
+                           are Seal-encrypted. A buyer pays access_fee ONCE → soulbound
+                           AccessEntitlement (key-only, non-transferable) that unlocks Seal
+                           decryption AND authorizes a fork.
+        │ fork  (hold entitlement + pay per-launch derive fee)
+        ▼
+L2  NftCollection        A holder launches a collection (1-layer max), holds a soulbound
+    + NftToken             NftCollectionCreatorCap, and mints tradeable NftTokens. N paint-
+                           variants share ONE Walrus quilt blob (N patches). base_royalty_bps
+                           is snapshot at launch, hard-capped ≤ 30%. NftTokens are key+store →
+                           Kiosk-placeable, resellable under their own TransferPolicy.
+        │ register  (gameDev pays register_fee)
+        ▼
+    IntegrationRecord    Games register a B2B integration against a collection. The same
+                           Walrus patch URL drives the marketplace thumbnail and the game asset.
 ```
 
-Not an NFT collection — `Model3D` is *content* that many buyers pay to access. `Access` is a soulbound (non-transferable) receipt. `Collection` wraps the shared quilt blob so N variants share one Walrus upload + one PTB mint.
+`AccessEntitlement` is a one-time, soulbound (`key` only, no `store`) L1 receipt — **not** a third tier. It gates `seal_approve_entitlement` decryption and `launch_collection_with_entitlement`. The old "L3 Access" framing is retired (D-078).
 
-**L2 Derivative** (deferred to v1.1) — composable forks of existing collections with automatic royalty cascading. Move-level scaffolding kept in `docs/spec.md` §2.8.
+---
+
+## What's Sui / Walrus-specific
+
+Three things that are load-bearing here and would not port cleanly to other chains:
+
+1. **Walrus quilt batching.** Up to 4 collection variants share **one** Walrus blob, each addressable by a byte-range patch id — `⌈N/4⌉` quilts for N variants, **4× fewer stores** than one-blob-per-variant. The same patch URL feeds both the marketplace preview and the in-game mesh.
+2. **Soulbound by Move ability, not by runtime guard.** `AccessEntitlement` and `NftCollectionCreatorCap` are `has key` only — *no* `store`. Non-transferability is a type-system guarantee; the equivalent on an account-based chain needs a custom transfer-guard contract.
+3. **Seal decryption gated on an on-chain object.** `seal_approve_entitlement` proves you hold the entitlement before the key unwraps. Encryption is *derived* from the license policy at publish (not a decorative flag), and the `seal_id` is fixed at 32 bytes to close a prefix-truncation bypass (D-085).
 
 ---
 
 ## Stack
 
-- **Smart contract**: Sui Move 2024 — `model3d::model3d` package (testnet `0x18a480b3...c3`)
-- **Storage**: [Walrus](https://docs.wal.app/) — decentralized blob storage with on-chain lifecycle. Phase 3 uses **quilt batching** (1 Walrus blob, N internal byte-range patches) so a 16-variant collection mint costs 2 Walrus popups instead of 32
-- **Sui SDK**: `@mysten/sui@2.16.2` (`SuiJsonRpcClient`) — D-019
-- **Frontend**: React + Vite + [Babylon.js](https://www.babylonjs.com/) (imperative wrapper, no `react-babylonjs` per D-007), [`@babylonjs/havok`](https://doc.babylonjs.com/features/featuresDeepDive/physics/) for Tiny Racetrack rigid-body physics — D-022
-- **Auth**: dApp Kit + Slush wallet + optional zkLogin via [Enoki](https://docs.enoki.mystenlabs.com/) (Google sign-in)
-- **Backend**: Node 22 LTS + [Hono](https://hono.dev/) + [`@gltf-transform/core`](https://gltf-transform.dev/) — procedural mesh generation + base-car-material-swap; zero AI API cost (D-012, D-023)
-- **Generator**: [Tripo](https://www.tripoai.com/) (optional) — prompt → base car GLB. D-023: directly dispatched, no LLM in the loop
-- **Encryption** (deferred to v1.1): [Seal](https://seal-docs.wal.app/) — threshold IBE for gated content
-- **Marketplace** (Phase 4): Sui Kiosk + TransferPolicy — protocol-level royalty enforcement
+- **Smart contract**: Sui Move 2024 — `model3d::model3d` package (testnet `0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1`)
+- **Storage**: [Walrus](https://docs.wal.app/) — `@mysten/walrus@1.1.7` + `@mysten/walrus-wasm@0.2.2`, browser upload via relay. L2 collections use **quilt batching** (1 blob, N byte-range patches). Read path accelerated via a Cloudflare Worker at `tusk3d.space` (D-073)
+- **Encryption**: [Seal](https://seal-docs.wal.app/) — `@mysten/seal@1.1.3`. Envelope encryption (AES-256-GCM data key wrapped by Seal threshold IBE); encryption derived from license policy; decryption gated by the soulbound `AccessEntitlement`
+- **Frontend**: React + Vite + [Babylon.js](https://www.babylonjs.com/) (imperative wrapper, no `react-babylonjs` per D-007) + [`@babylonjs/havok`](https://doc.babylonjs.com/features/featuresDeepDive/physics/) for the racetrack physics
+- **Auth**: `@mysten/dapp-kit@1.0.6` + `@mysten/slush-wallet@1.0.5` + optional zkLogin via [Enoki](https://docs.enoki.mystenlabs.com/) (`@mysten/enoki@1.0.7`, Google sign-in)
+- **Sui SDK**: `@mysten/sui@2.16.2`
+- **Backend**: Node 22 LTS + [Hono](https://hono.dev/) + [`@gltf-transform/core`](https://gltf-transform.dev/) — base-mesh material-swap for variant authoring; Tripo dispatch
+- **Generator**: [Tripo](https://www.tripoai.com/) — prompt → base GLB (`text_to_model` → `mesh_segmentation`, two-step, server-chained per D-045). SUI-fee-gated (D-034)
+- **Riff Copilot** (L2 authoring): Gemini via `@ai-sdk/google`, with a Walrus-backed agent-memory layer ([MemWal](https://www.npmjs.com/package/@mysten-incubation/memwal) `@mysten-incubation/memwal@0.0.6`, D-080/D-081). Vision captioning for uploads (D-082). Degrades visibly to "AI UNAVAILABLE" — never silently hidden (D-084)
+- **Marketplace** (in progress): Sui Kiosk + `TransferPolicy` — protocol-level royalty enforcement on `NftToken` resales
 
 ---
 
-## Roadmap
+## The demo arc
 
-| Phase | Window | Deliverable | Status |
-|---|---|---|---|
-| 1. Scaffold | 5/14 – 5/19 | Local e2e with mock data | ✅ Done |
-| 2. Sui Integration | 5/20 – 5/29 | Walrus + Move contract + zkLogin on testnet | ✅ Done |
-| 3. Real-World Application | 5/30 – 6/10 | Collection Forge + Tiny Racetrack demo | ✅ Code complete; demo recording pending (U7) |
-| 4. Mainnet + Kiosk | 6/11 – 6/20 | Kiosk + TransferPolicy royalty enforcement | Pending |
-| 5. Submission + Polish | 6/21 – 7/8 | Demo video, README, Demo Day prep | Pending |
+The full loop runs across these routes (no `/forge` — L1 publish and L2 launch are separate steps):
 
-Detailed plan: [`docs/spec.md`](docs/spec.md) §6. Live progress: [`docs/phase-progress.md`](docs/phase-progress.md). Current architecture snapshot: [`docs/process.md`](docs/process.md).
+| Route | Tier | What happens |
+|---|---|---|
+| `/` | — | Landing — the L1 → L2 lifecycle story |
+| `/create` | L1 | Carve a base: Tripo prompt **or** GLB upload → tag parts → set license → Seal-encrypt (if gated) → Walrus → `publish` a shared `Model3D` |
+| `/browse`, `/market` | — | Browse published bases and launched collections |
+| `/model/:objectId` | L1 | Base detail → buy access (mint soulbound `AccessEntitlement`) |
+| `/launch` | L2 | Hold an entitlement → pick paint-variants → 1 Walrus quilt + 1 PTB → `NftCollection` + `NftToken`s |
+| `/collection/:slug` | L2 | Collection detail → variant grid → buy / collect tokens |
+| `/integrate` | — | Register a game integration against a collection |
+| `/track` | — | Babylon + Havok racetrack — WASD-drive the variants you own, loaded from the same Walrus quilt patch |
 
 ---
 
 ## Run locally
 
-**Prerequisites**: Node 22 LTS (via [nvm](https://github.com/nvm-sh/nvm)) + pnpm 8 + (for the contract) Sui CLI 1.72.1+.
-
-### Minimum setup (read-only: Browse + slider mode)
+**Prerequisites**: Node 22 LTS (via [nvm](https://github.com/nvm-sh/nvm)) + pnpm + (for the contract) Sui CLI.
 
 ```bash
-nvm use                                  # picks up .nvmrc (22.22.3)
-pnpm install                             # installs all workspaces
-cp backend/.env.example backend/.env     # then edit JWT_SECRET (see below)
-cp frontend/.env.example frontend/.env.local  # leave VITE_MODEL3D_PACKAGE_ID
-                                         # set to the testnet id above
-pnpm dev                                 # starts backend (:3001) + frontend (:5173)
+nvm use                                        # picks up .nvmrc
+pnpm install                                   # installs all workspaces
+cp backend/.env.example backend/.env           # then set JWT_SECRET (see below)
+cp frontend/.env.example frontend/.env.local   # VITE_MODEL3D_PACKAGE_ID is the testnet id above
+pnpm dev                                        # backend (:3001) + frontend (:5173)
 ```
 
 Generate a JWT secret:
@@ -80,33 +105,21 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 # paste into backend/.env as JWT_SECRET=...
 ```
 
-Open <http://localhost:5173>. You can:
-- **Browse** the marketplace (`/`) — see existing Model3D collections
-- **Generate procedural shapes** (`/generate`) — pick box / chest / cylinder / sphere / sword / hammer / platform, drag sliders. No auth, no Sui, no Walrus.
-
-### Full Forge + Track flow
-
-Adds wallet sign-in (Slush works without extra setup) + Walrus uploads + on-chain mints + Babylon physics scene. Needs Tripo for the base car generation:
+Open <http://localhost:5173>. Browsing the marketplace needs no auth. The full carve → publish → buy → fork → drive loop needs a wallet (Slush works without extra setup) plus, for the prompt-generation and AI-copilot paths, these backend keys:
 
 ```bash
 # Append to backend/.env:
 TRIPO_ENABLED=true
-TRIPO_API_KEY=<your_tripo_key>     # required if TRIPO_ENABLED=true
+TRIPO_API_KEY=<your_tripo_key>     # base-mesh generation (prompt mode is SUI-fee-gated)
+GOOGLE_GENERATIVE_AI_API_KEY=<key> # Riff Copilot + upload captioning (degrades to "AI UNAVAILABLE" if absent)
 ```
 
-Then:
-- **`/forge`** — type a prompt → base car (~60–120 s via Tripo) → pick 1–16 paint variants → 3 wallet signatures → on-chain Collection + N Model3Ds
-- **`/collection/:slug`** — buyer-side variant grid; click a tile → buy Access
-- **`/track`** — Babylon + Havok rigid-body scene; WASD to drive your owned cars
-
-### Run tests
+### Tests
 
 ```bash
-# from repo root
-cd backend && pnpm vitest run    # 132 tests
-cd frontend && pnpm vitest run   # 158 tests
-cd contracts/model3d && sui move test   # 37 tests
-# total: 325 tests, all green at code-complete
+cd contracts/model3d && sui move test      # 62 Move unit tests (entry-fn coverage + red-team cases)
+cd backend  && pnpm vitest run             # 23 test files
+cd frontend && pnpm vitest run             # 90 test files
 ```
 
 ---
@@ -115,36 +128,35 @@ cd contracts/model3d && sui move test   # 37 tests
 
 ```
 .
-├── CLAUDE.md                  # Session protocol for AI agents
+├── CLAUDE.md            # Session protocol for AI agents
 ├── docs/
-│   ├── spec.md                # Full specification (architecture, technical decisions, plan)
-│   ├── decisions.md           # ADR log (D-001 through D-023)
-│   ├── phase-progress.md      # Current progress
-│   ├── process.md             # Current architecture snapshot (endpoints, env, flow)
-│   ├── open-questions.md      # Unresolved questions
-│   ├── brainstorms/           # Brainstorm outputs (ce-brainstorm)
-│   ├── plans/                 # Plan outputs (ce-plan); plan-003 = Phase 3
-│   └── solutions/             # Captured learnings (ce-compound)
-├── shared/                    # @overflow2026/shared — types shared by browser + backend
-├── backend/                   # Node 22 + Hono — procedural generators + Tripo passthrough (D-023)
-├── frontend/                  # React + Vite + Babylon (imperative wrapper per D-007) + Havok (D-022)
-├── contracts/                 # Sui Move 2024 — model3d::model3d package
-└── pitch/                     # demo-script.md + screenshots/ + recording (Phase 5)
+│   ├── spec.md          # Full specification (architecture, decisions, plan)
+│   ├── decisions.md     # ADR log (D-001 … D-089)
+│   ├── phase-progress.md# Current progress
+│   ├── process.md       # Architecture snapshot (endpoints, env, flow)
+│   ├── open-questions.md
+│   ├── brainstorms/  plans/  solutions/
+├── shared/              # types shared by browser + backend
+├── backend/             # Node 22 + Hono — Tripo dispatch, variant material-swap, Riff Copilot
+├── frontend/            # React + Vite + Babylon (imperative) + Havok
+├── contracts/           # Sui Move 2024 — model3d::model3d
+└── pitch/               # demo-script.md, pitch-deck-outline.md, screenshots/, recording
 ```
 
 ---
 
 ## License
 
-TBD at submission. Likely MIT or Apache-2.0.
+TBD at submission (likely MIT or Apache-2.0).
 
 ---
 
 ## Submission details
 
-- **Testnet package ID**: `0x18a480b3ff2219ac6666177221bafb37aa79a81122890581025b4737aef05ac3`
-- **Sui Scan (deploy tx)**: https://suiscan.xyz/testnet/tx/8gKrqemFVcAeBr3rifQurRDGuSF7pm2Yp44wXo15Kv5A
-- **Demo URL**: TBA (Phase 5 deploy target)
+- **Network**: Sui testnet
+- **Package ID**: `0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1`
+- **Sui Scan**: https://suiscan.xyz/testnet/object/0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1
+- **Demo URL**: TBA (deploy target)
 - **Demo video** (≤ 5 min, YouTube): TBA — script at [`pitch/demo-script.md`](pitch/demo-script.md)
-- **Mainnet package ID** (target before 8/27): TBA
+- **Mainnet package ID** (target before 8/27 for 100% prize): TBA
 - **Contact**: TBA

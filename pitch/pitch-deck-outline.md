@@ -24,7 +24,7 @@ Anchor every slide to one of those.
 
 **Single demo gif / 5-sec loop:** Wallet B drives the variant they just bought, hits a wall, bounces, recovers. No menus, no UI chrome — just the car physics.
 
-**One subheading:** *"Creator mints 16-variant car collection in 3 signatures. Buyer drives what they own seconds later. All on Sui testnet today."*
+**One subheading:** *"The car you just watched was AES-encrypted on Walrus until a soulbound on-chain entitlement unlocked it. Pay once, own forever, drive immediately. Sui testnet, today."*
 
 **Visual:** big screenshot of the `/track` scene mid-drive. Sui + Walrus + Babylon logos in a tight footer row.
 
@@ -32,27 +32,29 @@ Anchor every slide to one of those.
 
 ## Slide 2 — The problem (1 slide, 25 sec)
 
-**Headline:** *"Real NFT collections ship N variants of a base mesh — BAYC, Azuki, Pudgy Penguins. Today's on-chain economy can't handle this without 32 wallet signatures + duplicated storage."*
+**Headline:** *"Two things today's NFT stacks fake: composable variant storage, and real access control."*
 
 **Three bullets:**
-- A 16-variant mint with one-blob-per-variant = 16 Walrus stores + 16 PTBs = 32 wallet popups. Demo recording would be 4 minutes of popups. Nobody ships this.
-- Composable collections (1 base mesh, N skins) is the *recognizable* creator-economy product, not 1-mint-per-asset.
-- Existing NFT marketplaces solve the storage with IPFS pinning services (centralized) and the variants with off-chain metadata (mutable, not protocol-guaranteed). Both compromises are eliminated by Walrus + Sui Move.
+- **Storage**: N paint-variants of one mesh, stored one-blob-per-variant, is N× Walrus stores + N mint txs. Walrus quilt batching packs up to 4 variants into 1 blob — **4× fewer stores, at any N** (`⌈N/4⌉` quilts).
+- **Access**: marketplaces gate "ownership" with off-chain mutable metadata + centralized IPFS pinning — nothing protocol-guaranteed. Tusk3D makes access a **soulbound Move object** and encrypts the content with **Seal**, so only that on-chain object can decrypt it.
+- **Recognizable product**: composable collections (1 base mesh, N skins — BAYC traits) is what real creator economies ship, not 1-mint-per-asset.
 
-**Visual:** a split — left side "BAYC traits diagram (8 hats × 6 fur × 5 backgrounds = 240 variants)"; right side a flowchart showing "16 mints × (encode + register + certify) + 16 PTBs = 32 popups today."
+**Visual:** a split — left "BAYC traits diagram (8 hats × 6 fur × 5 backgrounds = 240 variants)"; right two stacked rows: "one-blob-per-variant = N× stores" vs "quilt = 1 blob, N byte-range patches (4× fewer)".
 
 ---
 
 ## Slide 3 — What we built (1 slide, 30 sec)
 
-**Headline:** *"Collection Forge + Tiny Racetrack — the L1→Walrus→L3 economic loop in 90 seconds."*
+**Headline:** *"Carve → Mint → Riff → Drive — the L1 base → L2 collection loop in 90 seconds."*
 
-**Visual:** the architecture diagram from `README.md` (Collection → Model3D × N → Access) but more polished. Add a parallel "Walrus quilt → 1 Blob, N patches" diagram showing the storage efficiency.
+**Visual:** the architecture diagram from `README.md` (Model3D + AccessEntitlement → NftCollection + NftToken) but more polished. Add a parallel "Walrus quilt → 1 Blob, N patches" diagram showing the storage efficiency.
 
 **Three callouts on the right:**
-- **Collection Forge** (`/forge`): one prompt → base car GLB (Tripo) → pick N variants → 3 wallet signatures → 1 Walrus quilt + 1 Sui PTB → on-chain Collection + N Model3Ds
-- **Tiny Racetrack** (`/track`): buyer's owned cars load into a Babylon + Havok rigid-body driving scene. Same Walrus quilt-patch URL drives both the marketplace thumbnail and the game asset.
-- **Marketplace** (`/`, `/collection/:slug`): Browse groups variants by collection (1 card per series). Click → variant grid → buy Access → drive.
+- **Carve + Mint** (`/create`): Tripo prompt **or** GLB upload → tag parts → set license → (gated content Seal-encrypted) → 1 Walrus upload → `publish` a shared `Model3D`. Buyer pays `access_fee` once at `/model/:id` → soulbound `AccessEntitlement`.
+- **Riff** (`/launch`): an entitlement holder forks the base → picks N paint-variants → 1 Walrus quilt + 1 Sui PTB → on-chain `NftCollection` + N tradeable `NftToken`s.
+- **Drive** (`/track`): owned variants load into a Babylon + Havok rigid-body scene. Same Walrus quilt-patch URL drives both the marketplace thumbnail and the game asset.
+
+> **Demo config (locked 2026-06-05): Tripo prompt-mode ON · 4 variants · Seal ON (encrypted `allow_list` base).** There is no `/forge`; L1 publish (`/create`) and L2 launch (`/launch`) are separate steps. Honest wallet-interaction counts for this config: `/create` ~5 (Tripo fee + 3 Walrus + publish) · buy access 1 · Seal unlock 1 · `/launch` 4 (2 Walrus + `launch_with_entitlement` + `mint_tokens`). The old "3 signatures" line is **retired** — the encrypted fork is a 2-step on-chain flow (cap first, then pin the post-decrypt quilt), which is exactly what makes entitlement-gated decryption safe. Lead with the storage (4×) + "pay once, own forever" numbers, not the raw signature count.
 
 ---
 
@@ -64,11 +66,13 @@ This is the originality + track-fit slide. Be explicit about what would NOT work
 
 **Three rows, each a one-line claim + one-line proof:**
 
-1. **Walrus quilt batching** — 16 variants share 1 Walrus Blob; per-variant byte-range patches addressable by URL. 16× storage reduction + 1 wallet popup instead of 16 for upload. *(Proof: live demo shows 16-variant mint completing in 3 popups.)*
-2. **Sui shared objects** — `Collection` is shared; N `Model3D` variants reference its ID. No "owner" indirection, no global serializer bottleneck, parallel reads on every variant. *(Proof: testnet PTB at `8gKrqemFV...` creates 17 shared objects in one tx.)*
-3. **Soulbound Access via Move's `has key` only** — no `store` ability means the Access NFT *cannot* be transferred, period. It's a Move type-system guarantee, not a runtime check. Same code on Ethereum needs a custom transfer guard contract; Sui makes it a type signature. *(Proof: source — `Access { id, target_id, holder, expires_at_ms } has key`.)*
+1. **Walrus quilt batching** — up to 4 collection variants share 1 Walrus Blob; per-variant byte-range patches addressable by URL. `⌈N/4⌉` quilts for N variants — **4× fewer stores** than one-blob-per-variant. The same patch URL feeds the marketplace thumbnail *and* the in-game mesh. *(Proof: the demo's 4-variant launch is a single quilt = 2 Walrus popups + the mint PTB.)*
+2. **Soulbound by Move ability, not runtime guard** — `AccessEntitlement` and `NftCollectionCreatorCap` are `has key` only — *no* `store`, so they *cannot* be transferred, wrapped, or Kiosk-placed. It's a Move type-system guarantee. The equivalent on Ethereum needs a custom transfer-guard contract; Sui makes it a type signature. *(Proof: source — `AccessEntitlement { id, model_id, holder } has key`.)*
+3. **Seal decryption gated on an on-chain object** — `allow_list`/`restricted` bases are Seal envelope-encrypted; `seal_approve_entitlement` proves you hold the entitlement before the key unwraps. Encryption is *derived* from the license policy at publish (not a decorative flag), and `seal_id` is fixed at 32 bytes to close a prefix-truncation bypass we found and fixed in our own security audit (D-085). *(Proof: source — `is_encrypted` derived in `publish_encrypted`; 32-byte `seal_id` in `validate_seal_publish`.)*
 
 Each claim is one row, ~30 chars of body. Don't over-explain.
+
+> ⚠️ Reconcile before design: the old "17 shared objects in PTB `8gKrqemFV…`" proof was on the **retired** Phase-3 package (`0x18a480b3…`). Re-capture an object-creation proof against the live v12 package `0xbf0affb8…02d1` before citing tx hashes / object counts.
 
 ---
 
@@ -76,7 +80,7 @@ Each claim is one row, ~30 chars of body. Don't over-explain.
 
 **No copy — embed the 90-sec demo video.** Slide is a single video player + a "Demo URL: <link>" caption.
 
-If presenting live, this is where you run the actual demo — `/forge` mint → `/collection/:slug` browse → `/track` drive. Switch to the slide for video playback if anything breaks.
+If presenting live, this is where you run the actual demo — `/create` (encrypted base mint) → `/model/:id` (buy access + Seal unlock) → `/launch` (4-variant fork) → `/track` drive. Switch to the slide for video playback if anything breaks.
 
 (See `pitch/demo-script.md` for the shot list + voiceover script.)
 
@@ -87,9 +91,9 @@ If presenting live, this is where you run the actual demo — `/forge` mint → 
 **Headline:** *"Phase 4 + 5: mainnet, Kiosk royalties, more collections."*
 
 **Three rows:**
-- **Mainnet by 8/27** (Sui Overflow winners deadline) — D-009. Mainnet deploy is mechanical given the testnet path is proven (D-021).
-- **Sui Kiosk + TransferPolicy** — protocol-level royalty enforcement on Access resales. Phase 4 plan starts post-submission.
-- **L2 Derivative** — Move scaffolding already in `docs/spec.md`. Other creators fork your Collection into a derivative series with automatic royalty cascading. Deferred to v1.1 per D-013.
+- **Mainnet by 8/27** (Sui Overflow winners deadline) — D-009. Mainnet deploy is mechanical given the testnet path is proven.
+- **Sui Kiosk + TransferPolicy** — protocol-level royalty enforcement on `NftToken` resales. Kiosk wiring in progress.
+- **Deeper L2 + integrations** — `IntegrationRecord` already lets games register against a collection (gameDev pays a register fee). Next: richer royalty cascading + more game integrations.
 
 ---
 
@@ -98,7 +102,7 @@ If presenting live, this is where you run the actual demo — `/forge` mint → 
 Standard last slide. Name(s), one-line bio, links:
 - GitHub: <repo URL>
 - Demo: <localhost / deployed URL>
-- Testnet PackageID: `0x18a480b3...c3`
+- Testnet PackageID: `0xbf0affb8...02d1` (v12)
 - Contact: email / Twitter
 
 **Ask** (if presenting live to investors / partners): *"We're looking for [one specific thing — testnet game studio partner / mainnet stress testing collaborator / etc.]."*
@@ -108,7 +112,7 @@ Standard last slide. Name(s), one-line bio, links:
 ## Tone / style notes
 
 - **No marketing language**. "Decentralized" appears at most once. "Web3-native" never appears. Engineers can smell those.
-- **Numbers, not adjectives**. "16 variants in 3 signatures" beats "lightning-fast mint flow."
+- **Numbers, not adjectives**. "4× fewer Walrus stores; pay once for a soulbound entitlement" beats "lightning-fast mint flow." (Use only counts you've re-verified against the v12 contract — see the demo-config note in Slide 3.)
 - **Lead with the demo**. Architecture is service to the demo, not the other way around.
 - **Phase 3 is feature-complete**. Don't apologize for what's deferred (L2 Derivative, Kiosk) — frame as roadmap with concrete dates.
 - **One thing per slide**. If you find two ideas in a slide, split it.
@@ -128,7 +132,7 @@ Standard last slide. Name(s), one-line bio, links:
 ## Source artifacts
 
 When designing, pull from:
-- Live screenshots from `/forge`, `/collection/:slug`, `/track` (after U7)
+- Live screenshots from `/create`, `/model/:id`, `/launch`, `/collection/:slug`, `/track`
 - The demo recording itself (`pitch/demo-recording.mp4` after U7)
 - Sui Scan screenshot of the deploy tx `8gKrqemFV...`
 - `docs/decisions.md` for technical depth on any judge follow-up Q

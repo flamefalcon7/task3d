@@ -1,5 +1,17 @@
 # 90-Second Demo Recording Script
 
+> ⚠️ **STALE — needs a full rewrite before recording (2026-06-05).** This shot-list was written for the retired Phase-3 architecture and DOES NOT match the shipped app. Do not record against it as-is. Specifically:
+> - **No `/forge` route.** The flow is now `/create` (carve + mint L1 `Model3D`) → `/model/:id` (buy soulbound `AccessEntitlement`) → `/launch` (fork into an L2 `NftCollection` + `NftToken`s) → `/track` (drive). "Collection Forge" no longer exists as one screen.
+> - **No `Collection`/`Access` types.** Architecture is L1 `Model3D` + `AccessEntitlement` → L2 `NftCollection` + `NftToken` (D-078). "L3 Access" is retired.
+> - **Stale package + tx.** The B-roll cites tx `8gKrqemFV…` / package `0x18a480b3…` (Phase-3). Live package is **v12 `0xbf0affb8…02d1`** — re-capture all on-chain proof shots.
+> - **Seal is now shipped** — the demo can show encrypted-base → entitlement → decrypt, which it currently doesn't.
+>
+> **Locked demo config (2026-06-05):** Tripo prompt-mode **ON** (Beat 1 = live prompt → base car; pre-bake to cut the 60–180s wait) · **4 variants** (fits one Walrus quilt) · **Seal ON** — publish the base as an encrypted `allow_list` model so the demo can show the locked-ciphertext → buy → entitlement-decrypt → render beat. Honest wallet-interaction counts: `/create` ~5 · buy access 1 · Seal unlock 1 · `/launch` 4 (encrypted fork is a 2-step on-chain flow). Do NOT claim "3 signatures." Re-capture all on-chain proof shots against v12 `0xbf0affb8…02d1`.
+>
+> Everything below is kept for its still-valid *production* guidance (what to cut, what not to show, editing/export notes), not its flow.
+
+---
+
 Phase 3 e2e demo for Sui Overflow 2026 submission. The full mint → browse → buy → drive arc through the Collection Forge + Tiny Racetrack apps.
 
 **Total target: 90 seconds.** Tight, no dead air.
