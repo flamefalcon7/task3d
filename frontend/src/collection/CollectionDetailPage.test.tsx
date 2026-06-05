@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { NftCollectionSummary } from '../integration/useCollections';
 
@@ -16,6 +16,9 @@ const useModelIndexMock = vi.fn();
 vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMock() }));
 
 vi.mock('../auth/SignInButton', () => ({ SignInButton: () => null }));
+
+// Babylon needs WebGL — jsdom doesn't have it. Stub PreviewCanvas.
+vi.mock('../babylon/PreviewCanvas', () => ({ PreviewCanvas: () => null }));
 
 import { CollectionDetailPage } from './CollectionDetailPage';
 
@@ -65,6 +68,20 @@ describe('CollectionDetailPage', () => {
     expect(screen.getByTestId('collection-name').textContent).toMatch(/Roadster collection/);
     expect(screen.getByTestId('collection-register-fee').textContent).toMatch(/0\.10 SUI/);
     expect(screen.getByTestId('usedby-section')).toBeTruthy();
+  });
+
+  it('shows a copyable Model ID that writes the base model id to the clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    useCollectionByIdMock.mockReturnValue({ collection: makeCollection(), loading: false, error: null });
+    renderAt('0xcoll');
+    const copyBtn = screen.getByTestId('copy-model-id');
+    expect(copyBtn).toBeTruthy();
+    fireEvent.click(copyBtn);
+    expect(writeText).toHaveBeenCalledWith('0xbase'); // makeCollection().baseModelId
   });
 
   it('renders loading state', () => {
