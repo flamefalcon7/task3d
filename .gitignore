@@ -34,3 +34,8 @@ backend/data/
 *.db
 *.db-journal
 *.db-wal
+
+# Pitch strategy working docs — INTERNAL only, never submit to judges
+# (contain demo-staging notes, "what not to show", honesty guards, overclaim warnings)
+pitch/demo-script.md
+pitch/pitch-deck-outline.md
