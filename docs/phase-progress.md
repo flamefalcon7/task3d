@@ -1,5 +1,32 @@
 # Phase Progress
 
+## Last Updated: 2026-06-05 (**Rage Racing /track reskin — DONE on branch `feat/rage-racing-track-reskin`, NOT yet merged / no PR**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **16 of 38**
+- Days to demo day (7/20–21): ~45
+- Days to winners (8/27): ~83
+
+### Current Phase
+Phase 3/4 — demo polish. Reskinned `/track` into **"Rage Racing by Deksat Studio"** so the racetrack reads as a *third-party game integrating a Tusk3D collection*, not an in-app feature tab — the visible proof of the composability thesis for the demo video. Brainstorm `docs/brainstorms/2026-06-05-rage-racing-thirdparty-game-reskin.md`; plan `docs/plans/2026-06-05-001-feat-rage-racing-track-reskin-plan.md` (Approach A, frontend-only).
+
+### Completed This Session
+- **U2** — `frontend/src/track/rageRacing/brand.ts` Electric Arcade identity (surface `#0B0B0F`, accent `#FFE500`, secondary `#FF2D7E`, Oswald display via `index.html`) + `brand.test.ts` collision guard (accent/font ≠ Tusk3D).
+- **U1** — removed "Track" from `NAV_ITEMS` + added `/track` to `HIDDEN_ROUTES` in `ux/TopNav.tsx` (masthead hidden, same seam as `/dev/compare`); nav tests updated.
+- **U3** — reskinned `TrackPage.tsx`: RAGE RACING wordmark + "by Deksat Studio", Rage Racing voice on all states, **no inward `/launch`/`/market`/`/browse` CTA**, + on-canvas **Sui + Walrus provenance caption** (real `blobId`/`collectionId` from selected token). All hooks/effects/override-modes/testids preserved verbatim.
+- **U4** — reskinned `carCarousel.tsx` to the garage strip (brand accent on selected, imported-car voice) + new `carCarousel.test.tsx`.
+- **Review fix** — locked the wordmark italic explicitly in `brand.ts` (was inheriting the global `h1{font-style:italic}` reset).
+- **Verification** — frontend `tsc -b` clean; full vitest **1021 pass / 2 skip**; agent-browser confirmed `/track` has no Tusk3D chrome + Rage Racing identity, `/market` keeps the nav minus Track. Screenshot captured.
+- **Commits** (branch `feat/rage-racing-track-reskin`): U2, U1, U3, U4, review-fix — 5 commits, NOT merged, no PR yet.
+
+### Next Concrete Step
+Decide merge path for `feat/rage-racing-track-reskin` (open PR via ce-commit-push-pr, or fast-forward merge to main). Plan status still `active` — flip to `completed` on merge. Optional future upgrades deferred in the plan: Approach B (separate domain) + Approach C (wire `/integrate` attestation into the demo narrative).
+
+### Notes for Next Session
+Reskin is presentation-only — zero contract/Walrus/Sui-read changes, so it's independent of the v12 republish state. The provenance caption pulls real ids straight off the selected `OwnedToken`. End-to-end driving still needs a real wallet + owned NftToken (agent-browser can't drive Babylon/wallet — verify the drive in real Chrome at demo time).
+
+---
+
 ## Last Updated: 2026-06-04 (**Audit Track 4–5 backend+Walrus run + all-Medium remediation — in working tree on `fix/seal-id-prefix-bypass`, NOT committed**)
 
 ### Hackathon Tracker
