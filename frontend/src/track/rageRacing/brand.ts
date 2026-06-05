@@ -41,9 +41,12 @@ export const RAGE_RACING = {
 // --- Ready-to-spread style helpers (mirror the eyebrow/headline/monoLabel
 // pattern from ux/tokens so TrackPage stays ergonomic) ---
 
-// The big sporty wordmark.
+// The big sporty wordmark. fontStyle is set explicitly (not left to inherit
+// from the global `h1 { font-style: italic }` rule in index.css) so the racing
+// slant is owned by this module, not coupled to Tusk3D's brutalist h1 reset.
 export const wordmark: CSSProperties = {
   fontFamily: RAGE_RACING.font.display,
+  fontStyle: 'italic',
   fontWeight: 700,
   fontSize: 40,
   lineHeight: 0.95,
