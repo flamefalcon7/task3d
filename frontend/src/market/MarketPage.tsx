@@ -49,7 +49,7 @@ function truncate(addr: string, head = 6, tail = 4): string {
 // public GraphQL endpoint is indexer-backed; the owner→objects filter that
 // `useOwnedTokens` uses can lag seconds to minutes behind fullnode. Reading the
 // object by id from fullnode is ~300ms and reflects state as of tx commit, so
-// the buyer's new car appears in "Your cars" without waiting for the indexer.
+// the buyer's new NFT appears in "Your NFTs" without waiting for the indexer.
 const NFT_TOKEN_TYPE = `${TESTNET.model3dPackageId}::model3d::NftToken`;
 
 function parseOwnedNftToken(resp: unknown): OwnedToken | null {
@@ -400,7 +400,7 @@ export function MarketPage() {
         setPhase('idle');
         void pollRefresh();
         // Bypass the indexer: read the bought token from fullnode (~300ms) so
-        // it shows in "Your cars" without waiting for GraphQL's owner→objects
+        // it shows in "Your NFTs" without waiting for GraphQL's owner→objects
         // filter to catch up. The pollRefresh loop above + useOwnedTokens are
         // the eventual-consistency backup.
         void (async () => {
@@ -444,7 +444,7 @@ export function MarketPage() {
             <span style={eyebrow}>— L2 / MARKET</span>
             <h1 style={displayHeadline}>The marketplace.</h1>
             <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px' }}>
-              Connect a wallet to buy and sell NFT cars.
+              Connect a wallet to buy and sell NFTs.
             </p>
           </div>
           <SignInButton />
@@ -481,7 +481,7 @@ export function MarketPage() {
           )}
           {!listingsLoading && visibleListings.length === 0 && (
             <p data-testid="no-listings" style={emptyState}>
-              NOTHING FOR SALE YET — LIST ONE OF YOUR CARS BELOW
+              NOTHING FOR SALE YET — LIST ONE OF YOUR NFTS BELOW
             </p>
           )}
           {visibleListings.length > 0 && (
@@ -548,13 +548,13 @@ export function MarketPage() {
 
         {/* Your NFTs → list */}
         <section data-testid="your-nfts">
-          <h2 style={sectionH2}>Your cars.</h2>
+          <h2 style={sectionH2}>Your NFTs.</h2>
           {tokensLoading && (
             <p style={{ ...monoLabel, color: tokens.color.hint }}>— SYNCING OWNERSHIP</p>
           )}
           {!tokensLoading && sellable.length === 0 && (
             <p data-testid="no-owned" style={emptyState}>
-              YOU DON'T OWN ANY UNLISTED CARS — MINT A COLLECTION ON{' '}
+              YOU DON'T OWN ANY UNLISTED NFTS — MINT A COLLECTION ON{' '}
               <Link to="/launch" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>/LAUNCH</Link>
             </p>
           )}
@@ -646,7 +646,7 @@ export function MarketPage() {
             {confirmStatus === 'confirmed' && (
               <div data-testid="confirm-ok" style={statusBanner}>
                 <span style={accentText}>✓ CONFIRMED</span>
-                <span>· YOUR NEW CAR IS IN YOUR CARS</span>
+                <span>· YOUR NEW NFT IS IN YOUR NFTS</span>
               </div>
             )}
             {confirmStatus === 'failed' && (
