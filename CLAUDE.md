@@ -4,6 +4,8 @@ A web3 service that lets users generate simple 3D models through constrained inp
 
 Submission: **Sui Overflow 2026, Walrus track.** Submission deadline **2026-06-21**.
 
+> **This file holds principles + protocol only.** Volatile facts are sourced elsewhere: stack/versions → `docs/spec.md` §4; architecture & data model → `docs/spec.md` §1.7 / §2.8; decisions → `docs/decisions.md`; current state → `docs/phase-progress.md`. Need a version, a struct field, or "is X shipped?" — read those, don't trust a copy pasted here.
+
 ---
 
 ## 🧭 Session Start Protocol (READ FIRST, EVERY SESSION)
@@ -15,13 +17,7 @@ Before doing anything else in a new session, follow this protocol in order:
 3. Skim `docs/spec.md` — full project specification; refer back when implementing
 4. Check `docs/open-questions.md` — unresolved questions
 
-After reading, briefly summarize to the user:
-- Current phase + day X of 38
-- Last completed work
-- Next concrete step you intend to take
-- Any blocker / open question
-
-Then ask the user to confirm direction before proceeding.
+After reading, briefly summarize to the user: current phase + day X of 38, last completed work, next concrete step you intend to take, any blocker / open question. Then ask the user to confirm direction before proceeding.
 
 ---
 
@@ -29,18 +25,14 @@ Then ask the user to confirm direction before proceeding.
 
 This is a **38-day Sui Overflow 2026 sprint**. User-stated preference: **finish early, leave time for pitch deck + demo video polish**.
 
-### Milestones (Pacific Time, verbatim from handbook captured at plan-007 U1)
+### Milestones (Pacific Time, verbatim from handbook)
 
 - **June 21** — Submission deadline (testnet OR mainnet deployment is sufficient at this stage)
 - **July 8** — Shortlisted teams announcement
 - **July 20–21** — Demo Day — **virtual live present-back**; shortlisted teams pitch + Q&A (NOT just submitting the 6/21 recording — separate work item)
 - **August 27** — Winners announcement; mainnet-deployed by this date = **100% prize upfront**, else 50% on announcement + 50% on mainnet deploy
 
-Source: `docs/brainstorms/2026-05-19-phase-4-kiosk-race-on-mint-requirements.md` Dependencies/Assumptions (verbatim handbook clauses).
-
 ### Decision discipline
-
-Use these heuristics to balance protocol discipline with shipping speed:
 
 | Change type | What to do |
 |---|---|
@@ -59,7 +51,7 @@ When sources conflict, prefer (more authoritative first):
 
 1. **Live primary sources**: npm registry, GitHub releases, official Sui / Walrus / Mysten docs
 2. **Sui Overflow 2026 handbook**: https://mystenlabs.notion.site/overflow-2026-handbook
-3. **`docs/spec.md`** — project-specific synthesis (last verified 2026-05-14)
+3. **`docs/spec.md`** — project-specific synthesis
 4. **`docs/decisions.md`** — explicit project decisions (ADR log)
 5. **LLM training data** — lowest priority; always verify before acting
 
@@ -71,275 +63,137 @@ If primary sources contradict `docs/spec.md`, update `docs/spec.md` AND add an A
 
 ### Decision Capture (ADR)
 
-Before implementing any non-obvious architecture, tech, or design choice:
+Before implementing any non-obvious architecture, tech, or design choice: (1) pause, (2) append a new ADR to `docs/decisions.md` using the template at the bottom of this file, (3) confirm the decision text with the user, (4) then implement.
 
-1. Pause implementation
-2. Append a new ADR entry to `docs/decisions.md` using the template at the bottom of this file
-3. Confirm the decision text with the user
-4. Then implement
+**Triggers**: picking one library/tool/service over another; choosing an architectural pattern; defining a data model or contract interface; setting a constraint ("MVP only supports X"); resolving a tradeoff; reversing a previous decision.
 
-**Triggers for decision capture**:
-- Picking one library/tool/service over another
-- Choosing an architectural pattern
-- Defining a data model or contract interface
-- Setting a constraint (e.g. "MVP only supports X")
-- Resolving a tradeoff between competing goals
-- Reversing a previous decision
-
-**Skip capture for**:
-- Routine implementation (naming, file layout)
-- Trivial syntax choices
-- Anything already covered in `docs/spec.md`
+**Skip capture for**: routine implementation (naming, file layout), trivial syntax, anything already covered in `docs/spec.md`.
 
 ### Open Questions
 
-If you encounter a question that needs user input but isn't blocking right now, append it to `docs/open-questions.md`. Don't drop it into chat and forget.
+If you hit a question that needs user input but isn't blocking now, append it to `docs/open-questions.md`. Don't drop it into chat and forget.
 
 ### Completing a meaningful unit of work
 
-After finishing any meaningful unit (a feature, a phase, a bug fix that took > 15 min):
-
-1. Update `docs/phase-progress.md`
-2. Suggest a commit if changes are unstaged
+After finishing any meaningful unit (a feature, a phase, a bug fix that took > 15 min): update `docs/phase-progress.md`, then suggest a commit if changes are unstaged.
 
 ---
 
 ## 🏁 End-of-Session Protocol
 
-Before session ends (or before context approaches 60% utilization), update `docs/phase-progress.md`. Template:
+Before session ends (or before context approaches 60% utilization), update `docs/phase-progress.md` with a new `## Last Updated: <YYYY-MM-DD HH:MM>` block containing: **Hackathon Tracker** (days to 6/21, 7/20–21, 8/27), **Current Phase** (from spec.md §6), **Completed This Session**, **In Progress** (with file paths), **Next Concrete Step** (single specific action), **Blockers / Open Questions** (link open-questions.md), **Notes for Next Session** (anything subtle that would be lost otherwise).
 
-```markdown
-## Last Updated: <YYYY-MM-DD HH:MM>
-
-### Hackathon Tracker
-- Days to submission (6/21): <X of 38>
-- Days to demo day (7/20–21): <Y of 67>
-- Days to winners (8/27): <Z of 105>
-
-### Current Phase
-<Phase number and name from spec.md §6>
-
-### Completed This Session
-- <bullet list of things finished>
-
-### In Progress
-- <what's started but not done, with file paths>
-
-### Next Concrete Step
-<single specific action the next session should take>
-
-### Blockers / Open Questions
-- <link to docs/open-questions.md entries if any>
-
-### Notes for Next Session
-<anything subtle that would be lost otherwise — e.g. "tried X, didn't work because Y, try Z next">
-```
-
-**Do this without being asked.** If user signals end of session ("stop", "done for today", "save and exit"), do this immediately.
-
-If context utilization approaches 60% mid-session, proactively suggest: "Let me update phase-progress.md before we continue, so we don't lose context if I get compacted."
+**Do this without being asked.** If the user signals end of session ("stop", "done for today", "save and exit"), do it immediately. If context approaches 60% mid-session, proactively suggest updating phase-progress.md first.
 
 ---
 
 ## 🖥 Frontend Verification Protocol
 
-Any commit that changes user-visible frontend behavior MUST be browser-verified before declaring done. "Frontend-touching" means modifying `frontend/src/**/*.tsx`, `frontend/src/**/*.ts` (excluding pure type/util/test files), or `shared/src/types.ts` consumed by a component. Per-commit judgement; trivial commits in a flow already verified this session can skip — but the default is to verify.
+Any commit that changes user-visible frontend behavior MUST be browser-verified before declaring done. "Frontend-touching" = modifying `frontend/src/**/*.tsx`, `frontend/src/**/*.ts` (excluding pure type/util/test files), or `shared/src/types.ts` consumed by a component. Per-commit judgement; trivial commits in an already-verified flow can skip — but the default is to verify.
 
 ### Verification loop
 
-1. After the change, ensure `pnpm --dir frontend dev` is running.
+1. Ensure `pnpm --dir frontend dev` is running.
 2. Invoke `agent-browser` via the `ce-test-browser` skill at the relevant route.
 3. Drive the changed surface (click, fill, navigate).
-4. If a wallet popup blocks: announce `"PAUSED — sign in the wallet, then say go"` and wait for the user signal.
+4. If a wallet popup blocks: announce `"PAUSED — sign in the wallet, then say go"` and wait.
 5. Assert expected DOM state (testids, text, conditional renders).
 6. Pass → declare done + commit. Fail → diagnose, fix, repeat from step 3.
 
-The verification surface is the **full demo arc** — `/`, `/create`, `/launch`, `/market`, `/track`, `/model/:id`, `/collection/:id` — not L1 only.
-
-### Pre-commit checklist self-review
-
-Before declaring done, walk `docs/ux/frontend-checklist.md` items relevant to the change. Each category maps to a known bug pattern (cross-component state, async UX feedback, real-data drift, source-of-truth drift, effect deps). Items that don't apply are explicitly skipped (not silently ignored).
+The verification surface is the **full demo arc** — `/`, `/create`, `/launch`, `/market`, `/track`, `/model/:id`, `/collection/:id` — not L1 only. Before declaring done, walk the relevant `docs/ux/frontend-checklist.md` items; skip non-applicable ones explicitly, not silently.
 
 ### Wallet pause-and-resume — and where it doesn't apply
 
-`agent-browser` uses an isolated Chromium **without** the user's installed Sui wallet extension. Wallet-gated flows cannot be driven end-to-end in v1. Validation splits in two:
-
-- **Pre-wallet portion** — `agent-browser` drives up to (and including) the "Connect Wallet" / "Sign In" button. Assert the button is visible, enabled, and clickable. This validates the gating UI, not the post-sign-in state.
-- **Post-wallet portion** — the user runs the wallet-signed step in their own real Chrome (with Slush installed) and reports back. Claude asserts against the reported state.
-
-The `"PAUSED — <X>, then say go"` handoff applies only to **non-wallet** pauses inside `agent-browser`'s Chromium (file picker dialog, OAuth tab, etc.) — there the user can actually click in agent-browser's window. For wallet flows there is nothing to click in that window, so the handoff doesn't work. End-to-end wallet automation is deferred to a `TestWalletAdapter` fixture (see `docs/brainstorms/2026-05-25-frontend-uat-requirements.md` §Scope Boundaries).
+`agent-browser` runs an isolated Chromium **without** the user's Sui wallet extension, so wallet-gated flows can't be driven end-to-end. Validation splits: **pre-wallet** — agent-browser drives up to and including the "Connect Wallet" / "Sign In" button (assert visible, enabled, clickable); **post-wallet** — the user runs the signed step in their own Chrome (Slush installed) and reports back, Claude asserts against the reported state. The `"PAUSED — <X>, then say go"` handoff applies only to **non-wallet** pauses (file picker, OAuth tab) where the user can actually click in agent-browser's window. End-to-end wallet automation is deferred to a `TestWalletAdapter` fixture (see `docs/brainstorms/2026-05-25-frontend-uat-requirements.md`).
 
 ### Default review-pass roster (frontend-touching plans)
 
-When dispatching a code-review pass on a plan modifying files matching the "frontend-touching" heuristic above, include `ce-julik-frontend-races-reviewer` alongside the existing default roster (`ce-correctness-reviewer`, `ce-testing-reviewer`, `ce-api-contract-reviewer`, `ce-adversarial-reviewer`). The 5-reviewer parallel pattern is the default for any frontend-touching plan.
+When dispatching a code-review pass on a frontend-touching plan, include `ce-julik-frontend-races-reviewer` alongside the default roster (`ce-correctness-reviewer`, `ce-testing-reviewer`, `ce-api-contract-reviewer`, `ce-adversarial-reviewer`). The 5-reviewer parallel pattern is the default for any frontend-touching plan.
 
 ---
 
 ## 🗂 Project Structure
 
 ```
-project-root/
-├── CLAUDE.md                   # This file (session protocol)
-├── README.md                   # Public-facing; submission artifact (install, run, demo, license)
-├── docs/
-│   ├── spec.md                 # Full project specification (the working source)
-│   ├── decisions.md            # ADR log
-│   ├── phase-progress.md       # Current progress / next step (updated every session)
-│   ├── open-questions.md       # Unresolved questions
-│   ├── plans/                  # plan-mode outputs for substantial features
-│   └── solutions/              # documented solutions to past problems (bugs, patterns, decisions), organized by category with YAML frontmatter (module, tags, problem_type) — relevant when implementing or debugging in documented areas
-├── backend/                    # TS Node + Hono (Tripo dispatch + Sui/Walrus read path, D-012)
-├── frontend/                   # React + Vite + Babylon (imperative)
-├── shared/                     # types shared by browser + backend (Generator, TripoParams, LineageRecord)
-├── contracts/                  # Sui Move package model3d::model3d
-├── samples/                    # Sample game scene (Phase 3 deliverable)
-└── pitch/                      # Pitch deck, demo video script, screenshots (Phase 3+)
+backend/    # TS Node + Hono — Tripo dispatch, Sui/Walrus read path, AI seam (D-012)
+frontend/   # React + Vite + Babylon (imperative)
+shared/     # types shared by browser + backend
+contracts/  # Sui Move package model3d::model3d
+cdn-worker/ # Cloudflare Worker for the Walrus read-path CDN (D-073)
+samples/    # Sample game scene
+pitch/      # Pitch deck, demo video script, screenshots
+docs/       # spec.md, decisions.md, phase-progress.md, open-questions.md,
+            # plans/, solutions/ (past fixes w/ YAML frontmatter), brainstorms/, audits/
 ```
-
-Implementation directories (`backend/`, `frontend/`, etc.) will be created in Phase 1.
 
 ---
 
-## 🛠 Stack at a Glance
+## 🛠 Stack & Architecture (pointers — do not duplicate detail here)
 
-(Authoritative versions and gotchas in `docs/spec.md` §4. Pin all `@mysten/*` to **2026-05-08 release train**.)
+**Versions / deps live in `docs/spec.md` §4** (pin all `@mysten/*` to the **2026-05-08 release train**) and in `docs/decisions.md`. Stable invariants worth stating as principle:
 
-- **Backend** (D-012): Node 22 LTS (or Bun 1.2.x) + Hono + `@gltf-transform/core` + `@mysten/sui` + `zod` (`@anthropic-ai/sdk` dropped per D-023 — no LLM router)
-- **Frontend**: React + Vite + TypeScript, `@babylonjs/core` (imperative — **NOT `react-babylonjs`**, drop per D-007)
-- **Wallet / Auth**: `@mysten/dapp-kit` + `@mysten/enoki` (zkLogin) + `@mysten/slush-wallet`
-- **Storage**: `@mysten/walrus` + `@mysten/walrus-wasm`, **upload relay required for browser**
-- **Sui client**: `@mysten/sui/grpc` `SuiGrpcClient` (JSON-RPC client deprecated July 2026)
-- **Contract**: Sui Move package `model3d::model3d` (Move 2024 edition, `edition = "2024.beta"`)
-- **Network**: **Testnet for 6/21 submission; mainnet by 8/27** for 100% prize (per D-009)
-- **Optional v1.1**: `@mysten/seal` (Walrus encryption), Sui Kiosk (TransferPolicy royalty), forensic watermark
+- **Frontend 3D**: `@babylonjs/core` imperative — **NOT `react-babylonjs`** (D-007).
+- **Sui client**: `@mysten/sui/grpc` `SuiGrpcClient` (JSON-RPC client deprecated July 2026).
+- **Contract**: Move 2024 edition (`module foo::bar;`).
+- **Network**: **testnet for 6/21 submission, mainnet by 8/27** for 100% prize (D-009).
+- The product has an **AI / memory seam** (Gemini at the prompt-authoring layer, MemWal memory, Seal content protection) — these are **shipped, not optional**; for what's in/out and at which seam, read spec.md + decisions.md, never assume from memory.
 
----
+**Architecture — Composable Creator Economy, L1 content → L2 collection** (full detail in `docs/spec.md` §1.7 / §2.8; D-029, D-078): **L1 `Model3D` + `AccessEntitlement`** — one creator publishes base content to Walrus with `LicenseTerms` (policy + access_fee + derivative_mint_fee); N buyers pay the **access_fee once** for a permanent **soulbound `AccessEntitlement`** (consumer view + precondition to forking, gates Seal decryption; NOT a separate tier — the old "L3 Access" framing is retired). **L2 `NftCollection` + `NftToken`** — a forker holding the entitlement pays the per-launch **derive_fee**, holds a soulbound `NftCollectionCreatorCap`, mints tradeable `NftToken`s. 1-layer max; `base_royalty_bps` ≤ 30%.
 
-## 🎯 Core Architecture
-
-**Composable Creator Economy — L1 content (+ access entitlement) → L2 collection** (see `docs/spec.md` §1.7, §2.8; D-029, D-078):
-
-```
-L1  Model3D            — Creator publishes base content to Walrus, sets LicenseTerms:
-    + AccessEntitlement   policy (restricted / allow_list / permissionless) + access_fee
-                          + derivative_mint_fee. AccessEntitlement is a one-time, soulbound
-                          receipt (`key` only, no `store`) minted by purchase_access; it gates
-                          seal_approve_entitlement decryption — an L1 entitlement, NOT a 3rd tier
-                          (D-078; the old "L3 Access" framing is retired).
-L2  NftCollection      — A forker who HOLDS the entitlement launches a collection (pays the
-    + NftToken            per-launch derive fee, holds a soulbound NftCollectionCreatorCap) and
-                          mints tradeable NftTokens. 1-layer max; base_royalty_bps snapshot ≤ 30% cap.
-```
-
-`Model3D` is content — one creator publishes; N buyers pay the **access_fee once** for a permanent soulbound `AccessEntitlement` (consumer view + the precondition to forking). The **derive_fee** is a separate per-launch charge to mint an L2 collection. Access gating lives on the **entitlement**, not the collection cap (D-078 moved it off the cap).
-
----
-
-## 🎯 Core Constraints
-
-- Content sources: Tripo prompt-mode (free-form NL, D-023) + user GLB upload (D-033). Procedural generation removed in U9 (was Go, then TS; D-033 supersedes the original "predefined shape categories" + "procedural generation" constraints)
-- Tripo prompt-mode is SUI-fee-gated (D-034); GLB upload validated for format + size
-- Low poly, manifold mesh, rigid-body friendly (best-effort for uploaded GLBs — D-033)
-- Login required before mint (preview can be open)
-- **1-layer derivation only** (D-002); royalty hard-capped at 30% (D-004)
-- **GLB only for v1** (no FBX/USDZ per D-006)
+**Hard constraints (principle-level guardrails):**
+- Content sources: Tripo prompt-mode (SUI-fee-gated) + user GLB upload (validated for format + size). GLB only for v1 (no FBX/USDZ).
+- Low poly, manifold, rigid-body friendly (best-effort for uploaded GLBs).
+- Login required before mint (preview can be open).
+- **1-layer derivation only** (D-002); royalty hard-capped at **30%** (D-004).
 
 ---
 
 ## 📐 Workflow Rules
 
 ### Planning before coding
-
-- For work touching > 2 files or introducing new patterns: plan-mode first
-- Confirm plan with user before implementation
-- Save approved plans into `docs/plans/<feature-name>.md` if substantial
+- For work touching > 2 files or introducing new patterns: plan-mode first, confirm with user before implementing. Save approved substantial plans into `docs/plans/<feature-name>.md`.
 
 ### Testing
+- Move unit tests for all contract entry functions (see `docs/spec.md` §2.8 scaffold); integration tests for backend API endpoints.
+- E2E test on testnet before merging Walrus integration; sample game scene smoke test before Phase 5 submission.
 
-- Move unit tests for all contract entry functions (see `docs/spec.md` §2.8 Move scaffold)
-- Integration tests for backend API endpoints
-- E2E test on testnet before merging Walrus integration
-- Sample game scene smoke test before Phase 5 submission
-
-### Code style
-
-- Go: standard `gofmt`, idiomatic error handling, no panics in handlers
-- TypeScript: strict mode, no `any` without justification
-- Move: follow Sui Move 2024 conventions (`module foo::bar;` syntax)
-
-### Commits
-
-- Conventional: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
-- Reference decision ID when relevant: `feat(contract): add Derivative struct (D-002)`
-- Don't auto-commit; suggest, let user review
+### Code style & commits
+- TypeScript: strict mode, no `any` without justification. Move: Sui Move 2024 conventions.
+- Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`); reference decision ID when relevant (`feat(contract): add Derivative struct (D-002)`). Don't auto-commit; suggest, let the user review.
 
 ### Don't
-
-- Don't reopen `Accepted` decisions in `docs/decisions.md` unless user explicitly asks
-- Don't make architectural changes without ADR first
-- Don't skip end-of-session update — it's the entire point of this protocol
-- Don't fabricate file paths or library APIs — verify with `view` or web search
-- Don't fabricate context to satisfy protocol — if uncertain, STOP and ask user
+- Don't reopen `Accepted` decisions in `docs/decisions.md` unless the user explicitly asks.
+- Don't make architectural changes without an ADR first.
+- Don't skip the end-of-session update — it's the entire point of this protocol.
+- Don't fabricate file paths, library APIs, or context to satisfy protocol — verify with `view` / web search, and if uncertain, STOP and ask the user.
 
 ---
 
 ## 🔄 Decision Reversal Protocol
 
-When superseding a prior decision:
-
-1. Create new D-XXX with status `Supersedes D-YYY`
-2. Update D-YYY status to `Superseded by D-XXX`
-3. If the old decision is reflected in `docs/spec.md`, update spec.md too
-4. Note all three changes in the commit message
+When superseding a prior decision: (1) create new `D-XXX` with status `Supersedes D-YYY`; (2) update `D-YYY` status to `Superseded by D-XXX`; (3) if the old decision is reflected in `docs/spec.md`, update spec.md too; (4) note all three changes in the commit message.
 
 ---
 
 ## 🚨 If Something Feels Off
 
-If at session start the docs look stale or inconsistent (e.g. phase-progress.md says "Phase 3" but the codebase looks like Phase 5):
-
-1. **Don't silently proceed**
-2. Report the inconsistency to the user
-3. Ask whether to:
-   - Re-sync docs to match codebase reality, OR
-   - Treat docs as truth and revert/skip code
-4. Wait for user direction
-
-This protects against context drift between sessions.
+If at session start the docs look stale or inconsistent (e.g. phase-progress.md says "Phase 3" but the codebase looks like Phase 5): **don't silently proceed.** Report the inconsistency, then ask whether to (a) re-sync docs to match codebase reality, or (b) treat docs as truth and revert/skip code. Wait for user direction. This protects against context drift between sessions.
 
 ---
 
 ## 📋 ADR Template (for `docs/decisions.md` entries)
 
-Lightweight variant for small decisions — only fill what's relevant; 5-line entry is fine for trivial choices:
+Lightweight — only fill what's relevant; a 5-line entry is fine for trivial choices. Number sequentially from D-001; **never reuse numbers.** (For the canonical shape, copy the most recent entry in `docs/decisions.md`.)
 
 ```markdown
 ## D-XXX: <Short title>
-
 **Status**: Accepted | Proposed | Superseded by D-YYY | Deprecated
-**Date**: YYYY-MM-DD
-**Phase**: <phase from spec.md §6>
+**Date**: YYYY-MM-DD · **Phase**: <phase from spec.md §6>
 
-### Context
-<What problem / forces?>
-
-### Decision
-<The choice, stated as a complete sentence.>
-
-### Rationale
-<Why this choice? Bullets OK.>
-
-### Alternatives Considered
-- **Alt A**: <description> — rejected because <reason>
-
-### Consequences
-- ✅ <positive>
-- ⚠️ <tradeoff>
-- 🔮 <future implication>
-
-### Related
-- spec.md section: <link>
-- Related decisions: D-YYY
+### Context — <what problem / forces?>
+### Decision — <the choice, as a complete sentence>
+### Rationale — <why; bullets OK>
+### Alternatives Considered — <Alt A — rejected because …>
+### Consequences — ✅ <positive> · ⚠️ <tradeoff> · 🔮 <future implication>
+### Related — spec.md §<link> · Related decisions: D-YYY
 ```
-
-Number decisions sequentially starting D-001. **Never reuse numbers.**

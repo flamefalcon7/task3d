@@ -13,11 +13,11 @@
 1. **時程**:Submission **2026-06-21**(距今 **~38 天**)、Shortlist 7/8、**Demo Day 7/20–21**、Winners **8/27**(Sui Basecamp 受邀 pitch)。**全部 Pacific Time。**
 2. **獎金結構**:**50% 在 8/27 公布時拿、50% 在 mainnet deploy 成功後拿**。若 8/27 已 mainnet → 100% upfront。**目標:8/27 前要上 mainnet**,別只停在 testnet。
 3. **主攻 track**:**Walrus**(1st $35K / 2nd $15K / 3rd $7.5K / 4th $5K + $7.5K honorable mentions = ~$70K pool)
-4. **Walrus track framing(D-011 升級)**:Handbook 寫的是「Build **AI agents and agentic workflows** powered by Walrus **as a verifiable data and memory layer**」。我們的 pitch:**「LLM agent 路由 procedural + (optional) AI generator,Walrus 同時存 GLB bytes 加 agent 的 lineage(prompt / 決策 trace / params / generator 來源)」**。Agent 真做事(decomposition、routing、batching、provenance),不是 thin wrapper。**MemWal 待調研** — 但 lineage 模式已經是 memory layer 的具體實作。詳見 [D-011](decisions.md#d-011-agentic-framing--hybrid-generator-architecture-llm-router--procedural--tripo)。
+4. **Walrus track framing(D-011 升級)**:Handbook 寫的是「Build **AI agents and agentic workflows** powered by Walrus **as a verifiable data and memory layer**」。我們的 pitch:**「LLM agent 路由 procedural + (optional) AI generator,Walrus 同時存 GLB bytes 加 agent 的 lineage(prompt / 決策 trace / params / generator 來源)」**。Agent 真做事(decomposition、routing、batching、provenance),不是 thin wrapper。~~**MemWal 待調研**~~ **⚠️ 已定案(D-080,所有權拆分 D-090):MemWal 已採用為 Riff Copilot 的 memory 層**;但 lineage 模式仍是 memory layer 的具體實作。詳見 [D-011](decisions.md#d-011-agentic-framing--hybrid-generator-architecture-llm-router--procedural--tripo)。
 4.5. **Generator architecture(D-011 新增)**:`Generator` interface,**primary = `ProceduralGenerator`**(Go,< 2s,manifold 保證,$0/gen)。**Secondary = `TripoGenerator`**(pluggable,**Phase 3 才決定**要不要接,接的話用 Pro tier $11.94/mo 商用 OK)。LLM router(Claude Haiku/Sonnet,~$0.001/call)做 NL → catalog → params + 多步驟拆解。**LLM 不畫東西**,只做分類 + 填空。
 5. **2026 track 縮編** — 只有 4 個 track:Core 2 個(Agentic Web、DeFi & Payments)+ Specialized 2 個(Walrus、DeepBook)。**沒有 Entertainment & Culture / ONE Championship / EVE / Infra & DevX** — 那些是 2025 的,不存在了。MVP 沒有 Walrus 之外的 fallback。
 6. **評分權重**:**Real-World Application 50%** ← 最重!Product & UX 20% / Technical 20% / Presentation 10%。**「solve meaningful problems」「market relevance」「long-term value」比技術 demo 重要。**
-7. **MVP 不要做 Seal**,但架構上把 Walrus URI 藏在 Sui Move 物件欄位(spec 已對)— 之後加 Seal 不用重做架構。**stretch 階段可加付費解鎖 demo**。
+7. ~~**MVP 不要做 Seal**~~ **⚠️ 已反轉(D-074,2026-05-31):Seal 內容保護提前納入 v1 / 6/21 submission,並已於 v9 出貨**(D-075/076、加固 D-085~087)。原架構先見之明仍成立——Walrus URI 藏在 Sui Move 物件欄位,加 Seal 不用重做架構。**stretch 階段可加付費解鎖 demo** 已實現為 access-entitlement(D-078)。
 8. **要改 spec 的幾件事**(詳見 §5):drop `react-babylonjs`、所有 `@mysten/*` 鎖到 2026-05-08 release train、Walrus WASM 在 Vite/Next.js 要特別 setup、Walrus package ID 用 MVR 不要硬寫。
 9. **Demo 殺手 60 秒**:Google 登入(zkLogin)→ 選 shape + slider → 即時預覽 → 確認 → mainnet mint(sponsored tx 讓用戶看不到 gas)→ Slush 錢包看到 Model3D NFT。
 
@@ -1070,7 +1070,7 @@ Seal 內容保護**已在 v9 出貨**(plan-026 / D-074·D-075·D-076,從原 Stre
 | `@mysten/enoki` | **1.0.7** | 5/5 |
 | `@mysten/walrus` | **1.1.7** | 5/5 |
 | `@mysten/walrus-wasm` | **0.2.2** | 5/5 |
-| `@mysten/seal`(若加) | **1.1.x** | 5/5(post-mainnet, beta tag 仍在) |
+| `@mysten/seal`(frontend，**已出貨 v1**，D-074) | **1.1.3** | 5/5(post-mainnet, beta tag 仍在) |
 | `@mysten/slush-wallet` | **1.0.5** | 5/5 |
 
 | Frontend | 版本 | 維護 |
@@ -1082,12 +1082,14 @@ Seal 內容保護**已在 v9 出貨**(plan-026 / D-074·D-075·D-076,從原 Stre
 
 | Backend(D-012:TS unified) | 版本 | 維護 / 用途 |
 |---|---|---|
-| Node.js | 22.x LTS(or Bun 1.2.x) | 5/5 — runtime |
+| Node.js | 22.x LTS(or Bun 1.2.x) | 5/5 — runtime;`node:sqlite`(內建)做持久化 store(quota / replay guard,D-083 / D-088) |
 | `hono` | 4.6.x | 5/5 — HTTP framework,Vercel / Cloudflare / Node 都跑 |
-| `@gltf-transform/core` | 4.x | 5/5 — procedural GLB 構造,取代 `qmuntal/gltf` |
-| `@anthropic-ai/sdk` | 0.40.x+ | 5/5 — LLM router(Claude Haiku 預設) |
+| `@gltf-transform/core` + `/extensions` | 4.x | 5/5 — GLB 構造 / 變換 |
+| `meshoptimizer` | 1.1.x | 5/5 — mesh 處理 |
+| `ai` + `@ai-sdk/google` | 6.x / 3.x | 5/5 — **Gemini**,prompt-authoring 接縫(Riff Copilot D-081 + Upload Captioning D-082)。⚠️ `@anthropic-ai/sdk` 已於 **D-023 移除** — generation-dispatch 路徑無 LLM;此 LLM 在另一個接縫(D-081 明言不推翻 D-023) |
+| `@mysten-incubation/memwal` | 0.0.6 | 5/5 — Walrus agent-memory 層(D-080,所有權拆分 D-090) |
 | `@mysten/sui` | 同 frontend 鎖 | 5/5 — server 端 lineage 簽章用 |
-| `zod` | 3.x | 5/5 — Anthropic structured output schema |
+| `zod` | 3.x | 5/5 — structured-output / validation schema |
 
 ### 4.1 dApp Kit 1.0 拆分
 

@@ -1,5 +1,30 @@
 # Phase Progress
 
+## Last Updated: 2026-06-07 (**Doc-sync: CLAUDE.md slimmed + spec.md §4 reconciled — on `docs/sync-claudemd-spec`**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **14 of 38**
+- Days to demo day (7/20–21): ~43
+- Days to winners (8/27): ~81
+
+### Current Phase
+Phase 4 — housekeeping. A prior session flagged CLAUDE.md as drifted; verified true and fixed the **structural** cause (volatile facts duplicated into a principles doc → guaranteed drift).
+
+### Completed This Session
+- **CLAUDE.md 345 → 199 lines.** Stripped the volatile `Stack at a Glance` version enumeration + `Core Architecture` detail down to **pointers** (spec.md §4 / §1.7 / §2.8 + decisions.md as source of truth); kept all protocol/principle content. Added a header note: this file holds principles only.
+- **spec.md §4 reconciled** (it was *more* stale than CLAUDE.md): backend table still listed `@anthropic-ai/sdk` as the active "LLM router" — **removed per D-023**; added the real shipped deps: `ai` + `@ai-sdk/google` (Gemini, D-081/082), `@mysten-incubation/memwal` (D-080/090), `node:sqlite` (D-083/088), `meshoptimizer`. Seal row: `若加` → **shipped v1 `1.1.3` (D-074)**.
+- **spec.md framing forward-notes** — the dated 2026-05-14 block's flatly-false lines (`MemWal 待調研`, `MVP 不要做 Seal`) got non-destructive `⚠️ 已定案/已反轉` markers pointing to D-080 / D-074 (history preserved, current truth flagged).
+- **Corrected stale state below** — the 06-06 block's "Next Step: push `feat/landing-live-3d-wells` (not pushed)" is **done**: that branch + `feat/rage-racing-track-reskin` are both **merged into main** (commits `4ced101`, `c0a228a`).
+
+### Next Concrete Step
+Review the `docs/sync-claudemd-spec` diff; if good, commit (`docs:` — references D-023/074/080/081) and merge to main. No code touched — docs only.
+
+### Notes for Next Session
+- Root cause of the drift: D-080→D-094 (June 2–6) landed in `decisions.md` but were never written back to the "resident" docs (CLAUDE.md/spec.md), both last touched 6/01 (`4d6a337`). The slimming makes CLAUDE.md drift-resistant; spec.md remains the one place stack/arch facts must be kept current.
+- Untracked at root (pre-existing, unrelated): `docs/brainstorms/2026-06-02-*` + several `.glb` files. Left alone.
+
+---
+
 ## Last Updated: 2026-06-06 (**Landing live-3D wells — 8-unit plan shipped + a long user-driven visual redesign pass; all on `feat/landing-live-3d-wells`, NOT yet pushed/PR'd**)
 
 ### Hackathon Tracker
