@@ -120,6 +120,20 @@ export const viewerWell: CSSProperties = {
   overflow: 'hidden',
 };
 
+// Landing live-3D wells — SCOPED D-044 EXCEPTION (D-093, updated D-094). The
+// hero now BLENDS into the page (paper clearColor + feathered edges + contact
+// shadow — see LedeHero), so the grey-viewport/grid tokens are retired. These
+// remaining values apply ONLY to the lifecycle panels, which keep black wells:
+//   - variant1/2/3: three desaturated, non-accent tints for the VARIANT triptych
+//     (none equal tokens.color.accent).
+//   - glow: neutral IN-GAME emissive glow; never the #FF4500 accent.
+export const landingWells = {
+  variant1: '#C9B27A',
+  variant2: '#6E8FA8',
+  variant3: '#8E7EA8',
+  glow: '#E8E4D8',
+} as const;
+
 export const badge: CSSProperties = {
   fontSize: 9,
   fontFamily: tokens.font.mono,

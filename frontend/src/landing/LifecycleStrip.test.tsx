@@ -1,12 +1,31 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, within } from '@testing-library/react';
+
+// The three Babylon panels + the typewriter are mocked at the module boundary
+// so the strip test never touches WebGL or timers (D-092 — the strip is now
+// live; its children own that behavior and are tested in their own suites).
+vi.mock('./TypewriterPrompt', () => ({
+  TypewriterPrompt: () => <span data-testid="mock-typewriter">a low-poly walrus tusk</span>,
+}));
+vi.mock('./panels/ModelPanel', () => ({
+  ModelPanel: () => <div data-testid="mock-model" />,
+}));
+vi.mock('./panels/VariantPanel', () => ({
+  VariantPanel: () => <div data-testid="mock-variant" />,
+}));
+vi.mock('./panels/InGamePanel', () => ({
+  InGamePanel: () => <div data-testid="mock-ingame" />,
+}));
+
 import { LifecycleStrip } from './LifecycleStrip';
 
 const ASSET_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../public/lifecycle');
 const PANEL_ASSETS = ['model.svg', 'variant.svg', 'in-game.svg'] as const;
+
+afterEach(cleanup);
 
 describe('LifecycleStrip', () => {
   it('renders 4 panels in PROMPT / MODEL / VARIANT / IN-GAME OBJ order (AC-2)', () => {
@@ -20,7 +39,7 @@ describe('LifecycleStrip', () => {
     expect(panels[3]?.textContent).toMatch(/IN-GAME OBJ/);
   });
 
-  it('renders the four layer sub-captions verbatim (AC-3)', () => {
+  it('renders the four layer sub-captions verbatim (AC-3, contract-locked)', () => {
     render(<LifecycleStrip />);
     const text = screen.getByTestId('lifecycle-strip').textContent ?? '';
     expect(text).toContain('INPUT · Tripo');
@@ -32,9 +51,6 @@ describe('LifecycleStrip', () => {
   it('never surfaces unshipped-mechanic vocabulary (AC-3)', () => {
     render(<LifecycleStrip />);
     const text = screen.getByTestId('lifecycle-strip').textContent ?? '';
-    // Access / Seal are v1.1; "Derivative" is the deferred fork flavor — none
-    // ship in v1, so none may appear on the landing strip. Word-boundary match
-    // so legitimate copy like "accessibility" wouldn't false-trip the guard.
     expect(text).not.toMatch(/\baccess\b/i);
     expect(text).not.toMatch(/\bseal\b/i);
     expect(text).not.toMatch(/\bderivative\b/i);
@@ -42,38 +58,36 @@ describe('LifecycleStrip', () => {
 
   it('renders the Newsreader-italic tagline (AC-4)', () => {
     render(<LifecycleStrip />);
+    expect(screen.getByText('One prompt. One model. Sixteen forks. Every game.')).toBeTruthy();
+  });
+
+  it('renders the live typewriter in the PROMPT panel (D-092)', () => {
+    render(<LifecycleStrip />);
+    const promptPanel = screen.getByTestId('lifecycle-panel-prompt');
+    expect(within(promptPanel).getByTestId('mock-typewriter')).toBeTruthy();
+  });
+
+  it('renders the mapped live well in each pipeline panel (D-092)', () => {
+    render(<LifecycleStrip />);
     expect(
-      screen.getByText('One prompt. One model. Sixteen forks. Every game.'),
+      within(screen.getByTestId('lifecycle-panel-model')).getByTestId('mock-model'),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId('lifecycle-panel-variant')).getByTestId('mock-variant'),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId('lifecycle-panel-ingame')).getByTestId('mock-ingame'),
     ).toBeTruthy();
   });
 
-  it('renders the prompt text in panel 1 (AC-2)', () => {
-    render(<LifecycleStrip />);
-    const promptPanel = screen.getByTestId('lifecycle-panel-prompt');
-    expect(promptPanel.textContent).toContain('a low-poly walrus tusk, ornate carve');
-  });
-
-  it('is static — no canvas, and panels 2–4 are img with non-empty alt (AC-6)', () => {
+  it('renders no #FF4500 accent in the DOM (AC-5 — panels stay accent-free)', () => {
     const { container } = render(<LifecycleStrip />);
-    expect(container.querySelector('canvas')).toBeNull();
-    const imgs = container.querySelectorAll('img');
-    expect(imgs).toHaveLength(3);
-    imgs.forEach((img) => {
-      expect(img.getAttribute('src')).toMatch(/^\/lifecycle\/.+\.svg$/);
-      expect((img.getAttribute('alt') ?? '').length).toBeGreaterThan(0);
-    });
-  });
-
-  it('renders no #FF4500 accent in the DOM (AC-5)', () => {
-    const { container } = render(<LifecycleStrip />);
-    expect(container.querySelector('[data-testid="keycap-accent-dot"]')).toBeNull();
     expect(container.innerHTML.toLowerCase()).not.toContain('ff4500');
   });
 
-  // The DOM check above is necessary but not sufficient: panels 2–4 are
-  // <img src> so the SVG bytes never enter the DOM. Assert zero accent on the
-  // actual asset files too (AC-5 — the real zero-accent surface).
-  it.each(PANEL_ASSETS)('panel asset %s contains no #FF4500 accent (AC-5)', (file) => {
+  // The static SVG fallbacks (used on low-end/mobile via LiveWell) must also
+  // stay zero-accent — the bytes never enter the DOM, so check the files.
+  it.each(PANEL_ASSETS)('static fallback asset %s contains no #FF4500 accent (AC-5)', (file) => {
     const svg = readFileSync(join(ASSET_DIR, file), 'utf8').toLowerCase();
     expect(svg).not.toContain('ff4500');
   });

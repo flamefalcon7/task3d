@@ -3,10 +3,14 @@
    No transition (D-044 §7 instant). All borders 1.5px solid #000, 0 radius.
    Mirrors KeycapRow.module.css grid + 767px breakpoint. */
 
+/* Full-bleed, mirroring ActorCards (.section) so the four pipeline cells line up
+   with the four actor cards below: edge-to-edge 4-column grid, 1.5px black
+   dividers + top/bottom borders, paper cells holding LIGHT-GREY thumbnails. */
 .strip {
   border-top: 1.5px solid #000;
   border-bottom: 1.5px solid #000;
   background: #f5f5f0;
+  overflow-x: clip;
 }
 
 .grid {
@@ -24,6 +28,7 @@
   gap: 12px;
   padding: 20px 16px;
   border-right: 1.5px solid #000;
+  background: #f5f5f0;
 }
 
 .panel:last-child {
@@ -39,15 +44,16 @@
   color: #000;
 }
 
-/* black well — the visualization surface */
+/* light-grey thumbnail — matches the canvas clearColor so the model sits in a
+   soft grey card, not a black box. */
 .well {
-  background: #000;
+  background: #e2e0da;
   aspect-ratio: 4 / 3;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  padding: 8px;
+  padding: 0;
 }
 
 .art {
@@ -62,8 +68,29 @@
   font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
   font-size: 13px;
   line-height: 1.6;
-  color: #f5f5f0;
+  color: #000;
   text-align: center;
+}
+
+/* blinking caret for the typewriter prompt (D-092/D-093 live-wells motion
+   exception). Text-colored — no #FF4500 accent. */
+.cursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: #000;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
 }
 
 .layer {
@@ -76,7 +103,7 @@
 .tagline {
   margin: 0;
   padding: 18px 16px;
-  border-top: 1.5px solid #000;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
   font-family: 'Newsreader', Georgia, serif;
   font-style: italic;
   font-size: 20px;
@@ -88,7 +115,7 @@
   .grid {
     grid-template-columns: 1fr 1fr;
   }
-  /* 2×2: drop right border on the right column, add bottom border on top row */
+  /* 2×2: drop right border on the right column, add bottom border on the top row */
   .panel:nth-child(2n) {
     border-right: none;
   }

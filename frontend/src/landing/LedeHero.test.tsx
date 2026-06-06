@@ -19,6 +19,10 @@ const state: {
   sweepSetup: ReturnType<typeof vi.fn>;
   sweepDispose: ReturnType<typeof vi.fn>;
   frameCamera: ReturnType<typeof vi.fn>;
+  clearColorSet: ReturnType<typeof vi.fn>;
+  groundCreate: ReturnType<typeof vi.fn>;
+  shadowGenCtor: ReturnType<typeof vi.fn>;
+  gridCtor: ReturnType<typeof vi.fn>;
 } = {
   engineCtor: vi.fn(),
   engineDispose: vi.fn(),
@@ -30,6 +34,10 @@ const state: {
   sweepSetup: vi.fn(),
   sweepDispose: vi.fn(),
   frameCamera: vi.fn(),
+  clearColorSet: vi.fn(),
+  groundCreate: vi.fn(),
+  shadowGenCtor: vi.fn(),
+  gridCtor: vi.fn(),
 };
 
 vi.mock('@babylonjs/core', () => {
@@ -39,6 +47,7 @@ vi.mock('@babylonjs/core', () => {
       state.engineCtor();
     }
     runRenderLoop() {}
+    stopRenderLoop() {}
     resize() {}
     wipeCaches() {
       state.engineWipeCaches();
@@ -49,14 +58,16 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class Scene {
-    clearColor = { set: () => {} };
+    clearColor = { set: (...a: number[]) => state.clearColorSet(...a) };
     activeCamera: unknown = null;
+    isDisposed = false;
     onBeforeRenderObservable = {
       add: (cb: () => void) => cb,
       remove: () => {},
     };
     render() {}
     dispose() {
+      this.isDisposed = true;
       state.sceneDispose();
     }
     constructor(_e: unknown) {
@@ -64,13 +75,43 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class ArcRotateCamera {
+    alpha = 0;
     constructor(_n: string, _a: number, _b: number, _r: number, _t: unknown, scene: Scene) {
       scene.activeCamera = this;
     }
     attachControl() {}
   }
   class HemisphericLight {
+    intensity = 1;
     constructor() {}
+  }
+  class DirectionalLight {
+    position: unknown = null;
+    intensity = 1;
+    constructor() {}
+  }
+  class ShadowGenerator {
+    useBlurExponentialShadowMap = false;
+    blurKernel = 1;
+    constructor() {
+      state.shadowGenCtor();
+    }
+    addShadowCaster() {}
+  }
+  class Color3 {
+    constructor(public r = 0, public g = 0, public b = 0) {}
+    static FromHexString(_hex: string) {
+      return new Color3(0.2, 0.2, 0.25);
+    }
+  }
+  const MeshBuilder = {
+    CreateGround: (..._a: unknown[]) => {
+      state.groundCreate();
+      return { position: { y: 0 }, material: null as unknown, receiveShadows: false };
+    },
+  };
+  class Vector2 {
+    constructor(public x = 0, public y = 0) {}
   }
   class Vector3 {
     constructor(public x = 0, public y = 0, public z = 0) {}
@@ -79,8 +120,42 @@ vi.mock('@babylonjs/core', () => {
     state.loadAssetCalls.push(url);
     return state.loadAssetImpl(url);
   });
-  return { Engine, Scene, ArcRotateCamera, HemisphericLight, Vector3, LoadAssetContainerAsync };
+  return {
+    Engine,
+    Scene,
+    ArcRotateCamera,
+    HemisphericLight,
+    DirectionalLight,
+    ShadowGenerator,
+    Color3,
+    MeshBuilder,
+    Vector2,
+    Vector3,
+    LoadAssetContainerAsync,
+  };
 });
+
+vi.mock('@babylonjs/materials/shadowOnly/shadowOnlyMaterial', () => ({
+  ShadowOnlyMaterial: class {
+    activeLight: unknown = null;
+    alpha = 1;
+    constructor() {}
+  },
+}));
+
+vi.mock('@babylonjs/materials/grid/gridMaterial', () => ({
+  GridMaterial: class {
+    mainColor: unknown = null;
+    lineColor: unknown = null;
+    opacity = 1;
+    gridRatio = 1;
+    majorUnitFrequency = 1;
+    minorUnitVisibility = 1;
+    constructor() {
+      state.gridCtor();
+    }
+  },
+}));
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
@@ -128,6 +203,10 @@ function resetState(): void {
   state.sweepSetup.mockReset();
   state.sweepDispose.mockReset();
   state.frameCamera.mockReset();
+  state.clearColorSet.mockReset();
+  state.groundCreate.mockReset();
+  state.shadowGenCtor.mockReset();
+  state.gridCtor.mockReset();
 }
 
 beforeEach(() => {
@@ -176,8 +255,24 @@ describe('LedeHero — render-mode branching', () => {
     expect(screen.queryByTestId('lede-canvas')).toBeNull();
     expect(state.engineCtor).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
-    // Caption still renders on fallback (R20).
-    expect(screen.getByTestId('lede-caption')).toBeTruthy();
+    // The editorial right column is desktop/live-only.
+    expect(screen.queryByTestId('lede-content')).toBeNull();
+  });
+
+  it('live mode renders the right editorial column (headline + jargon-free spec)', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('lede-content')).toBeTruthy());
+    expect(screen.getByText('Carve. Mint. Riff.')).toBeTruthy();
+    expect(screen.getByText('MODEL')).toBeTruthy();
+    // No spec-layer jargon leaks into user-facing copy.
+    const text = screen.getByTestId('lede-content').textContent ?? '';
+    expect(text).not.toMatch(/\bL[123]\b/);
   });
 
   it('live mode mounts canvas and constructs Engine + Scene + camera framing in order', async () => {
@@ -195,7 +290,29 @@ describe('LedeHero — render-mode branching', () => {
     // First load comes from the Walrus blob: URL (not the embedded path).
     expect(state.loadAssetCalls[0]?.startsWith('blob:')).toBe(true);
     await waitFor(() => expect(state.frameCamera).toHaveBeenCalled());
-    await waitFor(() => expect(state.sweepSetup).toHaveBeenCalled());
+    // U4/D-093 — Blender viewport, NOT the wireframe sweep.
+    expect(state.sweepSetup).not.toHaveBeenCalled();
+  });
+
+  it('AE5 — live hero blends into the page (paper clearColor, NOT black; contact shadow built; sweep gone)', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.sceneCtor).toHaveBeenCalled());
+    // clearColor is the page paper, NOT pure black (0,0,0). The mocked
+    // Color3.FromHexString returns (0.2,0.2,0.25); assert it reached clearColor.set.
+    await waitFor(() => expect(state.clearColorSet).toHaveBeenCalled());
+    const args = state.clearColorSet.mock.calls[0] ?? [];
+    expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
+    expect(args[0]).toBeCloseTo(0.2);
+    // Contact-shadow rig + faint grid floor: grounds + a ShadowGenerator + grid material.
+    expect(state.groundCreate).toHaveBeenCalled();
+    expect(state.shadowGenCtor).toHaveBeenCalled();
+    expect(state.gridCtor).toHaveBeenCalled();
   });
 });
 
@@ -209,7 +326,7 @@ describe('LedeHero — Walrus fetch behaviour', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
-    expect(state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb'))).toBe(
+    expect(state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/tusk.glb'))).toBe(
       true,
     );
     // Engine constructor fired exactly once; not torn down on the swap path.
@@ -227,7 +344,7 @@ describe('LedeHero — Walrus fetch behaviour', () => {
     );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
     expect(
-      state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb')),
+      state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/tusk.glb')),
     ).toBe(false);
   });
 

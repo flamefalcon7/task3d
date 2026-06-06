@@ -1,5 +1,42 @@
 # Phase Progress
 
+## Last Updated: 2026-06-06 (**Landing live-3D wells — 8-unit plan shipped + a long user-driven visual redesign pass; all on `feat/landing-live-3d-wells`, NOT yet pushed/PR'd**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **15 of 38**
+- Days to demo day (7/20–21): ~44
+- Days to winners (8/27): ~82
+
+### Current Phase
+Phase 4 — landing polish. Reskinned the landing page's five visual wells from static into live Babylon scenes (brainstorm → plan → ce-work, full 8-unit plan). Branch `feat/landing-live-3d-wells` off `main` (separate from the unmerged `feat/rage-racing-track-reskin`).
+
+### Completed This Session
+- **Brainstorm + plan** — `docs/brainstorms/2026-06-06-landing-live-3d-wells.md`, `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md` (5-reviewer doc-review pass; caught + fixed a P1: the MODEL split clip-plane is world-space, so the panel oscillates ±30° instead of a full turntable).
+- **U1** — swapped canonical model to `tusk.glb` (345KB) via shared `frontend/src/landing/tuskModel.ts`.
+- **U2** — **D-092** (reverse plan-023: LifecycleStrip now live) + **D-093** (scoped D-044 exception: grey Blender hero well only). `landingWells` tokens + design-tokens.md block. Took D-092/D-093, NOT D-091 (held by the unmerged rage-racing branch — avoids merge collision).
+- **U3** — `useInView` hook (first IntersectionObserver in repo) + `frontend/src/babylon/LiveWell.tsx` (lazy-mount Babylon well; dispose-on-exit default / pause for hero; static fallback + mount placeholder; `VITE_LANDING_LIVE_WELLS` kill-switch; StrictMode-safe).
+- **U4** — `LedeHero` Blender viewport: grey clearColor + `GridMaterial` ground + `AxesViewer` XYZ + auto-rotate; sweep removed; keyframe placeholder until sceneReady; pause off-screen. Walrus-fetch flow unchanged.
+- **U5/U6/U7** — MODEL (half-solid/half-wireframe via frozen sweep + bounded oscillation), VARIANT (3 recolored clones, D-093 tokens), IN-GAME (neutral scene + emissive-glow-primary + guarded GPU particle burst looping off the render clock).
+- **U8** — `TypewriterPrompt` (typing loop, blinking caret, reduced-motion, aria) + `LifecycleStrip` rewired to live panels; tests rewritten.
+- **Verified** — full suite **1042 pass**, `tsc -b` clean, `pnpm build` succeeds, browser-verified via agent-browser (--headed): all 5 wells render live, no React crash; fixed a `data-testid` collision found there (panel well → `lifecycle-well-*`). Screenshot confirms Blender hero + live panels.
+
+### Design Iterations (post-plan, user-driven via HMR)
+The 8-unit plan shipped, then a long interactive design pass reshaped the visuals (all committed on the branch):
+- **Hero** — removed axis gizmo + caption; **D-094 supersedes D-093**: hero no longer a grey viewport — it **blends into the page** (paper clearColor + soft contact shadow + radial edge-feather + faint grid floor). Then made it a **left-image / right-text editorial hero**: tusk shifted left (`targetScreenOffset`), right column adds `Carve. Mint. Riff.` + plain-language sub + jargon-free spec block + CTA. Copy uses **fork**, not "remix" (product vocabulary).
+- **Lifecycle panels** — iterated dark-pocket → filmstrip → **final: full-bleed brutalist cards mirroring ActorCards (`.section`), light-grey (`#E2E0DA`) thumbnails**. MODEL = dark hidden-line low-poly wireframe (enableEdgesRendering, faces painted grey). VARIANT = 3 tusks closer+bigger. PROMPT dark text.
+- **IN-GAME** — a game vignette: monster (`monster.glb`, copied from the user's `walrus-tusk.glb`) is struck (red flash + smoke burst) and **drops a gold tusk reward** (ease-out bounce + amber sparkle), looping. Floor is a **game-editor grid** (opaque, sits at the bottom). VFX uses STANDARD blend + deep colors (additive washes out on the light card).
+
+### Next Concrete Step
+Push `feat/landing-live-3d-wells` and open a PR (**awaiting user go — not pushed**).
+
+### Notes for Next Session
+- **agent-browser can't reliably screenshot the IN-GAME 3D** (renders the grid but not the model in this headless Chromium, though MODEL/VARIANT render). I wasted time chasing a phantom "invisible monster" bug that was just the tool. **Lesson: for IN-GAME, verify in the user's real browser, don't trust the headless screenshot.** A throw in a panel's `onSceneReady` blocks LiveWell's `setReady` → blank well; IN-GAME now guards the GPU-particle path so VFX failure can't blank it.
+- `walrus-tusk.glb` (667KB) still untracked/unused in `frontend/public/models/tusk3d/`; the IN-GAME monster is the separate `monster.glb` (506KB).
+- D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch; this branch took **D-092/D-093/D-094** — `design-tokens.md` will have a predictable top-of-file conflict (both scoped-exception blocks) at merge; keep both.
+- All visual values are tuned-default constants (grid line color, variant tints, IN-GAME phase timings/colors/drop height) — adjust in `tokens.ts` / `LedeHero.tsx` / `InGamePanel.tsx`.
+
+---
+
 ## Last Updated: 2026-06-04 (**Audit Track 4–5 backend+Walrus run + all-Medium remediation — in working tree on `fix/seal-id-prefix-bypass`, NOT committed**)
 
 ### Hackathon Tracker
