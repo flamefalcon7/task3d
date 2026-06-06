@@ -16,8 +16,18 @@ vi.mock('@babylonjs/core', () => {
       public b = 0,
     ) {}
   }
-  return { ArcRotateCamera, Color3 };
+  class Color4 {
+    constructor(
+      public r = 0,
+      public g = 0,
+      public b = 0,
+      public a = 1,
+    ) {}
+  }
+  return { ArcRotateCamera, Color3, Color4 };
 });
+
+vi.mock('@babylonjs/core/Rendering/edgesRenderer', () => ({}));
 
 vi.mock('../../babylon/LiveWell', () => ({
   LiveWell: (props: LiveWellProps) => {
@@ -33,19 +43,25 @@ const Cam = ArcRotateCamera as unknown as new () => { radius: number };
 
 function fakeContext() {
   const material = {
-    wireframe: false,
+    wireframe: true,
     albedoColor: null as unknown,
     emissiveColor: null as unknown,
     disableLighting: false,
+  };
+  const mesh = {
+    material,
+    enableEdgesRendering: vi.fn(),
+    edgesColor: null as unknown,
+    edgesWidth: 0,
   };
   const camera = new Cam() as unknown as LiveWellSceneContext['camera'];
   const ctx = {
     scene: {} as LiveWellSceneContext['scene'],
     camera,
-    meshes: [{ material } as unknown as LiveWellSceneContext['meshes'][number]],
+    meshes: [mesh as unknown as LiveWellSceneContext['meshes'][number]],
     container: {} as LiveWellSceneContext['container'],
   };
-  return { ctx, material, camera: camera as unknown as { radius: number } };
+  return { ctx, material, mesh, camera: camera as unknown as { radius: number } };
 }
 
 beforeEach(() => {
@@ -63,18 +79,21 @@ describe('ModelPanel', () => {
     expect(h.captured?.testIdBase).toBe('lifecycle-well-model');
     expect(h.captured?.staticSrc).toBe('/lifecycle/model.svg');
     expect(h.captured?.glbUrl).toContain('tusk.glb');
-    // No more split → no oscillation → default auto-rotate (autoRotate prop unset).
-    expect(h.captured?.autoRotate).toBeUndefined();
+    expect(h.captured?.autoRotate).toBeUndefined(); // default full turntable
   });
 
-  it('renders the tusk as a dark wireframe (full mesh, flat dark, unlit)', () => {
+  it('renders a hidden-line wireframe: faces hidden into the grey, dark hard edges only', () => {
     render(<ModelPanel />);
-    const { ctx, material } = fakeContext();
+    const { ctx, material, mesh } = fakeContext();
     h.captured?.onSceneReady?.(ctx);
-    expect(material.wireframe).toBe(true);
+    // NOT material.wireframe (that draws every triangle — too dense).
+    expect(material.wireframe).toBe(false);
+    // Faces painted the card grey so they vanish into the background.
     expect(material.albedoColor).not.toBeNull();
-    expect(material.emissiveColor).not.toBeNull();
     expect(material.disableLighting).toBe(true);
+    // Only hard facet edges are drawn, in dark.
+    expect(mesh.enableEdgesRendering).toHaveBeenCalled();
+    expect(mesh.edgesColor).not.toBeNull();
   });
 
   it('zooms the camera in so the model reads bigger', () => {
