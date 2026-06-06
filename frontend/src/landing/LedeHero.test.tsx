@@ -264,7 +264,7 @@ describe('LedeHero — render-mode branching', () => {
     expect(state.sweepSetup).not.toHaveBeenCalled();
   });
 
-  it('AE5 — live hero is a grey Blender viewport (grey clearColor + grid + axis), sweep removed', async () => {
+  it('AE5 — live hero is a grey Blender viewport (grey clearColor + grid), sweep removed', async () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
     render(
@@ -279,10 +279,9 @@ describe('LedeHero — render-mode branching', () => {
     const args = state.clearColorSet.mock.calls[0] ?? [];
     expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
     expect(args[0]).toBeCloseTo(0.2);
-    // Grid mesh + grid material + axis indicator all built.
+    // Grid mesh + grid material built (axis gizmo removed per user request).
     expect(state.groundCreate).toHaveBeenCalled();
     expect(state.gridCtor).toHaveBeenCalled();
-    expect(state.axesCtor).toHaveBeenCalled();
   });
 });
 

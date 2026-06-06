@@ -11,7 +11,6 @@ import {
   Scene,
   Vector3,
 } from '@babylonjs/core';
-import { AxesViewer } from '@babylonjs/core/Debug/axesViewer';
 import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 import '@babylonjs/loaders/glTF/index.js';
 
@@ -135,9 +134,6 @@ export function LedeHero(): JSX.Element {
     grid.minorUnitVisibility = 0.35;
     ground.material = grid;
 
-    // XYZ axis indicator (the orientation gizmo).
-    const axes = new AxesViewer(scene, 0.7);
-
     // New unconditional auto-rotate observer — no pointer idle gate (the hero
     // has no pointer interaction). Per-frame delta capped so a resume-after-
     // pause can't snap the camera.
@@ -154,7 +150,6 @@ export function LedeHero(): JSX.Element {
     return () => {
       if (!engine.isDisposed) {
         containerRef.current?.dispose();
-        axes.dispose();
         scene.dispose();
         engine.wipeCaches(true);
       }
