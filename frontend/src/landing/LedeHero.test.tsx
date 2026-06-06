@@ -22,6 +22,7 @@ const state: {
   clearColorSet: ReturnType<typeof vi.fn>;
   groundCreate: ReturnType<typeof vi.fn>;
   shadowGenCtor: ReturnType<typeof vi.fn>;
+  gridCtor: ReturnType<typeof vi.fn>;
 } = {
   engineCtor: vi.fn(),
   engineDispose: vi.fn(),
@@ -36,6 +37,7 @@ const state: {
   clearColorSet: vi.fn(),
   groundCreate: vi.fn(),
   shadowGenCtor: vi.fn(),
+  gridCtor: vi.fn(),
 };
 
 vi.mock('@babylonjs/core', () => {
@@ -137,6 +139,20 @@ vi.mock('@babylonjs/materials/shadowOnly/shadowOnlyMaterial', () => ({
   },
 }));
 
+vi.mock('@babylonjs/materials/grid/gridMaterial', () => ({
+  GridMaterial: class {
+    mainColor: unknown = null;
+    lineColor: unknown = null;
+    opacity = 1;
+    gridRatio = 1;
+    majorUnitFrequency = 1;
+    minorUnitVisibility = 1;
+    constructor() {
+      state.gridCtor();
+    }
+  },
+}));
+
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
 vi.mock('../walrus/fetchWithTimeout', async () => {
@@ -186,6 +202,7 @@ function resetState(): void {
   state.clearColorSet.mockReset();
   state.groundCreate.mockReset();
   state.shadowGenCtor.mockReset();
+  state.gridCtor.mockReset();
 }
 
 beforeEach(() => {
@@ -270,9 +287,10 @@ describe('LedeHero — render-mode branching', () => {
     const args = state.clearColorSet.mock.calls[0] ?? [];
     expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
     expect(args[0]).toBeCloseTo(0.2);
-    // Contact-shadow rig: a (shadow-only) ground + a ShadowGenerator.
+    // Contact-shadow rig + faint grid floor: grounds + a ShadowGenerator + grid material.
     expect(state.groundCreate).toHaveBeenCalled();
     expect(state.shadowGenCtor).toHaveBeenCalled();
+    expect(state.gridCtor).toHaveBeenCalled();
   });
 });
 

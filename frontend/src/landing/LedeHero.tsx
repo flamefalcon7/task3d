@@ -14,6 +14,7 @@ import {
   ShadowGenerator,
   Vector3,
 } from '@babylonjs/core';
+import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 import { ShadowOnlyMaterial } from '@babylonjs/materials/shadowOnly/shadowOnlyMaterial';
 import '@babylonjs/loaders/glTF/index.js';
 
@@ -60,6 +61,7 @@ export function LedeHero(): JSX.Element {
   const containerRef = useRef<AssetContainer | null>(null);
   const shadowGenRef = useRef<ShadowGenerator | null>(null);
   const shadowGroundRef = useRef<AbstractMesh | null>(null);
+  const gridGroundRef = useRef<AbstractMesh | null>(null);
   const aliveRef = useRef(false);
 
   // Pause the hero render loop when scrolled out of view (the brutalist hero is
@@ -147,6 +149,22 @@ export function LedeHero(): JSX.Element {
     sg.blurKernel = 48;
     shadowGenRef.current = sg;
 
+    // Faint "graph-paper" grid floor — sits just BELOW the shadow ground so the
+    // soft shadow darkens over it (no z-fight). Lines are a muted warm grey on
+    // the paper base so they read on the light background without turning the
+    // well back into a dark viewport; the canvas edge-feather fades them out.
+    const gridGround = MeshBuilder.CreateGround('lede-grid', { width: 20, height: 20 }, scene);
+    gridGround.position.y = -1.12;
+    const grid = new GridMaterial('lede-grid-mat', scene);
+    grid.mainColor = paper;
+    grid.lineColor = Color3.FromHexString('#9A968C');
+    grid.opacity = 0.35;
+    grid.gridRatio = 0.5;
+    grid.majorUnitFrequency = 5;
+    grid.minorUnitVisibility = 0.45;
+    gridGround.material = grid;
+    gridGroundRef.current = gridGround;
+
     // New unconditional auto-rotate observer — no pointer idle gate (the hero
     // has no pointer interaction). Per-frame delta capped so a resume-after-
     // pause can't snap the camera.
@@ -169,6 +187,7 @@ export function LedeHero(): JSX.Element {
       containerRef.current = null;
       shadowGenRef.current = null;
       shadowGroundRef.current = null;
+      gridGroundRef.current = null;
       sceneRef.current = null;
     };
   }, [isLive]);
@@ -275,7 +294,11 @@ export function LedeHero(): JSX.Element {
           minY = Math.min(minY, m.getBoundingInfo().boundingBox.minimumWorld.y);
           sg?.addShadowCaster(m);
         }
-        if (ground && Number.isFinite(minY)) ground.position.y = minY - 0.02;
+        if (Number.isFinite(minY)) {
+          if (ground) ground.position.y = minY - 0.02;
+          // Grid sits just below the shadow ground so the shadow reads over it.
+          if (gridGroundRef.current) gridGroundRef.current.position.y = minY - 0.04;
+        }
         // Tusk loaded + framed — reveal the canvas, hide the keyframe placeholder.
         setSceneReady(true);
       } catch (err) {
