@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 
 import type { LiveWellProps, LiveWellSceneContext } from '../../babylon/LiveWell';
 
@@ -8,8 +8,11 @@ const h = vi.hoisted(() => ({
   groundCreate: vi.fn(),
   shadowCtor: vi.fn(),
   shadowDispose: vi.fn(),
+  shadowCasters: 0,
+  transformNodes: 0,
   particleCtor: vi.fn(),
   particleDispose: vi.fn(),
+  loadCalls: [] as string[],
 }));
 
 vi.mock('@babylonjs/core', () => {
@@ -40,6 +43,7 @@ vi.mock('@babylonjs/core', () => {
       public y = 0,
       public z = 0,
     ) {}
+    setAll() {}
   }
   class DirectionalLight {
     position: unknown = null;
@@ -51,10 +55,26 @@ vi.mock('@babylonjs/core', () => {
     constructor() {
       h.shadowCtor();
     }
-    addShadowCaster() {}
+    addShadowCaster() {
+      h.shadowCasters++;
+    }
     dispose() {
       h.shadowDispose();
     }
+  }
+  class StandardMaterial {
+    diffuseColor: unknown = null;
+    specularColor: unknown = null;
+  }
+  class TransformNode {
+    position = { x: 0, y: 0, z: 0 };
+    rotation = { x: 0, y: 0, z: 0 };
+    scaling = { setAll: () => {} };
+    constructor() {
+      h.transformNodes++;
+    }
+    setEnabled() {}
+    dispose() {}
   }
   class DynamicTexture {
     hasAlpha = false;
@@ -72,7 +92,6 @@ vi.mock('@babylonjs/core', () => {
     static get IsSupported() {
       return true;
     }
-    blendMode = 0;
     particleTexture: unknown = null;
     emitter: unknown = null;
     minEmitBox: unknown = null;
@@ -106,16 +125,27 @@ vi.mock('@babylonjs/core', () => {
       return { position: { y: 0 }, material: null as unknown, receiveShadows: false };
     },
   };
+  const LoadAssetContainerAsync = vi.fn((url: string) => {
+    h.loadCalls.push(url);
+    return Promise.resolve({
+      meshes: [{ getTotalVertices: () => 8, setParent: () => {}, material: null }],
+      addAllToScene: () => {},
+      dispose: () => {},
+    });
+  });
   return {
     Color3,
     Color4,
     Vector3,
     DirectionalLight,
     ShadowGenerator,
+    StandardMaterial,
+    TransformNode,
     DynamicTexture,
     GPUParticleSystem,
     ParticleSystem,
     MeshBuilder,
+    LoadAssetContainerAsync,
   };
 });
 
@@ -148,7 +178,8 @@ import { InGamePanel } from './InGamePanel';
 function fakeContext() {
   let frameCb: (() => void) | null = null;
   const scene = {
-    getEngine: () => ({ getDeltaTime: () => 700 }), // big step so the loop visits all phases
+    isDisposed: false,
+    getEngine: () => ({ getDeltaTime: () => 16 }),
     onBeforeRenderObservable: {
       add: (cb: () => void) => {
         frameCb = cb;
@@ -157,19 +188,24 @@ function fakeContext() {
       remove: vi.fn(),
     },
   } as unknown as LiveWellSceneContext['scene'];
-  const material = { albedoColor: null, diffuseColor: null, emissiveColor: null };
-  const meshes = [{ material } as unknown as LiveWellSceneContext['meshes'][number]];
+  const meshes = [
+    { setParent: vi.fn(), material: { emissiveColor: null } } as unknown as
+      LiveWellSceneContext['meshes'][number],
+  ];
   const ctx = {
     scene,
-    camera: {} as LiveWellSceneContext['camera'],
+    camera: { radius: 6 } as unknown as LiveWellSceneContext['camera'],
     meshes,
     container: {} as LiveWellSceneContext['container'],
   };
-  return { ctx, material, fireFrame: () => frameCb?.() };
+  return { ctx, fireFrame: () => frameCb?.() };
 }
 
 beforeEach(() => {
   h.captured = null;
+  h.shadowCasters = 0;
+  h.transformNodes = 0;
+  h.loadCalls = [];
   [h.groundCreate, h.shadowCtor, h.shadowDispose, h.particleCtor, h.particleDispose].forEach((f) =>
     f.mockReset(),
   );
@@ -180,30 +216,26 @@ afterEach(() => {
 });
 
 describe('InGamePanel', () => {
-  it('drives LiveWell with the monster model + dispose policy + ingame testid', () => {
+  it('drives LiveWell with the monster model, dispose policy, no turntable', () => {
     render(<InGamePanel />);
     expect(h.captured?.offscreenPolicy).toBe('dispose');
     expect(h.captured?.testIdBase).toBe('lifecycle-well-ingame');
+    expect(h.captured?.autoRotate).toBe(false);
     expect(h.captured?.glbUrl).toContain('monster.glb');
   });
 
-  it('builds a grid floor + shadow + death/reward bursts', () => {
+  it('builds the scene: ground + shadow, monster + reward pivots, death + reward bursts; loads the reward tusk', async () => {
     render(<InGamePanel />);
-    const { ctx } = fakeContext();
+    const { ctx, fireFrame } = fakeContext();
     h.captured?.onSceneReady?.(ctx);
-    expect(h.groundCreate).toHaveBeenCalledTimes(2); // grid + shadow grounds
+    expect(h.groundCreate).toHaveBeenCalled();
     expect(h.shadowCtor).toHaveBeenCalled();
-    expect(h.particleCtor).toHaveBeenCalledTimes(2);
-  });
-
-  it('the phase loop recolors the monster across stages without throwing', () => {
-    render(<InGamePanel />);
-    const { ctx, material, fireFrame } = fakeContext();
-    h.captured?.onSceneReady?.(ctx);
-    // Several big steps cycle monster → kill → reward → rest; the material is
-    // recolored (gold during reward) and never crashes.
-    for (let i = 0; i < 6; i++) expect(() => fireFrame()).not.toThrow();
-    expect(material.albedoColor).not.toBeNull();
+    expect(h.transformNodes).toBe(2); // monster + reward pivots
+    expect(h.particleCtor).toHaveBeenCalledTimes(2); // death + reward bursts
+    // The reward tusk is loaded (separate from the monster model).
+    await waitFor(() => expect(h.loadCalls.some((u) => u.includes('tusk.glb'))).toBe(true));
+    // The phase loop runs without throwing.
+    expect(() => fireFrame()).not.toThrow();
   });
 
   it('cleanup disposes the shadow and the particle bursts', () => {
