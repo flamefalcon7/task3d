@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  type AbstractMesh,
   ArcRotateCamera,
   type AssetContainer,
+  Color3,
   Engine,
   HemisphericLight,
   LoadAssetContainerAsync,
+  MeshBuilder,
   Scene,
   Vector3,
 } from '@babylonjs/core';
+import { AxesViewer } from '@babylonjs/core/Debug/axesViewer';
+import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 import '@babylonjs/loaders/glTF/index.js';
 
 import {
@@ -18,15 +21,16 @@ import {
   WalrusFetchTimeoutError,
 } from '../walrus/fetchWithTimeout';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
-import {
-  setupEdgesGradientSweep,
-  type EdgesGradientSweepControl,
-} from '../babylon/edgesGradientSweep';
 import { frameCameraToMeshes } from '../babylon/PreviewCanvas';
 import { truncateBlobId } from '../babylon/MeshInfoPanel';
-import { tokens, viewerWell } from '../ux/tokens';
+import { landingWells, tokens, viewerWell } from '../ux/tokens';
 import { EMBEDDED_TUSK_GLB_URL } from './tuskModel';
+import { useInView } from './useInView';
 import { useLedeRenderMode } from './useLedeRenderMode';
+
+// D-093 — auto-rotate (new, unconditional; no idle gate, unlike PreviewCanvas).
+const AUTO_ROTATE_RAD_PER_SEC = 0.2;
+const MAX_FRAME_DELTA_S = 0.1;
 
 // Canonical Walrus blob CID for L1 Collection #001 — replaced before deploy
 // once Rick's pre-flight `/create` + `/launch` run mints the tusk. Until then
@@ -57,12 +61,19 @@ export function LedeHero(): JSX.Element {
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const containerRef = useRef<AssetContainer | null>(null);
-  const sweepRef = useRef<EdgesGradientSweepControl | null>(null);
   const aliveRef = useRef(false);
+
+  // Pause the hero render loop when scrolled out of view (the brutalist hero is
+  // fine frozen off-screen). Above the fold, so IntersectionObserver reports
+  // in-view almost immediately on mount.
+  const { ref: wellRef, inView } = useInView<HTMLDivElement>();
 
   // null until a source (Walrus blob URL or embedded GLB URL) is selected.
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [dwellElapsed, setDwellElapsed] = useState(false);
+  // false until the GLB is loaded + framed — gates the keyframe→canvas swap so
+  // there's no grey/black flash before the tusk appears.
+  const [sceneReady, setSceneReady] = useState(false);
 
   // Engine effect — one per LedeHero lifetime, only when live. Survives the
   // Walrus→embedded source swap so we don't thrash WebGL contexts.
@@ -86,15 +97,17 @@ export function LedeHero(): JSX.Element {
     };
   }, [isLive]);
 
-  // Scene effect — camera, light, attaches when engine is up. Cleanup
+  // Scene effect — Blender-style grey viewport (D-093 scoped D-044 exception):
+  // grey clearColor + ground grid + XYZ axis, auto-rotating tusk. Cleanup
   // mirrors PreviewCanvas's `if (!engine.isDisposed)` guard so a teardown
   // ordering surprise doesn't crash into a disposed engine.
   useEffect(() => {
     if (!isLive) return;
     const engine = engineRef.current;
     if (!engine) return;
+    setSceneReady(false); // fresh scene waits for its own GLB load before reveal
     const scene = new Scene(engine);
-    new ArcRotateCamera(
+    const camera = new ArcRotateCamera(
       'lede-cam',
       Math.PI / 4,
       Math.PI / 3,
@@ -102,25 +115,67 @@ export function LedeHero(): JSX.Element {
       new Vector3(0, 0.5, 0),
       scene,
     );
-    // No attachControl — the lede is a marketing surface; user grabbing the
-    // hero canvas to orbit the tusk would drag it out of the framed 3/4
-    // composition the static keyframe asset promises.
+    // No attachControl — auto-rotate only (R4). Grabbing the hero would drag it
+    // out of the framed composition.
     new HemisphericLight('lede-hl', new Vector3(0, 1, 0), scene);
-    scene.clearColor.set(0, 0, 0, 1);
+
+    // Grey viewport (NOT the D-044 black well — D-093, hero-only exception).
+    const grey = Color3.FromHexString(landingWells.heroViewport);
+    scene.clearColor.set(grey.r, grey.g, grey.b, 1);
+
+    // Ground grid mesh — white lines on the grey, Blender-viewport read.
+    const ground = MeshBuilder.CreateGround('lede-grid', { width: 14, height: 14 }, scene);
+    ground.position.y = -1.1;
+    const grid = new GridMaterial('lede-grid-mat', scene);
+    grid.mainColor = grey;
+    grid.lineColor = Color3.FromHexString('#FFFFFF');
+    grid.opacity = 0.5;
+    grid.gridRatio = 0.6;
+    grid.majorUnitFrequency = 5;
+    grid.minorUnitVisibility = 0.35;
+    ground.material = grid;
+
+    // XYZ axis indicator (the orientation gizmo).
+    const axes = new AxesViewer(scene, 0.7);
+
+    // New unconditional auto-rotate observer — no pointer idle gate (the hero
+    // has no pointer interaction). Per-frame delta capped so a resume-after-
+    // pause can't snap the camera.
+    let lastMs = performance.now();
+    scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      const deltaS = Math.min((now - lastMs) / 1000, MAX_FRAME_DELTA_S);
+      lastMs = now;
+      camera.alpha += AUTO_ROTATE_RAD_PER_SEC * deltaS;
+    });
+
     sceneRef.current = scene;
 
     return () => {
       if (!engine.isDisposed) {
-        sweepRef.current?.dispose();
         containerRef.current?.dispose();
+        axes.dispose();
         scene.dispose();
         engine.wipeCaches(true);
       }
-      sweepRef.current = null;
       containerRef.current = null;
       sceneRef.current = null;
     };
   }, [isLive]);
+
+  // Pause/resume the render loop with viewport visibility. The engine + scene
+  // stay warm (offscreenPolicy 'pause' — the hero is the one always-warm well);
+  // only the rAF stops when scrolled away.
+  useEffect(() => {
+    if (!isLive) return;
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (inView) {
+      engine.runRenderLoop(() => sceneRef.current?.render());
+    } else {
+      engine.stopRenderLoop();
+    }
+  }, [isLive, inView]);
 
   // Walrus fetch effect — runs once per live mount. Sets sourceUrl to a
   // blob: URL on success OR to EMBEDDED_GLB_URL on timeout. External abort
@@ -168,9 +223,11 @@ export function LedeHero(): JSX.Element {
     };
   }, [isLive]);
 
-  // GLB load + sweep effect — keyed on sourceUrl. Fires once when Walrus
-  // resolves (or times out and EMBEDDED_GLB_URL takes over); fires again on
-  // the swap, with the previous container disposed first.
+  // GLB load effect — keyed on sourceUrl. Fires once when Walrus resolves (or
+  // times out and EMBEDDED_GLB_URL takes over); fires again on the swap, with
+  // the previous container disposed first. No wireframe sweep on the hero — the
+  // Blender viewport reads cleaner as a solid PBR tusk (review-corrected: the
+  // sweep's world-X clip plane fights camera-orbit auto-rotate).
   useEffect(() => {
     if (!isLive || !sourceUrl) return;
     const scene = sceneRef.current;
@@ -189,8 +246,7 @@ export function LedeHero(): JSX.Element {
           container.dispose();
           return;
         }
-        // Dispose any prior sweep + container (Walrus→embedded swap path).
-        sweepRef.current?.dispose();
+        // Dispose any prior container (Walrus→embedded swap path).
         containerRef.current?.dispose();
         container.addAllToScene();
         containerRef.current = container;
@@ -198,11 +254,8 @@ export function LedeHero(): JSX.Element {
         if (camera instanceof ArcRotateCamera) {
           frameCameraToMeshes(camera, container.meshes);
         }
-        const meshes = container.meshes.filter(
-          (m: AbstractMesh) =>
-            typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
-        );
-        sweepRef.current = setupEdgesGradientSweep(scene, meshes);
+        // Tusk loaded + framed — reveal the canvas, hide the keyframe placeholder.
+        setSceneReady(true);
       } catch (err) {
         // Embedded GLB load failure is logged but does not bubble to React —
         // an error boundary would be overkill for a single optional asset.
@@ -241,13 +294,27 @@ export function LedeHero(): JSX.Element {
   // ---------------------------------------------------------------------
   return (
     <section style={sectionStyle} data-testid="lede-hero" data-render-mode={renderMode}>
-      <div style={wellStyle}>
+      <div ref={wellRef} style={wellStyle}>
         {isLive ? (
-          <canvas
-            ref={canvasRef}
-            data-testid="lede-canvas"
-            style={canvasInnerStyle}
-          />
+          <>
+            {/* Keyframe placeholder until the tusk is loaded + framed — no flash. */}
+            {!sceneReady && (
+              <img
+                src={STATIC_KEYFRAME_URL}
+                alt={STATIC_KEYFRAME_ALT}
+                data-testid="lede-static-image"
+                aria-hidden
+                style={fillStyle}
+              />
+            )}
+            <canvas
+              ref={canvasRef}
+              data-testid="lede-canvas"
+              role="img"
+              aria-label={STATIC_KEYFRAME_ALT}
+              style={{ ...fillStyle, objectFit: 'cover', opacity: sceneReady ? 1 : 0 }}
+            />
+          </>
         ) : (
           <img
             src={STATIC_KEYFRAME_URL}
@@ -297,6 +364,16 @@ const canvasInnerStyle: CSSProperties = {
   width: '100%',
   height: '100%',
   objectFit: 'cover',
+};
+
+// Absolute-fill so the keyframe placeholder and the live canvas stack inside the
+// (position: relative) well — the placeholder sits beneath until sceneReady.
+const fillStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  display: 'block',
 };
 
 const captionBlockStyle: CSSProperties = {

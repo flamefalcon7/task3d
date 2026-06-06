@@ -19,6 +19,11 @@ const state: {
   sweepSetup: ReturnType<typeof vi.fn>;
   sweepDispose: ReturnType<typeof vi.fn>;
   frameCamera: ReturnType<typeof vi.fn>;
+  clearColorSet: ReturnType<typeof vi.fn>;
+  gridCtor: ReturnType<typeof vi.fn>;
+  groundCreate: ReturnType<typeof vi.fn>;
+  axesCtor: ReturnType<typeof vi.fn>;
+  axesDispose: ReturnType<typeof vi.fn>;
 } = {
   engineCtor: vi.fn(),
   engineDispose: vi.fn(),
@@ -30,6 +35,11 @@ const state: {
   sweepSetup: vi.fn(),
   sweepDispose: vi.fn(),
   frameCamera: vi.fn(),
+  clearColorSet: vi.fn(),
+  gridCtor: vi.fn(),
+  groundCreate: vi.fn(),
+  axesCtor: vi.fn(),
+  axesDispose: vi.fn(),
 };
 
 vi.mock('@babylonjs/core', () => {
@@ -39,6 +49,7 @@ vi.mock('@babylonjs/core', () => {
       state.engineCtor();
     }
     runRenderLoop() {}
+    stopRenderLoop() {}
     resize() {}
     wipeCaches() {
       state.engineWipeCaches();
@@ -49,14 +60,16 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class Scene {
-    clearColor = { set: () => {} };
+    clearColor = { set: (...a: number[]) => state.clearColorSet(...a) };
     activeCamera: unknown = null;
+    isDisposed = false;
     onBeforeRenderObservable = {
       add: (cb: () => void) => cb,
       remove: () => {},
     };
     render() {}
     dispose() {
+      this.isDisposed = true;
       state.sceneDispose();
     }
     constructor(_e: unknown) {
@@ -64,6 +77,7 @@ vi.mock('@babylonjs/core', () => {
     }
   }
   class ArcRotateCamera {
+    alpha = 0;
     constructor(_n: string, _a: number, _b: number, _r: number, _t: unknown, scene: Scene) {
       scene.activeCamera = this;
     }
@@ -72,6 +86,18 @@ vi.mock('@babylonjs/core', () => {
   class HemisphericLight {
     constructor() {}
   }
+  class Color3 {
+    constructor(public r = 0, public g = 0, public b = 0) {}
+    static FromHexString(_hex: string) {
+      return new Color3(0.2, 0.2, 0.25);
+    }
+  }
+  const MeshBuilder = {
+    CreateGround: (..._a: unknown[]) => {
+      state.groundCreate();
+      return { position: { y: 0 }, material: null as unknown };
+    },
+  };
   class Vector3 {
     constructor(public x = 0, public y = 0, public z = 0) {}
   }
@@ -79,8 +105,42 @@ vi.mock('@babylonjs/core', () => {
     state.loadAssetCalls.push(url);
     return state.loadAssetImpl(url);
   });
-  return { Engine, Scene, ArcRotateCamera, HemisphericLight, Vector3, LoadAssetContainerAsync };
+  return {
+    Engine,
+    Scene,
+    ArcRotateCamera,
+    HemisphericLight,
+    Color3,
+    MeshBuilder,
+    Vector3,
+    LoadAssetContainerAsync,
+  };
 });
+
+vi.mock('@babylonjs/core/Debug/axesViewer', () => ({
+  AxesViewer: class {
+    constructor() {
+      state.axesCtor();
+    }
+    dispose() {
+      state.axesDispose();
+    }
+  },
+}));
+
+vi.mock('@babylonjs/materials/grid/gridMaterial', () => ({
+  GridMaterial: class {
+    mainColor: unknown = null;
+    lineColor: unknown = null;
+    opacity = 1;
+    gridRatio = 1;
+    majorUnitFrequency = 1;
+    minorUnitVisibility = 1;
+    constructor() {
+      state.gridCtor();
+    }
+  },
+}));
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
 
@@ -128,6 +188,11 @@ function resetState(): void {
   state.sweepSetup.mockReset();
   state.sweepDispose.mockReset();
   state.frameCamera.mockReset();
+  state.clearColorSet.mockReset();
+  state.gridCtor.mockReset();
+  state.groundCreate.mockReset();
+  state.axesCtor.mockReset();
+  state.axesDispose.mockReset();
 }
 
 beforeEach(() => {
@@ -195,7 +260,29 @@ describe('LedeHero — render-mode branching', () => {
     // First load comes from the Walrus blob: URL (not the embedded path).
     expect(state.loadAssetCalls[0]?.startsWith('blob:')).toBe(true);
     await waitFor(() => expect(state.frameCamera).toHaveBeenCalled());
-    await waitFor(() => expect(state.sweepSetup).toHaveBeenCalled());
+    // U4/D-093 — Blender viewport, NOT the wireframe sweep.
+    expect(state.sweepSetup).not.toHaveBeenCalled();
+  });
+
+  it('AE5 — live hero is a grey Blender viewport (grey clearColor + grid + axis), sweep removed', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.sceneCtor).toHaveBeenCalled());
+    // Grey clearColor — NOT pure black (0,0,0). The mocked Color3.FromHexString
+    // returns (0.2, 0.2, 0.25); assert that's what reached scene.clearColor.set.
+    await waitFor(() => expect(state.clearColorSet).toHaveBeenCalled());
+    const args = state.clearColorSet.mock.calls[0];
+    expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
+    expect(args[0]).toBeCloseTo(0.2);
+    // Grid mesh + grid material + axis indicator all built.
+    expect(state.groundCreate).toHaveBeenCalled();
+    expect(state.gridCtor).toHaveBeenCalled();
+    expect(state.axesCtor).toHaveBeenCalled();
   });
 });
 
