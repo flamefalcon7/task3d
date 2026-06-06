@@ -7,6 +7,7 @@ import { LaunchCollectionPage } from './collection/LaunchCollectionPage';
 import { CollectionDetailPage } from './collection/CollectionDetailPage';
 import { RegisterIntegrationPage } from './integration/RegisterIntegrationPage';
 import { MarketPage } from './market/MarketPage';
+import { NftTokenDetailPage } from './nft/NftTokenDetailPage';
 import { TrackPage } from './track/TrackPage';
 import { CompareGlbsPage } from './dev/CompareGlbsPage';
 import { NavGuard } from './ux/TopNav';
@@ -31,6 +32,7 @@ export function Shell() {
         <Route path="/model/:objectId" element={<ModelDetailPage />} />
         <Route path="/launch" element={<LaunchCollectionPage />} />
         <Route path="/collection/:slug" element={<CollectionDetailPage />} />
+        <Route path="/nft/:tokenId" element={<NftTokenDetailPage />} />
         <Route path="/integrate" element={<RegisterIntegrationPage />} />
         <Route path="/market" element={<MarketPage />} />
         <Route path="/track" element={<TrackPage />} />

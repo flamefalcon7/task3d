@@ -49,7 +49,7 @@ function truncate(addr: string, head = 6, tail = 4): string {
 // public GraphQL endpoint is indexer-backed; the owner→objects filter that
 // `useOwnedTokens` uses can lag seconds to minutes behind fullnode. Reading the
 // object by id from fullnode is ~300ms and reflects state as of tx commit, so
-// the buyer's new car appears in "Your cars" without waiting for the indexer.
+// the buyer's new NFT appears in "Your NFTs" without waiting for the indexer.
 const NFT_TOKEN_TYPE = `${TESTNET.model3dPackageId}::model3d::NftToken`;
 
 function parseOwnedNftToken(resp: unknown): OwnedToken | null {
@@ -169,6 +169,27 @@ const cardMeta: CSSProperties = {
   letterSpacing: '0.5px',
   textTransform: 'none',
   fontSize: 11,
+};
+
+// Click target: the preview well + name navigate to the collection detail
+// page. Reproduces gridCell's column gap so wrapping two children in one Link
+// doesn't collapse the spacing; the buy/list controls stay OUTSIDE the link.
+const cardLink: CSSProperties = {
+  textDecoration: 'none',
+  color: 'inherit',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  cursor: 'pointer',
+};
+
+// Small accent affordance so the card reads as clickable.
+const cardDetailHint: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.accent,
+  letterSpacing: '1px',
+  fontSize: 10,
+  marginTop: 4,
 };
 
 const priceRow: CSSProperties = {
@@ -379,7 +400,7 @@ export function MarketPage() {
         setPhase('idle');
         void pollRefresh();
         // Bypass the indexer: read the bought token from fullnode (~300ms) so
-        // it shows in "Your cars" without waiting for GraphQL's owner→objects
+        // it shows in "Your NFTs" without waiting for GraphQL's owner→objects
         // filter to catch up. The pollRefresh loop above + useOwnedTokens are
         // the eventual-consistency backup.
         void (async () => {
@@ -423,7 +444,7 @@ export function MarketPage() {
             <span style={eyebrow}>— L2 / MARKET</span>
             <h1 style={displayHeadline}>The marketplace.</h1>
             <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px' }}>
-              Connect a wallet to buy and sell NFT cars.
+              Connect a wallet to buy and sell NFTs.
             </p>
           </div>
           <SignInButton />
@@ -460,7 +481,7 @@ export function MarketPage() {
           )}
           {!listingsLoading && visibleListings.length === 0 && (
             <p data-testid="no-listings" style={emptyState}>
-              NOTHING FOR SALE YET — LIST ONE OF YOUR CARS BELOW
+              NOTHING FOR SALE YET — LIST ONE OF YOUR NFTS BELOW
             </p>
           )}
           {visibleListings.length > 0 && (
@@ -469,12 +490,8 @@ export function MarketPage() {
                 const royalty = royaltyOwedMist(l.priceMist);
                 const total = l.priceMist + royalty;
                 const royaltyPct = (Number(royalty) / Number(l.priceMist)) * 100;
-                return (
-                  <div
-                    key={l.tokenId}
-                    data-testid={`listing-${l.tokenId}`}
-                    style={gridCell}
-                  >
+                const preview = (
+                  <>
                     <div style={cardWell}>
                       {l.patchId ? (
                         <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
@@ -487,7 +504,24 @@ export function MarketPage() {
                     <div>
                       <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
                       <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
+                      <div style={cardDetailHint}>VIEW DETAILS →</div>
                     </div>
+                  </>
+                );
+                return (
+                  <div
+                    key={l.tokenId}
+                    data-testid={`listing-${l.tokenId}`}
+                    style={gridCell}
+                  >
+                    <Link
+                      to={`/nft/${l.tokenId}`}
+                      data-testid={`listing-details-${l.tokenId}`}
+                      aria-label={`View details for ${l.name || l.tokenId}`}
+                      style={cardLink}
+                    >
+                      {preview}
+                    </Link>
                     <div style={priceRow}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={priceMain}>{mistToSui(l.priceMist)} SUI</span>
@@ -514,33 +548,47 @@ export function MarketPage() {
 
         {/* Your NFTs → list */}
         <section data-testid="your-nfts">
-          <h2 style={sectionH2}>Your cars.</h2>
+          <h2 style={sectionH2}>Your NFTs.</h2>
           {tokensLoading && (
             <p style={{ ...monoLabel, color: tokens.color.hint }}>— SYNCING OWNERSHIP</p>
           )}
           {!tokensLoading && sellable.length === 0 && (
             <p data-testid="no-owned" style={emptyState}>
-              YOU DON'T OWN ANY UNLISTED CARS — MINT A COLLECTION ON{' '}
+              YOU DON'T OWN ANY UNLISTED NFTS — MINT A COLLECTION ON{' '}
               <Link to="/launch" style={{ color: tokens.color.ink, textDecoration: 'underline' }}>/LAUNCH</Link>
             </p>
           )}
           {sellable.length > 0 && (
             <div style={cardGrid}>
-              {sellable.map((t, idx) => (
+              {sellable.map((t, idx) => {
+                const preview = (
+                  <>
+                    <div style={cardWell}>
+                      {t.patchId || t.blobId ? (
+                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                      ) : (
+                        <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                      )}
+                      <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
+                      <span style={cardLayerBadge}>YOURS</span>
+                    </div>
+                    <div>
+                      <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
+                      <div style={cardMeta}>{truncate(t.tokenId)}</div>
+                      <div style={cardDetailHint}>VIEW DETAILS →</div>
+                    </div>
+                  </>
+                );
+                return (
                 <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
-                  <div style={cardWell}>
-                    {t.patchId || t.blobId ? (
-                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
-                    ) : (
-                      <span style={cardWellPlaceholder}>— NO PREVIEW</span>
-                    )}
-                    <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
-                    <span style={cardLayerBadge}>YOURS</span>
-                  </div>
-                  <div>
-                    <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
-                    <div style={cardMeta}>{truncate(t.tokenId)}</div>
-                  </div>
+                  <Link
+                    to={`/nft/${t.tokenId}`}
+                    data-testid={`owned-details-${t.tokenId}`}
+                    aria-label={`View details for ${t.name || t.tokenId}`}
+                    style={cardLink}
+                  >
+                    {preview}
+                  </Link>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: tokens.border.divider }}>
                     <input
                       data-testid={`price-${t.tokenId}`}
@@ -563,7 +611,8 @@ export function MarketPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -597,7 +646,7 @@ export function MarketPage() {
             {confirmStatus === 'confirmed' && (
               <div data-testid="confirm-ok" style={statusBanner}>
                 <span style={accentText}>✓ CONFIRMED</span>
-                <span>· YOUR NEW CAR IS IN YOUR CARS</span>
+                <span>· YOUR NEW NFT IS IN YOUR NFTS</span>
               </div>
             )}
             {confirmStatus === 'failed' && (

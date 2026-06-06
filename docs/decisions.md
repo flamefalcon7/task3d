@@ -4013,6 +4013,39 @@ Move **personal** memory to a per-user `MemWalAccount` **owned by the user's own
 
 ---
 
+## D-091: `/track` reskinned as a third-party game ("Rage Racing"), exempt from D-044 tokens
+
+**Status**: Accepted
+**Date**: 2026-06-05
+**Phase**: Phase 3/4 — demo polish
+
+### Context
+`/track` (the Babylon racetrack) is the surface that proves Tusk3D's composability thesis — "your Walrus-backed NFT is drivable in someone else's game." But dressed in the brutalist D-044 identity and presented as a top-nav "Track" tab, it read as a Tusk3D in-app feature, not as a third party integrating the collection. For the submission demo video the racetrack must look like a *separate studio's product*. See `docs/brainstorms/2026-06-05-rage-racing-thirdparty-game-reskin.md` and `docs/plans/2026-06-05-001-feat-rage-racing-track-reskin-plan.md` (Approach A, frontend-only).
+
+### Decision
+`/track` is reskinned as **"Rage Racing by Deksat Studio"** and is the single route **exempt from D-044 / `docs/ux/design-tokens.md`**. It sources its visual identity from a dedicated, route-scoped module `frontend/src/track/rageRacing/brand.ts` (the "Electric Arcade" palette — surface `#0B0B0F`, accent `#FFE500`, secondary `#FF2D7E`; the **Oswald** condensed display face loaded in `index.html`; weights **600/700**). The shared masthead is hidden on `/track` (`HIDDEN_ROUTES` in `ux/TopNav`) and the "Track" nav item is removed. Every other route still obeys D-044 unchanged.
+
+### Rationale
+- The visual *distance* from Tusk3D is the proof — a shared accent or typeface would make a viewer read "same team" and collapse the composability story.
+- A separate `brand.ts` keeps the two identities independent and prevents the brutalist tokens from leaking onto `/track` (or vice-versa). `brand.test.ts` guards that the Rage Racing accent/display-face never equal the D-044 tokens.
+- The D-044 rules this intentionally breaks (two weights only; three font families; "all routes") exist to enforce a *single coherent Tusk3D identity* — the opposite of what `/track` needs.
+
+### Alternatives Considered
+- **Separate domain / deployment (Approach B)** — strongest "different website" signal but a new deploy + brand pipeline; deferred as an optional upgrade.
+- **Wire the on-chain `/integrate` attestation into the demo (Approach C)** — turns "looks like an integration" into "verifiable, paid integration"; deferred.
+- **Keep `/track` on D-044** — rejected: it's the reason the racetrack read as an in-app feature.
+
+### Consequences
+- ✅ The racetrack reads as a third-party game in the demo; composability is *shown*, not asserted (on-canvas Sui + Walrus provenance caption).
+- ⚠️ Two visual systems now coexist; a `brand.test.ts` collision guard + the carve-out note in `design-tokens.md` keep them from silently converging.
+- 🔮 If Approach B (separate domain) ships later, `brand.ts` is already the extractable identity layer.
+
+### Related
+- `docs/ux/design-tokens.md` scoped-exception note; D-044 (parent system being excepted)
+- plan-2026-06-05-001; brainstorm 2026-06-05-rage-racing-thirdparty-game-reskin
+
+---
+
 ## D-092: Reverse plan-023 — LifecycleStrip becomes live Babylon, not static
 
 **Status**: Accepted
@@ -4093,4 +4126,4 @@ The landing hero 3D well renders on the **page paper background** (`tokens.color
 
 # Reserved Decision Numbers
 
-D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch (`/track` D-044 exemption); this branch took D-092/D-093/D-094 to avoid a merge-time collision. D-095 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-095 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

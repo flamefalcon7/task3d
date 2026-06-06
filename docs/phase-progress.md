@@ -34,6 +34,7 @@ Push `feat/landing-live-3d-wells` and open a PR (**awaiting user go — not push
 - `walrus-tusk.glb` (667KB) still untracked/unused in `frontend/public/models/tusk3d/`; the IN-GAME monster is the separate `monster.glb` (506KB).
 - D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch; this branch took **D-092/D-093/D-094** — `design-tokens.md` will have a predictable top-of-file conflict (both scoped-exception blocks) at merge; keep both.
 - All visual values are tuned-default constants (grid line color, variant tints, IN-GAME phase timings/colors/drop height) — adjust in `tokens.ts` / `LedeHero.tsx` / `InGamePanel.tsx`.
+- **`feat/rage-racing-track-reskin` is now MERGED in** (this merge): `/track` → Rage Racing reskin (D-091), `/market` card click-through, new `/nft/:tokenId` page, rebuilt `/collection/:slug`. Frontend-only, no contract/Walrus changes.
 
 ---
 

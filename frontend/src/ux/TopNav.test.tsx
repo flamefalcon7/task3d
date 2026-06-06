@@ -45,13 +45,15 @@ function renderAt(pathname: string) {
 }
 
 describe('TopNav', () => {
-  it('renders the brand mark, all four nav links, and the TESTNET badge (non-landing route)', () => {
+  it('renders the brand mark, the three nav links, and the TESTNET badge (non-landing route)', () => {
     renderAt('/market');
     expect(screen.getByTestId('brand-mark').textContent).toBe('Tusk3D');
     expect(screen.getByTestId('nav-create')).toBeTruthy();
     expect(screen.getByTestId('nav-launch')).toBeTruthy();
     expect(screen.getByTestId('nav-market')).toBeTruthy();
-    expect(screen.getByTestId('nav-track')).toBeTruthy();
+    // 'Track' is no longer a nav item — /track is the reskinned Rage Racing
+    // game, not a Tusk3D feature tab (plan 2026-06-05-001).
+    expect(screen.queryByTestId('nav-track')).toBeNull();
     expect(screen.getByTestId('network-badge').textContent).toBe('TESTNET');
   });
 
@@ -68,13 +70,7 @@ describe('TopNav', () => {
   it('highlights the active route with the accent underline (at /market)', () => {
     renderAt('/market');
     expect(screen.getByTestId('nav-market').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('nav-track').getAttribute('data-active')).toBe('false');
-  });
-
-  it('highlights the active route with the accent underline (at /track)', () => {
-    renderAt('/track');
-    expect(screen.getByTestId('nav-track').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('nav-market').getAttribute('data-active')).toBe('false');
+    expect(screen.getByTestId('nav-create').getAttribute('data-active')).toBe('false');
   });
 
   it('shows NO WALLET when no wallet is connected', () => {
@@ -134,6 +130,11 @@ describe('NavGuard', () => {
 
   it('hides the TopNav on /dev/compare', () => {
     renderGuardAt('/dev/compare');
+    expect(screen.queryByTestId('top-nav')).toBeNull();
+  });
+
+  it('hides the TopNav on /track (reskinned as the Rage Racing game)', () => {
+    renderGuardAt('/track');
     expect(screen.queryByTestId('top-nav')).toBeNull();
   });
 });

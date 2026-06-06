@@ -1,20 +1,16 @@
 import type { CSSProperties } from 'react';
 import type { OwnedToken } from './useOwnedTokens';
-import { monoLabel, tokens } from '../ux/tokens';
+import { RAGE_RACING, truncateId } from './rageRacing/brand';
 
-// Phase 3 U6 / U11 — horizontal strip of owned-NFT thumbnails. Click a tile
-// to swap the loaded car. v1 has no GLB thumbnails (would need a second
-// Babylon render-to-texture pass per token), so each tile shows the token
-// name + a colored swatch derived from its tokenId. Phase 5 polish can add
-// real screenshots.
+// Rage Racing garage strip — horizontal row of the cars the player owns,
+// IMPORTED from a Tusk3D collection (plan 2026-06-05-001). Click a tile to
+// swap the loaded car. v1 has no GLB thumbnails (would need a second Babylon
+// render-to-texture pass per token), so each tile shows the car name + a
+// colored swatch derived from its id.
 //
-// Brutalist editorial styling per D-044: pure-black background to blend with
-// the canvas, italic-serif name + mono uppercase SELECTED label on active.
-
-function truncate(addr: string, head = 4, tail = 4): string {
-  if (!addr || addr.length <= head + tail + 1) return addr;
-  return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
-}
+// Reskinned to the Electric Arcade identity (rageRacing/brand): near-black
+// background, electric-yellow selected state — DELIBERATELY not Tusk3D's
+// orangered, so the strip reads as a different studio's UI.
 
 // Pure objectId-hash → CSS color. Deterministic so the same variant always
 // gets the same swatch, gives the carousel some visual variety without
@@ -39,14 +35,16 @@ const carouselRow: CSSProperties = {
   gap: 12,
   overflowX: 'auto',
   padding: '16px 0',
-  background: tokens.color.well,
+  background: RAGE_RACING.color.surface,
 };
 
 function tileStyle(selected: boolean): CSSProperties {
   return {
     minWidth: 140,
     padding: 0,
-    border: selected ? `2px solid ${tokens.color.accent}` : '1.5px solid rgba(255,255,255,0.2)',
+    border: selected
+      ? `2px solid ${RAGE_RACING.color.accent}`
+      : '1.5px solid rgba(255,255,255,0.2)',
     background: 'transparent',
     cursor: 'pointer',
     textAlign: 'left',
@@ -62,33 +60,35 @@ const tileSwatch: CSSProperties = {
 
 const tileBody: CSSProperties = {
   padding: '8px 12px',
-  background: tokens.color.well,
-  color: tokens.color.wellInk,
+  background: RAGE_RACING.color.surface,
+  color: RAGE_RACING.color.ink,
   display: 'flex',
   flexDirection: 'column',
   gap: 4,
 };
 
 const tileName: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
-  fontSize: 13,
-  fontWeight: tokens.weight.medium,
-  color: tokens.color.wellInk,
+  fontFamily: RAGE_RACING.font.display,
+  fontWeight: 600,
+  fontSize: 14,
+  letterSpacing: '0.5px',
+  textTransform: 'uppercase',
+  color: RAGE_RACING.color.ink,
 };
 
 const tileId: CSSProperties = {
-  ...monoLabel,
-  color: 'rgba(255,255,255,0.5)',
+  fontFamily: RAGE_RACING.font.mono,
+  color: RAGE_RACING.color.inkFaint,
   fontSize: 9,
   letterSpacing: '1px',
 };
 
 const selectedLabel: CSSProperties = {
-  ...monoLabel,
-  color: tokens.color.accent,
+  fontFamily: RAGE_RACING.font.mono,
+  color: RAGE_RACING.color.secondary,
   fontSize: 9,
   letterSpacing: '1.5px',
+  textTransform: 'uppercase',
 };
 
 export function CarCarousel({
@@ -111,9 +111,9 @@ export function CarCarousel({
           >
             <div aria-hidden style={{ ...tileSwatch, background: swatch(t.tokenId) }} />
             <div style={tileBody}>
-              <span style={tileName}>{t.name || `NFT ${truncate(t.tokenId)}`}</span>
-              <span style={tileId}>{truncate(t.tokenId)}</span>
-              {selected && <span style={selectedLabel}>— SELECTED</span>}
+              <span style={tileName}>{t.name || `Car ${truncateId(t.tokenId, 4)}`}</span>
+              <span style={tileId}>imported · {truncateId(t.tokenId, 4)}</span>
+              {selected && <span style={selectedLabel}>▶ in garage</span>}
             </div>
           </button>
         );

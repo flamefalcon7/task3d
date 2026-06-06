@@ -32,6 +32,13 @@ vi.mock('./racetrackScene', () => ({
   createRacetrackScene: (opts: unknown) => createSceneMock(opts),
 }));
 
+// SignInButton pulls dapp-kit wallet hooks this suite's '@mysten/dapp-kit'
+// mock doesn't provide; stub it — the connect affordance itself is covered by
+// SignInButton's own tests, here we only assert it's present on the gate.
+vi.mock('../auth/SignInButton', () => ({
+  SignInButton: () => <div data-testid="signin-button-mock" />,
+}));
+
 import { TrackPage } from './TrackPage';
 
 function token(
@@ -148,16 +155,55 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-needs-signin')).toBeTruthy();
   });
 
-  it('shows the "buy first" empty state with zero owned variants', () => {
+  it('AE3 — empty state: Rage Racing voice, inward routes never the primary CTA', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [],
+      loading: false,
+      error: null,
+    });
+    const { container } = renderPage();
+    expect(screen.getByTestId('track-empty')).toBeTruthy();
+    // R8 — the old "back to the app" /browse link is gone, and no /browse or
+    // /launch nav-dump appears. The ONLY inward affordance is a single
+    // SECONDARY "get a car" pointer to the marketplace (a third-party game
+    // pointing at its asset source) — never the primary CTA (the headline).
+    expect(screen.queryByTestId('track-empty-browse')).toBeNull();
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) =>
+      a.getAttribute('href'),
+    );
+    expect(hrefs).not.toContain('/browse');
+    expect(hrefs).not.toContain('/launch');
+    expect(hrefs.filter((h) => h === '/market')).toHaveLength(1);
+    // The primary CTA (headline) is text, not a link.
+    expect(screen.getByText('Your garage is empty.').closest('a')).toBeNull();
+  });
+
+  it('AE1 — renders the Rage Racing wordmark, not the Tusk3D track header', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
       loading: false,
       error: null,
     });
     renderPage();
-    expect(screen.getByTestId('track-empty')).toBeTruthy();
-    const link = screen.getByTestId('track-empty-browse') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/browse');
+    expect(screen.getByText('RAGE RACING')).toBeTruthy();
+    expect(screen.queryByText('Tiny Racetrack.')).toBeNull();
+    expect(screen.queryByText(/L3 \/ DRIVE/)).toBeNull();
+  });
+
+  it('AE2 — shows a Sui + Walrus provenance caption for the selected car', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xa', blobId: 'blob-abcdef123456' })],
+      loading: false,
+      error: null,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    renderPage();
+    const prov = screen.getByTestId('track-provenance');
+    expect(prov.textContent).toMatch(/Sui \+ Walrus/);
+    // Assert the REAL truncated ids render (not just the static label) — this
+    // fails if truncateId regresses or the template stops interpolating.
+    expect(prov.textContent).toMatch(/blob blob-a…3456/); // truncateId('blob-abcdef123456')
+    expect(prov.textContent).toMatch(/collection 0xcoll/); // factory default collectionId
   });
 
   it('renders the carousel + canvas when variants exist', () => {
@@ -173,6 +219,8 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-canvas')).toBeTruthy();
     expect(screen.getByTestId('car-carousel')).toBeTruthy();
     expect(screen.getByTestId('carousel-tile-0')).toBeTruthy();
+    // Demo-critical path also wears the Rage Racing identity (AE1).
+    expect(screen.getByText('RAGE RACING')).toBeTruthy();
   });
 
   it('shows the "Loading variant…" overlay during the Walrus fetch (D-004)', async () => {
