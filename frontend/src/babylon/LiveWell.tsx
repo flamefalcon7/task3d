@@ -22,6 +22,14 @@ import { useLedeRenderMode } from '../landing/useLedeRenderMode';
 const AUTO_ROTATE_RAD_PER_SEC = 0.2;
 const MAX_FRAME_DELTA_S = 0.1;
 
+// Warm near-black "pocket" (D-094 harmony) — softer than pure #000 and matched
+// to the .well radial gradient behind, so the dark center dissolves into the
+// page at the feathered edges. #14110D → rgb(20,17,13)/255.
+const WELL_POCKET_RGB = [0.078, 0.067, 0.051] as const;
+// Same radial edge-feather signature as the hero: dark center, edges fade out so
+// the dark canvas melts into the paper rather than ending in a hard rectangle.
+const EDGE_FEATHER = 'radial-gradient(120% 120% at 50% 50%, #000 66%, transparent 100%)';
+
 // First-class kill-switch (D-093 / plan-2026-06-06-001). When
 // VITE_LANDING_LIVE_WELLS === '0' the wells collapse to their static fallback —
 // the one-flip revert if the live path janks on the demo machine.
@@ -86,7 +94,7 @@ export function LiveWell({
   testIdBase,
   offscreenPolicy = 'dispose',
   autoRotate = true,
-  clearColor = [0, 0, 0],
+  clearColor = WELL_POCKET_RGB,
   onSceneReady,
 }: LiveWellProps): JSX.Element {
   const renderMode = useLedeRenderMode();
@@ -253,7 +261,13 @@ export function LiveWell({
         data-testid={`${testIdBase}-canvas`}
         role="img"
         aria-label={ariaLabel}
-        style={{ ...FILL, objectFit: 'cover', opacity: ready ? 1 : 0 }}
+        style={{
+          ...FILL,
+          objectFit: 'cover',
+          opacity: ready ? 1 : 0,
+          maskImage: EDGE_FEATHER,
+          WebkitMaskImage: EDGE_FEATHER,
+        }}
       />
     </div>
   );
