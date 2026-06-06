@@ -1,5 +1,35 @@
 # Phase Progress
 
+## Last Updated: 2026-06-06 (**Landing live-3D wells — full feature shipped + browser-verified on `feat/landing-live-3d-wells`, NOT yet pushed/PR'd**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **15 of 38**
+- Days to demo day (7/20–21): ~44
+- Days to winners (8/27): ~82
+
+### Current Phase
+Phase 4 — landing polish. Reskinned the landing page's five visual wells from static into live Babylon scenes (brainstorm → plan → ce-work, full 8-unit plan). Branch `feat/landing-live-3d-wells` off `main` (separate from the unmerged `feat/rage-racing-track-reskin`).
+
+### Completed This Session
+- **Brainstorm + plan** — `docs/brainstorms/2026-06-06-landing-live-3d-wells.md`, `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md` (5-reviewer doc-review pass; caught + fixed a P1: the MODEL split clip-plane is world-space, so the panel oscillates ±30° instead of a full turntable).
+- **U1** — swapped canonical model to `tusk.glb` (345KB) via shared `frontend/src/landing/tuskModel.ts`.
+- **U2** — **D-092** (reverse plan-023: LifecycleStrip now live) + **D-093** (scoped D-044 exception: grey Blender hero well only). `landingWells` tokens + design-tokens.md block. Took D-092/D-093, NOT D-091 (held by the unmerged rage-racing branch — avoids merge collision).
+- **U3** — `useInView` hook (first IntersectionObserver in repo) + `frontend/src/babylon/LiveWell.tsx` (lazy-mount Babylon well; dispose-on-exit default / pause for hero; static fallback + mount placeholder; `VITE_LANDING_LIVE_WELLS` kill-switch; StrictMode-safe).
+- **U4** — `LedeHero` Blender viewport: grey clearColor + `GridMaterial` ground + `AxesViewer` XYZ + auto-rotate; sweep removed; keyframe placeholder until sceneReady; pause off-screen. Walrus-fetch flow unchanged.
+- **U5/U6/U7** — MODEL (half-solid/half-wireframe via frozen sweep + bounded oscillation), VARIANT (3 recolored clones, D-093 tokens), IN-GAME (neutral scene + emissive-glow-primary + guarded GPU particle burst looping off the render clock).
+- **U8** — `TypewriterPrompt` (typing loop, blinking caret, reduced-motion, aria) + `LifecycleStrip` rewired to live panels; tests rewritten.
+- **Verified** — full suite **1042 pass**, `tsc -b` clean, `pnpm build` succeeds, browser-verified via agent-browser (--headed): all 5 wells render live, no React crash; fixed a `data-testid` collision found there (panel well → `lifecycle-well-*`). Screenshot confirms Blender hero + live panels.
+
+### Next Concrete Step
+Push `feat/landing-live-3d-wells` and open a PR (not yet done — awaiting user go). Optional visual tuning before demo: MODEL oscillation center angle and VARIANT tint separation read slightly subtle in the screenshot.
+
+### Notes for Next Session
+- `walrus-tusk.glb` (667KB) left untracked/unused in `frontend/public/models/tusk3d/` — old model; safe to delete later.
+- Hero still uses the placeholder Walrus blob CID (times out → embedded fallback) — unchanged; real CID is the existing pre-deploy mint item.
+- The grey hero hex (`#3A3A40`), three `--variant-*` tints, MODEL oscillation arc, and IN-GAME `LOOP_PERIOD_S` are all in code as tuned defaults; adjust to taste in `tokens.ts` / the panel constants.
+
+---
+
 ## Last Updated: 2026-06-04 (**Audit Track 4–5 backend+Walrus run + all-Medium remediation — in working tree on `fix/seal-id-prefix-bypass`, NOT committed**)
 
 ### Hackathon Tracker
