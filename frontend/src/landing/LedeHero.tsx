@@ -12,6 +12,7 @@ import {
   MeshBuilder,
   Scene,
   ShadowGenerator,
+  Vector2,
   Vector3,
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
@@ -46,6 +47,23 @@ const STATIC_KEYFRAME_ALT =
 
 const WALRUS_TIMEOUT_MS = 3000;
 const DWELL_MS = 15000;
+
+// Shift the framed tusk left so the right side is free for editorial content
+// (left-image / right-text hero). Negative targetScreenOffset.x moves the model
+// left on screen.
+const TUSK_SCREEN_OFFSET_X = -1.2;
+
+// Right-column editorial copy (jargon-free — no L1/L2/L3). The headline is the
+// product tagline; the sub-line decodes it in plain words; the spec block is the
+// "card stats" flavor.
+const HERO_HEADLINE = 'Carve. Mint. Riff.';
+const HERO_SUBLINE = 'Generate a model. Own it on Sui. Remix anyone’s.';
+const HERO_SPEC: ReadonlyArray<readonly [string, string]> = [
+  ['MODEL', 'walrus tusk'],
+  ['STYLE', 'low-poly'],
+  ['STORAGE', 'Walrus · live'],
+  ['LICENSE', 'open to remix'],
+];
 
 export function LedeHero(): JSX.Element {
   const renderMode = useLedeRenderMode();
@@ -282,6 +300,8 @@ export function LedeHero(): JSX.Element {
         const camera = scene.activeCamera;
         if (camera instanceof ArcRotateCamera) {
           frameCameraToMeshes(camera, container.meshes);
+          // Push the model left so the right column has room.
+          camera.targetScreenOffset = new Vector2(TUSK_SCREEN_OFFSET_X, 0);
         }
         // Ground the contact shadow at the model's base + register casters
         // (model scale/origin is only known now, after load + framing).
@@ -359,12 +379,26 @@ export function LedeHero(): JSX.Element {
             style={canvasInnerStyle}
           />
         )}
+        {isLive && (
+          <div style={contentColStyle} data-testid="lede-content">
+            <div style={headlineStyle}>{HERO_HEADLINE}</div>
+            <p style={subStyle}>{HERO_SUBLINE}</p>
+            <dl style={specStyle}>
+              {HERO_SPEC.map(([k, v]) => (
+                <div key={k} style={specRowStyle}>
+                  <dt style={specKeyStyle}>{k}</dt>
+                  <dd style={specValStyle}>{v}</dd>
+                </div>
+              ))}
+            </dl>
+            {dwellElapsed && (
+              <Link to="/launch" style={ctaInColumnStyle} data-testid="lede-cta">
+                fork your own →
+              </Link>
+            )}
+          </div>
+        )}
       </div>
-      {isLive && dwellElapsed && (
-        <Link to="/launch" style={ctaStyle} data-testid="lede-cta">
-          fork your own →
-        </Link>
-      )}
     </section>
   );
 }
@@ -425,4 +459,72 @@ const ctaStyle: CSSProperties = {
   alignSelf: 'flex-start',
   // D-044 §7 — no transition, no opacity fade. CTA appears via conditional
   // render at t=15s; the appearance IS the motion.
+};
+
+// Right editorial column — overlays the right ~42% of the well (tusk is pushed
+// left). pointer-events:none so the (transparent) column never blocks the
+// canvas; only the CTA link re-enables them.
+const contentColStyle: CSSProperties = {
+  position: 'absolute',
+  top: 0,
+  right: 0,
+  bottom: 0,
+  width: '42%',
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'center',
+  gap: tokens.space[3],
+  paddingRight: tokens.space[8],
+  paddingLeft: tokens.space[4],
+  pointerEvents: 'none',
+};
+
+const headlineStyle: CSSProperties = {
+  fontFamily: tokens.font.display,
+  fontStyle: 'italic',
+  fontSize: 46,
+  lineHeight: 1.05,
+  color: tokens.color.ink,
+};
+
+const subStyle: CSSProperties = {
+  fontFamily: tokens.font.mono,
+  fontSize: tokens.size.sm,
+  color: tokens.color.muted,
+  margin: 0,
+  lineHeight: 1.5,
+  maxWidth: 280,
+};
+
+const specStyle: CSSProperties = {
+  margin: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 3,
+};
+
+const specRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: tokens.space[2],
+  fontFamily: tokens.font.mono,
+  fontSize: tokens.size.xs,
+};
+
+const specKeyStyle: CSSProperties = {
+  width: 76,
+  letterSpacing: '1px',
+  textTransform: 'uppercase',
+  color: tokens.color.subtle,
+  margin: 0,
+};
+
+const specValStyle: CSSProperties = {
+  margin: 0,
+  color: tokens.color.hint,
+};
+
+const ctaInColumnStyle: CSSProperties = {
+  ...ctaStyle,
+  pointerEvents: 'auto',
+  marginTop: tokens.space[2],
 };

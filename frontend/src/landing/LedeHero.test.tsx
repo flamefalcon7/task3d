@@ -110,6 +110,9 @@ vi.mock('@babylonjs/core', () => {
       return { position: { y: 0 }, material: null as unknown, receiveShadows: false };
     },
   };
+  class Vector2 {
+    constructor(public x = 0, public y = 0) {}
+  }
   class Vector3 {
     constructor(public x = 0, public y = 0, public z = 0) {}
   }
@@ -126,6 +129,7 @@ vi.mock('@babylonjs/core', () => {
     ShadowGenerator,
     Color3,
     MeshBuilder,
+    Vector2,
     Vector3,
     LoadAssetContainerAsync,
   };
@@ -251,6 +255,24 @@ describe('LedeHero — render-mode branching', () => {
     expect(screen.queryByTestId('lede-canvas')).toBeNull();
     expect(state.engineCtor).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+    // The editorial right column is desktop/live-only.
+    expect(screen.queryByTestId('lede-content')).toBeNull();
+  });
+
+  it('live mode renders the right editorial column (headline + jargon-free spec)', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('lede-content')).toBeTruthy());
+    expect(screen.getByText('Carve. Mint. Riff.')).toBeTruthy();
+    expect(screen.getByText('MODEL')).toBeTruthy();
+    // No spec-layer jargon leaks into user-facing copy.
+    const text = screen.getByTestId('lede-content').textContent ?? '';
+    expect(text).not.toMatch(/\bL[123]\b/);
   });
 
   it('live mode mounts canvas and constructs Engine + Scene + camera framing in order', async () => {
