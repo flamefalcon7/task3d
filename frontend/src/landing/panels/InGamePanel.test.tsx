@@ -180,7 +180,7 @@ describe('InGamePanel', () => {
   it('drives LiveWell with dispose policy + ingame testid + static fallback', () => {
     render(<InGamePanel />);
     expect(h.captured?.offscreenPolicy).toBe('dispose');
-    expect(h.captured?.testIdBase).toBe('lifecycle-panel-ingame');
+    expect(h.captured?.testIdBase).toBe('lifecycle-well-ingame');
     expect(h.captured?.staticSrc).toBe('/lifecycle/in-game.svg');
   });
 

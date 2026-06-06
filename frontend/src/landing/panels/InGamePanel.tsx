@@ -157,7 +157,7 @@ export function InGamePanel(): JSX.Element {
       staticSrc="/lifecycle/in-game.svg"
       staticAlt="The tusk floating as a usable object in a neutral game scene"
       ariaLabel="A walrus tusk glowing as a collectible item in a small game scene"
-      testIdBase="lifecycle-panel-ingame"
+      testIdBase="lifecycle-well-ingame"
       offscreenPolicy="dispose"
       onSceneReady={onSceneReady}
     />

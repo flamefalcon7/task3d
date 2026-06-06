@@ -68,7 +68,7 @@ export function VariantPanel(): JSX.Element {
       staticSrc="/lifecycle/variant.svg"
       staticAlt="A grid of tusk forks in different colors"
       ariaLabel="Three copies of the same walrus tusk in three different colors"
-      testIdBase="lifecycle-panel-variant"
+      testIdBase="lifecycle-well-variant"
       offscreenPolicy="dispose"
       onSceneReady={onSceneReady}
     />

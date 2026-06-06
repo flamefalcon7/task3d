@@ -50,7 +50,7 @@ export function ModelPanel(): JSX.Element {
       staticSrc="/lifecycle/model.svg"
       staticAlt="A walrus tusk shown half as a solid model, half as a wireframe mesh"
       ariaLabel="A 3D walrus tusk, one half shaded solid and the other half wireframe"
-      testIdBase="lifecycle-panel-model"
+      testIdBase="lifecycle-well-model"
       offscreenPolicy="dispose"
       autoRotate={false}
       onSceneReady={onSceneReady}

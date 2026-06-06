@@ -96,7 +96,7 @@ describe('VariantPanel', () => {
   it('drives LiveWell with dispose policy + variant testid + static fallback', () => {
     render(<VariantPanel />);
     expect(h.captured?.offscreenPolicy).toBe('dispose');
-    expect(h.captured?.testIdBase).toBe('lifecycle-panel-variant');
+    expect(h.captured?.testIdBase).toBe('lifecycle-well-variant');
     expect(h.captured?.staticSrc).toBe('/lifecycle/variant.svg');
   });
 

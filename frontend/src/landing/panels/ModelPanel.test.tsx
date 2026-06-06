@@ -71,7 +71,7 @@ describe('ModelPanel', () => {
     render(<ModelPanel />);
     expect(h.captured?.offscreenPolicy).toBe('dispose');
     expect(h.captured?.autoRotate).toBe(false);
-    expect(h.captured?.testIdBase).toBe('lifecycle-panel-model');
+    expect(h.captured?.testIdBase).toBe('lifecycle-well-model');
     expect(h.captured?.staticSrc).toBe('/lifecycle/model.svg');
     expect(h.captured?.glbUrl).toContain('tusk.glb');
   });
