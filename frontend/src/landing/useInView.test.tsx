@@ -40,7 +40,9 @@ function lastObserving(): MockIO {
   // The active observer is the most recent one that has an observed element
   // (StrictMode creates throwaway instances whose observers were disconnected).
   const live = MockIO.instances.filter((i) => i.observed.size > 0 && !i.disconnected);
-  return live[live.length - 1] ?? MockIO.instances[MockIO.instances.length - 1];
+  const found = live[live.length - 1] ?? MockIO.instances[MockIO.instances.length - 1];
+  if (!found) throw new Error('no IntersectionObserver instance created');
+  return found;
 }
 
 function Probe({ once }: { once?: boolean }) {

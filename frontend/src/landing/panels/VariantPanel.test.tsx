@@ -49,6 +49,9 @@ vi.mock('../../babylon/PreviewCanvas', () => ({
 import { ArcRotateCamera } from '@babylonjs/core';
 import { VariantPanel } from './VariantPanel';
 
+// Mocked ArcRotateCamera has a 0-arg constructor; cast off the real signature.
+const Cam = ArcRotateCamera as unknown as new () => object;
+
 function fakeMaterial() {
   return { albedoColor: null as unknown, clone: () => fakeMaterial() };
 }
@@ -67,7 +70,7 @@ function fakeMesh(name: string) {
 
 function fakeContext() {
   const source = fakeMesh('tusk');
-  const camera = new ArcRotateCamera() as unknown as LiveWellSceneContext['camera'];
+  const camera = new Cam() as unknown as LiveWellSceneContext['camera'];
   const scene = {} as LiveWellSceneContext['scene'];
   const ctx = {
     scene,

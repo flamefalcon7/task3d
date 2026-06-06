@@ -36,6 +36,8 @@ export function VariantPanel(): JSX.Element {
     const groups: TransformNode[] = [];
     const framed: AbstractMesh[] = [];
     for (let i = 0; i < 3; i++) {
+      const color = colors[i];
+      if (!color) continue;
       const node = new TransformNode(`variant-${i}`, scene);
       node.position.x = (i - 1) * SPREAD;
       for (const src of meshes) {
@@ -43,7 +45,7 @@ export function VariantPanel(): JSX.Element {
         if (!clone) continue;
         clone.setEnabled(true);
         clone.material = clone.material ? clone.material.clone(`variant-${i}-mat`) : null;
-        recolor(clone.material, colors[i]);
+        recolor(clone.material, color);
         framed.push(clone);
       }
       groups.push(node);

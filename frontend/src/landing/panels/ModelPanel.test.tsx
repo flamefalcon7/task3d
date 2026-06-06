@@ -34,9 +34,13 @@ vi.mock('../../babylon/edgesGradientSweep', () => ({
 import { ArcRotateCamera } from '@babylonjs/core';
 import { ModelPanel } from './ModelPanel';
 
+// The mocked ArcRotateCamera has a 0-arg constructor; cast away the real 5-7
+// arg signature so tsc -b is happy while runtime uses the mock.
+const Cam = ArcRotateCamera as unknown as new () => { alpha: number };
+
 function fakeContext(): { ctx: LiveWellSceneContext; fireFrame: () => void } {
   let frameCb: (() => void) | null = null;
-  const camera = new ArcRotateCamera() as unknown as LiveWellSceneContext['camera'];
+  const camera = new Cam() as unknown as LiveWellSceneContext['camera'];
   const scene = {
     activeCamera: camera,
     onBeforeRenderObservable: {

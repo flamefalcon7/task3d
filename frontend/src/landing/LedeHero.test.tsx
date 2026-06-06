@@ -276,7 +276,7 @@ describe('LedeHero — render-mode branching', () => {
     // Grey clearColor — NOT pure black (0,0,0). The mocked Color3.FromHexString
     // returns (0.2, 0.2, 0.25); assert that's what reached scene.clearColor.set.
     await waitFor(() => expect(state.clearColorSet).toHaveBeenCalled());
-    const args = state.clearColorSet.mock.calls[0];
+    const args = state.clearColorSet.mock.calls[0] ?? [];
     expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
     expect(args[0]).toBeCloseTo(0.2);
     // Grid mesh + grid material + axis indicator all built.
