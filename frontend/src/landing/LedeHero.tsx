@@ -25,6 +25,7 @@ import {
 import { frameCameraToMeshes } from '../babylon/PreviewCanvas';
 import { truncateBlobId } from '../babylon/MeshInfoPanel';
 import { tokens, viewerWell } from '../ux/tokens';
+import { EMBEDDED_TUSK_GLB_URL } from './tuskModel';
 import { useLedeRenderMode } from './useLedeRenderMode';
 
 // Canonical Walrus blob CID for L1 Collection #001 — replaced before deploy
@@ -32,7 +33,7 @@ import { useLedeRenderMode } from './useLedeRenderMode';
 // the value is a placeholder long enough to exercise `truncateBlobId`.
 const WALRUS_BLOB_CID = 'placeholder000000000000000000000000000000abcd';
 const WALRUS_BLOB_URL = `${WALRUS_AGGREGATOR}/v1/blobs/${WALRUS_BLOB_CID}`;
-const EMBEDDED_GLB_URL = '/models/tusk3d/walrus-tusk.glb';
+const EMBEDDED_GLB_URL = EMBEDDED_TUSK_GLB_URL;
 const STATIC_KEYFRAME_URL = '/lede/tusk-keyframe.svg';
 const STATIC_KEYFRAME_ALT =
   'Tusk3D Collection #001 — low-poly walrus tusk, line drawing gradient at 45% sweep, 3/4 view';

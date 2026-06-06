@@ -209,7 +209,7 @@ describe('LedeHero — Walrus fetch behaviour', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
-    expect(state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb'))).toBe(
+    expect(state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/tusk.glb'))).toBe(
       true,
     );
     // Engine constructor fired exactly once; not torn down on the swap path.
@@ -227,7 +227,7 @@ describe('LedeHero — Walrus fetch behaviour', () => {
     );
     await waitFor(() => expect(state.loadAssetCalls.length).toBeGreaterThan(0));
     expect(
-      state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/walrus-tusk.glb')),
+      state.loadAssetCalls.some((u) => u.endsWith('/models/tusk3d/tusk.glb')),
     ).toBe(false);
   });
 
