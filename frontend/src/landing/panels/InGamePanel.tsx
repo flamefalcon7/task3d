@@ -109,7 +109,8 @@ export function InGamePanel(): JSX.Element {
     const grid = new GridMaterial('ingame-grid-mat', scene);
     grid.mainColor = Color3.FromHexString(GROUND_HEX);
     grid.lineColor = Color3.FromHexString('#6E6A62');
-    grid.opacity = 0.9;
+    grid.opacity = 1; // OPAQUE — so it renders in the opaque pass at the correct
+    // depth (a transparent grid draws over the model; opaque sits at the bottom).
     grid.gridRatio = 0.4;
     grid.majorUnitFrequency = 4;
     grid.minorUnitVisibility = 0.6;
