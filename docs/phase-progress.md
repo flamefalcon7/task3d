@@ -1,6 +1,6 @@
 # Phase Progress
 
-## Last Updated: 2026-06-06 (**Landing live-3D wells — full feature shipped + browser-verified on `feat/landing-live-3d-wells`, NOT yet pushed/PR'd**)
+## Last Updated: 2026-06-06 (**Landing live-3D wells — 8-unit plan shipped + a long user-driven visual redesign pass; all on `feat/landing-live-3d-wells`, NOT yet pushed/PR'd**)
 
 ### Hackathon Tracker
 - Days to submission (6/21): **15 of 38**
@@ -20,13 +20,20 @@ Phase 4 — landing polish. Reskinned the landing page's five visual wells from 
 - **U8** — `TypewriterPrompt` (typing loop, blinking caret, reduced-motion, aria) + `LifecycleStrip` rewired to live panels; tests rewritten.
 - **Verified** — full suite **1042 pass**, `tsc -b` clean, `pnpm build` succeeds, browser-verified via agent-browser (--headed): all 5 wells render live, no React crash; fixed a `data-testid` collision found there (panel well → `lifecycle-well-*`). Screenshot confirms Blender hero + live panels.
 
+### Design Iterations (post-plan, user-driven via HMR)
+The 8-unit plan shipped, then a long interactive design pass reshaped the visuals (all committed on the branch):
+- **Hero** — removed axis gizmo + caption; **D-094 supersedes D-093**: hero no longer a grey viewport — it **blends into the page** (paper clearColor + soft contact shadow + radial edge-feather + faint grid floor). Then made it a **left-image / right-text editorial hero**: tusk shifted left (`targetScreenOffset`), right column adds `Carve. Mint. Riff.` + plain-language sub + jargon-free spec block + CTA. Copy uses **fork**, not "remix" (product vocabulary).
+- **Lifecycle panels** — iterated dark-pocket → filmstrip → **final: full-bleed brutalist cards mirroring ActorCards (`.section`), light-grey (`#E2E0DA`) thumbnails**. MODEL = dark hidden-line low-poly wireframe (enableEdgesRendering, faces painted grey). VARIANT = 3 tusks closer+bigger. PROMPT dark text.
+- **IN-GAME** — a game vignette: monster (`monster.glb`, copied from the user's `walrus-tusk.glb`) is struck (red flash + smoke burst) and **drops a gold tusk reward** (ease-out bounce + amber sparkle), looping. Floor is a **game-editor grid** (opaque, sits at the bottom). VFX uses STANDARD blend + deep colors (additive washes out on the light card).
+
 ### Next Concrete Step
-Push `feat/landing-live-3d-wells` and open a PR (not yet done — awaiting user go). Optional visual tuning before demo: MODEL oscillation center angle and VARIANT tint separation read slightly subtle in the screenshot.
+Push `feat/landing-live-3d-wells` and open a PR (**awaiting user go — not pushed**).
 
 ### Notes for Next Session
-- `walrus-tusk.glb` (667KB) left untracked/unused in `frontend/public/models/tusk3d/` — old model; safe to delete later.
-- Hero still uses the placeholder Walrus blob CID (times out → embedded fallback) — unchanged; real CID is the existing pre-deploy mint item.
-- The grey hero hex (`#3A3A40`), three `--variant-*` tints, MODEL oscillation arc, and IN-GAME `LOOP_PERIOD_S` are all in code as tuned defaults; adjust to taste in `tokens.ts` / the panel constants.
+- **agent-browser can't reliably screenshot the IN-GAME 3D** (renders the grid but not the model in this headless Chromium, though MODEL/VARIANT render). I wasted time chasing a phantom "invisible monster" bug that was just the tool. **Lesson: for IN-GAME, verify in the user's real browser, don't trust the headless screenshot.** A throw in a panel's `onSceneReady` blocks LiveWell's `setReady` → blank well; IN-GAME now guards the GPU-particle path so VFX failure can't blank it.
+- `walrus-tusk.glb` (667KB) still untracked/unused in `frontend/public/models/tusk3d/`; the IN-GAME monster is the separate `monster.glb` (506KB).
+- D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch; this branch took **D-092/D-093/D-094** — `design-tokens.md` will have a predictable top-of-file conflict (both scoped-exception blocks) at merge; keep both.
+- All visual values are tuned-default constants (grid line color, variant tints, IN-GAME phase timings/colors/drop height) — adjust in `tokens.ts` / `LedeHero.tsx` / `InGamePanel.tsx`.
 
 ---
 
