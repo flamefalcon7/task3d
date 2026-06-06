@@ -51,18 +51,18 @@ const DWELL_MS = 15000;
 // Shift the framed tusk left so the right side is free for editorial content
 // (left-image / right-text hero). Negative targetScreenOffset.x moves the model
 // left on screen.
-const TUSK_SCREEN_OFFSET_X = -1.2;
+const TUSK_SCREEN_OFFSET_X = -0.7;
 
 // Right-column editorial copy (jargon-free — no L1/L2/L3). The headline is the
 // product tagline; the sub-line decodes it in plain words; the spec block is the
 // "card stats" flavor.
 const HERO_HEADLINE = 'Carve. Mint. Riff.';
-const HERO_SUBLINE = 'Generate a model. Own it on Sui. Remix anyone’s.';
+const HERO_SUBLINE = 'Generate a model. Own it on Sui. Fork anyone’s.';
 const HERO_SPEC: ReadonlyArray<readonly [string, string]> = [
   ['MODEL', 'walrus tusk'],
   ['STYLE', 'low-poly'],
   ['STORAGE', 'Walrus · live'],
-  ['LICENSE', 'open to remix'],
+  ['LICENSE', 'open to fork'],
 ];
 
 export function LedeHero(): JSX.Element {
