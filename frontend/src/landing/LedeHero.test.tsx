@@ -241,8 +241,6 @@ describe('LedeHero — render-mode branching', () => {
     expect(screen.queryByTestId('lede-canvas')).toBeNull();
     expect(state.engineCtor).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
-    // Caption still renders on fallback (R20).
-    expect(screen.getByTestId('lede-caption')).toBeTruthy();
   });
 
   it('live mode mounts canvas and constructs Engine + Scene + camera framing in order', async () => {

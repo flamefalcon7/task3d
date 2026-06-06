@@ -21,7 +21,6 @@ import {
 } from '../walrus/fetchWithTimeout';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 import { frameCameraToMeshes } from '../babylon/PreviewCanvas';
-import { truncateBlobId } from '../babylon/MeshInfoPanel';
 import { landingWells, tokens, viewerWell } from '../ux/tokens';
 import { EMBEDDED_TUSK_GLB_URL } from './tuskModel';
 import { useInView } from './useInView';
@@ -43,10 +42,6 @@ const STATIC_KEYFRAME_ALT =
 
 const WALRUS_TIMEOUT_MS = 3000;
 const DWELL_MS = 15000;
-
-const TUSK_PROMPT = 'a low-poly walrus tusk';
-// Substituted at ship time once Rick mints — pre-deploy checklist item.
-const MINT_DATE_PLACEHOLDER = '2026-05-NN';
 
 export function LedeHero(): JSX.Element {
   const renderMode = useLedeRenderMode();
@@ -319,17 +314,6 @@ export function LedeHero(): JSX.Element {
           />
         )}
       </div>
-      <div style={captionBlockStyle} data-testid="lede-caption">
-        <p style={captionLineStyle}>
-          // L1 Collection #001 · prompt: "{TUSK_PROMPT}"
-        </p>
-        <p style={captionLineStyle}>
-          // live from Walrus · {truncateBlobId(WALRUS_BLOB_CID)}
-        </p>
-        <p style={captionLineStyle}>
-          // minted {MINT_DATE_PLACEHOLDER} · Tusk3D testnet
-        </p>
-      </div>
       {isLive && dwellElapsed && (
         <Link to="/launch" style={ctaStyle} data-testid="lede-cta">
           fork your own →
@@ -369,20 +353,6 @@ const fillStyle: CSSProperties = {
   width: '100%',
   height: '100%',
   display: 'block',
-};
-
-const captionBlockStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-};
-
-const captionLineStyle: CSSProperties = {
-  fontFamily: tokens.font.mono,
-  fontSize: tokens.size.sm,
-  color: tokens.color.hint,
-  margin: 0,
-  lineHeight: 1.6,
 };
 
 const ctaStyle: CSSProperties = {
