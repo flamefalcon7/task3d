@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  type AbstractMesh,
   ArcRotateCamera,
   type AssetContainer,
   Color3,
+  DirectionalLight,
   Engine,
   HemisphericLight,
   LoadAssetContainerAsync,
   MeshBuilder,
   Scene,
+  ShadowGenerator,
   Vector3,
 } from '@babylonjs/core';
-import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
+import { ShadowOnlyMaterial } from '@babylonjs/materials/shadowOnly/shadowOnlyMaterial';
 import '@babylonjs/loaders/glTF/index.js';
 
 import {
@@ -21,7 +24,7 @@ import {
 } from '../walrus/fetchWithTimeout';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 import { frameCameraToMeshes } from '../babylon/PreviewCanvas';
-import { landingWells, tokens, viewerWell } from '../ux/tokens';
+import { tokens, viewerWell } from '../ux/tokens';
 import { EMBEDDED_TUSK_GLB_URL } from './tuskModel';
 import { useInView } from './useInView';
 import { useLedeRenderMode } from './useLedeRenderMode';
@@ -55,6 +58,8 @@ export function LedeHero(): JSX.Element {
   const engineRef = useRef<Engine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const containerRef = useRef<AssetContainer | null>(null);
+  const shadowGenRef = useRef<ShadowGenerator | null>(null);
+  const shadowGroundRef = useRef<AbstractMesh | null>(null);
   const aliveRef = useRef(false);
 
   // Pause the hero render loop when scrolled out of view (the brutalist hero is
@@ -91,10 +96,12 @@ export function LedeHero(): JSX.Element {
     };
   }, [isLive]);
 
-  // Scene effect — Blender-style grey viewport (D-093 scoped D-044 exception):
-  // grey clearColor + ground grid + XYZ axis, auto-rotating tusk. Cleanup
-  // mirrors PreviewCanvas's `if (!engine.isDisposed)` guard so a teardown
-  // ordering surprise doesn't crash into a disposed engine.
+  // Scene effect — the tusk blends into the page rather than sitting in its own
+  // window (supersedes D-093's grey Blender viewport): clearColor = page paper
+  // so the box has no visible boundary, a soft contact shadow grounds the model
+  // on the page, and the canvas edges are feathered (CSS mask) so anything near
+  // the box edge dissolves into the page instead of hard-clipping. Cleanup
+  // mirrors PreviewCanvas's `if (!engine.isDisposed)` guard.
   useEffect(() => {
     if (!isLive) return;
     const engine = engineRef.current;
@@ -111,23 +118,34 @@ export function LedeHero(): JSX.Element {
     );
     // No attachControl — auto-rotate only (R4). Grabbing the hero would drag it
     // out of the framed composition.
-    new HemisphericLight('lede-hl', new Vector3(0, 1, 0), scene);
+    new HemisphericLight('lede-hl', new Vector3(0, 1, 0), scene).intensity = 0.9;
 
-    // Grey viewport (NOT the D-044 black well — D-093, hero-only exception).
-    const grey = Color3.FromHexString(landingWells.heroViewport);
-    scene.clearColor.set(grey.r, grey.g, grey.b, 1);
+    // Background = page paper (#F5F5F0) so the well merges into the page.
+    const paper = Color3.FromHexString(tokens.color.paper);
+    scene.clearColor.set(paper.r, paper.g, paper.b, 1);
 
-    // Ground grid mesh — white lines on the grey, Blender-viewport read.
-    const ground = MeshBuilder.CreateGround('lede-grid', { width: 14, height: 14 }, scene);
+    // Directional key light — gives the ivory tusk real shading (definition it
+    // would lose washed-out on the light background) AND casts the contact shadow.
+    const key = new DirectionalLight('lede-key', new Vector3(-0.45, -1, -0.35), scene);
+    key.position = new Vector3(4, 8, 4);
+    key.intensity = 1.5;
+
+    // Shadow-only ground: invisible except where the tusk casts a soft shadow,
+    // so the model reads as standing on the page, not floating. Y is set to the
+    // model's base after load (model scale/origin is unknown until then).
+    const ground = MeshBuilder.CreateGround('lede-shadow', { width: 20, height: 20 }, scene);
     ground.position.y = -1.1;
-    const grid = new GridMaterial('lede-grid-mat', scene);
-    grid.mainColor = grey;
-    grid.lineColor = Color3.FromHexString('#FFFFFF');
-    grid.opacity = 0.5;
-    grid.gridRatio = 0.6;
-    grid.majorUnitFrequency = 5;
-    grid.minorUnitVisibility = 0.35;
-    ground.material = grid;
+    ground.receiveShadows = true;
+    const shadowMat = new ShadowOnlyMaterial('lede-shadow-mat', scene);
+    shadowMat.activeLight = key;
+    shadowMat.alpha = 0.22; // soft
+    ground.material = shadowMat;
+    shadowGroundRef.current = ground;
+
+    const sg = new ShadowGenerator(1024, key);
+    sg.useBlurExponentialShadowMap = true;
+    sg.blurKernel = 48;
+    shadowGenRef.current = sg;
 
     // New unconditional auto-rotate observer — no pointer idle gate (the hero
     // has no pointer interaction). Per-frame delta capped so a resume-after-
@@ -149,6 +167,8 @@ export function LedeHero(): JSX.Element {
         engine.wipeCaches(true);
       }
       containerRef.current = null;
+      shadowGenRef.current = null;
+      shadowGroundRef.current = null;
       sceneRef.current = null;
     };
   }, [isLive]);
@@ -244,6 +264,18 @@ export function LedeHero(): JSX.Element {
         if (camera instanceof ArcRotateCamera) {
           frameCameraToMeshes(camera, container.meshes);
         }
+        // Ground the contact shadow at the model's base + register casters
+        // (model scale/origin is only known now, after load + framing).
+        const sg = shadowGenRef.current;
+        const ground = shadowGroundRef.current;
+        let minY = Infinity;
+        for (const m of container.meshes as AbstractMesh[]) {
+          if (typeof m.getTotalVertices !== 'function' || m.getTotalVertices() === 0) continue;
+          m.computeWorldMatrix(true);
+          minY = Math.min(minY, m.getBoundingInfo().boundingBox.minimumWorld.y);
+          sg?.addShadowCaster(m);
+        }
+        if (ground && Number.isFinite(minY)) ground.position.y = minY - 0.02;
         // Tusk loaded + framed — reveal the canvas, hide the keyframe placeholder.
         setSceneReady(true);
       } catch (err) {
@@ -284,27 +316,18 @@ export function LedeHero(): JSX.Element {
   // ---------------------------------------------------------------------
   return (
     <section style={sectionStyle} data-testid="lede-hero" data-render-mode={renderMode}>
-      <div ref={wellRef} style={wellStyle}>
+      <div ref={wellRef} style={isLive ? liveWellStyle : wellStyle}>
         {isLive ? (
-          <>
-            {/* Keyframe placeholder until the tusk is loaded + framed — no flash. */}
-            {!sceneReady && (
-              <img
-                src={STATIC_KEYFRAME_URL}
-                alt={STATIC_KEYFRAME_ALT}
-                data-testid="lede-static-image"
-                aria-hidden
-                style={fillStyle}
-              />
-            )}
-            <canvas
-              ref={canvasRef}
-              data-testid="lede-canvas"
-              role="img"
-              aria-label={STATIC_KEYFRAME_ALT}
-              style={{ ...fillStyle, objectFit: 'cover', opacity: sceneReady ? 1 : 0 }}
-            />
-          </>
+          // Canvas fades in once the tusk is framed; until then the paper well
+          // background shows through (opacity 0) — same color as the page, so
+          // the load reads as blank page rather than a flash.
+          <canvas
+            ref={canvasRef}
+            data-testid="lede-canvas"
+            role="img"
+            aria-label={STATIC_KEYFRAME_ALT}
+            style={{ ...fillStyle, objectFit: 'cover', opacity: sceneReady ? 1 : 0 }}
+          />
         ) : (
           <img
             src={STATIC_KEYFRAME_URL}
@@ -338,6 +361,19 @@ const wellStyle: CSSProperties = {
   width: '100%',
 };
 
+// Live hero blends into the page: paper background (not the D-044 black well)
+// so the feathered canvas edges reveal page paper, not black. Static-fallback
+// (mobile) keeps the black well + keyframe via the plain wellStyle above.
+const liveWellStyle: CSSProperties = {
+  ...wellStyle,
+  background: tokens.color.paper,
+};
+
+// Radial feather so the box has no hard rectangular boundary — content near the
+// edges dissolves into the page. Inner ~70% stays fully opaque (the tusk reads
+// crisp); the outer band fades to transparent.
+const EDGE_FEATHER = 'radial-gradient(115% 115% at 50% 50%, #000 70%, transparent 100%)';
+
 const canvasInnerStyle: CSSProperties = {
   display: 'block',
   width: '100%',
@@ -353,6 +389,8 @@ const fillStyle: CSSProperties = {
   width: '100%',
   height: '100%',
   display: 'block',
+  maskImage: EDGE_FEATHER,
+  WebkitMaskImage: EDGE_FEATHER,
 };
 
 const ctaStyle: CSSProperties = {

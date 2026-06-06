@@ -4041,7 +4041,7 @@ The `LifecycleStrip` panels may hold state, effects, and Babylon scenes: PROMPT 
 
 ## D-093: Scoped D-044 exception — landing hero well is a grey Blender viewport
 
-**Status**: Accepted
+**Status**: Superseded by D-094
 **Date**: 2026-06-06
 **Phase**: Phase 4 (landing polish)
 
@@ -4065,6 +4065,32 @@ The landing **hero well only** (`LedeHero`) is exempt from the black-well rule: 
 
 ---
 
+## D-094: Landing hero blends into the page (supersedes the grey viewport)
+
+**Status**: Supersedes D-093
+**Date**: 2026-06-06
+**Phase**: Phase 4 (landing polish)
+
+### Context
+D-093 made the hero a grey Blender-style viewport (grey well + grid + axis). On review the user wanted the opposite read: the tusk should **blend into the page**, not look like its own framed window.
+
+### Decision
+The landing hero 3D well renders on the **page paper background** (`tokens.color.paper` #F5F5F0) instead of a tinted/black well, with: (1) a **soft contact shadow** (DirectionalLight + a `ShadowOnlyMaterial` ground + `ShadowGenerator`) so the tusk reads as standing on the page rather than floating; (2) a **radial edge-feather** (CSS `mask-image`) so content near the box edges dissolves into the page instead of hard-clipping; (3) **no grid / no axis**. Auto-rotate is unchanged. Scope is still the hero well only — the four `LifecycleStrip` panels keep `--well` black. The grey-viewport / grid / axis `landingWells` tokens are retired.
+
+### Rationale
+- The "own window" framing (D-093) read as a separate app surface; blending makes the model feel embedded in the editorial page, which is what the user wanted.
+- Contact shadow + directional key light restore the model definition that a light background would otherwise wash out (the contrast concern that originally motivated D-044's black wells).
+
+### Consequences
+- ✅ Hero reads as a model living in the page, not a 3D viewer pane.
+- ⚠️ Still a D-044 exception (one well is non-black); bounded by this ADR + the `design-tokens.md` block (updated from D-093).
+- 🔮 If the ivory tusk ever loses legibility on paper, dial up the contact-shadow alpha / key-light intensity, or add a faint radial vignette — without reopening the ADR.
+
+### Related
+- Supersedes D-093. Companion to D-091 (`/track`) and D-092 (live strip). Code: `frontend/src/landing/LedeHero.tsx`; tokens trimmed in `frontend/src/ux/tokens.ts`.
+
+---
+
 # Reserved Decision Numbers
 
-D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch (`/track` D-044 exemption); this branch took D-092/D-093 to avoid a merge-time collision. D-094 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch (`/track` D-044 exemption); this branch took D-092/D-093/D-094 to avoid a merge-time collision. D-095 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

@@ -20,10 +20,8 @@ const state: {
   sweepDispose: ReturnType<typeof vi.fn>;
   frameCamera: ReturnType<typeof vi.fn>;
   clearColorSet: ReturnType<typeof vi.fn>;
-  gridCtor: ReturnType<typeof vi.fn>;
   groundCreate: ReturnType<typeof vi.fn>;
-  axesCtor: ReturnType<typeof vi.fn>;
-  axesDispose: ReturnType<typeof vi.fn>;
+  shadowGenCtor: ReturnType<typeof vi.fn>;
 } = {
   engineCtor: vi.fn(),
   engineDispose: vi.fn(),
@@ -36,10 +34,8 @@ const state: {
   sweepDispose: vi.fn(),
   frameCamera: vi.fn(),
   clearColorSet: vi.fn(),
-  gridCtor: vi.fn(),
   groundCreate: vi.fn(),
-  axesCtor: vi.fn(),
-  axesDispose: vi.fn(),
+  shadowGenCtor: vi.fn(),
 };
 
 vi.mock('@babylonjs/core', () => {
@@ -84,7 +80,21 @@ vi.mock('@babylonjs/core', () => {
     attachControl() {}
   }
   class HemisphericLight {
+    intensity = 1;
     constructor() {}
+  }
+  class DirectionalLight {
+    position: unknown = null;
+    intensity = 1;
+    constructor() {}
+  }
+  class ShadowGenerator {
+    useBlurExponentialShadowMap = false;
+    blurKernel = 1;
+    constructor() {
+      state.shadowGenCtor();
+    }
+    addShadowCaster() {}
   }
   class Color3 {
     constructor(public r = 0, public g = 0, public b = 0) {}
@@ -95,7 +105,7 @@ vi.mock('@babylonjs/core', () => {
   const MeshBuilder = {
     CreateGround: (..._a: unknown[]) => {
       state.groundCreate();
-      return { position: { y: 0 }, material: null as unknown };
+      return { position: { y: 0 }, material: null as unknown, receiveShadows: false };
     },
   };
   class Vector3 {
@@ -110,6 +120,8 @@ vi.mock('@babylonjs/core', () => {
     Scene,
     ArcRotateCamera,
     HemisphericLight,
+    DirectionalLight,
+    ShadowGenerator,
     Color3,
     MeshBuilder,
     Vector3,
@@ -117,28 +129,11 @@ vi.mock('@babylonjs/core', () => {
   };
 });
 
-vi.mock('@babylonjs/core/Debug/axesViewer', () => ({
-  AxesViewer: class {
-    constructor() {
-      state.axesCtor();
-    }
-    dispose() {
-      state.axesDispose();
-    }
-  },
-}));
-
-vi.mock('@babylonjs/materials/grid/gridMaterial', () => ({
-  GridMaterial: class {
-    mainColor: unknown = null;
-    lineColor: unknown = null;
-    opacity = 1;
-    gridRatio = 1;
-    majorUnitFrequency = 1;
-    minorUnitVisibility = 1;
-    constructor() {
-      state.gridCtor();
-    }
+vi.mock('@babylonjs/materials/shadowOnly/shadowOnlyMaterial', () => ({
+  ShadowOnlyMaterial: class {
+    activeLight: unknown = null;
+    alpha = 1;
+    constructor() {}
   },
 }));
 
@@ -189,10 +184,8 @@ function resetState(): void {
   state.sweepDispose.mockReset();
   state.frameCamera.mockReset();
   state.clearColorSet.mockReset();
-  state.gridCtor.mockReset();
   state.groundCreate.mockReset();
-  state.axesCtor.mockReset();
-  state.axesDispose.mockReset();
+  state.shadowGenCtor.mockReset();
 }
 
 beforeEach(() => {
@@ -262,7 +255,7 @@ describe('LedeHero — render-mode branching', () => {
     expect(state.sweepSetup).not.toHaveBeenCalled();
   });
 
-  it('AE5 — live hero is a grey Blender viewport (grey clearColor + grid), sweep removed', async () => {
+  it('AE5 — live hero blends into the page (paper clearColor, NOT black; contact shadow built; sweep gone)', async () => {
     mockMode.mockReturnValue('live');
     mockFetch.mockResolvedValue(new ArrayBuffer(64));
     render(
@@ -271,15 +264,15 @@ describe('LedeHero — render-mode branching', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(state.sceneCtor).toHaveBeenCalled());
-    // Grey clearColor — NOT pure black (0,0,0). The mocked Color3.FromHexString
-    // returns (0.2, 0.2, 0.25); assert that's what reached scene.clearColor.set.
+    // clearColor is the page paper, NOT pure black (0,0,0). The mocked
+    // Color3.FromHexString returns (0.2,0.2,0.25); assert it reached clearColor.set.
     await waitFor(() => expect(state.clearColorSet).toHaveBeenCalled());
     const args = state.clearColorSet.mock.calls[0] ?? [];
     expect(args.slice(0, 3)).not.toEqual([0, 0, 0]);
     expect(args[0]).toBeCloseTo(0.2);
-    // Grid mesh + grid material built (axis gizmo removed per user request).
+    // Contact-shadow rig: a (shadow-only) ground + a ShadowGenerator.
     expect(state.groundCreate).toHaveBeenCalled();
-    expect(state.gridCtor).toHaveBeenCalled();
+    expect(state.shadowGenCtor).toHaveBeenCalled();
   });
 });
 
