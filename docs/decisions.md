@@ -4013,6 +4013,58 @@ Move **personal** memory to a per-user `MemWalAccount` **owned by the user's own
 
 ---
 
+## D-092: Reverse plan-023 — LifecycleStrip becomes live Babylon, not static
+
+**Status**: Accepted
+**Date**: 2026-06-06
+**Phase**: Phase 4 (landing polish)
+
+### Context
+plan-023 (KD-1/AC-6) deliberately made the landing `LifecycleStrip` pure-presentational — "no props, no state, no effects, no imports from `@babylonjs/*`, no Walrus fetch" — rendering four static SVG panels. The brainstorm `docs/brainstorms/2026-06-06-landing-live-3d-wells.md` (direction B) reverses this: the four panels (PROMPT / MODEL / VARIANT / IN-GAME) become live to *show* the pipeline rather than describe it.
+
+### Decision
+The `LifecycleStrip` panels may hold state, effects, and Babylon scenes: PROMPT is a typing-text animation (no Babylon), MODEL/VARIANT/IN-GAME are live Babylon scenes via a shared `LiveWell` primitive. Low-end/mobile and a `VITE_LANDING_LIVE_WELLS` kill-switch fall back to the existing static SVGs.
+
+### Rationale
+- The landing page is the most evaluator-facing surface; motion that demonstrates "live 3D generate-and-remix" lands the pitch faster than static art.
+- D-044's own consequence note names "subtle 3D-viewer rotation" as the intended mitigation for stillness — so live motion is aligned, not in tension.
+
+### Consequences
+- ✅ Panels visibly demonstrate the L1→L2→L3 pipeline.
+- ⚠️ The strip becomes the most timer/observer/StrictMode-heavy component on the most-tested page; mitigated by reusing the documented dispose/StrictMode discipline, mocking Babylon at the module boundary in tests, and the kill-switch.
+- ⚠️ `LifecycleStrip.test.tsx`'s zero-canvas / exactly-3-`<img>` assertions are replaced; the locked layer-caption (INPUT/L1/L2/L3, never "Access"/"Seal"/"Derivative") and zero-accent assertions stay.
+
+### Related
+- Supersedes plan-023 KD-1/AC-6 (static strip). Origin: `docs/brainstorms/2026-06-06-landing-live-3d-wells.md`; plan: `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md`. See D-093.
+
+---
+
+## D-093: Scoped D-044 exception — landing hero well is a grey Blender viewport
+
+**Status**: Accepted
+**Date**: 2026-06-06
+**Phase**: Phase 4 (landing polish)
+
+### Context
+D-044 / `docs/ux/design-tokens.md` mandate that 3D-viewer wells are pure black (`--well` #000) — "the contrast is what makes the model visible… clearColor must be #000." The brainstorm makes the landing **hero** well a Blender-style viewport (grey background + ground grid + XYZ axis + camera gizmo, auto-rotating tusk), which the user explicitly chose over the black-well alternative.
+
+### Decision
+The landing **hero well only** (`LedeHero`) is exempt from the black-well rule: it uses a grey `clearColor` (`--hero-viewport`) plus a grid/axis/gizmo chrome and continuous auto-rotation. Scope is strictly the hero well — the four `LifecycleStrip` panels keep `--well` (#000) and stay D-044-compliant. Panels remain accent-free; VARIANT uses three desaturated, non-accent tints (`--variant-1/2/3`); IN-GAME's glow is neutral, never `#FF4500`, so the ≤5-accent page budget is untouched.
+
+### Rationale
+- Modeled on **D-091** (the `/track` Rage Racing exemption): a single, route/surface-scoped carve-out documented in `design-tokens.md`, not a silent token drift.
+- A literal 3D-IDE viewport reads "this is a 3D creation tool" at a glance; the user accepted the slight contrast tradeoff (mitigated with lighting).
+
+### Consequences
+- ✅ Hero communicates the product's 3D-tool identity viscerally.
+- ⚠️ One well now tints its surface — bounded by this ADR + a `design-tokens.md` scoped-exception block so it can't spread.
+- 🔮 If contrast proves weak on the demo machine, fall back to white-grid-on-black (the rejected brainstorm alternative) without reopening the ADR.
+
+### Related
+- Modeled on D-091 (`/track` exemption). Pairs with D-092. Origin/plan as in D-092. Tokens: `--hero-viewport`, `--variant-1/2/3` in `frontend/src/ux/tokens.ts` + `docs/ux/design-tokens.md`.
+
+---
+
 # Reserved Decision Numbers
 
-D-091 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-091 is held by the unmerged `feat/rage-racing-track-reskin` branch (`/track` D-044 exemption); this branch took D-092/D-093 to avoid a merge-time collision. D-094 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

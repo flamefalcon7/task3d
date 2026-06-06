@@ -6,6 +6,8 @@
 
 This document is the single source of truth for the visual system. Every screen, every component, every state must reference values from here. If you find yourself reaching for a value not in this doc, stop and add it here first, then use it.
 
+> **Scoped exception — landing hero well (Blender viewport), D-093.** The landing **hero** well (`frontend/src/landing/LedeHero.tsx`) is the one 3D-viewer well exempt from the "wells are pure black" rule: it renders a grey Blender-style viewport (`--hero-viewport`) with a ground grid, XYZ axis, and camera gizmo, auto-rotating the tusk. The exemption is well-scoped — every other 3D well, including the four `LifecycleStrip` panels, stays pure-black `--well` (#000). Panels remain accent-free; the VARIANT panel uses three desaturated non-accent tints (`--variant-1/2/3`) and the IN-GAME glow is neutral, so the ≤5-accent page budget is untouched. See D-093 and `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md`. (Companion to the `/track` exemption, D-091.)
+
 ---
 
 ## 1. Vibe
