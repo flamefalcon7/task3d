@@ -16,7 +16,8 @@ import { landingWells } from '../../ux/tokens';
 // distinct desaturated tints (D-093 tokens; black well, accent-free). The
 // loaded tusk is hidden and three recolored clones are spread across the well.
 const VARIANT_HEXES = [landingWells.variant1, landingWells.variant2, landingWells.variant3];
-const SPREAD = 1.7;
+const SPREAD = 1.05; // closer together
+const ZOOM = 0.82; // <1 = bigger in the card
 
 function recolor(material: Material | null, color: Color3): void {
   if (!material) return;
@@ -53,6 +54,7 @@ export function VariantPanel(): JSX.Element {
 
     if (camera instanceof ArcRotateCamera && framed.length > 0) {
       frameCameraToMeshes(camera, framed);
+      camera.radius *= ZOOM; // bigger
     }
 
     return () => {

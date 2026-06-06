@@ -3,18 +3,20 @@ import { cleanup, render } from '@testing-library/react';
 
 import type { LiveWellProps, LiveWellSceneContext } from '../../babylon/LiveWell';
 
-const h = vi.hoisted(() => ({
-  setProgress: vi.fn(),
-  dispose: vi.fn(),
-  setupSweep: vi.fn(),
-  captured: null as LiveWellProps | null,
-}));
+const h = vi.hoisted(() => ({ captured: null as LiveWellProps | null }));
 
 vi.mock('@babylonjs/core', () => {
   class ArcRotateCamera {
-    alpha = 0;
+    radius = 10;
   }
-  return { ArcRotateCamera };
+  class Color3 {
+    constructor(
+      public r = 0,
+      public g = 0,
+      public b = 0,
+    ) {}
+  }
+  return { ArcRotateCamera, Color3 };
 });
 
 vi.mock('../../babylon/LiveWell', () => ({
@@ -24,41 +26,29 @@ vi.mock('../../babylon/LiveWell', () => ({
   },
 }));
 
-vi.mock('../../babylon/edgesGradientSweep', () => ({
-  setupEdgesGradientSweep: (...args: unknown[]) => {
-    h.setupSweep(...args);
-    return { setProgress: h.setProgress, dispose: h.dispose };
-  },
-}));
-
 import { ArcRotateCamera } from '@babylonjs/core';
 import { ModelPanel } from './ModelPanel';
 
-// The mocked ArcRotateCamera has a 0-arg constructor; cast away the real 5-7
-// arg signature so tsc -b is happy while runtime uses the mock.
-const Cam = ArcRotateCamera as unknown as new () => { alpha: number };
+const Cam = ArcRotateCamera as unknown as new () => { radius: number };
 
-function fakeContext(): { ctx: LiveWellSceneContext; fireFrame: () => void } {
-  let frameCb: (() => void) | null = null;
+function fakeContext() {
+  const material = {
+    wireframe: false,
+    albedoColor: null as unknown,
+    emissiveColor: null as unknown,
+    disableLighting: false,
+  };
   const camera = new Cam() as unknown as LiveWellSceneContext['camera'];
-  const scene = {
-    activeCamera: camera,
-    onBeforeRenderObservable: {
-      add: (cb: () => void) => {
-        frameCb = cb;
-        return cb;
-      },
-      remove: vi.fn(),
-    },
-  } as unknown as LiveWellSceneContext['scene'];
-  const ctx = { scene, camera, meshes: [], container: {} as LiveWellSceneContext['container'] };
-  return { ctx, fireFrame: () => frameCb?.() };
+  const ctx = {
+    scene: {} as LiveWellSceneContext['scene'],
+    camera,
+    meshes: [{ material } as unknown as LiveWellSceneContext['meshes'][number]],
+    container: {} as LiveWellSceneContext['container'],
+  };
+  return { ctx, material, camera: camera as unknown as { radius: number } };
 }
 
 beforeEach(() => {
-  h.setProgress.mockReset();
-  h.dispose.mockReset();
-  h.setupSweep.mockReset();
   h.captured = null;
 });
 afterEach(() => {
@@ -67,53 +57,30 @@ afterEach(() => {
 });
 
 describe('ModelPanel', () => {
-  it('drives LiveWell with dispose policy, no turntable, model testid + static fallback', () => {
+  it('drives LiveWell with dispose policy, full turntable, model testid + static fallback', () => {
     render(<ModelPanel />);
     expect(h.captured?.offscreenPolicy).toBe('dispose');
-    expect(h.captured?.autoRotate).toBe(false);
     expect(h.captured?.testIdBase).toBe('lifecycle-well-model');
     expect(h.captured?.staticSrc).toBe('/lifecycle/model.svg');
     expect(h.captured?.glbUrl).toContain('tusk.glb');
+    // No more split → no oscillation → default auto-rotate (autoRotate prop unset).
+    expect(h.captured?.autoRotate).toBeUndefined();
   });
 
-  it('AE3 — freezes the split at the midpoint (0.5), not the 6s loop', () => {
+  it('renders the tusk as a dark wireframe (full mesh, flat dark, unlit)', () => {
     render(<ModelPanel />);
-    const { ctx } = fakeContext();
+    const { ctx, material } = fakeContext();
     h.captured?.onSceneReady?.(ctx);
-    expect(h.setupSweep).toHaveBeenCalledTimes(1);
-    expect(h.setProgress).toHaveBeenCalledWith(0.5);
+    expect(material.wireframe).toBe(true);
+    expect(material.albedoColor).not.toBeNull();
+    expect(material.emissiveColor).not.toBeNull();
+    expect(material.disableLighting).toBe(true);
   });
 
-  it('AE3 — camera oscillation stays in a narrow frontal arc (never edge-on/inverted)', () => {
-    vi.spyOn(performance, 'now').mockImplementation(
-      (() => {
-        let t = 0;
-        return () => (t += 200); // advance 200ms each frame so the phase sweeps
-      })(),
-    );
+  it('zooms the camera in so the model reads bigger', () => {
     render(<ModelPanel />);
-    const { ctx, fireFrame } = fakeContext();
+    const { ctx, camera } = fakeContext();
     h.captured?.onSceneReady?.(ctx);
-    const center = -Math.PI / 2;
-    const arc = Math.PI / 6;
-    let maxDeviation = 0;
-    for (let i = 0; i < 200; i++) {
-      fireFrame();
-      maxDeviation = Math.max(maxDeviation, Math.abs(ctx.camera.alpha - center));
-    }
-    // Swings (proves it isn't stuck) but never reaches the ±90° edge-on angle.
-    expect(maxDeviation).toBeGreaterThan(0);
-    expect(maxDeviation).toBeLessThanOrEqual(arc + 1e-9);
-    expect(maxDeviation).toBeLessThan(Math.PI / 2);
-  });
-
-  it('cleanup disposes the sweep and removes the oscillation observer', () => {
-    render(<ModelPanel />);
-    const { ctx } = fakeContext();
-    const cleanupFn = h.captured?.onSceneReady?.(ctx) as (() => void) | undefined;
-    expect(typeof cleanupFn).toBe('function');
-    cleanupFn?.();
-    expect(h.dispose).toHaveBeenCalledTimes(1);
-    expect(ctx.scene.onBeforeRenderObservable.remove).toHaveBeenCalled();
+    expect(camera.radius).toBeCloseTo(7.2); // 10 * 0.72
   });
 });

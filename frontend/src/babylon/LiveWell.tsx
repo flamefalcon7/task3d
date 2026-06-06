@@ -3,6 +3,7 @@ import {
   type AbstractMesh,
   ArcRotateCamera,
   type AssetContainer,
+  DirectionalLight,
   Engine,
   HemisphericLight,
   LoadAssetContainerAsync,
@@ -22,13 +23,10 @@ import { useLedeRenderMode } from '../landing/useLedeRenderMode';
 const AUTO_ROTATE_RAD_PER_SEC = 0.2;
 const MAX_FRAME_DELTA_S = 0.1;
 
-// Warm near-black "pocket" (D-094 harmony) — softer than pure #000 and matched
-// to the .well radial gradient behind, so the dark center dissolves into the
-// page at the feathered edges. #14110D → rgb(20,17,13)/255.
-const WELL_POCKET_RGB = [0.078, 0.067, 0.051] as const;
-// Same radial edge-feather signature as the hero: dark center, edges fade out so
-// the dark canvas melts into the paper rather than ending in a hard rectangle.
-const EDGE_FEATHER = 'radial-gradient(120% 120% at 50% 50%, #000 66%, transparent 100%)';
+// Light-grey thumbnail background (a touch darker than the page paper so the
+// models gain contrast without going back to a stark black box). #E2E0DA →
+// rgb/255. A directional key light gives the models shading so they read on it.
+const WELL_GREY_RGB = [0.886, 0.878, 0.855] as const;
 
 // First-class kill-switch (D-093 / plan-2026-06-06-001). When
 // VITE_LANDING_LIVE_WELLS === '0' the wells collapse to their static fallback —
@@ -94,7 +92,7 @@ export function LiveWell({
   testIdBase,
   offscreenPolicy = 'dispose',
   autoRotate = true,
-  clearColor = WELL_POCKET_RGB,
+  clearColor = WELL_GREY_RGB,
   onSceneReady,
 }: LiveWellProps): JSX.Element {
   const renderMode = useLedeRenderMode();
@@ -165,7 +163,11 @@ export function LiveWell({
       scene,
     );
     // No attachControl — these are marketing surfaces, not interactive viewers.
-    new HemisphericLight('livewell-hl', new Vector3(0, 1, 0), scene);
+    new HemisphericLight('livewell-hl', new Vector3(0, 1, 0), scene).intensity = 0.85;
+    // Key light for shading/definition so models read on the light paper bg.
+    const key = new DirectionalLight('livewell-key', new Vector3(-0.4, -1, -0.35), scene);
+    key.position = new Vector3(3, 6, 3);
+    key.intensity = 1.4;
     sceneRef.current = scene;
 
     if (autoRotateRef.current) installAutoRotate(scene);
@@ -261,13 +263,7 @@ export function LiveWell({
         data-testid={`${testIdBase}-canvas`}
         role="img"
         aria-label={ariaLabel}
-        style={{
-          ...FILL,
-          objectFit: 'cover',
-          opacity: ready ? 1 : 0,
-          maskImage: EDGE_FEATHER,
-          WebkitMaskImage: EDGE_FEATHER,
-        }}
+        style={{ ...FILL, objectFit: 'cover', opacity: ready ? 1 : 0 }}
       />
     </div>
   );

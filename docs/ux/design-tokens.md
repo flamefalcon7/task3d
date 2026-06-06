@@ -6,7 +6,11 @@
 
 This document is the single source of truth for the visual system. Every screen, every component, every state must reference values from here. If you find yourself reaching for a value not in this doc, stop and add it here first, then use it.
 
-> **Scoped exception — landing hero well (blends into page), D-094 (supersedes D-093).** The landing **hero** well (`frontend/src/landing/LedeHero.tsx`) is the one 3D-viewer well exempt from the "wells are pure black" rule: it renders on the **page paper background** (`--paper`) with a soft contact shadow + radial edge-feather so the tusk blends into the page rather than sitting in its own window (no grid/axis — D-093's grey-viewport idea was superseded). The exemption is well-scoped — every other 3D well, including the four `LifecycleStrip` panels, stays pure-black `--well` (#000). Panels remain accent-free; the VARIANT panel uses three desaturated non-accent tints (`--variant-1/2/3`) and the IN-GAME glow is neutral, so the ≤5-accent page budget is untouched. See D-094 and `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md`. (Companion to the `/track` exemption, D-091.)
+> **Scoped exception — landing live-3D wells (light, not black), D-094 (supersedes D-093).** The landing's live-3D wells are exempt from the "wells are pure black" rule and go **light** instead, so they read as one airy system rather than dark boxes on the paper page:
+> - **Hero** (`frontend/src/landing/LedeHero.tsx`) renders on the **page paper** (`--paper`) with a soft contact shadow + radial edge-feather + a faint grid floor, so the tusk blends into the page (no window, no grid/axis chrome — D-093's grey-viewport idea was superseded).
+> - The four **`LifecycleStrip` panels** are **brutalist cards** (1.5px black frame, contained to the hero width) holding **light-grey thumbnails** (`#E2E0DA`), not black wells — soft, but enough contrast for the models (dark wireframe / colored tusks / shadowed collectible) to read.
+>
+> The exemption is scoped to the landing live-3D surfaces; other routes keep the doc's defaults. Panels remain accent-free; VARIANT uses three desaturated non-accent tints (`--variant-1/2/3`), so the ≤5-accent page budget is untouched. See D-094 and `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md`. (Companion to the `/track` exemption, D-091.)
 
 ---
 

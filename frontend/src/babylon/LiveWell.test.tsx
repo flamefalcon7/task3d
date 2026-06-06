@@ -60,7 +60,13 @@ vi.mock('@babylonjs/core', () => {
       scene.activeCamera = this;
     }
   }
-  class HemisphericLight {}
+  class HemisphericLight {
+    intensity = 1;
+  }
+  class DirectionalLight {
+    position: unknown = null;
+    intensity = 1;
+  }
   class Vector3 {
     constructor(public x = 0, public y = 0, public z = 0) {}
   }
@@ -72,7 +78,15 @@ vi.mock('@babylonjs/core', () => {
       dispose: () => {},
     });
   });
-  return { Engine, Scene, ArcRotateCamera, HemisphericLight, Vector3, LoadAssetContainerAsync };
+  return {
+    Engine,
+    Scene,
+    ArcRotateCamera,
+    HemisphericLight,
+    DirectionalLight,
+    Vector3,
+    LoadAssetContainerAsync,
+  };
 });
 
 vi.mock('@babylonjs/loaders/glTF/index.js', () => ({}));
