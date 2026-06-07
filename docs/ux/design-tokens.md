@@ -14,6 +14,8 @@ This document is the single source of truth for the visual system. Every screen,
 >
 > The exemption is scoped to the landing live-3D surfaces; other routes keep the doc's defaults. Panels remain accent-free; VARIANT uses three desaturated non-accent tints (`--variant-1/2/3`), so the ≤5-accent page budget is untouched. See D-094 and `docs/plans/2026-06-06-001-feat-landing-live-3d-wells-plan.md`. (Companion to the `/track` exemption, D-091.)
 
+> **Scoped exception — landing scroll spine (motion only), D-099.** The landing route (`/`) runs a GSAP + Lenis scroll spine (D-098): eased inertial smooth-scroll, once-per-entry section reveals, a fixed stage indicator (CARVE / MINT / RIFF), and a scroll-coupled "farewell" camera move on the hero tusk. This is **more orchestrated motion than the "appearance-is-the-motion" default**, so it is an explicit, route-scoped exception — but **motion only**: the spine spends **zero `#FF4500`** (the indicator uses ink + hint greys, mono type, radius 0), the ≤5-accent page budget is untouched, and `prefers-reduced-motion` collapses all of it to instant visibility + native scroll. Mobile / no-WebGL (`useLedeRenderMode` → `static-fallback`) gets a plain page with no spine. Any future spine element that would spend accent reopens this decision. See D-099 / D-098 and `docs/plans/2026-06-07-001-feat-landing-cinematic-scroll-spine-plan.md`. (Companion to D-091 / D-094.)
+
 ---
 
 ## 1. Vibe
