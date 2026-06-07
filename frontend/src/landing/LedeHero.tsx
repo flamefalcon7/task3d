@@ -18,6 +18,7 @@ import {
 import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 import { ShadowOnlyMaterial } from '@babylonjs/materials/shadowOnly/shadowOnlyMaterial';
 import '@babylonjs/loaders/glTF/index.js';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 import {
   fetchBlobWithTimeout,
@@ -30,10 +31,16 @@ import { tokens, viewerWell } from '../ux/tokens';
 import { EMBEDDED_TUSK_GLB_URL } from './tuskModel';
 import { useInView } from './useInView';
 import { useLedeRenderMode } from './useLedeRenderMode';
+import { SPINE_FLAG_ENABLED, prefersReducedMotion, registerScrollTrigger } from './spineConfig';
 
 // D-093 — auto-rotate (new, unconditional; no idle gate, unlike PreviewCanvas).
 const AUTO_ROTATE_RAD_PER_SEC = 0.2;
 const MAX_FRAME_DELTA_S = 0.1;
+
+// U5 scroll-spine "farewell" camera move (D-098/D-099). As the hero scrolls out,
+// the tusk tilts up (beta decreases) and the camera dollies back (radius grows).
+const FAREWELL_BETA_LIFT = 0.5; // radians the camera lifts across the full exit
+const FAREWELL_RADIUS_PULL = 1.5; // world units the camera dollies back across exit
 
 // Canonical Walrus blob CID for L1 Collection #001 — replaced before deploy
 // once Rick's pre-flight `/create` + `/launch` run mints the tusk. Until then
@@ -81,6 +88,11 @@ export function LedeHero(): JSX.Element {
   const shadowGroundRef = useRef<AbstractMesh | null>(null);
   const gridGroundRef = useRef<AbstractMesh | null>(null);
   const aliveRef = useRef(false);
+  // U5 — the hero <section> element (ScrollTrigger trigger) + the scroll-coupled
+  // farewell progress (0→1), written by ScrollTrigger and read each frame by the
+  // existing render observer. No new render loop / rAF (KTD-3 / R9).
+  const heroSectionRef = useRef<HTMLElement | null>(null);
+  const farewellProgressRef = useRef(0);
 
   // Pause the hero render loop when scrolled out of view (the brutalist hero is
   // fine frozen off-screen). Above the fold, so IntersectionObserver reports
@@ -354,11 +366,72 @@ export function LedeHero(): JSX.Element {
     };
   }, [isLive]);
 
+  // Scroll-spine "farewell" camera move (U5, D-098/D-099). When the spine is
+  // engaged, a ScrollTrigger on the hero section writes a 0→1 progress scalar as
+  // the hero scrolls out; an onBeforeRenderObservable on the EXISTING scene reads
+  // it each frame and eases the camera (beta up, radius back). This composes with
+  // the auto-rotate observer (which only touches alpha) and adds NO render loop /
+  // rAF — the existing loop renders the camera mutation (KTD-3 / R9). Gated on the
+  // same signals as the rest of the spine; when off, the hero is unchanged.
+  useEffect(() => {
+    if (!isLive) return;
+    const engaged = SPINE_FLAG_ENABLED && !prefersReducedMotion();
+    if (!engaged) return;
+    const scene = sceneRef.current;
+    const trigger = heroSectionRef.current;
+    if (!scene || !trigger) return;
+
+    registerScrollTrigger();
+    farewellProgressRef.current = 0;
+    // Captured lazily on first non-zero progress (after camera framing has run),
+    // so the offset is relative to the framed pose, not the constructor defaults.
+    let base: { beta: number; radius: number } | null = null;
+
+    const applyFarewell = (): void => {
+      const cam = scene.activeCamera;
+      if (!(cam instanceof ArcRotateCamera)) return;
+      const p = farewellProgressRef.current;
+      if (p <= 0) {
+        if (base) {
+          cam.beta = base.beta;
+          cam.radius = base.radius;
+          base = null;
+        }
+        return;
+      }
+      if (!base) base = { beta: cam.beta, radius: cam.radius };
+      cam.beta = base.beta - p * FAREWELL_BETA_LIFT;
+      cam.radius = base.radius + p * FAREWELL_RADIUS_PULL;
+    };
+    const observer = scene.onBeforeRenderObservable.add(applyFarewell);
+
+    const st = ScrollTrigger.create({
+      trigger,
+      start: 'top top',
+      end: 'bottom top',
+      scrub: true,
+      onUpdate: (self: { progress: number }) => {
+        farewellProgressRef.current = self.progress;
+      },
+    });
+
+    return () => {
+      farewellProgressRef.current = 0;
+      scene.onBeforeRenderObservable.remove(observer);
+      st.kill();
+    };
+  }, [isLive]);
+
   // ---------------------------------------------------------------------
   // Render — branches on renderMode in JSX only.
   // ---------------------------------------------------------------------
   return (
-    <section style={sectionStyle} data-testid="lede-hero" data-render-mode={renderMode}>
+    <section
+      ref={heroSectionRef}
+      style={sectionStyle}
+      data-testid="lede-hero"
+      data-render-mode={renderMode}
+    >
       <div ref={wellRef} style={isLive ? liveWellStyle : wellStyle}>
         {isLive ? (
           // Canvas fades in once the tusk is framed; until then the paper well

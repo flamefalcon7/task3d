@@ -23,6 +23,14 @@ const state: {
   groundCreate: ReturnType<typeof vi.fn>;
   shadowGenCtor: ReturnType<typeof vi.fn>;
   gridCtor: ReturnType<typeof vi.fn>;
+  runRenderLoop: ReturnType<typeof vi.fn>;
+  stopRenderLoop: ReturnType<typeof vi.fn>;
+  onBeforeRenderCbs: Array<() => void>;
+  scrollTriggerConfigs: Array<{ onUpdate?: (s: { progress: number }) => void }>;
+  scrollTriggerKill: ReturnType<typeof vi.fn>;
+  lastCamera: { alpha: number; beta: number; radius: number } | null;
+  spineEnabled: boolean;
+  spineReduced: boolean;
 } = {
   engineCtor: vi.fn(),
   engineDispose: vi.fn(),
@@ -38,6 +46,14 @@ const state: {
   groundCreate: vi.fn(),
   shadowGenCtor: vi.fn(),
   gridCtor: vi.fn(),
+  runRenderLoop: vi.fn(),
+  stopRenderLoop: vi.fn(),
+  onBeforeRenderCbs: [],
+  scrollTriggerConfigs: [],
+  scrollTriggerKill: vi.fn(),
+  lastCamera: null,
+  spineEnabled: true,
+  spineReduced: false,
 };
 
 vi.mock('@babylonjs/core', () => {
@@ -46,8 +62,12 @@ vi.mock('@babylonjs/core', () => {
     constructor(..._a: unknown[]) {
       state.engineCtor();
     }
-    runRenderLoop() {}
-    stopRenderLoop() {}
+    runRenderLoop() {
+      state.runRenderLoop();
+    }
+    stopRenderLoop() {
+      state.stopRenderLoop();
+    }
     resize() {}
     wipeCaches() {
       state.engineWipeCaches();
@@ -62,8 +82,14 @@ vi.mock('@babylonjs/core', () => {
     activeCamera: unknown = null;
     isDisposed = false;
     onBeforeRenderObservable = {
-      add: (cb: () => void) => cb,
-      remove: () => {},
+      add: (cb: () => void) => {
+        state.onBeforeRenderCbs.push(cb);
+        return cb;
+      },
+      remove: (cb: () => void) => {
+        const i = state.onBeforeRenderCbs.indexOf(cb);
+        if (i >= 0) state.onBeforeRenderCbs.splice(i, 1);
+      },
     };
     render() {}
     dispose() {
@@ -76,8 +102,12 @@ vi.mock('@babylonjs/core', () => {
   }
   class ArcRotateCamera {
     alpha = 0;
+    beta = 1;
+    radius = 4;
+    targetScreenOffset: unknown = null;
     constructor(_n: string, _a: number, _b: number, _r: number, _t: unknown, scene: Scene) {
       scene.activeCamera = this;
+      state.lastCamera = this;
     }
     attachControl() {}
   }
@@ -184,6 +214,25 @@ vi.mock('./useLedeRenderMode', () => ({
   useLedeRenderMode: vi.fn(),
 }));
 
+// U5 spine surfaces — gsap/ScrollTrigger + spineConfig are mocked so the hero's
+// farewell effect runs deterministically without touching real scroll machinery.
+vi.mock('gsap', () => ({ default: { registerPlugin: () => {} } }));
+vi.mock('gsap/ScrollTrigger', () => ({
+  ScrollTrigger: {
+    create: (cfg: { onUpdate?: (s: { progress: number }) => void }) => {
+      state.scrollTriggerConfigs.push(cfg);
+      return { kill: state.scrollTriggerKill };
+    },
+  },
+}));
+vi.mock('./spineConfig', () => ({
+  get SPINE_FLAG_ENABLED() {
+    return state.spineEnabled;
+  },
+  prefersReducedMotion: () => state.spineReduced,
+  registerScrollTrigger: () => {},
+}));
+
 import { fetchBlobWithTimeout, WalrusFetchTimeoutError } from '../walrus/fetchWithTimeout';
 import { useLedeRenderMode } from './useLedeRenderMode';
 import { LedeHero } from './LedeHero';
@@ -207,6 +256,14 @@ function resetState(): void {
   state.groundCreate.mockReset();
   state.shadowGenCtor.mockReset();
   state.gridCtor.mockReset();
+  state.runRenderLoop.mockReset();
+  state.stopRenderLoop.mockReset();
+  state.scrollTriggerKill.mockReset();
+  state.onBeforeRenderCbs = [];
+  state.scrollTriggerConfigs = [];
+  state.lastCamera = null;
+  state.spineEnabled = true;
+  state.spineReduced = false;
 }
 
 beforeEach(() => {
@@ -449,5 +506,117 @@ describe('LedeHero — StrictMode + lifecycle safety', () => {
     // No GLB load is queued because the fetch path aborted before resolving.
     expect(state.loadAssetCalls.length).toBe(0);
     revoke.mockRestore();
+  });
+});
+
+describe('LedeHero — U5 scroll-spine farewell camera move', () => {
+  it('AE3 — scrolling the hero out drives the camera (beta up, radius back) with NO new render loop (R9)', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.frameCamera).toHaveBeenCalled());
+    await waitFor(() => expect(state.scrollTriggerConfigs.length).toBeGreaterThan(0));
+
+    const cam = state.lastCamera!;
+    expect(cam).not.toBeNull();
+    const baseBeta = cam.beta;
+    const baseRadius = cam.radius;
+    // Snapshot render-loop control counts BEFORE driving the farewell.
+    const rl = state.runRenderLoop.mock.calls.length;
+    const sl = state.stopRenderLoop.mock.calls.length;
+
+    const cfg = state.scrollTriggerConfigs[0]!;
+    act(() => cfg.onUpdate?.({ progress: 1 }));
+    // The existing render loop "ticks": invoke the registered onBeforeRender cbs.
+    act(() => {
+      state.onBeforeRenderCbs.forEach((cb) => cb());
+    });
+
+    expect(cam.beta).toBeCloseTo(baseBeta - 0.5);
+    expect(cam.radius).toBeCloseTo(baseRadius + 1.5);
+    // R9 / KTD-3: the farewell path touched no render-loop control.
+    expect(state.runRenderLoop.mock.calls.length).toBe(rl);
+    expect(state.stopRenderLoop.mock.calls.length).toBe(sl);
+  });
+
+  it('returns the camera to its framed pose when scrolled back to the top', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.scrollTriggerConfigs.length).toBeGreaterThan(0));
+    const cam = state.lastCamera!;
+    const baseBeta = cam.beta;
+    const baseRadius = cam.radius;
+    const cfg = state.scrollTriggerConfigs[0]!;
+
+    act(() => cfg.onUpdate?.({ progress: 0.6 }));
+    act(() => state.onBeforeRenderCbs.forEach((cb) => cb()));
+    expect(cam.beta).not.toBeCloseTo(baseBeta);
+
+    act(() => cfg.onUpdate?.({ progress: 0 }));
+    act(() => state.onBeforeRenderCbs.forEach((cb) => cb()));
+    expect(cam.beta).toBeCloseTo(baseBeta);
+    expect(cam.radius).toBeCloseTo(baseRadius);
+  });
+
+  it('does not create a farewell ScrollTrigger under reduced-motion (hero unchanged)', async () => {
+    state.spineReduced = true;
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.frameCamera).toHaveBeenCalled());
+    expect(state.scrollTriggerConfigs.length).toBe(0);
+  });
+
+  it('does not create a farewell ScrollTrigger when the build flag is off', async () => {
+    state.spineEnabled = false;
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.frameCamera).toHaveBeenCalled());
+    expect(state.scrollTriggerConfigs.length).toBe(0);
+  });
+
+  it('is inert in static-fallback mode (no canvas, no farewell trigger)', async () => {
+    mockMode.mockReturnValue('static-fallback');
+    render(
+      <MemoryRouter>
+        <LedeHero />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('lede-static-image')).toBeTruthy());
+    expect(state.scrollTriggerConfigs.length).toBe(0);
+  });
+
+  it('StrictMode double-mount: every farewell ScrollTrigger created is also killed', async () => {
+    mockMode.mockReturnValue('live');
+    mockFetch.mockResolvedValue(new ArrayBuffer(64));
+    const { unmount } = render(
+      <MemoryRouter>
+        <StrictMode>
+          <LedeHero />
+        </StrictMode>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(state.scrollTriggerConfigs.length).toBeGreaterThan(0));
+    unmount();
+    // No leaked trigger: kills == creates (StrictMode makes this >1 each).
+    expect(state.scrollTriggerKill.mock.calls.length).toBe(state.scrollTriggerConfigs.length);
   });
 });
