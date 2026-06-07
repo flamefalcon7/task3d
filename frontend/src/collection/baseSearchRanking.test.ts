@@ -93,6 +93,17 @@ describe('rankForkableMatches', () => {
     expect(matches.get('0xa')!.reason).toBe('my own base');
   });
 
+  it('treats the strong-match threshold as exclusive (0.45 is weak)', () => {
+    const { matches } = rankForkableMatches([hit('0xa', 0.45)], [], FORKABLE);
+    expect(matches.get('0xa')!.strong).toBe(false);
+  });
+
+  it('drops hits with a non-finite or negative distance', () => {
+    const { ordered, matches } = rankForkableMatches([hit('0xa', NaN), hit('0xb', -1)], [], FORKABLE);
+    expect(matches.size).toBe(0);
+    expect(ids(ordered)).toEqual(['0xa', '0xb', '0xc']);
+  });
+
   it('applies per-scope distance transforms', () => {
     // Inflate global distances so a nominally-closer global hit ranks behind personal.
     const { ordered } = rankForkableMatches(

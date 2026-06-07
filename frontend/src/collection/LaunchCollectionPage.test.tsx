@@ -422,6 +422,55 @@ describe('LaunchCollectionPage', () => {
     expect(memoryRecallState.personal.recall).toHaveBeenLastCalledWith('');
   });
 
+  it('distinguishes a strong match from a weak one (ring + reason color differ)', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([hit('0xaa', 0.3, 'strong'), hit('0xbb', 0.6, 'weak')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    const strongCard = screen.getByTestId('base-option-0xaa');
+    const weakCard = screen.getByTestId('base-option-0xbb');
+    expect(strongCard.style.boxShadow).not.toBe(weakCard.style.boxShadow); // ink vs subtle ring
+    expect(screen.getByTestId('base-match-reason-0xaa').style.color).not.toBe(
+      screen.getByTestId('base-match-reason-0xbb').style.color,
+    );
+  });
+
+  it('suppresses notes when the query drops below 3 chars, even with degraded lane state', () => {
+    threeForkable();
+    memoryRecallState.global = lane([], { degraded: true });
+    memoryRecallState.personal = lane([], { status: 'empty' });
+    renderPage();
+    const input = screen.getByTestId('base-search-input');
+    fireEvent.change(input, { target: { value: 'race' } }); // active
+    fireEvent.change(input, { target: { value: 'ra' } }); // below MIN_QUERY_LEN
+    expect(screen.queryByTestId('base-search-degraded')).toBeNull();
+    expect(screen.queryByTestId('base-search-showing-all')).toBeNull();
+    expect(screen.getByTestId('base-search-hint')).toBeTruthy(); // static hint still shown
+  });
+
+  it('never shows the searching and degraded notes together (no contradiction)', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([], { status: 'loading' });
+    memoryRecallState.global = lane([], { degraded: true });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-search-loading')).toBeTruthy();
+    expect(screen.queryByTestId('base-search-degraded')).toBeNull(); // gated on !loading
+  });
+
+  it('discards the search query when a base is picked (CHANGE re-opens unsearched)', async () => {
+    threeForkable();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })));
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xaa'));
+    });
+    await waitFor(() => expect(screen.getByTestId('base-picker-change')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('base-picker-change'));
+    expect((screen.getByTestId('base-search-input') as HTMLInputElement).value).toBe('');
+  });
+
   it('a matched LOCKED card gets the reason badge but stays non-clickable', () => {
     useModelIndexMock.mockReturnValue({
       models: [

@@ -63,6 +63,9 @@ export function rankForkableMatches(
       const id = c.modelId;
       if (!id || !forkableById.has(id)) continue; // null/'' or not forkable → drop
       const distance = transform(c.distance);
+      // Defensive at the relayer trust boundary: a NaN/negative distance would
+      // poison the < comparison (mask a closer hit) and the sort (arbitrary order).
+      if (!Number.isFinite(distance) || distance < 0) continue;
       const prev = best.get(id);
       if (!prev || distance < prev.distance) best.set(id, { distance, reason: c.prompt });
     }

@@ -127,7 +127,11 @@ export function useMemoryRecall(opts: MemoryRecallOptions = {}): UseMemoryRecall
     }
     // Set loading immediately — covers BOTH the debounce wait and the flight, so
     // the UI shows "recalling…" the moment the user pauses, not after the round-trip.
+    // Clear any prior `degraded` here too: a new query must not inherit the last
+    // one's relayer-down flag (else the caller shows "searching…" and "some matches
+    // unavailable" at once, and an errored new query would keep a stale flag).
     t.setStatus('loading');
+    t.setDegraded(false);
     t.timer.current = setTimeout(async () => {
       const seq = ++t.seq.current;
       // A response only commits if it's the latest query (seq), the hook is still

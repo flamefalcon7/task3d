@@ -490,7 +490,8 @@ export function LaunchCollectionPage() {
   const baseSearchLoading = personalRecall.status === 'loading' || globalRecall.status === 'loading';
   // Degraded ≠ empty: when a scope's relayer is down we surface an honest note
   // rather than presenting a one-sided merge as a complete answer.
-  const baseSearchDegraded = baseQueryActive && (personalRecall.degraded || globalRecall.degraded);
+  const baseSearchDegraded =
+    baseQueryActive && !baseSearchLoading && (personalRecall.degraded || globalRecall.degraded);
   const baseSearchShowingAll =
     baseQueryActive && !baseSearchLoading && !baseSearchDegraded && baseMatches.size === 0;
 
@@ -533,6 +534,9 @@ export function LaunchCollectionPage() {
     setErrorMsg(null);
     setBase(model);
     setVariantGlbs(null);
+    // plan-002 U3 — discard the base-finder query on pick, so a later CHANGE
+    // re-expands the picker in the default (unsearched) order, not a stale reorder.
+    setBaseQuery('');
     // Collapse the base-picker grid so its PreviewCanvas thumbnails
     // unmount (each ≈ 300 MB GPU on a textured Tripo model — see
     // diagnostic in useWalrusUpload.ts). User can click CHANGE to

@@ -235,6 +235,39 @@ describe('useMemoryRecall', () => {
     expect(result.current.personal.chips).toEqual([]);
   });
 
+  it('clears prior chips when the query is shortened below MIN_QUERY_LEN', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(recallResponse([PERSONAL]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useMemoryRecall());
+    act(() => result.current.personal.recall('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.personal.chips).toEqual([PERSONAL]);
+    act(() => result.current.personal.recall('ca')); // below MIN — must wipe prior chips
+    expect(result.current.personal.chips).toEqual([]);
+    expect(result.current.personal.status).toBe('idle');
+  });
+
+  it('sets status to loading synchronously on a valid query (leading edge)', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(recallResponse([])));
+    const { result } = renderHook(() => useMemoryRecall());
+    act(() => result.current.personal.recall('car'));
+    expect(result.current.personal.status).toBe('loading'); // before any timer advance
+  });
+
+  it('clears a prior degraded flag the moment a new query starts (loading edge)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(recallResponse([], true))
+      .mockResolvedValue(recallResponse([PERSONAL]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useMemoryRecall());
+    act(() => result.current.personal.recall('car'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.personal.degraded).toBe(true);
+    act(() => result.current.personal.recall('cart')); // new query → loading edge resets degraded
+    expect(result.current.personal.degraded).toBe(false); // immediately, before the flight resolves
+  });
+
   it('commits async recall correctly under StrictMode (cleanup-effect false-green guard)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(recallResponse([PERSONAL]));
     vi.stubGlobal('fetch', fetchMock);
