@@ -1,7 +1,7 @@
 ---
 title: "feat: Landing cinematic scroll spine"
 type: feat
-status: active
+status: completed
 date: 2026-06-07
 origin: docs/brainstorms/2026-06-07-landing-cinematic-scroll-spine-requirements.md
 decisions: [D-098, D-099]
