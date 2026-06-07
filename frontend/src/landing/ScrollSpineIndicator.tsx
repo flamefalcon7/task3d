@@ -65,7 +65,9 @@ export function ScrollSpineIndicator(): JSX.Element | null {
     >
       <ol className={styles.list}>
         {STAGES.map((label, i) => {
-          const isActive = i === active;
+          // When not engaged the rail is static; show the first beat, never a
+          // stale index carried over from a prior engaged scroll session.
+          const isActive = i === (engaged ? active : 0);
           return (
             <li
               key={label}

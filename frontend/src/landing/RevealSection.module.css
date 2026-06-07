@@ -12,3 +12,12 @@
     transform: none !important;
   }
 }
+
+/* When the spine is not engaged (build flag off, static-fallback, or after a
+   live→static resize that ran ctx.revert() back to the hidden `from` state),
+   force the section visible. CSS !important beats gsap's non-important inline
+   opacity:0, so content can never strand invisible on a plain-scroll page. */
+.section:not([data-reveal-engaged='true']) {
+  opacity: 1 !important;
+  transform: none !important;
+}

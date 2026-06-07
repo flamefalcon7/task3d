@@ -53,9 +53,42 @@ export function useSmoothScroll(): void {
     gsap.ticker.add(tick);
     gsap.ticker.lagSmoothing(0);
 
+    // Re-measure ScrollTrigger start/end after async layout settles. Triggers are
+    // created in child effects against the INITIAL layout; the hero GLB loads
+    // async, the dwell CTA inserts at 15s, web fonts reflow below-fold sections,
+    // and lifecycle wells swap static↔live — all AFTER measurement. Without a
+    // refresh, reveals can strand at opacity:0 and the stage indicator desyncs.
+    // Debounced to one call per frame so a reflowing ResizeObserver can't thrash.
+    let refreshQueued = false;
+    let refreshRaf = 0;
+    const refresh = (): void => {
+      if (refreshQueued) return;
+      refreshQueued = true;
+      refreshRaf = requestAnimationFrame(() => {
+        refreshQueued = false;
+        if (aliveRef.current) ScrollTrigger.refresh();
+      });
+    };
+    refresh(); // initial settle after first paint
+    if (document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (aliveRef.current) refresh();
+      });
+    }
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => refresh());
+      ro.observe(document.body);
+    }
+
     return () => {
       aliveRef.current = false;
+      if (refreshRaf) cancelAnimationFrame(refreshRaf);
+      ro?.disconnect();
       gsap.ticker.remove(tick);
+      // Restore gsap's documented ticker default (we disabled lag smoothing for
+      // Lenis); leaving it at 0 would leak to any later gsap consumer.
+      gsap.ticker.lagSmoothing(500, 33);
       lenis.off('scroll', onScroll);
       lenis.destroy();
     };

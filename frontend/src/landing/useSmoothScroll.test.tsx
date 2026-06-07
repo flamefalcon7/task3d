@@ -7,7 +7,7 @@ import { useSmoothScroll } from './useSmoothScroll';
 // --- Mocks -----------------------------------------------------------------
 // Capture every Lenis instance so we can assert create/destroy symmetry.
 const { lenisInstances, ticker } = vi.hoisted(() => ({
-  lenisInstances: [] as Array<{ destroy: ReturnType<typeof vi.fn> }>,
+  lenisInstances: [] as Array<{ destroy: ReturnType<typeof vi.fn>; off: ReturnType<typeof vi.fn> }>,
   ticker: { add: vi.fn(), remove: vi.fn(), lagSmoothing: vi.fn() },
 }));
 
@@ -22,6 +22,17 @@ vi.mock('lenis', () => ({
     }
   },
 }));
+
+// jsdom has no ResizeObserver — provide a no-op so the refresh-on-reflow path runs.
+beforeEach(() => {
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+  }
+});
 
 vi.mock('gsap', () => ({ default: { ticker, registerPlugin: vi.fn() } }));
 vi.mock('gsap/ScrollTrigger', () => ({ ScrollTrigger: { update: vi.fn() } }));
@@ -61,6 +72,12 @@ describe('useSmoothScroll', () => {
     expect(instance!.destroy).not.toHaveBeenCalled();
     unmount();
     expect(instance!.destroy).toHaveBeenCalledTimes(1);
+    // Teardown leak guards: the global gsap.ticker callback and the scroll
+    // listener must be removed (a missed remove leaks a per-frame callback).
+    expect(instance!.off).toHaveBeenCalled();
+    expect(ticker.add.mock.calls.length).toBe(ticker.remove.mock.calls.length);
+    // lag smoothing restored to gsap's default, not left at 0.
+    expect(ticker.lagSmoothing).toHaveBeenLastCalledWith(500, 33);
   });
 
   it('does not engage when prefers-reduced-motion is set', () => {
@@ -82,8 +99,11 @@ describe('useSmoothScroll', () => {
   });
 
   it('leaves exactly one live Lenis instance under StrictMode double-mount', () => {
-    renderHook(() => useSmoothScroll(), { wrapper: strictWrapper });
+    const { unmount } = renderHook(() => useSmoothScroll(), { wrapper: strictWrapper });
     const alive = lenisInstances.filter((l) => l.destroy.mock.calls.length === 0);
     expect(alive).toHaveLength(1);
+    unmount();
+    // After full teardown the global ticker has no net leaked callback.
+    expect(ticker.add.mock.calls.length).toBe(ticker.remove.mock.calls.length);
   });
 });

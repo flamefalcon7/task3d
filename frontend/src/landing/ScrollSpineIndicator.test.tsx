@@ -62,6 +62,9 @@ describe('ScrollSpineIndicator', () => {
     expect(activeLabel()).toBe('Mint');
     act(() => cfg.onUpdate({ progress: 0.95 }));
     expect(activeLabel()).toBe('Riff');
+    // Boundary: progress exactly 1.0 must clamp to the last beat, not index out.
+    act(() => cfg.onUpdate({ progress: 1.0 }));
+    expect(activeLabel()).toBe('Riff');
     act(() => cfg.onUpdate({ progress: 0.0 }));
     expect(activeLabel()).toBe('Carve');
   });
@@ -98,7 +101,13 @@ describe('ScrollSpineIndicator', () => {
   });
 
   it('spends zero #FF4500 accent — the CSS module is accent-free (D-099 / KTD-6)', () => {
-    const css = readFileSync('src/landing/ScrollSpineIndicator.module.css', 'utf8');
-    expect(css.toLowerCase()).not.toContain('ff4500');
+    const css = readFileSync('src/landing/ScrollSpineIndicator.module.css', 'utf8')
+      .toLowerCase()
+      .replace(/\s/g, '');
+    // Cover the accent in every spelling: hex, short hex, rgb(), and the keyword.
+    expect(css).not.toContain('ff4500');
+    expect(css).not.toContain('#f40');
+    expect(css).not.toContain('rgb(255,69,0)');
+    expect(css).not.toContain('orangered');
   });
 });

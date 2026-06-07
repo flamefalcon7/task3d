@@ -374,7 +374,11 @@ export function LedeHero(): JSX.Element {
   // rAF — the existing loop renders the camera mutation (KTD-3 / R9). Gated on the
   // same signals as the rest of the spine; when off, the hero is unchanged.
   useEffect(() => {
-    if (!isLive) return;
+    // Gate on sceneReady so the camera has been framed (frameCameraToMeshes runs
+    // just before setSceneReady) before we arm the farewell — otherwise scrolling
+    // during the async GLB load would capture a base pose from the constructor
+    // defaults and fight the framing once it lands.
+    if (!isLive || !sceneReady) return;
     const engaged = SPINE_FLAG_ENABLED && !prefersReducedMotion();
     if (!engaged) return;
     const scene = sceneRef.current;
@@ -420,7 +424,7 @@ export function LedeHero(): JSX.Element {
       scene.onBeforeRenderObservable.remove(observer);
       st.kill();
     };
-  }, [isLive]);
+  }, [isLive, sceneReady]);
 
   // ---------------------------------------------------------------------
   // Render — branches on renderMode in JSX only.
