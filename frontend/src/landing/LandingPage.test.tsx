@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -36,6 +37,21 @@ vi.mock('./ActorCards', () => ({
   ActorCards: () => <div data-testid="actor-cards">stub</div>,
 }));
 
+// Spine surfaces — this test asserts composition + order, so the spine hook is a
+// no-op, the indicator is a stub, and RevealSection is a transparent passthrough
+// (their behavior is covered by their own suites). Passthrough preserves both
+// child presence and document order.
+const smoothScrollSpy = vi.fn();
+vi.mock('./useSmoothScroll', () => ({ useSmoothScroll: () => smoothScrollSpy() }));
+vi.mock('./ScrollSpineIndicator', () => ({
+  ScrollSpineIndicator: () => <div data-testid="scroll-spine-indicator">stub</div>,
+}));
+vi.mock('./RevealSection', () => ({
+  RevealSection: ({ children }: { children: ReactNode }) => (
+    <div data-reveal-wrapper="true">{children}</div>
+  ),
+}));
+
 import { LandingPage } from './LandingPage';
 
 function renderPage(): void {
@@ -72,5 +88,23 @@ describe('LandingPage', () => {
     expect(lede.compareDocumentPosition(lifecycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(lifecycle.compareDocumentPosition(actors) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(actors.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('mounts the scroll spine indicator and engages the smooth-scroll hook', () => {
+    renderPage();
+    expect(screen.getByTestId('scroll-spine-indicator')).toBeTruthy();
+    expect(smoothScrollSpy).toHaveBeenCalled();
+  });
+
+  it('wraps the below-fold sections in reveal wrappers but leaves children reachable and ordered', () => {
+    renderPage();
+    // The three below-fold sections each sit inside a reveal wrapper, yet their
+    // testids resolve (content reachable) and order is preserved.
+    expect(screen.getByTestId('lifecycle-strip')).toBeTruthy();
+    const wrappers = document.querySelectorAll('[data-reveal-wrapper="true"]');
+    expect(wrappers.length).toBe(3);
+    // Above-the-fold sections are NOT reveal-wrapped.
+    expect(screen.getByTestId('masthead').closest('[data-reveal-wrapper="true"]')).toBeNull();
+    expect(screen.getByTestId('lede-hero').closest('[data-reveal-wrapper="true"]')).toBeNull();
   });
 });
