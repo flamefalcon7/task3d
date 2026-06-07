@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-06-07 (**Brand mark shipped — logo assets + D-095, uncommitted on main**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **14 of 38**
+- Days to demo day (7/20–21): ~43
+- Days to winners (8/27): ~81
+
+### Current Phase
+Phase 4 — demo/pitch polish (brand identity).
+
+### Completed This Session
+- **Tusk3D brand mark** (D-095): low-poly wireframe tusk, Nano Banana-generated, background removed, colors normalized to exact D-044 tokens (`#000000` / `#FF4500`), vectorized via potracer (two-layer trace). Full asset set in `pitch/brand/`: primary SVG + inverse SVG (for `--well`), transparent PNG master + 512/180/64/32 + inverse PNG. Verified at 32px and on black.
+- **Docs**: `pitch/brand/README.md` (asset inventory, usage mapping, generation prompt, rebuild process) + ADR D-095.
+
+### Next Concrete Step
+Commit brand assets (`feat(pitch): add Tusk3D logo assets + brand README (D-095)`), then wire favicon/apple-touch + nav mark into `frontend/index.html` / nav component (browser-verify per protocol).
+
+### Blockers / Open Questions
+- None. (Housekeeping done: raw Gemini PNG moved to `pitch/brand/tusk3d-logo-source.png`; `check.png` junk deleted.)
+
+### Notes for Next Session
+- SVG is a potrace draft — Figma cleanup pass (snap vertices, unify stroke weight) before any print-scale use.
+- potracer pip package has inverted foreground convention (pass `~mask`) — documented in pitch/brand/README.md.
+
+---
+
 ## Last Updated: 2026-06-07 (**Doc-sync: CLAUDE.md slimmed + spec.md §4 reconciled — on `docs/sync-claudemd-spec`**)
 
 ### Hackathon Tracker

@@ -4124,6 +4124,32 @@ The landing hero 3D well renders on the **page paper background** (`tokens.color
 
 ---
 
+## D-095: Tusk3D brand mark — low-poly wireframe tusk
+
+**Status**: Accepted
+**Date**: 2026-06-07
+**Phase**: Phase 4 (demo/pitch polish)
+
+### Context
+Submission needs a brand mark for nav, favicon, pitch deck, og-image. Must comply with the locked brutalist editorial system (D-044).
+
+### Decision
+Adopt a **low-poly wireframe tusk** as the brand symbol: black uniform-weight strokes + exactly one `--accent` (#FF4500) facet, transparent background. Tusk = Walrus-track homage; faceted mesh = the product itself (low-poly, manifold). The wordmark is never baked into images — "Tusk3D" is always set in Newsreader Italic 500, letter-spacing −1px (the nav brand spec in design-tokens §6). Generated via Nano Banana, normalized to exact token colors, vectorized. Assets + generation prompt + rebuild process: `pitch/brand/README.md`.
+
+### Alternatives Considered
+- Combination mark (symbol + type in one image) — rejected: AI image gen renders type badly; type belongs to the design system.
+- Wordmark-only — rejected: no favicon/avatar-sized identity.
+
+### Consequences
+- ✅ One mark works across paper (`#F5F5F0`), pure-black `--well` (inverse variant), and 32px favicon.
+- ⚠️ SVG is a potrace draft; vertices need a Figma cleanup pass before print-scale use.
+- 🔮 Accent facet counts toward the ≤5-accent-per-page budget on any page where the color logo appears.
+
+### Related
+- D-044 (design tokens) · `pitch/brand/README.md` · `docs/ux/design-tokens.md` §6
+
+---
+
 # Reserved Decision Numbers
 
-D-095 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-096 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
