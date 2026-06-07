@@ -1,0 +1,14 @@
+/* RevealSection — the reveal itself is driven by gsap (opacity/transform only).
+   This module carries a defensive belt-and-suspenders guarantee: under reduced
+   motion, force a visible, untransformed state so an engaged hidden state can
+   never strand content even if JS-applied styles linger. Zero color/accent. */
+.section {
+  /* no base visual styling — the wrapper is a transparent layout passthrough */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
