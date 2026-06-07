@@ -4184,6 +4184,68 @@ After D-096 the landing showed two stacked bars: TopNav (brand already suppresse
 
 ---
 
+## D-098: Adopt GSAP + ScrollTrigger + Lenis for the landing scroll spine
+
+**Status**: Accepted
+**Date**: 2026-06-07 · **Phase**: Phase 4 (demo/pitch polish)
+
+### Context
+The landing already *moves* (auto-rotating hero, animating lifecycle wells, typewriter) but does not *guide*: scrolling reads as disconnected blocks the visitor must hunt through, not the carve→mint→riff arc the content already tells. The fix (brainstorm `docs/brainstorms/2026-06-07-landing-cinematic-scroll-spine-requirements.md`, Approach 丙) is a scroll-orchestration layer — smooth inertial scroll, paced reveals, a stage indicator, and per-section connective transitions — layered **over** the existing sections without rebuilding the 2026-06-06 live-3D wells or merging their separate canvases. The project currently ships **zero animation libraries**; D-007 deliberately chose imperative Babylon over `react-babylonjs` to avoid abstraction, so adding an animation dependency is a real decision, not a default.
+
+### Decision
+The landing scroll spine is built with **`gsap` (+ the ScrollTrigger plugin)** for scrubbed reveals / scroll-driven section & camera transitions, and **`lenis`** for eased inertial smooth-scroll. Both are **scoped to the landing route (`/`)** — they are not adopted as a site-wide motion framework, and no other route's animation approach changes. Exact versions are pinned to latest stable at install time and recorded in `docs/spec.md §4`; ScrollTrigger camera transitions drive Babylon via the existing per-scene cameras (no cross-canvas object flight).
+
+### Rationale
+- User-chosen toolkit; ScrollTrigger is the industry standard for scrubbed/scroll-bound timelines and is far less error-prone than hand-rolled scroll math.
+- Lenis solves the one piece that is genuinely hard to hand-write well (weighted inertial scroll) and carries most of the "sleek" read.
+- Scoping to `/` contains the dependency's blast radius and keeps the rest of the app dependency-light, consistent with D-007's minimalism.
+
+### Alternatives Considered
+- **Native-only (IntersectionObserver + CSS scroll-driven animations + Babylon AnimationGroup)** — rejected by the user in favor of GSAP's one-step control; viable but more hand-written orchestration.
+- **Lenis-only, reveals/camera native** — rejected: user wanted GSAP's scrubbing headroom for future choreography.
+- **Approach 乙 (merge canvases into one pinned cross-lifecycle scene)** — rejected as too large a rebuild with real jank/perf risk 14 days from submission (see brainstorm Scope Boundaries).
+
+### Consequences
+- ✅ Guided, sleek descent achievable without touching the just-shipped wells.
+- ⚠️ First animation dependencies in the repo; bundle weight added on `/` (acceptable — landing is the evaluator surface).
+- ⚠️ GSAP/Lenis rAF must coexist with Babylon's render loop without breaking the "never two render loops at once" guardrail — a planning-time perf concern (brainstorm R9, Outstanding Questions).
+- 🔮 If future routes want scroll choreography, this sets the precedent toolkit; revisit the route-scoping then.
+
+### Related
+- Origin: `docs/brainstorms/2026-06-07-landing-cinematic-scroll-spine-requirements.md` · pairs with D-099 · constrained by D-007 (imperative Babylon), D-044 (brutalist tokens) · versions → `docs/spec.md §4`
+
+---
+
+## D-099: Scoped D-044 motion exception — landing scroll spine (accent budget preserved)
+
+**Status**: Accepted
+**Date**: 2026-06-07 · **Phase**: Phase 4 (demo/pitch polish)
+
+### Context
+D-044's brutalist-editorial system favors restraint — *"appearance-is-the-motion"* — and caps the page at ≤5 `#FF4500` accents. The scroll spine (D-098) introduces deliberate, scroll-driven motion: eased smooth-scroll, reveal entrances, a persistent stage indicator, and per-section camera/transition choreography. This is more orchestrated motion than D-044 anticipates, so it needs an explicit ruling rather than a silent stretch — modeled on the scoped exceptions D-091 (`/track`) and D-093 (hero viewport).
+
+### Decision
+The landing route (`/`) is granted a **bounded motion exception** for the scroll spine: eased inertial scroll, once-per-entry reveal entrances, a restrained stage indicator, and scroll-bound section/camera transitions are permitted. The exception is **motion-only** — it does **not** grant new accent: the spine spends **zero** `#FF4500`, the page's ≤5-accent budget is untouched, and type stays mono per D-044. `prefers-reduced-motion` must collapse all of it to instant visibility + native scroll. Any future spine element that would spend accent or introduce a non-token color/weight requires a new decision.
+
+### Rationale
+- Keeps the deliberate brutalist identity intact (no slop, no accent creep) while allowing the choreography the brainstorm requires.
+- Motion-only scoping makes the boundary auditable: a reviewer can check "spine spends 0 accent" as a hard line.
+- Consistent with how /track and the hero viewport were excepted — bounded, route-scoped, ADR-captured.
+
+### Alternatives Considered
+- **No exception (claim it fits "appearance-is-the-motion")** — rejected: the spine is clearly more orchestrated than D-044 intends; an honest scoped exception is better than stretching the parent rule silently.
+- **Broad exception incl. accent** — rejected: accent creep is exactly the marketing-slop failure mode the brutalist system guards against.
+
+### Consequences
+- ✅ Spine ships within a clear, auditable boundary; brutalist identity preserved.
+- ⚠️ Reveals/easing must be tuned restrained, not bouncy — a taste constraint planning/review must enforce (brainstorm R3, R10).
+- 🔮 If the stage indicator or a transition later needs accent to read, it reopens this decision rather than quietly spending budget.
+
+### Related
+- Pairs with D-098 · modeled on D-091, D-093 · parent system D-044 · `prefers-reduced-motion` pattern from `frontend/src/landing/TypewriterPrompt.tsx` · Origin brainstorm as in D-098
+
+---
+
 # Reserved Decision Numbers
 
-D-098 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-100 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
