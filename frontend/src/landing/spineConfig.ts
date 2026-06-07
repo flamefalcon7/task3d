@@ -31,3 +31,15 @@ export function registerScrollTrigger(): void {
 export function __resetScrollTriggerRegistrationForTest(): void {
   registered = false;
 }
+
+// Read-once reduced-motion check, shared by every spine surface. Mirrors the
+// helper shape in TypewriterPrompt.tsx (read at render, not reactive to a
+// mid-session toggle — consistent with the rest of the landing).
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
