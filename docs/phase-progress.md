@@ -1,5 +1,44 @@
 # Phase Progress
 
+## Last Updated: 2026-06-07 (**Landing cinematic scroll spine — U1–U7 implemented on `feat/landing-scroll-spine`**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **14 of 38**
+- Days to demo day (7/20–21): ~43
+- Days to winners (8/27): ~81
+
+### Current Phase
+Phase 4 — demo/pitch polish (landing cinematicness).
+
+### Completed This Session
+- **Landing cinematic scroll spine** (D-098 + D-099), Approach 丙 — a scroll-orchestration layer over the existing sections; the 2026-06-06 live-3D wells were **not** rebuilt and their separate canvases **not** merged. Branch `feat/landing-scroll-spine`, 7 units, each its own commit:
+  - **U1** `gsap@3.15.0` + `lenis@1.3.23` added (spec.md §4); `frontend/src/landing/spineConfig.ts` — `SPINE_FLAG_ENABLED` (`VITE_LANDING_SCROLL_SPINE`), `registerScrollTrigger()`, shared `prefersReducedMotion()`.
+  - **U2** `useSmoothScroll.ts` — Lenis inertial scroll bridged to ScrollTrigger via one `gsap.ticker`; gated; StrictMode-safe.
+  - **U3** `RevealSection.tsx` — once-per-entry fade+translate reveal; gated; gsap.context/revert.
+  - **U4** `ScrollSpineIndicator.tsx` — fixed CARVE/MINT/RIFF rail tracking page progress; **zero `#FF4500`** (CSS asserted accent-free); + design-tokens.md D-099 note.
+  - **U5** `LedeHero.tsx` — scroll-coupled "farewell" camera move (beta up + radius back) driven through the **existing** `onBeforeRenderObservable` via a scalar ref written by ScrollTrigger — **no new render loop / rAF** (R9 asserted in test).
+  - **U6** `LandingPage.tsx` — `useSmoothScroll()`, mounts the indicator, wraps the three below-fold sections in `RevealSection` (hero/masthead/telemetry left unwrapped — above the fold).
+  - **U7** verification (this entry).
+- **Three-gate engage rule everywhere**: `SPINE_FLAG_ENABLED && useLedeRenderMode()==='live' && !prefersReducedMotion()`. Reduced-motion / mobile-no-WebGL / flag-off all degrade to a plain native-scroll page.
+- **Tests**: full frontend suite green — **103 files / 1084 tests pass, 0 fail** (2 skipped). New: spineConfig (4), useSmoothScroll (5), RevealSection (6), ScrollSpineIndicator (6), LedeHero +6 farewell, LandingPage +2.
+- **Production build** clean (`tsc -b && vite build`).
+- **Browser-verified live mode** (agent-browser, WebGL2): renderMode=live, all 6 sections render, indicator present and **tracks scroll** (Riff active at page bottom), smooth scroll engaged, 3 reveals all opacity:1 (none stranded), **zero gsap/lenis/ScrollTrigger/React console errors** (only the expected placeholder-CID Walrus 400→embedded GLB fallback).
+
+### KTD-5 divergence (recorded)
+Plan KTD-5 proposed tree-shaking gsap/lenis out when the flag is off (dist grep zero hits). Implemented instead as **static imports + runtime flag kill-switch** (matching the existing `VITE_LANDING_LIVE_WELLS` convention): true tree-shake would require dynamic imports, which complicate the StrictMode-safe synchronous lifecycle. gsap+lenis (~75 KB gz) ride the landing chunk, which already loads Babylon (hundreds of KB) — negligible. U7's verification was adjusted from "dist grep zero hits" to "flag-off → no spine at runtime" (covered by unit tests on every surface).
+
+### Next Concrete Step
+**User visual pass needed**: confirm the live spine *feels* smooth (eased scroll, restrained reveals, hero farewell move) and holds frame rate with **no jank on the tallest demo viewport during an inertial fling** (R9/AE5 — the one item that needs a real GPU + human eyes; agent-browser can't judge smoothness). Then: optional 5-reviewer pass (incl. `ce-julik-frontend-races-reviewer`), merge `feat/landing-scroll-spine` → main.
+
+### Blockers / Open Questions
+- None blocking. Tuning values (Lenis duration/easing, farewell camera deltas, reveal timing) are first-pass — adjust to taste during the visual pass.
+
+### Notes for Next Session
+- Spine kill-switch: build/run with `VITE_LANDING_SCROLL_SPINE=0` to ship a plain-scroll landing without touching code.
+- The farewell camera move is **hero-only** by design (KTD-2): panels dispose off-screen + MODEL has a ±30° clip-plane constraint, so panels get DOM reveal transitions, not camera scrubbing.
+
+---
+
 ## Last Updated: 2026-06-07 (**Brand mark shipped — logo assets + D-095, uncommitted on main**)
 
 ### Hackathon Tracker
