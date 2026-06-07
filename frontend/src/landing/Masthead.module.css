@@ -3,8 +3,11 @@
    No transition (D-044 §7 instant). 1.5px black rule below, 0 radius. */
 
 .masthead {
+  /* Center-aligned row (D-096): the 30px square brand mark sets the line box,
+     so baseline-aligning the row pushed the text group to the top. Texts keep
+     their mutual baseline inside .titleGroup instead. */
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   padding: 14px 20px;
   border-bottom: 1.5px solid #000;
@@ -12,15 +15,20 @@
   color: #000;
 }
 
-/* S3 topology mark — leads the wordmark. The row is baseline-aligned for the
-   text tokens; the mark is an image with no baseline, so center it against the
-   wordmark cap-height rather than letting it sit on the text baseline. */
+/* Brand mark (D-095/D-096) — leads the wordmark, centered against it. */
 .mark {
   height: 30px;
   width: auto;
   display: block;
   flex: none;
-  align-self: center;
+}
+
+/* Wordmark + issue number: baseline-aligned with each other, centered as a
+   group against the mark. */
+.titleGroup {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .wordmark {

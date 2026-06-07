@@ -7,7 +7,7 @@ import { Masthead } from './Masthead';
 
 const MARK_SVG = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../../public/mark/tusk-ridge.svg',
+  '../../public/mark/tusk-facet.svg',
 );
 
 describe('Masthead', () => {
@@ -61,15 +61,15 @@ describe('Masthead', () => {
     expect(screen.getByTestId('masthead-issue').textContent).toBe('№9999');
   });
 
-  it('renders the S3 topology mark as a decorative img before the wordmark (S3)', () => {
+  it('renders the brand mark as a decorative img before the wordmark (S3/D-096)', () => {
     render(<Masthead issueNumber={313} />);
     const mark = screen.getByTestId('masthead-mark');
     expect(mark.tagName).toBe('IMG');
-    expect(mark.getAttribute('src')).toBe('/mark/tusk-ridge.svg');
+    expect(mark.getAttribute('src')).toBe('/mark/tusk-facet.svg');
     // decorative — wordmark carries the name, so empty alt avoids double-announce
     expect(mark.getAttribute('alt')).toBe('');
     // intrinsic dimensions reserve the box (no CLS before the SVG decodes)
-    expect(mark.getAttribute('width')).toBe('43');
+    expect(mark.getAttribute('width')).toBe('30');
     expect(mark.getAttribute('height')).toBe('30');
     // DOM order: the mark leads the wordmark
     const wordmark = screen.getByTestId('masthead-wordmark');
@@ -101,7 +101,7 @@ describe('Masthead', () => {
   // The DOM ff4500 check above is vacuous for the mark, which is an <img src>
   // (the SVG bytes never enter the DOM). Assert zero accent on the asset file
   // itself — the real zero-accent surface (S4 lesson).
-  it('the topology mark SVG asset contains no #FF4500 accent (S3 / D-044)', () => {
+  it('the brand mark SVG asset contains no #FF4500 accent (S3 / D-044 / D-096)', () => {
     const svg = readFileSync(MARK_SVG, 'utf8').toLowerCase();
     // Cover the aliases #FF4500 can hide behind, not just the literal hex:
     // the named color `orangered` IS #FF4500, plus the rgb() and #f40 forms.

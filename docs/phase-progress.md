@@ -15,7 +15,7 @@ Phase 4 — demo/pitch polish (brand identity).
 - **Docs**: `pitch/brand/README.md` (asset inventory, usage mapping, generation prompt, rebuild process) + ADR D-095.
 
 ### Next Concrete Step
-Commit brand assets (`feat(pitch): add Tusk3D logo assets + brand README (D-095)`), then wire favicon/apple-touch + nav mark into `frontend/index.html` / nav component (browser-verify per protocol).
+~~Commit brand assets~~ done (`1871605`). **Uncommitted frontend work (D-096 + D-097)**: (a) logo rollout — favicon.svg replaced, apple-touch-icon added, TopNav 20px symbol, Masthead tusk-ridge → tusk-facet.svg (black no-accent variant), Masthead tests updated; (b) masthead alignment fix — row `align-items: center` + new `.titleGroup` baseline sub-group (the square mark had pushed "Tusk3D №NNN" to the line-box top); (c) **TopNav hidden on `/` (D-097)** — NavGuard HIDDEN_ROUTES + isLanding branch deleted, TopNav tests reworked (wallet-pill tests moved to /market). `tsc --noEmit` clean ×3. **Sandbox can't run vitest (macOS node_modules) — user must run `pnpm --dir frontend test` + browser-verify `/` and one inner route per protocol, then commit** (`feat(frontend): brand mark rollout + chrome-free landing (D-096, D-097)`). ⚠️ Known accepted gap: /market unreachable from landing (D-097).
 
 ### Blockers / Open Questions
 - None. (Housekeeping done: raw Gemini PNG moved to `pitch/brand/tusk3d-logo-source.png`; `check.png` junk deleted.)

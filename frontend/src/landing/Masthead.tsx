@@ -27,34 +27,42 @@ export function Masthead({ issueNumber = buildIssueNumber }: MastheadProps = {})
   const showIssue = Number.isFinite(issueNumber) && issueNumber > 0;
   return (
     <header className={styles.masthead} data-testid="masthead">
-      {/* S3 topology identity mark (plan-025). Static baked ridgeline tusk —
-          NOT a live Walrus fetch (S1 LedeHero already carries that proof).
-          Decorative: the wordmark carries the name, so alt="" keeps screen
-          readers from double-announcing (the SVG itself carries no role/
-          aria-label, so the decorative intent has a single source). Intrinsic
-          width/height reserve the box to avoid masthead reflow before the SVG
-          decodes (CLS). onError collapses the box (display:none, not
-          visibility:hidden) so a sub-path-deploy 404 leaves no phantom gap in
-          this flex row. */}
+      {/* Brand identity mark (D-095/D-096; supersedes the plan-025 tusk-ridge):
+          the wireframe-tusk logo, black no-accent variant (tusk-facet.svg), so
+          the masthead stays zero-#FF4500 (D-044; landing accent budget full).
+          Static asset — NOT a live Walrus fetch (S1 LedeHero already carries
+          that proof). Decorative: the wordmark carries the name, so alt=""
+          keeps screen readers from double-announcing (the SVG itself carries
+          no role/aria-label, so the decorative intent has a single source).
+          Intrinsic width/height reserve the box to avoid masthead reflow
+          before the SVG decodes (CLS). onError collapses the box
+          (display:none, not visibility:hidden) so a sub-path-deploy 404
+          leaves no phantom gap in this flex row. */}
       <img
         className={styles.mark}
-        src="/mark/tusk-ridge.svg"
+        src="/mark/tusk-facet.svg"
         alt=""
-        width={43}
+        width={30}
         height={30}
         data-testid="masthead-mark"
         onError={(e) => {
           e.currentTarget.style.display = 'none';
         }}
       />
-      <span className={styles.wordmark} data-testid="masthead-wordmark">
-        Tusk3D
-      </span>
-      {showIssue && (
-        <span className={styles.issue} data-testid="masthead-issue">
-          №{issueNumber}
+      {/* Wordmark + issue share a baseline inside this sub-group; the group
+          itself centers against the 30px mark (D-096 fix: with the row
+          baseline-aligned, the square mark inflated the line box and pushed
+          the text to the top). */}
+      <span className={styles.titleGroup}>
+        <span className={styles.wordmark} data-testid="masthead-wordmark">
+          Tusk3D
         </span>
-      )}
+        {showIssue && (
+          <span className={styles.issue} data-testid="masthead-issue">
+            №{issueNumber}
+          </span>
+        )}
+      </span>
       <span className={styles.edition} data-testid="masthead-edition">
         TESTNET EDITION
       </span>

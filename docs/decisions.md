@@ -4150,6 +4150,40 @@ Adopt a **low-poly wireframe tusk** as the brand symbol: black uniform-weight st
 
 ---
 
+## D-096: Site-wide brand mark rollout (retires the plan-025 tusk-ridge masthead mark)
+
+**Status**: Accepted
+**Date**: 2026-06-07 · **Phase**: Phase 4 (demo/pitch polish)
+
+### Decision
+The D-095 wireframe-tusk logo is the single site identity: `favicon.svg` (color version, replaces the off-brand purple placeholder), `apple-touch-icon.png` (180px, opaque paper bg), TopNav brand link gains a 20px symbol before the wordmark, and the landing Masthead's plan-025 `tusk-ridge.svg` is **replaced** by the logo. TopNav + Masthead use a **black no-accent variant** (`/mark/tusk-facet.svg`, accent path stripped) so no page spends `#FF4500` budget on chrome (D-044; landing budget full). User-approved swap 2026-06-07; `tusk-ridge.svg` deleted (recoverable from git).
+
+### Related
+- D-095, D-044 · `pitch/brand/README.md` · `frontend/src/landing/Masthead.tsx`, `frontend/src/ux/TopNav.tsx`
+
+---
+
+## D-097: Landing is chrome-free — TopNav hidden on `/`
+
+**Status**: Accepted
+**Date**: 2026-06-07 · **Phase**: Phase 4 (demo/pitch polish)
+
+### Context
+After D-096 the landing showed two stacked bars: TopNav (brand already suppressed there per plan-022, leaving only nav links + wallet pill) above the editorial Masthead. User judged the TopNav redundant on the cover page.
+
+### Decision
+`/` is added to NavGuard's `HIDDEN_ROUTES` — the landing renders **no TopNav at all**. Masthead owns identity; KeycapRow (CARVE/RIFF/BROWSE/INTEGRATE) + ActorCards own navigation. The plan-022 `isLanding` suppression branch in TopNav is deleted (dead code — brand + TESTNET badge now render unconditionally on routes where TopNav exists).
+
+### Consequences
+- ✅ Landing reads as a pure editorial cover; one identity bar.
+- ⚠️ **`/market` has no entry point from the landing** (KeycapRow doesn't link it). User explicitly accepted this ("直接拿掉不補"). Demo arc reaches /market via inner-page nav or direct URL.
+- ⚠️ No wallet pill on landing — first wallet affordance appears on inner routes. Acceptable: landing has no signed actions.
+
+### Related
+- D-096, plan-022 (S7 masthead) · `frontend/src/ux/TopNav.tsx` (NavGuard), `TopNav.test.tsx`
+
+---
+
 # Reserved Decision Numbers
 
-D-096 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-098 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

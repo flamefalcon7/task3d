@@ -57,14 +57,13 @@ describe('TopNav', () => {
     expect(screen.getByTestId('network-badge').textContent).toBe('TESTNET');
   });
 
-  it('suppresses the brand mark + TESTNET badge on the landing route (S7 — Masthead owns identity)', () => {
-    renderAt('/');
-    // The editorial <Masthead /> owns the wordmark + TESTNET EDITION on `/`.
-    expect(screen.queryByTestId('brand-mark')).toBeNull();
-    expect(screen.queryByTestId('network-badge')).toBeNull();
-    // nav links + wallet pill still render (the testnet signal survives via the pill).
-    expect(screen.getByTestId('nav-create')).toBeTruthy();
-    expect(screen.getByTestId('wallet-pill')).toBeTruthy();
+  it('renders the brand symbol before the wordmark (D-095/D-096)', () => {
+    renderAt('/market');
+    const symbol = screen.getByTestId('brand-mark-symbol');
+    expect(symbol.tagName).toBe('IMG');
+    expect(symbol.getAttribute('src')).toBe('/mark/tusk-facet.svg');
+    // decorative — the wordmark text carries the name
+    expect(symbol.getAttribute('alt')).toBe('');
   });
 
   it('highlights the active route with the accent underline (at /market)', () => {
@@ -75,13 +74,13 @@ describe('TopNav', () => {
 
   it('shows NO WALLET when no wallet is connected', () => {
     mockAddress = null;
-    renderAt('/');
+    renderAt('/market');
     expect(screen.getByTestId('wallet-pill').textContent).toBe('NO WALLET');
   });
 
   it('shows a truncated address pill when a wallet is connected', () => {
     mockAddress = `0xc731848b${'a'.repeat(50)}48BA`;
-    renderAt('/');
+    renderAt('/market');
     const pill = screen.getByTestId('wallet-pill');
     // Truncation: 0xXXXX…YYYY (6 chars + ellipsis + 4 chars), optional ⏏ disconnect hint
     expect(pill.textContent ?? '').toMatch(/^0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}( ⏏)?$/);
@@ -94,7 +93,7 @@ describe('TopNav', () => {
   it('prepends "TEST " to the wallet pill when test mode is active (plan-016 R6)', () => {
     mockAddress = `0xc731848b${'a'.repeat(50)}48BA`;
     testWalletEnabled = true;
-    renderAt('/');
+    renderAt('/market');
     const pill = screen.getByTestId('wallet-pill');
     expect(pill.getAttribute('data-test-wallet')).toBe('true');
     // Shape: "TEST 0xXXXX…YYYY" (optional ⏏ disconnect hint)
@@ -104,7 +103,7 @@ describe('TopNav', () => {
   it('still shows NO WALLET (no TEST prefix) when test mode is on but address is null', () => {
     mockAddress = null;
     testWalletEnabled = true;
-    renderAt('/');
+    renderAt('/market');
     expect(screen.getByTestId('wallet-pill').textContent).toBe('NO WALLET');
   });
 });
@@ -118,9 +117,9 @@ describe('NavGuard', () => {
     );
   }
 
-  it('renders the TopNav on a normal route (/)', () => {
+  it('hides the TopNav on the landing route (D-097 — chrome-free editorial cover)', () => {
     renderGuardAt('/');
-    expect(screen.getByTestId('top-nav')).toBeTruthy();
+    expect(screen.queryByTestId('top-nav')).toBeNull();
   });
 
   it('renders the TopNav on /market', () => {

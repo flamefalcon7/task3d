@@ -15,6 +15,9 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; path: string }> = [
 ];
 
 const brandStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   fontFamily: tokens.font.display,
   fontStyle: 'italic',
   fontSize: tokens.size.md,
@@ -81,11 +84,13 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-// NavGuard hides the chrome on /dev/compare (developer tool, not editorial)
-// and on /track (reskinned as the third-party "Rage Racing" game — the Tusk3D
-// masthead must not appear over it). Co-located with TopNav so the
-// conditional-hide test stays self-contained.
-const HIDDEN_ROUTES: ReadonlyArray<string> = ['/dev/compare', '/track'];
+// NavGuard hides the chrome on /dev/compare (developer tool, not editorial),
+// on /track (reskinned as the third-party "Rage Racing" game — the Tusk3D
+// masthead must not appear over it), and on `/` (D-097: the landing is a
+// chrome-free editorial cover — Masthead owns identity, KeycapRow/ActorCards
+// own navigation; /market is deliberately not linked from the landing).
+// Co-located with TopNav so the conditional-hide test stays self-contained.
+const HIDDEN_ROUTES: ReadonlyArray<string> = ['/', '/dev/compare', '/track'];
 
 export function NavGuard() {
   const location = useLocation();
@@ -97,23 +102,29 @@ export function TopNav() {
   const location = useLocation();
   const { address, disconnect } = useSession();
 
-  // S7 (plan-022): on the landing route the editorial <Masthead /> owns the
-  // "Tusk3D" wordmark and the "TESTNET EDITION" tag. Suppress the TopNav
-  // brand-mark + network badge on `/` so the page shows one intentional
-  // identity instead of two stacked wordmarks. The brand link is a no-op on
-  // `/` anyway (already home); the wallet pill keeps the testnet signal.
-  const isLanding = location.pathname === '/';
-
+  // D-097: TopNav never renders on `/` (NavGuard hides it — the landing is a
+  // chrome-free editorial cover), so the old plan-022 isLanding suppression
+  // branch is gone and the brand + badge render unconditionally here.
   return (
     <nav style={navBar} data-testid="top-nav">
-      {isLanding ? (
-        // empty flex slot keeps the nav links centered (navBar is space-between)
-        <span aria-hidden="true" />
-      ) : (
-        <Link to="/" style={brandStyle} data-testid="brand-mark">
-          Tusk3D
-        </Link>
-      )}
+      <Link to="/" style={brandStyle} data-testid="brand-mark">
+        {/* D-095 wireframe tusk symbol, black no-accent variant (tusk-facet.svg)
+            so the nav never spends a page's #FF4500 budget. Decorative: the
+            wordmark text carries the name (alt=""). onError collapses the box
+            so a 404 leaves no phantom gap. */}
+        <img
+          src="/mark/tusk-facet.svg"
+          alt=""
+          width={20}
+          height={20}
+          style={{ display: 'block' }}
+          data-testid="brand-mark-symbol"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+        Tusk3D
+      </Link>
 
       <div style={navLinksContainer}>
         {NAV_ITEMS.map((item) => {
@@ -164,11 +175,9 @@ export function TopNav() {
             DISCONNECT
           </button>
         )}
-        {!isLanding && (
-          <span style={networkBadge} data-testid="network-badge">
-            TESTNET
-          </span>
-        )}
+        <span style={networkBadge} data-testid="network-badge">
+          TESTNET
+        </span>
       </div>
     </nav>
   );
