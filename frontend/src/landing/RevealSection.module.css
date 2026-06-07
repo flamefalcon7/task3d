@@ -1,0 +1,23 @@
+/* RevealSection — the reveal itself is driven by gsap (opacity/transform only).
+   This module carries a defensive belt-and-suspenders guarantee: under reduced
+   motion, force a visible, untransformed state so an engaged hidden state can
+   never strand content even if JS-applied styles linger. Zero color/accent. */
+.section {
+  /* no base visual styling — the wrapper is a transparent layout passthrough */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* When the spine is not engaged (build flag off, static-fallback, or after a
+   live→static resize that ran ctx.revert() back to the hidden `from` state),
+   force the section visible. CSS !important beats gsap's non-important inline
+   opacity:0, so content can never strand invisible on a plain-scroll page. */
+.section:not([data-reveal-engaged='true']) {
+  opacity: 1 !important;
+  transform: none !important;
+}

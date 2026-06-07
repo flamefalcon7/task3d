@@ -98,8 +98,9 @@ vi.mock('./PreviewCanvas', () => ({
 vi.mock('../landing/useLedeRenderMode', () => ({ useLedeRenderMode: vi.fn() }));
 
 let mockInView = false;
+const useInViewSpy = vi.fn((_opts?: unknown) => ({ ref: vi.fn(), inView: mockInView }));
 vi.mock('../landing/useInView', () => ({
-  useInView: () => ({ ref: vi.fn(), inView: mockInView }),
+  useInView: (opts?: unknown) => useInViewSpy(opts),
 }));
 
 import { useLedeRenderMode } from '../landing/useLedeRenderMode';
@@ -144,6 +145,13 @@ describe('LiveWell', () => {
     mockInView = false;
     render(<LiveWell {...baseProps} />);
     expect(state.engineCtor).not.toHaveBeenCalled();
+  });
+
+  it('pre-mounts via a widened viewport trigger band (rootMargin 300px) — perf-guardrail value', () => {
+    mockMode.mockReturnValue('live');
+    mockInView = false;
+    render(<LiveWell {...baseProps} />);
+    expect(useInViewSpy).toHaveBeenCalledWith({ rootMargin: '300px 0px' });
   });
 
   it('builds the scene, frames the camera, and fires onSceneReady when live + in-view', async () => {

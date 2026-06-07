@@ -97,7 +97,13 @@ export function LiveWell({
 }: LiveWellProps): JSX.Element {
   const renderMode = useLedeRenderMode();
   const isLive = renderMode === 'live' && LIVE_WELLS_ENABLED;
-  const { ref: inViewRef, inView } = useInView<HTMLDivElement>();
+  // Pre-mount: expand the viewport trigger band by ~300px so a panel spins up its
+  // Babylon scene just BEFORE it scrolls into view (and disposes shortly after it
+  // leaves) — the user arrives to a live scene, not a static thumbnail that swaps
+  // a beat later. Peak concurrency is unchanged: the four lifecycle panels sit in
+  // one horizontal grid row, so the live wells already co-mount when the strip
+  // enters; this only shifts that moment earlier.
+  const { ref: inViewRef, inView } = useInView<HTMLDivElement>({ rootMargin: '300px 0px' });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<Engine | null>(null);

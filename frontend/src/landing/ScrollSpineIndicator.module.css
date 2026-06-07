@@ -1,0 +1,62 @@
+/* Scroll spine stage indicator — brutalist, mono, ZERO accent spend (D-099).
+   Colors are limited to ink (#000) and hint (rgba(0,0,0,0.6)) per D-044 tokens;
+   the active beat is full ink, inactive beats are hint. The orange accent is
+   never used here — this file is asserted accent-free by the test suite. */
+.rail {
+  position: fixed;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  /* Informational only — never intercept clicks on the page beneath it. */
+  pointer-events: none;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tick,
+.active {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.6);
+  transition: color 0.3s ease;
+}
+
+.active {
+  color: #000000;
+}
+
+.dash {
+  display: inline-block;
+  width: 18px;
+  height: 1.5px;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick,
+  .active {
+    transition: none;
+  }
+}
+
+/* Below the live-render breakpoint the rail is suppressed (the component also
+   returns null in static-fallback) so it never crowds a narrow viewport. */
+@media (max-width: 767.98px) {
+  .rail {
+    display: none;
+  }
+}
