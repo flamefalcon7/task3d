@@ -1079,6 +1079,8 @@ Seal 內容保護**已在 v9 出貨**(plan-026 / D-074·D-075·D-076,從原 Stre
 | `react-babylonjs` | 3.2.5-beta.2(**2025-05** 一年前) | **2/5 不要用** |
 | `@react-three/fiber`(alt) | 9.6.1 | 5/5 |
 | `three`(alt) | 0.184.0 | 5/5 |
+| `gsap`(landing scroll spine,D-098) | **3.15.0** | 5/5 — ScrollTrigger 驅動 `/` 揭示/相機過渡;限 landing route |
+| `lenis`(landing scroll spine,D-098) | **1.3.23** | 5/5 — 慣性平滑滾動;限 landing route,`prefers-reduced-motion` / 移動端降級不啟用 |
 
 | Backend(D-012:TS unified) | 版本 | 維護 / 用途 |
 |---|---|---|
