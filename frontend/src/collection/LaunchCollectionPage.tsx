@@ -25,6 +25,7 @@ import type {
   CollectionBuildResponse,
   Model3DSummary,
 } from '@overflow2026/shared';
+import { modelDescription } from '@overflow2026/shared';
 import { useSession } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
@@ -225,6 +226,17 @@ const baseOptionMeta: CSSProperties = {
   letterSpacing: '0.5px',
   textTransform: 'none',
   fontSize: 11,
+};
+
+// plan 2026-06-08-001 U3 (R4) — single-line description snippet on a base-option
+// card. Neutral tokens; ellipsis truncation so a long prompt/caption stays one
+// line and card-height reflow is bounded.
+const baseOptionDescription: CSSProperties = {
+  ...baseOptionMeta,
+  color: tokens.color.muted,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };
 
 const formGrid: CSSProperties = {
@@ -1349,6 +1361,18 @@ export function LaunchCollectionPage() {
                     fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
                   </span>
                 );
+                // plan 2026-06-08-001 U3 (R4) — static description snippet; null
+                // for uncaptioned uploads → nothing (R6). MERGE SEAM: when the
+                // base-finder (plan-002) lands here, suppress this snippet for a
+                // card whose search match-reason is showing (match-reason already
+                // renders the prompt — never both). No match state exists on this
+                // branch, so it renders unconditionally for now.
+                const description = modelDescription(m);
+                const descriptionNode = description && (
+                  <span style={baseOptionDescription} data-testid={`base-option-description-${m.objectId}`}>
+                    {description.text}
+                  </span>
+                );
                 // plan-027 U10 / D-078 — LOCKED card: an encrypted ALLOW_LIST base
                 // the wallet holds no AccessEntitlement for. Rendered grayed +
                 // NON-clickable (a <div>, not a fork <button> — AE4: locked ≠
@@ -1366,6 +1390,7 @@ export function LaunchCollectionPage() {
                       </div>
                       <div style={baseOptionBody}>
                         <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                        {descriptionNode}
                         {metaLine}
                         <span style={{ ...baseOptionMeta, color: tokens.color.muted }}>
                           — LOCKED · ACCESS REQUIRED
@@ -1403,6 +1428,7 @@ export function LaunchCollectionPage() {
                     </div>
                     <div style={baseOptionBody}>
                       <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                      {descriptionNode}
                       {metaLine}
                     </div>
                   </button>
@@ -1574,6 +1600,23 @@ export function LaunchCollectionPage() {
                 />
               </div>
             </div>
+            {/* plan 2026-06-08-001 U3 (R5) — picked-base description caption under
+                the preview area (VariantPreview has no caption slot). Null for an
+                uncaptioned-upload base → nothing (R6). */}
+            {(() => {
+              const baseDescription = modelDescription(base);
+              return baseDescription ? (
+                <div
+                  data-testid="picked-base-description"
+                  style={{ ...baseOptionMeta, color: tokens.color.muted, marginTop: 8, whiteSpace: 'normal' }}
+                >
+                  <span style={{ color: tokens.color.hint }}>
+                    {baseDescription.kind === 'caption' ? 'AI description' : 'Prompt'}:
+                  </span>{' '}
+                  {baseDescription.text}
+                </div>
+              ) : null;
+            })()}
             {/* plan-015 U8 / R13 — VariantStrip below the main preview area.
                 Active variant gets accent border; locked variants survive
                 re-rolls. Lock badge click toggles state without firing

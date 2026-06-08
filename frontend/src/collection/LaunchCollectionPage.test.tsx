@@ -1927,3 +1927,83 @@ describe('LaunchCollectionPage — creator forks their OWN encrypted ALLOW_LIST 
     expect(screen.getByTestId('base-option-locked-card-0xother')).toBeTruthy();
   });
 });
+
+// plan 2026-06-08-001 U3 — base-option description snippets + picked-base
+// preview caption (R4, R5, R6). NOTE: the search match-reason dedupe is moot on
+// this branch — the base-finder (plan-002) is not merged here, so there is no
+// match state to suppress against (merge-seam comment in the component).
+describe('LaunchCollectionPage — description snippets', () => {
+  it('R4: a launchable base with a prompt shows the snippet on its base-option card', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xbase1', paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByTestId('base-option-description-0xbase1').textContent).toBe('a low-poly red sports car');
+  });
+
+  it('R4: a locked base with a caption shows the snippet on its locked card', () => {
+    const locked = summary({
+      objectId: '0xlocked',
+      creator: '0xsomeoneelse',
+      isEncrypted: true,
+      policy: 1,
+      glbBlobId: 'cipher-x',
+      previewBlobIds: ['still-x'],
+      paramsJson: JSON.stringify({ source: 'upload', caption: 'a chunky walrus' }),
+    });
+    useModelIndexMock.mockReturnValue({ models: [locked], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+    expect(screen.getByTestId('base-option-locked-card-0xlocked')).toBeTruthy();
+    expect(screen.getByTestId('base-option-description-0xlocked').textContent).toBe('a chunky walrus');
+  });
+
+  it('R6: an uncaptioned-upload base shows no snippet on its card', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xbase1', paramsJson: JSON.stringify({ source: 'upload' }) })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.queryByTestId('base-option-description-0xbase1')).toBeNull();
+  });
+
+  it('R5: picking a described base shows the description caption under the preview', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xbase1', paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    const caption = screen.getByTestId('picked-base-description');
+    expect(caption.textContent).toMatch(/Prompt:/);
+    expect(caption.textContent).toMatch(/a low-poly red sports car/);
+  });
+
+  it('R6: picking an uncaptioned-upload base shows no preview caption', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xbase1', paramsJson: JSON.stringify({ source: 'upload' }) })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('authoring')).toBeTruthy());
+    expect(screen.queryByTestId('picked-base-description')).toBeNull();
+  });
+});

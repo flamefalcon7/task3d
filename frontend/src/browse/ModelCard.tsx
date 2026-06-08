@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
+import { modelDescription } from '@overflow2026/shared';
 
 interface Props {
   model: Model3DSummary;
@@ -24,6 +25,10 @@ function formatSui(mist: string): string {
 }
 
 export function ModelCard({ model }: Props) {
+  // plan 2026-06-08-001 U3 (R4) — one-line description snippet (prompt/caption);
+  // null for uncaptioned uploads → nothing renders (R6). Card-height reflow is
+  // acceptable; the auto-fill grid tolerates it.
+  const description = modelDescription(model);
   return (
     <Link
       to={`/model/${model.objectId}`}
@@ -68,6 +73,21 @@ export function ModelCard({ model }: Props) {
         <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>
           by <span data-testid="card-creator">{truncate(model.creator)}</span>
         </div>
+        {description && (
+          <div
+            data-testid="card-description"
+            style={{
+              fontSize: 12,
+              color: '#aaa',
+              marginBottom: 8,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {description.text}
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <span style={{ fontSize: 12, color: '#aaa' }}>{model.shapeType}</span>
           <span data-testid="card-price" style={{ fontSize: 13, fontWeight: 600 }}>
