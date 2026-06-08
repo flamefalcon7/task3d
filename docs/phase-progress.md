@@ -1,5 +1,39 @@
 # Phase Progress
 
+## Last Updated: 2026-06-08 (**description-surfacing + base-finder MERGED on one branch · next: brainstorm /browse AI search**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **13 of 38** · demo day (7/20–21): ~42 · winners (8/27): ~80
+
+### Current Phase
+Phase 4 — feature/UX polish. **No git remote** — "shipping" = local commits/branches.
+
+### Completed This Session (continued)
+- **model-description-surfacing** fully shipped on `feat/model-description-surfacing` (U1 resolver → U4 publish nudge + 5-reviewer fixes; browser-verified). Then a round of **user-review fixes** (commits `f33d765`, `bbc15a3`):
+  - Description snippet moved to the REAL browse card **`CollectionCard`** (ModelCard was dead code → deleted; `/market` shows NftToken listings, not model cards).
+  - **"AI description" → neutral "Description"** via shared `modelDescriptionLabel()` (caption is user-editable, not necessarily AI). Tripo stays "Prompt".
+  - Added **Browse** nav entry (`/browse`); removed the L1/L2/L3 three-CTA grid from `/browse`.
+- **MERGED `feat/launch-ask-model-finder` → `feat/model-description-surfacing`** (commit `ecef211`). One conflict in `LaunchCollectionPage.tsx` (kept both `baseOptionDescription` + `MatchReason`/`matchRing`). **Wired the documented dedupe**: base-option static snippet gated on `!match` — a search match shows MatchReason, suppresses the static snippet (never both). Added a dedupe test. **Full suite 1153 pass / 2 skip, tsc + build clean.**
+
+### Next Concrete Step
+**Brainstorm/plan: reuse the AI search field on `/browse`** (user asked). Feasibility already scouted — 3 decisions to settle before coding:
+1. **Auth**: `/api/memory/recall` REQUIRES `Authorization: Bearer <jwt>` (401 without; `backend/src/routes/memory.ts:139-145`), and `useMemoryRecall` fires nothing without a session. But `/browse` is PUBLIC. → either (A) show search only when signed in [smaller/safer], or (B) make global recall public [backend change + rate-limit/abuse]. **User must answer "must logged-out users search?" first.**
+2. **Search unit**: `/browse` groups models into collections (`CollectionCard` per collection); recall returns modelIds → map matched modelId back to its collection group, reorder/highlight.
+3. **Scope**: global fits /browse (discovering others' published models) better than personal+global (which /launch uses).
+- Reusable pieces: `useMemoryRecall` (hook), `rankForkableMatches` (core merge/dedupe/sort is general despite the name), the search-box UI + reorder/highlight/MatchReason pattern.
+- User chose to **compact first, then run the brainstorm/plan process** for this.
+
+### Blockers / Open Questions
+- Browse-search auth decision (A vs B) is the gating question — ask before planning.
+- 3 local unmerged branches remain: `feat/landing-scroll-spine`, `feat/launch-ask-model-finder` (now merged INTO the description branch but still exists), `feat/model-description-surfacing` (current, HEAD). None merged to `main` yet — user hasn't decided merge-to-main.
+
+### Notes for Next Session
+- Background: backend dev :3001 (MemWal-configured), frontend dev :5173 — likely still running.
+- `shared/dist` is gitignored + rebuilt locally; a fresh clone must build `shared` before the frontend.
+- MemWal recall relevance gate `MEMORY_MAX_DISTANCE=0.66`: single-word queries ("robot") miss; descriptive phrases ("steampunk robot") match — affects browse-search UX too.
+
+---
+
 ## Last Updated: 2026-06-08 (**model-description-surfacing SHIPPED (local) — 4 units + 5-reviewer fixes, browser-verified**)
 
 ### Hackathon Tracker
