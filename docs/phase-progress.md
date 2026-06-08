@@ -1,5 +1,39 @@
 # Phase Progress
 
+## Last Updated: 2026-06-08 (**/browse semantic search SHIPPED (local) — plan 2026-06-08-002, 3 code units + 5-reviewer hardening, browser-verified**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **13 of 38** · demo day (7/20–21): ~42 · winners (8/27): ~80
+
+### Current Phase
+Phase 4 — feature/UX polish. **No git remote** — "shipping" = local commits/branches.
+
+### Completed This Session
+- **plan 2026-06-08-002 browse-semantic-search — BUILT + tested + 5-reviewer hardened + browser-verified + committed** on `feat/browse-semantic-search`, **stacked on `feat/model-description-surfacing`** (NOT off main — it genuinely depends on that branch's `useMemoryRecall` / `baseSearchRanking` / `modelDescription`; a main-based branch wouldn't compile). Commits: docs → U1 → U2 → U3 → review-fixes.
+  - **U1** `frontend/src/browse/browseSearchRanking.ts` — `rankCollectionMatches`: reuses `rankForkableMatches`' per-objectId join/dedupe/NaN-guard, collapses matches up to per-collection cards (closest variant wins), preserves every group key incl. `_orphan:` (R9 no-hide). 12 tests.
+  - **U2** `frontend/src/browse/CollectionCard.tsx` — optional `match?: BaseMatch` → non-accent ring (ink/subtle, coexists with ink border) + `MatchReason` + description dedupe. 6 new tests.
+  - **U3** `frontend/src/browse/BrowsePage.tsx` — semantic "Ask" field above filterRow; `useMemoryRecall` wired unconditionally (hooks-before-early-return safe); single `gridKeys` render path; honest-state micro-statuses (loading/showing-all/degraded, tag-aware copy); signed-out = **non-input login teaser** (no recall path). 12 new tests incl. StrictMode.
+  - **5-reviewer hardening** (correctness/testing/api-contract/adversarial/julik — all came back with **no P0/P1 defects**): gate grid reorder/highlight on `searchActive` (single source of truth); re-issue recall on auth change (`session?.address` dep); defensive `collectionGroups.get` guard; relabeled the vacuous BrowsePage StrictMode test (real mounted-ref guard lives in `useMemoryRecall.test.ts`); added degraded/showing-all mutual-exclusion, AE5 promote-within-subset, exact strong-boundary, Escape-clear, signed-in integration-view-hide tests.
+- **Verification:** full suite **1185 frontend pass / 2 skip + 23 shared pass**, `tsc --noEmit` clean. **Browser-verified** (agent-browser, `VITE_TEST_WALLET=0` → signed-out): `/browse` shows the login teaser ("Sign in to search models by description" + Sign-in-with-Google), NO search input when signed out, grid + description snippets render, no console errors. **Post-wallet step for user:** sign in via Slush in own Chrome, type e.g. "a steampunk robot", confirm the robot card promotes with a "↳ …" reason line.
+
+### Decisions as shipped (supersede the stale notes in the 2 blocks below)
+- **Auth: signed-out shows a login TEASER** (not the plain grid). The earlier "Option A = no field when signed out" lock was superseded in-session by the user.
+- **Scope: personal + global** (mirrors /launch; a signed-in creator's own models match too). The earlier "leaning global-only" note was superseded in-session.
+- No backend / `/api/memory/recall` change. Match highlight is non-accent (D-044 budget untouched).
+
+### Next Concrete Step
+User decides merge strategy. Branch stack is now: `main` → `feat/model-description-surfacing` → `feat/browse-semantic-search` (HEAD). To land both, merge in dependency order (model-description first, then browse-search) into main.
+
+### Blockers / Open Questions
+- Merge-to-main of the stacked branches (+ `feat/landing-scroll-spine`) is still user's call — no remote, all local.
+
+### Notes for Next Session
+- Branch base lesson: browse-search depends on model-description-surfacing; they're stacked, not independent. Don't rebase browse-search onto bare main.
+- Deferred follow-up (in the plan): consolidate `/launch` + `/browse` match-highlight helpers into one shared module (left duplicated to avoid touching shipped `/launch` near submission).
+- Background: frontend dev :5173 running; `VITE_TEST_WALLET=0` (signed-out by default — restart dev after changing it).
+
+---
+
 ## Last Updated: 2026-06-08 (**description-surfacing + base-finder MERGED on one branch · next: brainstorm /browse AI search**)
 
 ### Hackathon Tracker
