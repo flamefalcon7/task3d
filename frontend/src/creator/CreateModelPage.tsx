@@ -319,6 +319,18 @@ const taggingActionRow: CSSProperties = {
   flexWrap: 'wrap',
 };
 
+// plan 2026-06-08-001 U4 — no-caption nudge panel (publish-time). Token-aligned,
+// modeled on SignConfirmation's two-step trigger/confirm; accent is spent only on
+// the heading (exception state, ≤5/page budget — D-044/D-099).
+const noCaptionPanel: CSSProperties = {
+  border: `2px solid ${tokens.color.accent}`,
+  background: tokens.color.paperPure,
+  padding: tokens.space[4],
+  display: 'flex',
+  flexDirection: 'column',
+  gap: tokens.space[3],
+};
+
 // plan-015 U5 — Framing B + shared canvas/panel infrastructure. Bridges
 // TaggingCanvas selection state and a freeform per-part label input. Owns
 // the partial-labels map; on Continue, emits a positional `partLabels[]` of
@@ -647,6 +659,10 @@ export function CreateModelPage() {
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [mintError, setMintError] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  // plan 2026-06-08-001 U4 — when true, the no-caption nudge replaces the Mint
+  // button (an uncaptioned upload is about to publish). Continue → proceedMint;
+  // Cancel → back to editing.
+  const [noCaptionConfirm, setNoCaptionConfirm] = useState(false);
   // Required-field validation: on a Mint attempt with missing required fields we
   // highlight them (red border + inline message) instead of silently no-op'ing;
   // each field clears its own highlight as soon as it's filled.
@@ -698,6 +714,10 @@ export function CreateModelPage() {
   const captioner = useUploadCaption();
   const [caption, setCaption] = useState('');
   const captionOn = import.meta.env.VITE_COPILOT_ENABLED === 'true'; // D-084 — flag only; never hide on keyless
+  // plan 2026-06-08-001 U4 — can the user actually add a caption right now? Drives
+  // the no-caption nudge's copy variant (R8): the build flag must be on AND the
+  // backend keyed. False → the informational "captioning unavailable" wording.
+  const captioningAvailable = captionOn && captioner.available;
   // A caption describes ONE specific uploaded model. Clear it (and reset the hook)
   // when the loaded model changes or we leave upload mode, so a stale caption can't
   // ride onto the next mint's params_json / personal-memory write (review:
@@ -901,24 +921,12 @@ export function CreateModelPage() {
     [setGlbBytes, name],
   );
 
-  const onMint = useCallback(async () => {
-    // Non-user-fixable preconditions (the model must exist / be signed in).
+  // plan 2026-06-08-001 U4 — the actual publish body, split out from the
+  // validation gate (onMint, below) so the no-caption nudge's "Publish anyway"
+  // can run it directly. Re-checks the non-user-fixable preconditions defensively
+  // since it is also callable from the confirm panel.
+  const proceedMint = useCallback(async () => {
     if (!session || !signer || !glb) return;
-    // Validate required fields and HIGHLIGHT the missing ones instead of silently
-    // doing nothing. name is always required; ALLOW_LIST also requires access_fee
-    // > 0 (mirrors the on-chain EAllowListNeedsFee — surfaces here pre-sign so the
-    // user fixes it before the Walrus upload + encrypt window).
-    const missing = new Set<string>();
-    if (!name.trim()) missing.add('name');
-    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) missing.add('accessFee');
-    if (missing.size > 0) {
-      setInvalidFields(missing);
-      setMintError(null);
-      const firstId = missing.has('name') ? 'name-input' : 'access-fee-input';
-      document.querySelector<HTMLInputElement>(`[data-testid="${firstId}"]`)?.focus();
-      return;
-    }
-    setInvalidFields(new Set());
     setMintError(null);
     setMintStatus('uploading');
     try {
@@ -1059,6 +1067,37 @@ export function CreateModelPage() {
       setMintStatus('error');
     }
   }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, caption, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
+
+  // plan 2026-06-08-001 U4 — the publish gate: validate required fields, then
+  // nudge before an UNcaptioned upload ships (R7/R8 — it'd be undiscoverable in
+  // search). Tripo models + captioned uploads skip straight to proceedMint.
+  const onMint = useCallback(() => {
+    // Non-user-fixable preconditions (the model must exist / be signed in).
+    if (!session || !signer || !glb) return;
+    // Validate required fields and HIGHLIGHT the missing ones instead of silently
+    // doing nothing. name is always required; ALLOW_LIST also requires access_fee
+    // > 0 (mirrors the on-chain EAllowListNeedsFee — surfaces here pre-sign so the
+    // user fixes it before the Walrus upload + encrypt window).
+    const missing = new Set<string>();
+    if (!name.trim()) missing.add('name');
+    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) missing.add('accessFee');
+    if (missing.size > 0) {
+      setInvalidFields(missing);
+      setMintError(null);
+      const firstId = missing.has('name') ? 'name-input' : 'access-fee-input';
+      document.querySelector<HTMLInputElement>(`[data-testid="${firstId}"]`)?.focus();
+      return;
+    }
+    setInvalidFields(new Set());
+    // R7/R8 — an uncaptioned upload is hard to find in search. Warn first; Continue
+    // runs proceedMint, Cancel returns to editing. Fires for ANY uncaptioned upload
+    // (incl. captioning unavailable). Tripo + captioned uploads never trigger it.
+    if (sourceMode === 'upload' && !caption.trim()) {
+      setNoCaptionConfirm(true);
+      return;
+    }
+    void proceedMint();
+  }, [session, signer, glb, name, policy, accessFeeSui, sourceMode, caption, proceedMint]);
 
   if (!session) {
     return (
@@ -1503,13 +1542,51 @@ export function CreateModelPage() {
               />
             </label>
             <div style={fullRow}>
-              <MintButton
-                status={mintStatus}
-                uploadStage={uploadStage}
-                onClick={onMint}
-                errorMessage={mintError ?? undefined}
-                explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
-              />
+              {/* plan 2026-06-08-001 U4 — no-caption nudge REPLACES the Mint
+                  button while open (the trigger), so a second publish can't fire
+                  mid-confirm. Continue → proceedMint; Cancel → back to editing.
+                  Exception state: accent permitted (≤5/page, D-044/D-099). */}
+              {noCaptionConfirm ? (
+                <div data-testid="no-caption-panel" style={noCaptionPanel}>
+                  <span style={{ ...monoLabel, color: tokens.color.accent }}>
+                    — PUBLISH WITHOUT A DESCRIPTION?
+                  </span>
+                  <p style={{ margin: 0, fontSize: tokens.size.sm, color: tokens.color.ink, lineHeight: 1.5 }}>
+                    {captioningAvailable
+                      ? "No caption means this model won't show up in search. Add one with “Describe with AI” first?"
+                      : "No caption means this model won't show up in search (captioning is unavailable right now)."}
+                  </p>
+                  <div style={{ display: 'flex', gap: tokens.space[3] }}>
+                    <button
+                      type="button"
+                      data-testid="no-caption-cancel"
+                      style={buttonOutline}
+                      onClick={() => setNoCaptionConfirm(false)}
+                    >
+                      Go back
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="no-caption-confirm"
+                      style={buttonPrimary}
+                      onClick={() => {
+                        setNoCaptionConfirm(false);
+                        void proceedMint();
+                      }}
+                    >
+                      Publish anyway
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <MintButton
+                  status={mintStatus}
+                  uploadStage={uploadStage}
+                  onClick={onMint}
+                  errorMessage={mintError ?? undefined}
+                  explorerUrl={txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : undefined}
+                />
+              )}
               {/* Clicking Mint with missing required fields highlights them (below)
                   rather than disabling the button with no explanation. */}
               {invalidFields.size > 0 && mintStatus === 'idle' && (

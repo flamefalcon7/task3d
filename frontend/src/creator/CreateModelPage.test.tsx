@@ -792,6 +792,14 @@ describe('CreateModelPage', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('mint-button'));
     });
+    // plan 2026-06-08-001 U4 — an uncaptioned upload now warns first; click
+    // "Publish anyway" to proceed. Tripo + captioned uploads never show this,
+    // so the guard keeps every existing caller transparent.
+    if (screen.queryByTestId('no-caption-panel')) {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('no-caption-confirm'));
+      });
+    }
     await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
     return buildPublishPtbMock.mock.calls[0]![0] as { partLabels: string[]; tags: string[] };
   }
@@ -1066,10 +1074,20 @@ describe('CreateModelPage', () => {
       async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
     );
     vi.stubGlobal('fetch', fetchMock);
+    uploadBlobMock.mockResolvedValue({ blobId: 'walrus_blob_id_xyz', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST456' });
     render(<CreateModelPage />);
     await uploadToMetadataForm();
     // do NOT type a caption
-    await driveMintAndCaptureArgs();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    // plan 2026-06-08-001 U4 — an uncaptioned upload now warns first; confirm it.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('no-caption-confirm'));
+    });
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
 
     const args = (buildPublishPtbMock.mock.calls[0]! as unknown as [{ paramsJson: string }])[0];
     expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload' });
@@ -1270,6 +1288,100 @@ describe('CreateModelPage', () => {
     fireEvent.click(screen.getByTestId('confirm-model'));
     await waitFor(() => expect(screen.getByTestId('tagging-step')).toBeTruthy());
     expect(screen.getByTestId('tag-progress').textContent).toMatch(/0 OF 5 NAMED/);
+  });
+
+  // ----- plan 2026-06-08-001 U4 — publish-time no-caption nudge (R7, R8) -----
+
+  it('AE4: publishing an uncaptioned upload opens the confirm panel and does NOT publish yet', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    // Do NOT type a caption.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    // The nudge appears; the publish PTB is NOT built until the user confirms.
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
+
+  it('AE4: Cancel ("Go back") closes the panel and does not publish', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('no-caption-cancel'));
+    // Back in edit state: panel gone, mint button back, nothing published.
+    expect(screen.queryByTestId('no-caption-panel')).toBeNull();
+    expect(screen.getByTestId('mint-button')).toBeTruthy();
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
+
+  it('AE4: Continue ("Publish anyway") proceeds to publish', async () => {
+    uploadBlobMock.mockResolvedValue({ blobId: 'b', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST' });
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('no-caption-confirm'));
+    });
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+    const args = (buildPublishPtbMock.mock.calls[0]! as unknown as [{ paramsJson: string }])[0];
+    expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload' });
+  });
+
+  it('AE5/R8: the warning still fires when captioning is unavailable (informational copy)', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.available = false;
+    captionState.status = 'unavailable';
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    const panel = screen.getByTestId('no-caption-panel');
+    expect(panel).toBeTruthy();
+    expect(panel.textContent).toMatch(/unavailable/i);
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
+
+  it('AE6: a captioned upload publishes directly (no nudge)', async () => {
+    uploadBlobMock.mockResolvedValue({ blobId: 'b', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST' });
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'a tidy caption' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.queryByTestId('no-caption-panel')).toBeNull();
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+  });
+
+  it('AE6: a Tripo model publishes directly (no nudge)', async () => {
+    uploadBlobMock.mockResolvedValue({ blobId: 'b', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST' });
+    render(<CreateModelPage />);
+    await generateAndConfirmTripoModel();
+    await labelAllParts(TAGGING_PART_COUNT_REF.current);
+    fireEvent.click(screen.getByTestId('continue-tagging'));
+    await waitFor(() => expect(screen.getByTestId('name-input')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Tripo' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.queryByTestId('no-caption-panel')).toBeNull();
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
   });
 });
 
