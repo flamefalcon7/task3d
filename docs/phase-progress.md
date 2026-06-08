@@ -1,5 +1,37 @@
 # Phase Progress
 
+## Last Updated: 2026-06-08 (**post-ship UX pass on browse/market/launch cards — split results, preview drag-only, name hover; all on `feat/browse-semantic-search`**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **13 of 38** · demo day (7/20–21): ~42 · winners (8/27): ~80
+
+### Current Phase
+Phase 4 — feature/UX polish. **No git remote** — "shipping" = local commits/branches.
+
+### Completed This Session (UX follow-ups, continuing `feat/browse-semantic-search`)
+- **Search results split** (`/browse`): an active query with matches now renders a labeled **RESULTS** band over the matched cards, separated from an **ALL MODELS** band (rest stays visible, R9 no-hide). No query / zero matches → single grid. (`BrowsePage` `splitView`.)
+- **Preview wells are drag-only, no nav-hijack** across `/browse` + `/market` + `/launch`:
+  - Card root is a container; the **text body/title is the detail `<Link>`**, the 3D preview well is a sibling (Babylon `ArcRotateCamera.attachControl` already gives orbit). A stationary click on the preview no longer navigates (browse/market) or selects the base (`/launch` uses `onClick stopPropagation` on the base-option preview).
+- **Accent hover cue on clickable card titles** (`/browse` + `/market` + `/launch` launchable base): new `.nav-name` / `.nav-link:hover .nav-name` rule in `frontend/src/index.css`; titles carry no inline color so the `:hover { color: var(--accent) }` wins (had to drop inline `color` from `cardName`/`baseOptionName`). Verified live in DOM on `/browse` (class applied + rule loaded).
+- **Preview well default GRAY** for live 3D previews (`CollectionCard` `PreviewCanvas defaultBg="gray"`); **VARIANT badge moved top-LEFT** (was being covered by the top-right BG-toggle pill).
+- **Verification:** full suite **1190 frontend pass / 2 skip**, tsc clean. Browser-verified (headed screenshot) the badge move + gray live wells + preview-outside-link structure on `/browse`.
+
+### Known limitation (reported to user)
+- **Encrypted (Seal) models' preview thumbnails stay BLACK.** They render watermarked preview *stills* (`<img>`), and those WebPs are **~62% opaque black** (black baked into the model band, only edges transparent) — confirmed by downloading one and inspecting alpha. The frontend cannot recolor them to gray without washing the model (blend hacks turn the red car pink) or **re-baking the stills on gray at publish time** (backend + Seal republish). Live (public) previews are gray; encrypted stills are black. Deferred unless the user wants the publish-time re-bake.
+
+### Next Concrete Step
+User's post-wallet pass (own Chrome, Slush): (1) drag a card preview → rotates, doesn't navigate; click title → detail; titles tint orange on hover (incl. `/launch` base cards, which only show when signed in). (2) signed-in `/browse` search → RESULTS / ALL MODELS split. Then decide merge strategy.
+
+### Blockers / Open Questions
+- Merge-to-main of the stacked branches still user's call. Stack: `main` → `feat/model-description-surfacing` → `feat/browse-semantic-search` (HEAD). Merge in dependency order.
+
+### Notes for Next Session
+- Hover affordance pattern: `.nav-name` (no inline color on the title) + `.nav-link` on the clickable ancestor → accent on hover. Reuse for any new clickable card title.
+- Preview-not-nav pattern: keep the 3D well a sibling of the nav `<Link>`/action, never a descendant.
+- `feat/launch` base cards + signed-in `/browse` search + `/market` listings all need a wallet to view live — headless agent-browser only covers the signed-out / public surfaces.
+
+---
+
 ## Last Updated: 2026-06-08 (**/browse semantic search SHIPPED (local) — plan 2026-06-08-002, 3 code units + 5-reviewer hardening, browser-verified**)
 
 ### Hackathon Tracker
