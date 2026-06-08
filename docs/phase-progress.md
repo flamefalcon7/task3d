@@ -1,6 +1,68 @@
 # Phase Progress
 
-## Last Updated: 2026-06-07 (**Landing cinematic scroll spine — U1–U7 implemented on `feat/landing-scroll-spine`**)
+## Last Updated: 2026-06-08 (**model-description-surfacing SHIPPED (local) — 4 units + 5-reviewer fixes, browser-verified**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **13 of 38**
+- Days to demo day (7/20–21): ~42 · Days to winners (8/27): ~80
+
+### Current Phase
+Phase 4 — feature/UX polish. **Note: this repo has NO git remote** — "shipping" = local commits/branches, no PR/push.
+
+### Completed This Session
+- **plan 2026-06-08-001 model-description-surfacing — BUILT + tested + reviewed + browser-verified + committed** on a fresh branch `feat/model-description-surfacing` (off `main`; NOT merged; no remote). 5 commits:
+  - **U1** `shared/src/modelDescription.ts` — pure resolver `(Model3DSummary)→{text,kind:'prompt'|'caption'}|null` (Tripo prompt / D-082 upload caption / null for uncaptioned+malformed). 12 co-located tests; re-exported via `shared/src/index.ts`.
+  - **U2** `frontend/src/buy/ModelDetailPage.tsx` — labeled "Prompt"/"AI description" block + 3D viewer caption; raw Params(json) expander demoted+kept. 5 tests.
+  - **U3** `frontend/src/browse/ModelCard.tsx` (market card snippet) + `LaunchCollectionPage.tsx` (base-picker card snippet both variants + picked-base preview caption). 8 tests.
+  - **U4** `frontend/src/creator/CreateModelPage.tsx` — publish-time no-caption nudge: split `onMint`→validation gate + `proceedMint`; styled Continue/Cancel inline panel replaces MintButton for an uncaptioned upload (R7/R8, context-aware copy). Test-first, 11 tests.
+  - **5-reviewer fixes** (correctness/testing/api-contract/adversarial/julik): reset `noCaptionConfirm` on model swap/mode switch; `proceedMint` re-validates required fields (panel leaves form editable); `mintInFlight` ref guards double-publish. +6 tests.
+- **Verification:** full suite **1110 frontend pass / 2 skip + 21 shared pass**, `tsc --noEmit` clean, frontend build clean. **Browser-verified live** (agent-browser, read-only surfaces through the real `@overflow2026/shared` dist boundary): robot(Tripo) detail shows Prompt block + viewer caption; turbo-seg(upload) shows neither (R6); `/create`+`/launch` load to sign-in gate, no console errors.
+
+### Next Concrete Step
+User decides: (a) merge strategy for the 3 unmerged local branches (`feat/landing-scroll-spine`, `feat/launch-ask-model-finder`, `feat/model-description-surfacing`), or (b) next feature. **MERGE SEAM**: when `feat/launch-ask-model-finder` (base-finder) merges with `feat/model-description-surfacing`, wire the U3 dedupe — suppress the static `/launch` snippet on a card whose search match-reason is showing (documented inline at `LaunchCollectionPage.tsx` base-option map; no match state exists on the description branch alone).
+
+### Blockers / Open Questions
+- None blocking.
+- **Deferred copy polish** (adversarial P3): the no-caption nudge's "actionable" copy variant ("Add one with Describe with AI") still shows when the captioner is quota-exhausted (status='quota' keeps `available=true`) — fine per plan's "final copy strings deferred", but could branch on `captioner.status` later.
+- **shared/dist build-ordering** (api-contract, pre-existing not a regression): `shared/dist` is gitignored; the new export reaches the frontend only after a shared build. Full-repo `pnpm -r build` handles ordering; verify any frontend-only deploy (Vercel/CF) runs a shared build first — same as the already-shipped `memory.ts` export.
+- **ModelCard snippet is on `/market` (wallet-gated)**, NOT `/browse` (which uses collection-level cards, out of scope per R4). Verified via unit tests; not driveable headless.
+
+### Notes for Next Session
+- Background processes: **backend dev :3001** (MemWal-configured), **frontend dev :5173** — likely still running.
+- `shared/dist` was rebuilt locally (`pnpm --dir shared build`) so the frontend resolves `modelDescription`; a fresh clone must build shared before the frontend.
+- Wallet-gated surfaces NOT live-verified (covered by unit tests, per pre/post-wallet split): ModelCard `/market` snippet, `/launch` picker snippets + picked-base caption, `/create` publish nudge. Offer the user a post-wallet pass in their own Chrome if desired.
+
+---
+
+## Last Updated: 2026-06-08 (**/launch base-finder shipped (local) · MemWal restored + .env safeguards · model-description plan ready**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **13 of 38**
+- Days to demo day (7/20–21): ~42 · Days to winners (8/27): ~80
+
+### Current Phase
+Phase 4 — feature/UX polish. **Note: this repo has NO git remote** — "shipping" = local commits/branches, no PR/push.
+
+### Completed This Session
+- **plan-002 `/launch` natural-language base-finder — BUILT + tested + reviewed + committed** on branch `feat/launch-ask-model-finder` (NOT merged; no remote). 6 commits (`87b6051`→`e4c403a` + plan-status + ops). U1 extracted a neutral `frontend/src/memory/useMemoryRecall.ts` from `creator/useCreatorMemory.ts` (public API byte-identical, 17-test /create suite green); U2 `frontend/src/collection/baseSearchRanking.ts` (pure merge/dedupe/join); U3 search box + grid reorder/highlight in `LaunchCollectionPage.tsx`. Full suite **1127 pass / 2 skip**, build clean. 5-reviewer pass (incl. julik) → folded fixes: degraded≠empty note, query-reset on pick, NaN-distance guard, +9 tests.
+- **MemWal restored.** `backend/.env` had lost `MEMWAL_*` (a prior session clobbered the file — mtime 6/4, not this session). Re-provisioned a fresh delegate key on the **existing** account `0x55c2…229c6` via `backend/scripts/memwal-spike.ts` (owner = deployer `VITE_TEST_WALLET_KEY`); wired `MEMWAL_ACCOUNT_ID/DELEGATE_KEY/SERVER_URL` into `backend/.env`. Backend running on **:3001**, recall live.
+- **.env-clobber safeguards** (commit `87a12e9`): new CLAUDE.md "Secrets & `.env` files" rule (never overwrite/regenerate; append-only; STOP+report) + MemWal recovery runbook; backend `server.ts` prints a loud startup warning when MemWal is unconfigured.
+- **Catalog→memory sync** (commit `32fdbab`): new `backend/scripts/sync-models-to-memory.ts` reads on-chain Model3D objects → writes memory via the live `memoryWrites` helper. Synced 3 published models (`robot` tripo / `nasty-guy`, `turbo-seg` uploads); verified recallable.
+- **plan 2026-06-08-001 model-description-surfacing — PLANNED, ready for `/ce-work` (NOT started).** Brainstorm `docs/brainstorms/2026-06-08-model-description-surfacing-requirements.md` + plan `docs/plans/2026-06-08-001-feat-model-description-surfacing-plan.md`. Doc-reviewed (3 personas, no P0/P1, 7 fixes folded). Display-only (caption write-path already exists, D-082): shared `shared/src/modelDescription.ts` resolver + render on detail/cards/preview + a styled publish-time no-caption confirm panel. 4 units (U1 resolver → U2 detail → U3 cards/launch → U4 publish nudge).
+
+### Next Concrete Step
+Resume after compaction: **`/ce-work` on `docs/plans/2026-06-08-001-feat-model-description-surfacing-plan.md`**, on a **fresh branch off `main`** (keep it separate from the unmerged `feat/launch-ask-model-finder`).
+
+### Blockers / Open Questions
+- None blocking. **MemWal recall relevance gate** = `MEMORY_MAX_DISTANCE` 0.66 — bare single-word queries ("robot","car") fall past it; descriptive queries ("steampunk robot") match. Tunable if demo needs looser matching (cost: noise).
+- Two unmerged local feature branches exist (`feat/landing-scroll-spine`, `feat/launch-ask-model-finder`) — no remote, so they live locally until manually merged.
+
+### Notes for Next Session
+- Background processes from this session: **backend dev on :3001** (MemWal-configured) and **frontend dev on :5173** — may still be running.
+- `/launch` live reorder verification was deferred to the user (wallet-gated; agent-browser has no wallet). Data is synced + recallable; descriptive queries surface matches.
+- Description-surfacing scope decisions locked: caption stored under `params_json.caption` (separate from `prompt`); `/create` upload preview already shows the live caption (out of scope); `/launch` card must dedupe its description snippet against the existing `MatchReason` (per-card boolean); 2 existing uncaptioned uploads = no backfill.
+
+---
 
 ### Hackathon Tracker
 - Days to submission (6/21): **14 of 38**
