@@ -1383,6 +1383,98 @@ describe('CreateModelPage', () => {
     expect(screen.queryByTestId('no-caption-panel')).toBeNull();
     await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
   });
+
+  it('the nudge panel REPLACES the Mint button while open (no second publish entry point)', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    expect(screen.queryByTestId('mint-button')).toBeNull();
+  });
+
+  it('R8: shows the ACTIONABLE copy when captioning is available', async () => {
+    vi.stubEnv('VITE_COPILOT_ENABLED', 'true');
+    captionState.available = true;
+    captionState.status = 'idle';
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    const panel = screen.getByTestId('no-caption-panel');
+    expect(panel.textContent).toMatch(/Describe with AI/i);
+    expect(panel.textContent).not.toMatch(/unavailable/i);
+  });
+
+  it('a whitespace-only caption is treated as uncaptioned → the nudge fires', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: '   ' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
+
+  it('review(correctness): Continue after clearing the name does NOT publish (proceedMint re-validates)', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    // Clear the (still-editable) name field, THEN confirm publish.
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('no-caption-confirm'));
+    });
+    // Re-validation blocks the publish + flags the missing field.
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('name-required-error')).toBeTruthy();
+  });
+
+  it('review: Cancel → add a caption → re-publish skips the nudge and publishes', async () => {
+    uploadBlobMock.mockResolvedValue({ blobId: 'b', blobObjectId: '0x' + 'a'.repeat(64) });
+    signAndExecuteMock.mockResolvedValue({ digest: 'PUBDIGEST' });
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    fireEvent.click(screen.getByTestId('no-caption-cancel'));
+    // Add a caption, then publish again — no nudge this time.
+    fireEvent.change(screen.getByTestId('caption-input'), { target: { value: 'now described' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.queryByTestId('no-caption-panel')).toBeNull();
+    await waitFor(() => expect(buildPublishPtbMock).toHaveBeenCalled());
+    const args = (buildPublishPtbMock.mock.calls[0]! as unknown as [{ paramsJson: string }])[0];
+    expect(JSON.parse(args.paramsJson)).toEqual({ source: 'upload', caption: 'now described' });
+  });
+
+  it('review(races): re-uploading a model while the nudge is open dismisses it (no stale-model publish)', async () => {
+    render(<CreateModelPage />);
+    await uploadToMetadataForm();
+    fireEvent.change(screen.getByTestId('name-input'), { target: { value: 'My Upload' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mint-button'));
+    });
+    expect(screen.getByTestId('no-caption-panel')).toBeTruthy();
+    // Switch source mode (changes the model-identity effect deps) — the open
+    // nudge must be dismissed rather than left referencing the old model.
+    fireEvent.click(screen.getByText('Generate with Tripo'));
+    expect(screen.queryByTestId('no-caption-panel')).toBeNull();
+    expect(buildPublishPtbMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('CreateModelPage — L2 Riff Copilot integration (D-081)', () => {

@@ -728,6 +728,11 @@ export function CreateModelPage() {
     // mode switch produces a fresh `glb` reference, clearing any prior caption.
     setCaption('');
     captionerReset();
+    // plan 2026-06-08-001 U4 (review: correctness/adversarial/julik) — dismiss the
+    // open no-caption nudge on a model swap or mode switch, so "Publish anyway"
+    // can never publish a DIFFERENT model than the warning described; the user is
+    // forced back through onMint's fresh validate+nudge gate.
+    setNoCaptionConfirm(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [glb, sourceMode]);
   // Re-entrancy guard: onDescribe awaits captureFrames BEFORE the hook flips to
@@ -735,6 +740,12 @@ export function CreateModelPage() {
   // from launching a second capture + paid call. This ref closes that window
   // across the whole capture→describe span (review: julik + adversarial).
   const describeInFlight = useRef(false);
+  // plan 2026-06-08-001 U4 (review: julik) — publish re-entrancy guard. While the
+  // no-caption panel is open the busy MintButton (the usual guard) is unmounted,
+  // so a double-click on "Publish anyway" could enqueue two paid publishes before
+  // setMintStatus('uploading') re-renders. This ref closes that window, mirroring
+  // describeInFlight above.
+  const mintInFlight = useRef(false);
   const onDescribe = useCallback(async () => {
     if (describeInFlight.current) return;
     describeInFlight.current = true;
@@ -927,6 +938,23 @@ export function CreateModelPage() {
   // since it is also callable from the confirm panel.
   const proceedMint = useCallback(async () => {
     if (!session || !signer || !glb) return;
+    // Re-validate required fields (review: correctness). The no-caption panel
+    // leaves the metadata form editable, so name / ALLOW_LIST access-fee could
+    // have been cleared between onMint's gate and "Publish anyway" — without this
+    // re-check the publish would spend gas + Walrus upload then mint an empty
+    // name (or an ALLOW_LIST base with fee=0, which the chain rejects).
+    const missing = new Set<string>();
+    if (!name.trim()) missing.add('name');
+    if (policy === POLICY_ALLOW_LIST && suiToMist(accessFeeSui) <= 0n) missing.add('accessFee');
+    if (missing.size > 0) {
+      setInvalidFields(missing);
+      setMintError(null);
+      return;
+    }
+    // Re-entrancy guard (review: julik) — a double "Publish anyway" must not
+    // launch two paid publishes before setMintStatus('uploading') re-renders.
+    if (mintInFlight.current) return;
+    mintInFlight.current = true;
     setMintError(null);
     setMintStatus('uploading');
     try {
@@ -1065,6 +1093,8 @@ export function CreateModelPage() {
     } catch (e) {
       setMintError(e instanceof Error ? e.message : String(e));
       setMintStatus('error');
+    } finally {
+      mintInFlight.current = false;
     }
   }, [session, signer, glb, name, uploadBlob, tagsStr, sourceMode, prompt, caption, policy, feeSui, accessFeeSui, royaltyBps, partLabels, signAndExecute, suiClient, rememberCreation]);
 
