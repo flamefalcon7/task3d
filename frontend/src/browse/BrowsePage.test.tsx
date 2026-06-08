@@ -1,7 +1,8 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { Model3DSummary } from '@overflow2026/shared';
+import type { Model3DSummary, RecallChip } from '@overflow2026/shared';
 
 // Stub Babylon-backed preview so jsdom doesn't try to run WebGL.
 vi.mock('../babylon/PreviewCanvas', () => ({
@@ -15,6 +16,50 @@ vi.mock('../integration/useCollections', () => ({
   useCollections: (...a: unknown[]) => useCollectionsMock(...a),
   POLICY_PERMISSIONLESS: 2,
 }));
+
+// plan 2026-06-08-002 U3 — session + recall + sign-in mocks. NOTE: this file
+// resets via vi.restoreAllMocks(), which does NOT reset hoisted vi.mock module
+// factories — so these are backed by mutable module-scope state reset manually
+// in beforeEach (see below), or lanes/session leak across tests.
+const useSessionMock = vi.fn();
+vi.mock('../auth/useSession', () => ({
+  useSession: () => useSessionMock(),
+  isJwtExpired: () => false,
+}));
+
+vi.mock('../auth/SignInButton', () => ({
+  SignInButton: () => <div data-testid="signin-buttons" />,
+}));
+
+type RecallLane = {
+  chips: RecallChip[];
+  status: 'idle' | 'loading' | 'ready' | 'empty';
+  degraded: boolean;
+  recall: ReturnType<typeof vi.fn>;
+};
+let memoryRecallState: { personal: RecallLane; global: RecallLane };
+vi.mock('../memory/useMemoryRecall', () => ({
+  useMemoryRecall: () => memoryRecallState,
+}));
+
+function lane(
+  chips: RecallChip[] = [],
+  opts: { status?: RecallLane['status']; degraded?: boolean } = {},
+): RecallLane {
+  return {
+    chips,
+    status: opts.status ?? (chips.length ? 'ready' : 'idle'),
+    degraded: opts.degraded ?? false,
+    recall: vi.fn(),
+  };
+}
+
+function hit(modelId: string, distance: number, prompt = 'a prompt'): RecallChip {
+  return { modelId, distance, prompt } as RecallChip;
+}
+
+const SIGNED_IN = { session: { address: '0xme', jwt: 'jwt-token' } };
+const SIGNED_OUT = { session: null };
 
 import { BrowsePage } from './BrowsePage';
 import * as hookMod from './useModelIndex';
@@ -69,6 +114,9 @@ function renderPage(path = '/') {
 beforeEach(() => {
   vi.restoreAllMocks();
   useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
+  // Reset hoisted-factory-backed state explicitly (restoreAllMocks won't).
+  memoryRecallState = { personal: lane(), global: lane() };
+  useSessionMock.mockReturnValue(SIGNED_IN);
 });
 
 afterEach(() => {
@@ -233,5 +281,165 @@ describe('BrowsePage', () => {
     useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
     renderPage('/browse?filter=integration');
     expect(screen.getByTestId('integration-empty')).toBeTruthy();
+  });
+
+  // ─── U3: semantic "Ask" search ───
+
+  function precedes(first: Element, second: Element): boolean {
+    return Boolean(
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  }
+
+  it('AE2: signed-out shows a login teaser, no search input, and no recall path', () => {
+    useSessionMock.mockReturnValue(SIGNED_OUT);
+    mockHook({ models: [makeModel()] });
+    renderPage();
+    expect(screen.getByTestId('browse-search-signin')).toBeTruthy();
+    expect(screen.getByTestId('signin-buttons')).toBeTruthy();
+    // No input element exists, so there is no onChange/autofill path to recall.
+    expect(screen.queryByTestId('browse-search-input')).toBeNull();
+  });
+
+  it('signed-out hides the search entirely in the integration view too', () => {
+    useSessionMock.mockReturnValue(SIGNED_OUT);
+    mockHook({ models: [makeModel()] });
+    renderPage('/browse?filter=integration');
+    expect(screen.queryByTestId('browse-search')).toBeNull();
+    expect(screen.queryByTestId('browse-search-signin')).toBeNull();
+  });
+
+  it('AE1: a semantic match promotes its collection to the front with a reason, others stay visible', () => {
+    memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    expect(memoryRecallState.global.recall).toHaveBeenCalledWith('race car');
+    const matched = screen.getByTestId('collection-card-0xc-b');
+    const other = screen.getByTestId('collection-card-0xc-a');
+    // Matched card promoted to the front; the unmatched card is still rendered.
+    expect(precedes(matched, other)).toBe(true);
+    expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('a fast race car');
+  });
+
+  it('AE3: drives both personal + global recall and highlights a personal-scope (own model) match', () => {
+    memoryRecallState.personal = lane([hit('0xa', 0.25, 'my own race car')]);
+    mockHook({ models: [makeModel({ objectId: '0xa', collectionId: '0xc-a' })] });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    expect(memoryRecallState.personal.recall).toHaveBeenCalledWith('race car');
+    expect(memoryRecallState.global.recall).toHaveBeenCalledWith('race car');
+    expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('my own race car');
+  });
+
+  it('AE5: search reorders only within the tag-filtered subset (a tag-excluded match is not resurrected)', () => {
+    // 0xb matches semantically but is tagged 'armor'; filtering to 'weapon'
+    // must keep it hidden — search never un-hides a tag-excluded card.
+    memoryRecallState.global = lane([hit('0xb', 0.2, 'armored thing')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a', tags: ['weapon'] }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b', tags: ['armor'] }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('tag-filter'), { target: { value: 'weapon' } });
+    expect(screen.getByTestId('collection-card-0xc-a')).toBeTruthy();
+    expect(screen.queryByTestId('collection-card-0xc-b')).toBeNull();
+  });
+
+  it('AE6 / R9: a zero-match query keeps the full grid in default order, no "no results" state', () => {
+    memoryRecallState = { personal: lane(), global: lane() }; // no chips → no match
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'nothing matches this' } });
+    // Both cards still rendered, original order; the showing-all micro-status fires.
+    const a = screen.getByTestId('collection-card-0xc-a');
+    const b = screen.getByTestId('collection-card-0xc-b');
+    expect(precedes(a, b)).toBe(true);
+    expect(screen.getByTestId('browse-search-showing-all')).toBeTruthy();
+    expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
+  });
+
+  it('R10: a degraded recall scope surfaces the degraded note, not an empty grid', () => {
+    memoryRecallState.global = lane([], { degraded: true });
+    mockHook({ models: [makeModel({ objectId: '0xa', collectionId: '0xc-a' })] });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('browse-search-degraded')).toBeTruthy();
+    expect(screen.getByTestId('collection-card-0xc-a')).toBeTruthy();
+  });
+
+  it('shows the loading micro-status while a scope is loading', () => {
+    memoryRecallState.global = lane([], { status: 'loading' });
+    mockHook({ models: [makeModel()] });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('browse-search-loading')).toBeTruthy();
+  });
+
+  it('tag-aware copy: showing-all drops the "showing all" lead when a tag filter is active', () => {
+    memoryRecallState = { personal: lane(), global: lane() };
+    mockHook({
+      models: [makeModel({ objectId: '0xa', collectionId: '0xc-a', tags: ['weapon'] })],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('tag-filter'), { target: { value: 'weapon' } });
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'no match here' } });
+    const status = screen.getByTestId('browse-search-showing-all');
+    expect(status.textContent).toContain('no semantic matches');
+    expect(status.textContent).not.toContain('showing all');
+  });
+
+  it('does not fire the showing-all / loading statuses for a sub-MIN_QUERY (1–2 char) query', () => {
+    memoryRecallState = { personal: lane(), global: lane() };
+    mockHook({ models: [makeModel()] });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'ab' } });
+    expect(screen.queryByTestId('browse-search-showing-all')).toBeNull();
+    expect(screen.queryByTestId('browse-search-loading')).toBeNull();
+  });
+
+  it('survives an in-page signed-out → signed-in transition without a hooks-count error', () => {
+    useSessionMock.mockReturnValue(SIGNED_OUT);
+    mockHook({ models: [makeModel()] });
+    const { rerender } = renderPage();
+    expect(screen.getByTestId('browse-search-signin')).toBeTruthy();
+    useSessionMock.mockReturnValue(SIGNED_IN);
+    rerender(
+      <MemoryRouter initialEntries={['/']}>
+        <BrowsePage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('browse-search-input')).toBeTruthy();
+  });
+
+  it('StrictMode: commits search results (recall mounted-ref guard)', () => {
+    memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/']}>
+          <BrowsePage />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('a fast race car');
   });
 });

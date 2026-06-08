@@ -1,14 +1,19 @@
 import type { CSSProperties } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useModelIndex } from './useModelIndex';
 import { CollectionCard } from './CollectionCard';
+import { rankCollectionMatches } from './browseSearchRanking';
 import { useCollections, POLICY_PERMISSIONLESS } from '../integration/useCollections';
+import { useSession } from '../auth/useSession';
+import { SignInButton } from '../auth/SignInButton';
+import { useMemoryRecall } from '../memory/useMemoryRecall';
 import {
   buttonOutline,
   displayHeadline,
   eyebrow,
+  input as inputStyle,
   monoLabel,
   pagePaper,
   tokens,
@@ -84,6 +89,48 @@ const filterRow: CSSProperties = {
   marginBottom: 24,
   paddingBottom: 16,
   borderBottom: tokens.border.primary,
+};
+
+// plan 2026-06-08-002 U3 — semantic "Ask" search row. Full-width row directly
+// ABOVE filterRow, separated by the same hairline, so "describe what you want"
+// reads as the primary affordance above "narrow by tag".
+const searchRow: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  marginBottom: 20,
+  paddingBottom: 16,
+  borderBottom: tokens.border.primary,
+};
+
+const searchHint: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  fontSize: 11,
+};
+
+// Signed-out teaser — a non-interactive prompt block (NOT a disabled <input>):
+// there is no input/onChange path, so recall can never fire from this surface
+// (autofill / stray form-submit can't reach it); the token guard in
+// useMemoryRecall is the backstop, not the only defense.
+const signinTeaser: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 12,
+  padding: '12px 14px',
+  background: tokens.color.paperPure,
+  border: tokens.border.primary,
+};
+
+const signinTeaserCopy: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  textTransform: 'none',
+  letterSpacing: '0.3px',
+  fontSize: 12,
 };
 
 function chip(active: boolean): CSSProperties {
@@ -200,6 +247,40 @@ export function BrowsePage() {
   // cards, not individual variants.
   const collectionGroups = useMemo(() => groupByCollection(models), [models]);
 
+  // plan 2026-06-08-002 U3 — natural-language semantic search. ALL hooks below
+  // run unconditionally (no early return precedes them) so an in-page sign-in
+  // transition never changes the hook count (react-hooks-after-early-return).
+  // useMemoryRecall internally no-ops without a JWT, so calling it while signed
+  // out is safe and returns empty lanes.
+  const { session } = useSession();
+  const { personal, global } = useMemoryRecall();
+  const [searchQuery, setSearchQuery] = useState('');
+  useEffect(() => {
+    personal.recall(searchQuery);
+    global.recall(searchQuery);
+  }, [searchQuery, personal.recall, global.recall]);
+
+  const { orderedKeys, cardMatches } = useMemo(
+    () => rankCollectionMatches(personal.chips, global.chips, collectionGroups),
+    [personal.chips, global.chips, collectionGroups],
+  );
+
+  const searchActive = searchQuery.trim().length >= 3;
+  const searchLoading = personal.status === 'loading' || global.status === 'loading';
+  // Degraded ≠ empty: a scope's relayer being down is surfaced honestly, never
+  // collapsed to "zero matches".
+  const searchDegraded =
+    searchActive && !searchLoading && (personal.degraded || global.degraded);
+  // "showing all" only fires when there ARE cards but none matched semantically;
+  // when the grid is empty (no models / tag yields nothing) the empty-state owns
+  // the message and this stays silent to avoid a contradictory double signal.
+  const searchShowingAll =
+    searchActive &&
+    !searchLoading &&
+    !searchDegraded &&
+    cardMatches.size === 0 &&
+    collectionGroups.size > 0;
+
   return (
     <div style={pagePaper} data-testid="browse-page">
       <main style={mainStyle}>
@@ -213,6 +294,54 @@ export function BrowsePage() {
             with royalty enforced at the protocol layer.
           </p>
         </section>
+
+        {/* plan 2026-06-08-002 U3 — semantic "Ask" search. Default model-grid
+            view only (hidden in the integration view, mirroring the disabled
+            tag chips there). Signed in → active field; signed out → login
+            teaser (no input, so recall can't fire from this surface). */}
+        {!integrationFilter && (
+          <div style={searchRow} data-testid="browse-search">
+            {session ? (
+              <>
+                <input
+                  type="text"
+                  data-testid="browse-search-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Escape clears (browser-native search convention). The field
+                    // is intentionally NOT inside a <form>, so Enter is a no-op
+                    // (no default-submit reload).
+                    if (e.key === 'Escape') {
+                      setSearchQuery('');
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="Describe what you're looking for — e.g. “a fast race car”"
+                  aria-label="Search models by description"
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+                <div data-testid="browse-search-hint" style={searchHint} aria-live="polite" aria-atomic="true">
+                  Searches models published with a description
+                  {searchLoading && <span data-testid="browse-search-loading"> · searching…</span>}
+                  {searchShowingAll && (
+                    <span data-testid="browse-search-showing-all">
+                      {tagFilter ? ' · no semantic matches' : ' · showing all — no semantic matches'}
+                    </span>
+                  )}
+                  {searchDegraded && (
+                    <span data-testid="browse-search-degraded"> · some matches unavailable — showing all</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div data-testid="browse-search-signin" style={signinTeaser}>
+                <span style={signinTeaserCopy}>Sign in to search models by description</span>
+                <SignInButton />
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={filterRow}>
           <span style={chipsLabel}>TAGS ·</span>
@@ -345,9 +474,19 @@ export function BrowsePage() {
 
         {!integrationFilter && !loading && !error && models.length > 0 && (
           <div data-testid="model-grid" style={grid}>
-            {Array.from(collectionGroups.entries()).map(([cid, variants]) => (
+            {/* Single render path: always iterate orderedKeys. When no query is
+                active it equals the original insertion order; an active query
+                promotes matched collections to the front. Every group key —
+                including `_orphan:` keys — is present, so no card vanishes (R9).
+                Reorder is instantaneous (no layout transition); the ring +
+                reason line is the only promotion signal. */}
+            {orderedKeys.map((cid) => (
               <div key={cid} style={gridCell}>
-                <CollectionCard collectionId={cid} variants={variants} />
+                <CollectionCard
+                  collectionId={cid}
+                  variants={collectionGroups.get(cid)!}
+                  match={cardMatches.get(cid)}
+                />
               </div>
             ))}
           </div>
