@@ -25,7 +25,7 @@ import type {
   CollectionBuildResponse,
   Model3DSummary,
 } from '@overflow2026/shared';
-import { modelDescription } from '@overflow2026/shared';
+import { modelDescription, modelDescriptionLabel } from '@overflow2026/shared';
 import { useSession } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
@@ -1611,7 +1611,7 @@ export function LaunchCollectionPage() {
                   style={{ ...baseOptionMeta, color: tokens.color.muted, marginTop: 8, whiteSpace: 'normal' }}
                 >
                   <span style={{ color: tokens.color.hint }}>
-                    {baseDescription.kind === 'caption' ? 'AI description' : 'Prompt'}:
+                    {modelDescriptionLabel(baseDescription.kind)}:
                   </span>{' '}
                   {baseDescription.text}
                 </div>

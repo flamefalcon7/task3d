@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
+import { modelDescription } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
 import { TurntablePreview } from '../ux/TurntablePreview';
@@ -93,6 +94,20 @@ const creatorStyle: CSSProperties = {
   fontSize: 11,
 };
 
+// plan 2026-06-08-001 U3 (R4) — one-line description snippet on the card,
+// derived from the first variant (same source as name/preview). Null for an
+// uncaptioned upload → nothing (R6).
+const descriptionStyle: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  letterSpacing: '0.3px',
+  textTransform: 'none',
+  fontSize: 11,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
 const priceRow: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
@@ -116,6 +131,7 @@ export function CollectionCard({ collectionId, variants }: Props) {
   const first = variants[0]!;
   const name = collectionNameFromVariants(variants);
   const variantCount = variants.length;
+  const description = modelDescription(first);
   // plan-026 D-075 — encrypted ALLOW_LIST bases render their public preview
   // still (an <img>), NEVER the ciphertext glb_blob_id as a 3D GLB.
   // PERMISSIONLESS + legacy bases render the live mesh as before.
@@ -162,6 +178,11 @@ export function CollectionCard({ collectionId, variants }: Props) {
         <div style={creatorStyle}>
           BY <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
         </div>
+        {description && (
+          <div data-testid="collection-card-description" style={descriptionStyle}>
+            {description.text}
+          </div>
+        )}
         <div style={priceRow}>
           <span style={shapeChip}>{first.shapeType}</span>
           <span data-testid="collection-card-price" style={priceStyle}>

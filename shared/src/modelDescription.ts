@@ -31,6 +31,16 @@ export interface ModelDescription {
  * Returns null on: missing/empty/whitespace prompt AND caption, malformed JSON,
  * or a non-object params_json — every "no description" path collapses to null.
  */
+/**
+ * Display label for a description kind. NOTE: a 'caption' is NOT necessarily
+ * AI-authored — the upload DESCRIPTION field is user-editable (hand-typed or
+ * AI-drafted), so it reads as a neutral "Description", never "AI description".
+ * A Tripo 'prompt' is the human generation prompt, labeled "Prompt".
+ */
+export function modelDescriptionLabel(kind: ModelDescriptionKind): string {
+  return kind === 'prompt' ? 'Prompt' : 'Description';
+}
+
 export function modelDescription(summary: Model3DSummary): ModelDescription | null {
   let parsed: unknown;
   try {

@@ -12,7 +12,6 @@ import {
   monoLabel,
   pagePaper,
   tokens,
-  viewerWell,
 } from '../ux/tokens';
 
 // Phase 3 (U5): Browse renders one card per Collection rather than per
@@ -135,61 +134,6 @@ const errorState: CSSProperties = {
   letterSpacing: '0.5px',
   padding: 16,
   border: `1.5px solid ${tokens.color.err}`,
-};
-
-const ctaRow: CSSProperties = {
-  marginTop: 48,
-  paddingTop: 32,
-  borderTop: tokens.border.primary,
-  display: 'grid',
-  gridTemplateColumns: 'repeat(3, 1fr)',
-  gap: 0,
-  border: tokens.border.primary,
-};
-
-const ctaCell: CSSProperties = {
-  borderRight: tokens.border.primary,
-  padding: 20,
-  background: tokens.color.paperPure,
-  textDecoration: 'none',
-  color: tokens.color.ink,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-};
-
-const ctaThumb: CSSProperties = {
-  ...viewerWell,
-  height: 100,
-  marginBottom: 4,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const ctaLabel: CSSProperties = {
-  ...monoLabel,
-  color: tokens.color.accent,
-  letterSpacing: '1.5px',
-};
-
-const ctaTagline: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
-  fontSize: tokens.size.md,
-  fontWeight: tokens.weight.medium,
-};
-
-const ctaArrow: CSSProperties = {
-  ...monoLabel,
-  color: tokens.color.muted,
-  fontSize: 11,
-  marginTop: 'auto',
-};
-
-const ctaWellLabel: CSSProperties = {
-  ...monoLabel,
-  color: 'rgba(255,255,255,0.5)',
 };
 
 const integrationGrid: CSSProperties = {
@@ -409,40 +353,6 @@ export function BrowsePage() {
           </div>
         )}
 
-        {/* Three-CTA row — dispatches the demo arc roles. Only on the default
-            view so the integration view doesn't get crowded. */}
-        {!integrationFilter && (
-          <div style={ctaRow}>
-            <Link to="/create" style={ctaCell} data-testid="cta-creators">
-              <div style={ctaThumb}>
-                <span style={ctaWellLabel}>L1</span>
-              </div>
-              <span style={ctaLabel}>FOR CREATORS</span>
-              <span style={ctaTagline}>Publish a model.</span>
-              <span style={ctaArrow}>/CREATE →</span>
-            </Link>
-            <Link to="/market" style={ctaCell} data-testid="cta-buyers">
-              <div style={ctaThumb}>
-                <span style={ctaWellLabel}>L2</span>
-              </div>
-              <span style={ctaLabel}>FOR BUYERS</span>
-              <span style={ctaTagline}>Buy a car.</span>
-              <span style={ctaArrow}>/MARKET →</span>
-            </Link>
-            <Link
-              to="/track"
-              style={{ ...ctaCell, borderRight: 'none' }}
-              data-testid="cta-drivers"
-            >
-              <div style={ctaThumb}>
-                <span style={ctaWellLabel}>L3</span>
-              </div>
-              <span style={ctaLabel}>FOR DRIVERS</span>
-              <span style={ctaTagline}>Drive it.</span>
-              <span style={ctaArrow}>/TRACK →</span>
-            </Link>
-          </div>
-        )}
       </main>
     </div>
   );

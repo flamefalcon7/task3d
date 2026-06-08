@@ -507,7 +507,7 @@ describe('ModelDetailPage — description surfacing', () => {
     expect(screen.getByTestId('model-description-text').textContent).toBe('a low-poly red sports car');
   });
 
-  it('AE2/R2: captioned upload shows an "AI description"-labeled block with the caption', () => {
+  it('AE2/R2: captioned upload shows a neutral "Description"-labeled block (not "AI description" — the caption may be hand-typed)', () => {
     useModelByIdMock.mockReturnValue({
       model: makeModel({
         shapeType: 'box',
@@ -519,7 +519,8 @@ describe('ModelDetailPage — description surfacing', () => {
     renderAt('/model/0xMODEL');
     const block = screen.getByTestId('model-description');
     expect(block.getAttribute('data-kind')).toBe('caption');
-    expect(block.textContent).toMatch(/AI description:/);
+    expect(block.textContent).toMatch(/Description:/);
+    expect(block.textContent).not.toMatch(/AI description/);
     expect(screen.getByTestId('model-description-text').textContent).toBe('a chunky walrus');
   });
 

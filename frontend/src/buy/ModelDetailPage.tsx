@@ -10,7 +10,7 @@ import { useAppSigner } from '../wallet/useAppSigner';
 import { SignInButton } from '../auth/SignInButton';
 import { buildPurchaseAccessPtb } from '../sui/collectionTxBuilders';
 import { decryptViaEntitlement, decryptViaCreator } from '../seal/decryptAndView';
-import { modelDescription } from '@overflow2026/shared';
+import { modelDescription, modelDescriptionLabel } from '@overflow2026/shared';
 
 // plan-027 U8 — L1 published-content detail page (`/model/:objectId`). Three
 // policies branch here:
@@ -261,7 +261,7 @@ export function ModelDetailPage() {
   // plan 2026-06-08-001 U2 — shared resolver; null for uncaptioned uploads, so
   // both the metadata block and the viewer caption simply don't render (R6).
   const description = modelDescription(model);
-  const descriptionLabel = description?.kind === 'caption' ? 'AI description' : 'Prompt';
+  const descriptionLabel = description ? modelDescriptionLabel(description.kind) : '';
 
   const isAllowList = model.policy === POLICY_ALLOW_LIST;
   const isRestricted = model.policy === POLICY_RESTRICTED;

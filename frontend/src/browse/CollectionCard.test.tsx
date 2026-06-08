@@ -163,4 +163,29 @@ describe('CollectionCard', () => {
     expect(screen.getByTestId('collection-card-preview-locked')).toBeTruthy();
     expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
   });
+
+  // plan 2026-06-08-001 U3 — description snippet derived from the first variant.
+  it('shows a description snippet for a Tripo first-variant (R4)', () => {
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel({ paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) })],
+    });
+    expect(screen.getByTestId('collection-card-description').textContent).toBe('a low-poly red sports car');
+  });
+
+  it('shows a caption snippet for a captioned-upload first-variant', () => {
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel({ paramsJson: JSON.stringify({ source: 'upload', caption: 'a chunky walrus' }) })],
+    });
+    expect(screen.getByTestId('collection-card-description').textContent).toBe('a chunky walrus');
+  });
+
+  it('shows NO description for an uncaptioned-upload first-variant (R6)', () => {
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel({ paramsJson: JSON.stringify({ source: 'upload' }) })],
+    });
+    expect(screen.queryByTestId('collection-card-description')).toBeNull();
+  });
 });

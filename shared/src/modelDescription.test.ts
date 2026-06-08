@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { modelDescription } from './modelDescription.js';
+import { modelDescription, modelDescriptionLabel } from './modelDescription.js';
 import type { Model3DSummary } from './types.js';
 
 // Minimal Model3DSummary stub — only paramsJson matters to the resolver.
@@ -82,5 +82,16 @@ describe('modelDescription', () => {
   it('non-string prompt is ignored, falls through to caption', () => {
     const m = makeModel(JSON.stringify({ prompt: 123, caption: 'fallback caption' }), 'box');
     expect(modelDescription(m)).toEqual({ text: 'fallback caption', kind: 'caption' });
+  });
+});
+
+describe('modelDescriptionLabel', () => {
+  it('labels a Tripo prompt "Prompt"', () => {
+    expect(modelDescriptionLabel('prompt')).toBe('Prompt');
+  });
+
+  it('labels an upload caption neutrally as "Description" (NOT "AI description" — it may be hand-typed)', () => {
+    expect(modelDescriptionLabel('caption')).toBe('Description');
+    expect(modelDescriptionLabel('caption')).not.toMatch(/AI/);
   });
 });

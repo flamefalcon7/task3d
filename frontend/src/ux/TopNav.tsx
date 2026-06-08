@@ -5,6 +5,7 @@ import { TEST_WALLET_ENABLED } from '../wallet/testWalletEnabled';
 import { navBar, tokens } from './tokens';
 
 const NAV_ITEMS: ReadonlyArray<{ label: string; path: string }> = [
+  { label: 'Browse', path: '/browse' },
   { label: 'Create', path: '/create' },
   { label: 'Launch', path: '/launch' },
   { label: 'Market', path: '/market' },
