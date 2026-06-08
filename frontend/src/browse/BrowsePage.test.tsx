@@ -497,4 +497,54 @@ describe('BrowsePage', () => {
     fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
     expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('a fast race car');
   });
+
+  it('splits an active query with matches into a RESULTS band and an ALL MODELS band', () => {
+    memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    // Two labeled bands.
+    expect(screen.getByTestId('browse-split-view')).toBeTruthy();
+    expect(screen.getByTestId('browse-results-heading').textContent).toContain('RESULTS · 1');
+    expect(screen.getByTestId('browse-rest-heading')).toBeTruthy();
+    // Matched card lives in the RESULTS grid; the unmatched card in ALL MODELS.
+    const results = screen.getByTestId('model-grid');
+    const rest = screen.getByTestId('browse-rest-grid');
+    expect(results.contains(screen.getByTestId('collection-card-0xc-b'))).toBe(true);
+    expect(rest.contains(screen.getByTestId('collection-card-0xc-a'))).toBe(true);
+  });
+
+  it('does NOT split when an active query has zero matches (single grid, no bands)', () => {
+    memoryRecallState = { personal: lane(), global: lane() };
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'no matches at all' } });
+    expect(screen.queryByTestId('browse-split-view')).toBeNull();
+    expect(screen.queryByTestId('browse-rest-grid')).toBeNull();
+    expect(screen.getByTestId('model-grid')).toBeTruthy();
+  });
+
+  it('does NOT split when there is no active query (default single grid)', () => {
+    memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]); // chips present…
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage(); // …but no query typed → searchActive false → no split
+    expect(screen.queryByTestId('browse-split-view')).toBeNull();
+    expect(screen.getByTestId('model-grid')).toBeTruthy();
+    expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
+  });
 });

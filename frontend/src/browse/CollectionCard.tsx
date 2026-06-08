@@ -48,13 +48,21 @@ function collectionNameFromVariants(variants: Model3DSummary[]): string {
   return stripped || first.name || 'Collection';
 }
 
-const linkStyle: CSSProperties = {
-  display: 'block',
-  textDecoration: 'none',
-  color: tokens.color.ink,
+// The card root is a plain container (NOT a link), so the 3D preview well can
+// own its pointer (drag-to-rotate) without the whole card hijacking the click
+// to navigate. Only the text body below is a <Link> to the detail page.
+const cardStyle: CSSProperties = {
   background: tokens.color.paperPure,
   border: tokens.border.primary,
   overflow: 'hidden',
+};
+
+// Text body — the navigation surface. Keeps bodyStyle's flex/padding/border-top
+// but reads as a link (ink text, no underline, pointer cursor).
+const bodyLinkStyle: CSSProperties = {
+  textDecoration: 'none',
+  color: tokens.color.ink,
+  cursor: 'pointer',
 };
 
 const wellStyle: CSSProperties = {
@@ -176,11 +184,13 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
   const to = isStandalone ? `/model/${first.objectId}` : `/collection/${collectionId}`;
 
   return (
-    <Link
-      to={to}
+    <div
       data-testid={`collection-card-${collectionId}`}
-      style={{ ...linkStyle, ...matchRing(match) }}
+      style={{ ...cardStyle, ...matchRing(match) }}
     >
+      {/* Preview well — interactive 3D, NOT a navigation target. The Babylon
+          ArcRotateCamera attaches its own pointer controls, so dragging here
+          rotates the model; a click does nothing (no detail-page jump). */}
       <div style={wellStyle} data-testid="collection-card-preview">
         {/* One Babylon canvas per card. Browsers cap WebGL contexts at
             ~8-16 per page — if the marketplace grows past ~6 cards, later
@@ -209,7 +219,13 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
           {variantCount} variant{variantCount === 1 ? '' : 's'}
         </span>
       </div>
-      <div style={bodyStyle}>
+      {/* Text body — the navigation surface (drag the preview to inspect; click
+          the title block to open the detail page). */}
+      <Link
+        to={to}
+        data-testid={`collection-card-link-${collectionId}`}
+        style={{ ...bodyStyle, ...bodyLinkStyle }}
+      >
         <div data-testid="collection-card-name" style={nameStyle}>{name}</div>
         <div style={creatorStyle}>
           BY <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
@@ -232,7 +248,7 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
             {formatSui(first.directAccessPrice)}
           </span>
         </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   );
 }

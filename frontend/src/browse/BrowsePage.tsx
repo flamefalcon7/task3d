@@ -164,6 +164,25 @@ const gridCell: CSSProperties = {
   background: tokens.color.paperPure,
 };
 
+// plan 2026-06-08-002 (follow-up) — section headers for the split search view:
+// a RESULTS band over the matched cards, then an ALL MODELS band over the rest.
+const sectionHeading: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  letterSpacing: '1.5px',
+  marginBottom: 12,
+};
+
+const restHeading: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  letterSpacing: '1.5px',
+  marginTop: 32,
+  marginBottom: 12,
+  paddingTop: 16,
+  borderTop: tokens.border.primary,
+};
+
 const emptyState: CSSProperties = {
   ...monoLabel,
   color: tokens.color.muted,
@@ -292,6 +311,31 @@ export function BrowsePage() {
   // This keeps the grid order/highlight and the text micro-statuses (which are
   // all gated on searchActive) from ever disagreeing for a frame.
   const gridKeys = searchActive ? orderedKeys : Array.from(collectionGroups.keys());
+
+  // Two-section view: when an active query has matches, the matched collections
+  // render in a labeled RESULTS band, visually separated from the rest of the
+  // catalog (which stays visible below — R9 no-hide). Without a query, or with
+  // zero matches, the grid is a single unsplit band.
+  const matchedKeys = searchActive ? orderedKeys.filter((k) => cardMatches.has(k)) : [];
+  const restKeys = searchActive ? orderedKeys.filter((k) => !cardMatches.has(k)) : [];
+  const splitView = matchedKeys.length > 0;
+
+  const renderCell = (cid: string) => {
+    // Defensive: every key here comes from collectionGroups, but guard the
+    // lookup so a future memo-dep skew degrades to a skipped card rather than
+    // crashing the grid on a null variants[0].
+    const variants = collectionGroups.get(cid);
+    if (!variants) return null;
+    return (
+      <div key={cid} style={gridCell}>
+        <CollectionCard
+          collectionId={cid}
+          variants={variants}
+          match={searchActive ? cardMatches.get(cid) : undefined}
+        />
+      </div>
+    );
+  };
 
   return (
     <div style={pagePaper} data-testid="browse-page">
@@ -485,31 +529,35 @@ export function BrowsePage() {
         )}
 
         {!integrationFilter && !loading && !error && models.length > 0 && (
-          <div data-testid="model-grid" style={grid}>
-            {/* Single render path: always iterate orderedKeys. When no query is
-                active it equals the original insertion order; an active query
-                promotes matched collections to the front. Every group key —
-                including `_orphan:` keys — is present, so no card vanishes (R9).
-                Reorder is instantaneous (no layout transition); the ring +
-                reason line is the only promotion signal. */}
-            {gridKeys.map((cid) => {
-              // Defensive: gridKeys ⊆ collectionGroups.keys() by construction
-              // (rankCollectionMatches only ever returns input keys), but guard
-              // the lookup so a future memo-dep skew degrades to a skipped card
-              // rather than crashing the whole grid on a null variants[0].
-              const variants = collectionGroups.get(cid);
-              if (!variants) return null;
-              return (
-                <div key={cid} style={gridCell}>
-                  <CollectionCard
-                    collectionId={cid}
-                    variants={variants}
-                    match={searchActive ? cardMatches.get(cid) : undefined}
-                  />
-                </div>
-              );
-            })}
-          </div>
+          splitView ? (
+            // Search active WITH matches → two separated bands. RESULTS holds the
+            // matched cards (ring + reason); ALL MODELS holds everything else,
+            // still visible (R9 no-hide).
+            <div data-testid="browse-split-view">
+              <div data-testid="browse-results-heading" style={sectionHeading}>
+                RESULTS · {matchedKeys.length}
+              </div>
+              <div data-testid="model-grid" style={grid}>
+                {matchedKeys.map(renderCell)}
+              </div>
+              {restKeys.length > 0 && (
+                <>
+                  <div data-testid="browse-rest-heading" style={restHeading}>
+                    ALL MODELS
+                  </div>
+                  <div data-testid="browse-rest-grid" style={grid}>
+                    {restKeys.map(renderCell)}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            // No query, or a query with zero matches → single unsplit grid in the
+            // default catalog order (gridKeys preserves every key incl. _orphan).
+            <div data-testid="model-grid" style={grid}>
+              {gridKeys.map(renderCell)}
+            </div>
+          )
         )}
 
       </main>

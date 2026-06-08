@@ -75,12 +75,12 @@ describe('CollectionCard', () => {
     expect(screen.getByTestId('collection-card-badge').textContent).not.toContain('variants');
   });
 
-  it('navigates to /collection/<collectionId> on click', () => {
+  it('navigates to /collection/<collectionId> via the text body link (not the preview)', () => {
     renderCard({
       collectionId: '0xdeadbeef',
       variants: [makeModel()],
     });
-    const link = screen.getByTestId('collection-card-0xdeadbeef') as HTMLAnchorElement;
+    const link = screen.getByTestId('collection-card-link-0xdeadbeef') as HTMLAnchorElement;
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('href')).toBe('/collection/0xdeadbeef');
   });
@@ -90,8 +90,22 @@ describe('CollectionCard', () => {
       collectionId: '_orphan:0xstand',
       variants: [makeModel({ objectId: '0xstand', collectionId: '', patchId: '', blobId: '', glbBlobId: 'g' })],
     });
-    const link = screen.getByTestId('collection-card-_orphan:0xstand') as HTMLAnchorElement;
+    const link = screen.getByTestId('collection-card-link-_orphan:0xstand') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/model/0xstand');
+  });
+
+  it('keeps the preview well OUT of the navigation link (drag-to-rotate, no detail jump)', () => {
+    renderCard({ collectionId: '0xc', variants: [makeModel()] });
+    const card = screen.getByTestId('collection-card-0xc');
+    const preview = screen.getByTestId('collection-card-preview');
+    const link = screen.getByTestId('collection-card-link-0xc');
+    // Card root is a plain container, not an anchor.
+    expect(card.tagName).toBe('DIV');
+    // The preview is a sibling of the link, never nested inside it — so a click
+    // (or drag) on the 3D well cannot trigger navigation.
+    expect(link.contains(preview)).toBe(false);
+    expect(card.contains(preview)).toBe(true);
+    expect(card.contains(link)).toBe(true);
   });
 
   it('preview canvas uses Walrus quilt-patch URL when patchId is set', () => {
