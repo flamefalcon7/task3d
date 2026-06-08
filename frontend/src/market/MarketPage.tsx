@@ -160,7 +160,8 @@ const cardName: CSSProperties = {
   fontStyle: 'italic',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
-  color: tokens.color.ink,
+  // No inline color: inherits ink, so the `.nav-name` :hover accent rule can win
+  // (an inline color would out-specify the CSS hover).
 };
 
 const cardMeta: CSSProperties = {
@@ -490,23 +491,16 @@ export function MarketPage() {
                 const royalty = royaltyOwedMist(l.priceMist);
                 const total = l.priceMist + royalty;
                 const royaltyPct = (Number(royalty) / Number(l.priceMist)) * 100;
-                const preview = (
-                  <>
-                    <div style={cardWell}>
-                      {l.patchId ? (
-                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
-                      ) : (
-                        <span style={cardWellPlaceholder}>— NO PREVIEW</span>
-                      )}
-                      <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(visibleListings.length).padStart(3, '0')}</span>
-                      <span style={cardLayerBadge}>L2 NFT</span>
-                    </div>
-                    <div>
-                      <div style={cardName}>{l.name || truncate(l.tokenId)}</div>
-                      <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
-                      <div style={cardDetailHint}>VIEW DETAILS →</div>
-                    </div>
-                  </>
+                const well = (
+                  <div style={cardWell} data-testid={`listing-preview-${l.tokenId}`}>
+                    {l.patchId ? (
+                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
+                    ) : (
+                      <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                    )}
+                    <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(visibleListings.length).padStart(3, '0')}</span>
+                    <span style={cardLayerBadge}>L2 NFT</span>
+                  </div>
                 );
                 return (
                   <div
@@ -514,13 +508,21 @@ export function MarketPage() {
                     data-testid={`listing-${l.tokenId}`}
                     style={gridCell}
                   >
+                    {/* Interactive 3D preview — kept OUTSIDE the details link so a
+                        click/drag to rotate it doesn't navigate to the detail page. */}
+                    {well}
                     <Link
                       to={`/nft/${l.tokenId}`}
                       data-testid={`listing-details-${l.tokenId}`}
                       aria-label={`View details for ${l.name || l.tokenId}`}
+                      className="nav-link"
                       style={cardLink}
                     >
-                      {preview}
+                      <div>
+                        <div style={cardName} className="nav-name">{l.name || truncate(l.tokenId)}</div>
+                        <div style={cardMeta}>KIOSK {truncate(l.kioskId)}</div>
+                        <div style={cardDetailHint}>VIEW DETAILS →</div>
+                      </div>
                     </Link>
                     <div style={priceRow}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -561,33 +563,33 @@ export function MarketPage() {
           {sellable.length > 0 && (
             <div style={cardGrid}>
               {sellable.map((t, idx) => {
-                const preview = (
-                  <>
-                    <div style={cardWell}>
-                      {t.patchId || t.blobId ? (
-                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
-                      ) : (
-                        <span style={cardWellPlaceholder}>— NO PREVIEW</span>
-                      )}
-                      <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
-                      <span style={cardLayerBadge}>YOURS</span>
-                    </div>
-                    <div>
-                      <div style={cardName}>{t.name || truncate(t.tokenId)}</div>
-                      <div style={cardMeta}>{truncate(t.tokenId)}</div>
-                      <div style={cardDetailHint}>VIEW DETAILS →</div>
-                    </div>
-                  </>
+                const well = (
+                  <div style={cardWell} data-testid={`owned-preview-${t.tokenId}`}>
+                    {t.patchId || t.blobId ? (
+                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                    ) : (
+                      <span style={cardWellPlaceholder}>— NO PREVIEW</span>
+                    )}
+                    <span style={cardCounter}>{String(idx + 1).padStart(3, '0')}/{String(sellable.length).padStart(3, '0')}</span>
+                    <span style={cardLayerBadge}>YOURS</span>
+                  </div>
                 );
                 return (
                 <div key={t.tokenId} data-testid={`owned-${t.tokenId}`} style={gridCell}>
+                  {/* Interactive 3D preview — outside the details link (rotate ≠ navigate). */}
+                  {well}
                   <Link
                     to={`/nft/${t.tokenId}`}
                     data-testid={`owned-details-${t.tokenId}`}
                     aria-label={`View details for ${t.name || t.tokenId}`}
+                    className="nav-link"
                     style={cardLink}
                   >
-                    {preview}
+                    <div>
+                      <div style={cardName} className="nav-name">{t.name || truncate(t.tokenId)}</div>
+                      <div style={cardMeta}>{truncate(t.tokenId)}</div>
+                      <div style={cardDetailHint}>VIEW DETAILS →</div>
+                    </div>
                   </Link>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: tokens.border.divider }}>
                     <input

@@ -125,13 +125,24 @@ describe('MarketPage', () => {
     expect(screen.getByTestId('no-listings')).toBeTruthy();
   });
 
-  it('links the listing preview to its single-NFT detail page (buy button excluded)', () => {
+  it('links the listing title to its single-NFT detail page (buy button excluded)', () => {
     useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
     renderPage();
     const link = screen.getByTestId(`listing-details-${TOKEN}`) as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe(`/nft/${TOKEN}`);
     // Clicking BUY must not also navigate — the button lives outside the link.
     expect(screen.getByTestId(`buy-${TOKEN}`).closest('a')).toBeNull();
+  });
+
+  it('keeps the 3D preview OUTSIDE the details link (drag-to-rotate, no navigation)', () => {
+    useListingsMock.mockReturnValue({ listings: [listing()], loading: false, error: null });
+    renderPage();
+    const preview = screen.getByTestId(`listing-preview-${TOKEN}`);
+    const link = screen.getByTestId(`listing-details-${TOKEN}`);
+    // The preview well is a sibling of the link, never nested inside it — so a
+    // click/drag on the 3D well cannot trigger a route change.
+    expect(link.contains(preview)).toBe(false);
+    expect(preview.closest('a')).toBeNull();
   });
 
   it('renders a listing and buys it via the purchase builder', async () => {

@@ -1514,8 +1514,15 @@ export function LaunchCollectionPage() {
                         PreviewCanvas; PreviewCanvas's default BgTogglePill is
                         itself a <button>, producing a hydration-error nested
                         <button>-in-<button> (caught in dev console). The pill
-                        also reads as visual noise on a ~150 px thumbnail. */}
-                    <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
+                        also reads as visual noise on a ~150 px thumbnail.
+                        stopPropagation: a click on the 3D preview should rotate
+                        the model (drag) without selecting this base — picking
+                        happens by clicking the card body below. */}
+                    <div
+                      style={baseOptionPreview}
+                      data-testid={`base-option-preview-${m.objectId}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {previewNode}
                     </div>
                     <div style={baseOptionBody}>

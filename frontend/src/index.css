@@ -65,6 +65,20 @@ a {
   box-sizing: border-box;
 }
 
+/* Clickable card-title affordance. A card's title is the navigation target, so
+   tint it to accent on hover (and when hovering the card's link region) — the
+   colour shift tells the user the title is clickable. Titles carry no inline
+   color (they inherit ink), so these :hover rules win without a specificity
+   fight. Accent here is a transient interaction state, not a static-budget fill
+   (D-044). */
+.nav-name {
+  transition: color 0.12s ease;
+}
+.nav-name:hover,
+.nav-link:hover .nav-name {
+  color: var(--accent);
+}
+
 /* Loading spinner — used by the Seal decrypt indicator (ModelDetailPage) and any
    small inline loader. The class was referenced but never defined, so the decrypt
    "spinner" rendered invisibly (only the text showed → felt frozen). */

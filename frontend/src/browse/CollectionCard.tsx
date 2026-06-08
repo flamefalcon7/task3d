@@ -229,9 +229,10 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
       <Link
         to={to}
         data-testid={`collection-card-link-${collectionId}`}
+        className="nav-link"
         style={{ ...bodyStyle, ...bodyLinkStyle }}
       >
-        <div data-testid="collection-card-name" style={nameStyle}>{name}</div>
+        <div data-testid="collection-card-name" className="nav-name" style={nameStyle}>{name}</div>
         <div style={creatorStyle}>
           BY <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
         </div>
