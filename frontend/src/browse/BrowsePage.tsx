@@ -255,10 +255,15 @@ export function BrowsePage() {
   const { session } = useSession();
   const { personal, global } = useMemoryRecall();
   const [searchQuery, setSearchQuery] = useState('');
+  // session?.address is in the deps so an in-page auth transition (sign in /
+  // account switch) RE-ISSUES the active query: the hook clears its lanes on
+  // auth change, and without this the grid would sit on a stale "showing all"
+  // until the next keystroke. recall identities are stable useCallbacks, so the
+  // effect only re-fires on query or auth change, never per render.
   useEffect(() => {
     personal.recall(searchQuery);
     global.recall(searchQuery);
-  }, [searchQuery, personal.recall, global.recall]);
+  }, [searchQuery, personal.recall, global.recall, session?.address]);
 
   const { orderedKeys, cardMatches } = useMemo(
     () => rankCollectionMatches(personal.chips, global.chips, collectionGroups),
@@ -280,6 +285,13 @@ export function BrowsePage() {
     !searchDegraded &&
     cardMatches.size === 0 &&
     collectionGroups.size > 0;
+
+  // searchActive is the single source of truth for the grid: a sub-3-char or
+  // cleared query renders the default catalog order with no rings, even if a
+  // debounced recall response for a prior query is momentarily still in state.
+  // This keeps the grid order/highlight and the text micro-statuses (which are
+  // all gated on searchActive) from ever disagreeing for a frame.
+  const gridKeys = searchActive ? orderedKeys : Array.from(collectionGroups.keys());
 
   return (
     <div style={pagePaper} data-testid="browse-page">
@@ -480,15 +492,23 @@ export function BrowsePage() {
                 including `_orphan:` keys — is present, so no card vanishes (R9).
                 Reorder is instantaneous (no layout transition); the ring +
                 reason line is the only promotion signal. */}
-            {orderedKeys.map((cid) => (
-              <div key={cid} style={gridCell}>
-                <CollectionCard
-                  collectionId={cid}
-                  variants={collectionGroups.get(cid)!}
-                  match={cardMatches.get(cid)}
-                />
-              </div>
-            ))}
+            {gridKeys.map((cid) => {
+              // Defensive: gridKeys ⊆ collectionGroups.keys() by construction
+              // (rankCollectionMatches only ever returns input keys), but guard
+              // the lookup so a future memo-dep skew degrades to a skipped card
+              // rather than crashing the whole grid on a null variants[0].
+              const variants = collectionGroups.get(cid);
+              if (!variants) return null;
+              return (
+                <div key={cid} style={gridCell}>
+                  <CollectionCard
+                    collectionId={cid}
+                    variants={variants}
+                    match={searchActive ? cardMatches.get(cid) : undefined}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
 

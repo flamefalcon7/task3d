@@ -309,6 +309,14 @@ describe('BrowsePage', () => {
     expect(screen.queryByTestId('browse-search-signin')).toBeNull();
   });
 
+  it('hides the search field in the integration view even when signed in', () => {
+    // The whole browse-search row is gated on !integrationFilter.
+    mockHook({ models: [makeModel()] });
+    renderPage('/browse?filter=integration');
+    expect(screen.queryByTestId('browse-search')).toBeNull();
+    expect(screen.queryByTestId('browse-search-input')).toBeNull();
+  });
+
   it('AE1: a semantic match promotes its collection to the front with a reason, others stay visible', () => {
     memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
     mockHook({
@@ -337,7 +345,7 @@ describe('BrowsePage', () => {
     expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('my own race car');
   });
 
-  it('AE5: search reorders only within the tag-filtered subset (a tag-excluded match is not resurrected)', () => {
+  it('AE5: a tag-excluded match is not resurrected by search', () => {
     // 0xb matches semantically but is tagged 'armor'; filtering to 'weapon'
     // must keep it hidden — search never un-hides a tag-excluded card.
     memoryRecallState.global = lane([hit('0xb', 0.2, 'armored thing')]);
@@ -351,6 +359,25 @@ describe('BrowsePage', () => {
     fireEvent.change(screen.getByTestId('tag-filter'), { target: { value: 'weapon' } });
     expect(screen.getByTestId('collection-card-0xc-a')).toBeTruthy();
     expect(screen.queryByTestId('collection-card-0xc-b')).toBeNull();
+  });
+
+  it('AE5: a match WITHIN the tag-filtered subset still promotes to the front', () => {
+    // Both cards carry 'weapon'; only 0xw2 matches → it must promote ahead of
+    // 0xw1 while the tag filter is active (proves reorder works post-filter).
+    memoryRecallState.global = lane([hit('0xw2', 0.2, 'a sharp blade')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xw1', collectionId: '0xc-w1', tags: ['weapon'] }),
+        makeModel({ objectId: '0xw2', collectionId: '0xc-w2', tags: ['weapon'] }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('tag-filter'), { target: { value: 'weapon' } });
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'a sharp blade' } });
+    const matched = screen.getByTestId('collection-card-0xc-w2');
+    const other = screen.getByTestId('collection-card-0xc-w1');
+    expect(precedes(matched, other)).toBe(true);
+    expect(screen.getByTestId('collection-card-match-reason')).toBeTruthy();
   });
 
   it('AE6 / R9: a zero-match query keeps the full grid in default order, no "no results" state', () => {
@@ -371,21 +398,45 @@ describe('BrowsePage', () => {
     expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
   });
 
-  it('R10: a degraded recall scope surfaces the degraded note, not an empty grid', () => {
+  it('R10: a degraded recall scope surfaces the degraded note, not an empty grid, and suppresses showing-all', () => {
     memoryRecallState.global = lane([], { degraded: true });
     mockHook({ models: [makeModel({ objectId: '0xa', collectionId: '0xc-a' })] });
     renderPage();
     fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
     expect(screen.getByTestId('browse-search-degraded')).toBeTruthy();
     expect(screen.getByTestId('collection-card-0xc-a')).toBeTruthy();
+    // Mutual exclusion: degraded suppresses showing-all (the !searchDegraded gate).
+    expect(screen.queryByTestId('browse-search-showing-all')).toBeNull();
   });
 
-  it('shows the loading micro-status while a scope is loading', () => {
-    memoryRecallState.global = lane([], { status: 'loading' });
+  it('shows the loading micro-status while a scope is loading, suppressing degraded + showing-all', () => {
+    memoryRecallState.global = lane([], { status: 'loading', degraded: true });
     mockHook({ models: [makeModel()] });
     renderPage();
     fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
     expect(screen.getByTestId('browse-search-loading')).toBeTruthy();
+    // loading gates both other statuses off (no contradictory co-render).
+    expect(screen.queryByTestId('browse-search-degraded')).toBeNull();
+    expect(screen.queryByTestId('browse-search-showing-all')).toBeNull();
+  });
+
+  it('Escape clears the query (and the active match clears with it)', () => {
+    memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b' }),
+      ],
+    });
+    renderPage();
+    const inputEl = screen.getByTestId('browse-search-input') as HTMLInputElement;
+    fireEvent.change(inputEl, { target: { value: 'race car' } });
+    expect(screen.getByTestId('collection-card-match-reason')).toBeTruthy();
+    fireEvent.keyDown(inputEl, { key: 'Escape' });
+    // Query cleared → searchActive false → grid back to default, no rings.
+    expect(inputEl.value).toBe('');
+    expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
+    expect(screen.queryByTestId('browse-search-showing-all')).toBeNull();
   });
 
   it('tag-aware copy: showing-all drops the "showing all" lead when a tag filter is active', () => {
@@ -424,7 +475,11 @@ describe('BrowsePage', () => {
     expect(screen.getByTestId('browse-search-input')).toBeTruthy();
   });
 
-  it('StrictMode: commits search results (recall mounted-ref guard)', () => {
+  // NOTE: this proves BrowsePage's OWN search wiring (effect + memo + render) is
+  // StrictMode-idempotent under the double-invoke — it does NOT guard the recall
+  // hook's mounted-ref, which is mocked out here. That guard lives in
+  // useMemoryRecall.test.ts ('commits async recall correctly under StrictMode').
+  it('StrictMode: BrowsePage search wiring renders results under the double-invoke', () => {
     memoryRecallState.global = lane([hit('0xb', 0.3, 'a fast race car')]);
     mockHook({
       models: [

@@ -178,6 +178,12 @@ describe('rankCollectionMatches', () => {
     expect(cardMatches.get('0xweak')?.strong).toBe(false);
   });
 
+  it('treats a hit exactly at STRONG_MATCH_DISTANCE as weak (pins the strict < operator)', () => {
+    const g = groups([['0xc-a', [makeModel({ objectId: '0xa', collectionId: '0xc-a' })]]]);
+    const { cardMatches } = rankCollectionMatches([], [hit('0xa', STRONG_MATCH_DISTANCE)], g);
+    expect(cardMatches.get('0xc-a')?.strong).toBe(false);
+  });
+
   it('preserves synthetic _orphan:<objectId> keys verbatim', () => {
     const g = groups([
       ['_orphan:0xo', [makeModel({ objectId: '0xo', collectionId: '' })]],
