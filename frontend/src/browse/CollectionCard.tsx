@@ -6,6 +6,7 @@ import { PreviewCanvas } from '../babylon/PreviewCanvas';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
 import { TurntablePreview } from '../ux/TurntablePreview';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
+import type { BaseMatch } from './browseSearchRanking';
 
 // CollectionCard is the Browse grid card (U5): one card per Collection — its
 // preview/name/description are derived from the first variant in the group, and
@@ -17,6 +18,10 @@ import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 interface Props {
   collectionId: string;
   variants: Model3DSummary[]; // 1..16
+  // plan 2026-06-08-002 U2 — set by /browse semantic search when this card's
+  // closest variant matched the query. Drives the highlight ring + reason line.
+  // Undefined when there's no query match (the default catalog card).
+  match?: BaseMatch;
 }
 
 function truncate(addr: string, head = 6, tail = 4): string {
@@ -108,6 +113,33 @@ const descriptionStyle: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+// plan 2026-06-08-002 U2 — semantic-search match highlight, mirroring /launch's
+// matchRing/MatchReason. Non-accent only (D-044 rations #FF4500): a strong match
+// (distance < STRONG_MATCH_DISTANCE) rings in ink, a weak match in subtle gray.
+// The 2px ring COEXISTS with linkStyle's 1.5px ink border as a composite frame —
+// it is spread on top, never replacing the border. No ring when match is absent.
+function matchRing(match: BaseMatch | undefined): CSSProperties {
+  if (!match) return {};
+  return { boxShadow: `0 0 0 2px ${match.strong ? tokens.color.ink : tokens.color.subtle}` };
+}
+
+function truncateReason(s: string): string {
+  return s.length > 48 ? `${s.slice(0, 47)}…` : s;
+}
+
+// "Why it matched" — the matching variant's prompt/caption. Bolder (ink) for a
+// strong match, muted (hint) otherwise.
+function MatchReason({ match }: { match: BaseMatch }) {
+  return (
+    <div
+      data-testid="collection-card-match-reason"
+      style={{ ...descriptionStyle, color: match.strong ? tokens.color.ink : tokens.color.hint }}
+    >
+      ↳ {truncateReason(match.reason)}
+    </div>
+  );
+}
+
 const priceRow: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
@@ -127,7 +159,7 @@ const priceStyle: CSSProperties = {
   fontWeight: tokens.weight.medium,
 };
 
-export function CollectionCard({ collectionId, variants }: Props) {
+export function CollectionCard({ collectionId, variants, match }: Props) {
   const first = variants[0]!;
   const name = collectionNameFromVariants(variants);
   const variantCount = variants.length;
@@ -144,7 +176,11 @@ export function CollectionCard({ collectionId, variants }: Props) {
   const to = isStandalone ? `/model/${first.objectId}` : `/collection/${collectionId}`;
 
   return (
-    <Link to={to} data-testid={`collection-card-${collectionId}`} style={linkStyle}>
+    <Link
+      to={to}
+      data-testid={`collection-card-${collectionId}`}
+      style={{ ...linkStyle, ...matchRing(match) }}
+    >
       <div style={wellStyle} data-testid="collection-card-preview">
         {/* One Babylon canvas per card. Browsers cap WebGL contexts at
             ~8-16 per page — if the marketplace grows past ~6 cards, later
@@ -178,10 +214,17 @@ export function CollectionCard({ collectionId, variants }: Props) {
         <div style={creatorStyle}>
           BY <span data-testid="collection-card-creator">{truncate(first.creator)}</span>
         </div>
-        {description && (
-          <div data-testid="collection-card-description" style={descriptionStyle}>
-            {description.text}
-          </div>
+        {/* Dedupe (mirrors /launch): when a query match exists, the MatchReason
+            already shows the matching variant's prompt — suppress the static
+            description snippet so the prompt isn't shown twice. */}
+        {match ? (
+          <MatchReason match={match} />
+        ) : (
+          description && (
+            <div data-testid="collection-card-description" style={descriptionStyle}>
+              {description.text}
+            </div>
+          )
         )}
         <div style={priceRow}>
           <span style={shapeChip}>{first.shapeType}</span>

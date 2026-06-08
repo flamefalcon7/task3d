@@ -13,6 +13,7 @@ vi.mock('../babylon/PreviewCanvas', () => ({
 }));
 
 import { CollectionCard } from './CollectionCard';
+import type { BaseMatch } from './browseSearchRanking';
 
 function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
   return {
@@ -40,7 +41,11 @@ function makeModel(overrides: Partial<Model3DSummary> = {}): Model3DSummary {
   };
 }
 
-function renderCard(props: { collectionId: string; variants: Model3DSummary[] }) {
+function renderCard(props: {
+  collectionId: string;
+  variants: Model3DSummary[];
+  match?: BaseMatch;
+}) {
   return render(
     <MemoryRouter>
       <CollectionCard {...props} />
@@ -187,5 +192,69 @@ describe('CollectionCard', () => {
       variants: [makeModel({ paramsJson: JSON.stringify({ source: 'upload' }) })],
     });
     expect(screen.queryByTestId('collection-card-description')).toBeNull();
+  });
+
+  // plan 2026-06-08-002 U2 — semantic-search match highlight + reason.
+  const strongMatch: BaseMatch = { distance: 0.2, strong: true, reason: 'a fast race car' };
+  const weakMatch: BaseMatch = { distance: 0.6, strong: false, reason: 'a slow tractor' };
+
+  it('renders the match reason and a ring when a match prop is given (AE1)', () => {
+    renderCard({
+      collectionId: '0xdeadbeef',
+      variants: [makeModel({ paramsJson: JSON.stringify({ prompt: 'a fast race car' }) })],
+      match: strongMatch,
+    });
+    expect(screen.getByTestId('collection-card-match-reason').textContent).toContain('a fast race car');
+    const link = screen.getByTestId('collection-card-0xdeadbeef');
+    expect(link.style.boxShadow).toContain('2px');
+  });
+
+  it('renders a strong match reason in ink and a weak one in hint', () => {
+    const { unmount } = renderCard({
+      collectionId: '0xc-strong',
+      variants: [makeModel()],
+      match: strongMatch,
+    });
+    const strongEl = screen.getByTestId('collection-card-match-reason');
+    const strongColor = strongEl.style.color;
+    unmount();
+    renderCard({ collectionId: '0xc-weak', variants: [makeModel()], match: weakMatch });
+    const weakColor = screen.getByTestId('collection-card-match-reason').style.color;
+    // Distinct treatments: strong (ink) ≠ weak (hint).
+    expect(strongColor).not.toBe(weakColor);
+    expect(strongColor).toBeTruthy();
+  });
+
+  it('suppresses the static description snippet when a match is present (dedupe)', () => {
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel({ paramsJson: JSON.stringify({ prompt: 'a fast race car' }) })],
+      match: strongMatch,
+    });
+    expect(screen.queryByTestId('collection-card-description')).toBeNull();
+    expect(screen.getByTestId('collection-card-match-reason')).toBeTruthy();
+  });
+
+  it('renders no ring and no match reason when match is undefined (existing-card regression)', () => {
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel({ paramsJson: JSON.stringify({ prompt: 'a fast race car' }) })],
+    });
+    expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
+    expect(screen.getByTestId('collection-card-0xcoll').style.boxShadow).toBe('');
+    // The static description snippet still shows when there's no match.
+    expect(screen.getByTestId('collection-card-description').textContent).toBe('a fast race car');
+  });
+
+  it('ellipsis-truncates a long match reason', () => {
+    const longReason = 'x'.repeat(80);
+    renderCard({
+      collectionId: '0xcoll',
+      variants: [makeModel()],
+      match: { distance: 0.2, strong: true, reason: longReason },
+    });
+    const text = screen.getByTestId('collection-card-match-reason').textContent ?? '';
+    expect(text).toContain('…');
+    expect(text.length).toBeLessThan(longReason.length);
   });
 });
