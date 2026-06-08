@@ -9,7 +9,7 @@
 Phase 4 — feature/UX polish. **No git remote** — "shipping" = local commits/branches.
 
 ### Completed This Session (UX follow-ups, continuing `feat/browse-semantic-search`)
-- **Search results split** (`/browse`): an active query with matches now renders a labeled **RESULTS** band over the matched cards, separated from an **ALL MODELS** band (rest stays visible, R9 no-hide). No query / zero matches → single grid. (`BrowsePage` `splitView`.)
+- **Search results split** on BOTH `/browse` and `/launch`: an active query with matches renders a labeled **RESULTS** band over the matched cards, separated from an **ALL MODELS** / **MORE BASES** band (rest stays visible, R9 no-hide). No query / zero matches → single grid. (`BrowsePage` `splitView`; `LaunchCollectionPage` `baseSplitView` with the card render extracted into `renderBaseCard`.)
 - **Preview wells are drag-only, no nav-hijack** across `/browse` + `/market` + `/launch`:
   - Card root is a container; the **text body/title is the detail `<Link>`**, the 3D preview well is a sibling (Babylon `ArcRotateCamera.attachControl` already gives orbit). A stationary click on the preview no longer navigates (browse/market) or selects the base (`/launch` uses `onClick stopPropagation` on the base-option preview).
 - **Accent hover cue on clickable card titles** (`/browse` + `/market` + `/launch` launchable base): new `.nav-name` / `.nav-link:hover .nav-name` rule in `frontend/src/index.css`; titles carry no inline color so the `:hover { color: var(--accent) }` wins (had to drop inline `color` from `cardName`/`baseOptionName`). Verified live in DOM on `/browse` (class applied + rule loaded).
