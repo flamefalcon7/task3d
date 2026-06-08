@@ -187,6 +187,24 @@ const basePickerGrid: CSSProperties = {
   gap: 12,
 };
 
+// Split-search section headers (mirrors /browse): a RESULTS band over the
+// matched bases, then a MORE BASES band over the rest.
+const baseSectionHeading: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.ink,
+  letterSpacing: '1.5px',
+  marginBottom: 12,
+};
+const baseRestHeading: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  letterSpacing: '1.5px',
+  marginTop: 28,
+  marginBottom: 12,
+  paddingTop: 14,
+  borderTop: tokens.border.primary,
+};
+
 function baseOptionStyle(active: boolean): CSSProperties {
   return {
     ...card,
@@ -508,6 +526,11 @@ export function LaunchCollectionPage() {
     baseQueryActive && !baseSearchLoading && (personalRecall.degraded || globalRecall.degraded);
   const baseSearchShowingAll =
     baseQueryActive && !baseSearchLoading && !baseSearchDegraded && baseMatches.size === 0;
+  // Split the base picker like /browse: matched bases in a RESULTS band,
+  // separated from the rest. Only splits when a query actually matched.
+  const matchedBases = orderedForkable.filter((m) => baseMatches.has(m.objectId));
+  const restBases = orderedForkable.filter((m) => !baseMatches.has(m.objectId));
+  const baseSplitView = baseQueryActive && matchedBases.length > 0;
 
   // plan-027 U10 / D-078 — which forkable bases the wallet already holds an
   // AccessEntitlement for. RESTRICTED bases are filtered upstream (useModelIndex),
@@ -1422,8 +1445,8 @@ export function LaunchCollectionPage() {
                   </div>
                 </div>
               )}
-              <div style={basePickerGrid}>
-              {orderedForkable.map((m) => {
+              {(() => {
+              const renderBaseCard = (m: Model3DSummary) => {
                 const picked = base?.objectId === m.objectId;
                 const match = baseMatches.get(m.objectId);
                 // plan-027 U10 / D-078 — preview thumbnail (GLB canvas for public
@@ -1536,8 +1559,26 @@ export function LaunchCollectionPage() {
                     </div>
                   </button>
                 );
-              })}
-              </div>
+              };
+              return baseSplitView ? (
+                <>
+                  <div style={baseSectionHeading} data-testid="base-results-heading">
+                    RESULTS · {matchedBases.length}
+                  </div>
+                  <div style={basePickerGrid}>{matchedBases.map(renderBaseCard)}</div>
+                  {restBases.length > 0 && (
+                    <>
+                      <div style={baseRestHeading} data-testid="base-rest-heading">
+                        MORE BASES
+                      </div>
+                      <div style={basePickerGrid}>{restBases.map(renderBaseCard)}</div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <div style={basePickerGrid}>{orderedForkable.map(renderBaseCard)}</div>
+              );
+              })()}
             </>
           )}
         </section>

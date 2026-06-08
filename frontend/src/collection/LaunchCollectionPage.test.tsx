@@ -370,6 +370,27 @@ describe('LaunchCollectionPage', () => {
     expect(screen.getByTestId('base-option-0xcc')).toBeTruthy();
   });
 
+  it('splits matched bases into a RESULTS band and the rest into MORE BASES', () => {
+    threeForkable();
+    memoryRecallState.global = lane([hit('0xbb', 0.3, 'a fast race car')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-results-heading').textContent).toContain('RESULTS · 1');
+    expect(screen.getByTestId('base-rest-heading')).toBeTruthy();
+    // Matched base in the results band, ahead of the unmatched ones below.
+    expect(cardOrder()).toEqual(['base-option-0xbb', 'base-option-0xaa', 'base-option-0xcc']);
+  });
+
+  it('does not split the base grid when the query has no matches', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([], { status: 'empty' });
+    memoryRecallState.global = lane([], { status: 'empty' });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'zzzzz' } });
+    expect(screen.queryByTestId('base-results-heading')).toBeNull();
+    expect(screen.queryByTestId('base-rest-heading')).toBeNull();
+  });
+
   it('R6: the match reason shows the base creator prompt', () => {
     threeForkable();
     memoryRecallState.personal = lane([hit('0xbb', 0.3, 'a low-poly race car')]);
