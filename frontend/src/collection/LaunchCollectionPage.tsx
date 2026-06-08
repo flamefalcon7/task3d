@@ -219,7 +219,9 @@ const baseOptionName: CSSProperties = {
   fontStyle: 'italic',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
-  color: tokens.color.ink,
+  // No inline color: inherits ink, so the `.nav-name` :hover accent rule can win
+  // on the launchable (clickable) base card. Picked-summary + locked names keep
+  // the same inherited ink visual.
 };
 
 const baseOptionMeta: CSSProperties = {
@@ -1508,6 +1510,7 @@ export function LaunchCollectionPage() {
                     disabled={busy}
                     data-testid={`base-option-${m.objectId}`}
                     aria-pressed={picked}
+                    className="nav-link"
                     style={{ ...baseOptionStyle(picked), ...matchRing(match, true) }}
                   >
                     {/* bgToggle={false}: a base-option <button> wraps this
@@ -1526,7 +1529,7 @@ export function LaunchCollectionPage() {
                       {previewNode}
                     </div>
                     <div style={baseOptionBody}>
-                      <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
+                      <span style={baseOptionName} className="nav-name">{m.name || '(unnamed)'}</span>
                       {descriptionNode}
                       {metaLine}
                       <MatchReason match={match} objectId={m.objectId} launchable />
