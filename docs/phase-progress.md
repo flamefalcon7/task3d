@@ -16,12 +16,15 @@ Phase 4 — feature/UX polish. **No git remote** — "shipping" = local commits/
 - **MERGED `feat/launch-ask-model-finder` → `feat/model-description-surfacing`** (commit `ecef211`). One conflict in `LaunchCollectionPage.tsx` (kept both `baseOptionDescription` + `MatchReason`/`matchRing`). **Wired the documented dedupe**: base-option static snippet gated on `!match` — a search match shows MatchReason, suppresses the static snippet (never both). Added a dedupe test. **Full suite 1153 pass / 2 skip, tsc + build clean.**
 
 ### Next Concrete Step
-**Brainstorm/plan: reuse the AI search field on `/browse`** (user asked). Feasibility already scouted — 3 decisions to settle before coding:
-1. **Auth**: `/api/memory/recall` REQUIRES `Authorization: Bearer <jwt>` (401 without; `backend/src/routes/memory.ts:139-145`), and `useMemoryRecall` fires nothing without a session. But `/browse` is PUBLIC. → either (A) show search only when signed in [smaller/safer], or (B) make global recall public [backend change + rate-limit/abuse]. **User must answer "must logged-out users search?" first.**
-2. **Search unit**: `/browse` groups models into collections (`CollectionCard` per collection); recall returns modelIds → map matched modelId back to its collection group, reorder/highlight.
-3. **Scope**: global fits /browse (discovering others' published models) better than personal+global (which /launch uses).
-- Reusable pieces: `useMemoryRecall` (hook), `rankForkableMatches` (core merge/dedupe/sort is general despite the name), the search-box UI + reorder/highlight/MatchReason pattern.
-- User chose to **compact first, then run the brainstorm/plan process** for this.
+**Run `/ce-brainstorm` on: reuse the AI search field on `/browse`** (user asked; compacting first, brainstorm right after).
+
+**DECISION LOCKED by user — Auth = Option A: search field shows ONLY when signed in.** No backend change. Logged-out users see the plain `/browse` grid; signed-in users get the search box. (`/api/memory/recall` requires `Authorization: Bearer <jwt>`; `useMemoryRecall` no-ops without a session — so gating the UI on session is the whole story. Global recall is invoked server-side by the backend; the client only triggers it via the authed endpoint.)
+
+Two decisions still open for the brainstorm:
+1. **Search unit**: `/browse` groups models into collections (`CollectionCard` per collection); recall returns modelIds → map matched modelId back to its collection group, then reorder/highlight collection cards.
+2. **Scope**: global fits /browse (discovering OTHERS' published models) better than personal+global (which /launch uses). Likely **global-only**, but confirm whether a signed-in creator also wants their own (personal) surfaced.
+
+- Reusable pieces: `useMemoryRecall` (hook), `rankForkableMatches` (core merge/dedupe/sort is general despite the name), the search-box UI + reorder/highlight/MatchReason pattern from `LaunchCollectionPage.tsx`.
 
 ### Blockers / Open Questions
 - Browse-search auth decision (A vs B) is the gating question — ask before planning.
