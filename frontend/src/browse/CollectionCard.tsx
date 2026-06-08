@@ -74,7 +74,9 @@ const badgeStyle: CSSProperties = {
   ...monoLabel,
   position: 'absolute',
   top: 8,
-  right: 8,
+  // Top-LEFT: the PreviewCanvas BG-toggle pill lives top-right, so anchoring the
+  // variant badge left avoids the two overlapping (the pill was covering it).
+  left: 8,
   padding: '2px 8px',
   background: 'rgba(0, 0, 0, 0.75)',
   color: tokens.color.accent,
@@ -199,7 +201,10 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
             plan-026 — encrypted ALLOW_LIST bases render the public still
             instead (no GLB mesh exists publicly). */}
         {thumb.kind === 'glb' ? (
-          <PreviewCanvas glbUrl={thumb.url} />
+          // Default the well to GRAY (not D-044 black): mid-gray reads better for
+          // the mixed-tone PBR meshes in the catalog grid. Still toggleable via
+          // the BG pill (BLACK / PAPER / GRAY).
+          <PreviewCanvas glbUrl={thumb.url} defaultBg="gray" />
         ) : thumb.url ? (
           <TurntablePreview
             urls={previewStillUrlsForSummary(first)}
