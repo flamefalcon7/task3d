@@ -10,6 +10,7 @@ import { createIntegrationIndexer } from './events/integrationIndexer.js';
 import { createTripoBalancePoller } from './events/tripoBalancePoller.js';
 import { createPaymentVerifier } from './sui/paymentVerifier.js';
 import { getQuotaStore } from './lib/quota-store.js';
+import { getMemwalClient } from './lib/memwal-client.js';
 import { getSuiClient, TRIPO_FEE_TREASURY, TRIPO_FEE_MIST, TRIPO_FEE_OPERATOR } from './sui/client.js';
 
 // D-023/D-033: the only content the backend generates is Tripo prompt-mode.
@@ -85,6 +86,19 @@ if (invokedDirectly) {
     balanceProvider,
   });
   app.route('/api/auth', buildAuthRoute({ jwt }));
+  // MemWal config is OPTIONAL + fail-soft (unlike TRIPO above, which hard-fails),
+  // so a wiped backend/.env silently disables ALL memory features (/create recall
+  // chips + /launch base finder) with no error — invisible for days. Surface it
+  // LOUDLY at startup instead. backend/.env secrets are gitignored + git-
+  // unrecoverable; recovery + the no-clobber rule live in CLAUDE.md "Secrets & .env".
+  if (!getMemwalClient().configured) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '\n⚠️  MEMWAL NOT CONFIGURED — memory features INERT (/create recall + /launch base finder return empty).\n' +
+        '    Missing MEMWAL_ACCOUNT_ID / MEMWAL_DELEGATE_KEY in backend/.env.\n' +
+        '    Recover: CLAUDE.md → "Secrets & .env files" (regenerate via scripts/memwal-spike.ts).\n',
+    );
+  }
   serve({ fetch: app.fetch, port }, (info) => {
     // eslint-disable-next-line no-console
     console.log(`backend listening on http://localhost:${info.port}`);
