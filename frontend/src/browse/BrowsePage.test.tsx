@@ -17,7 +17,6 @@ vi.mock('../integration/useCollections', () => ({
 }));
 
 import { BrowsePage } from './BrowsePage';
-import { ModelCard } from './ModelCard';
 import * as hookMod from './useModelIndex';
 
 function mockHook(result: Partial<hookMod.UseModelIndexResult>): void {
@@ -234,31 +233,5 @@ describe('BrowsePage', () => {
     useCollectionsMock.mockReturnValue({ collections: [], loading: false, error: null });
     renderPage('/browse?filter=integration');
     expect(screen.getByTestId('integration-empty')).toBeTruthy();
-  });
-});
-
-// plan 2026-06-08-001 U3 — ModelCard description snippet (R4, R6).
-describe('ModelCard — description snippet', () => {
-  function renderCard(model: Model3DSummary) {
-    return render(
-      <MemoryRouter>
-        <ModelCard model={model} />
-      </MemoryRouter>,
-    );
-  }
-
-  it('AE1/R4: Tripo card shows the prompt snippet', () => {
-    renderCard(makeModel({ paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) }));
-    expect(screen.getByTestId('card-description').textContent).toBe('a low-poly red sports car');
-  });
-
-  it('AE2: captioned upload card shows the caption snippet', () => {
-    renderCard(makeModel({ paramsJson: JSON.stringify({ source: 'upload', caption: 'a chunky walrus' }) }));
-    expect(screen.getByTestId('card-description').textContent).toBe('a chunky walrus');
-  });
-
-  it('AE3/R6: uncaptioned upload card shows no snippet', () => {
-    renderCard(makeModel({ paramsJson: JSON.stringify({ source: 'upload' }) }));
-    expect(screen.queryByTestId('card-description')).toBeNull();
   });
 });

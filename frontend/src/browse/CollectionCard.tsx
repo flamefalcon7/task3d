@@ -7,9 +7,9 @@ import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/agg
 import { TurntablePreview } from '../ux/TurntablePreview';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
 
-// CollectionCard replaces ModelCard for the grouped Browse view (U5). One
-// card per Collection — its preview/name are derived from the first variant
-// in the group, and the "N variants" badge advertises the collection size.
+// CollectionCard is the Browse grid card (U5): one card per Collection — its
+// preview/name/description are derived from the first variant in the group, and
+// the "N variants" badge advertises the collection size.
 //
 // Brutalist editorial styling per D-044: paper-pure card body with 1.5px
 // ink border, pure-black viewer well, italic-serif name, mono creator/price.
