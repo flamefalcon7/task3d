@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { Model3DSummary } from '@overflow2026/shared';
+import type { Model3DSummary, RecallChip } from '@overflow2026/shared';
 
 // plan-016 U4 — LaunchCollectionPage now reads account + signer via the
 // wrapper hooks (frontend/src/wallet/*). We mock those directly so the
@@ -59,6 +59,25 @@ vi.mock('../auth/useSession', () => ({ useSession: () => useSessionMock() }));
 
 const useModelIndexMock = vi.fn();
 vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMock() }));
+
+// plan-002 U3 — the base-finder reuses memory/useMemoryRecall. The hook itself
+// is unit-tested (useMemoryRecall.test.ts); here we mock it to drive the page's
+// reorder/highlight/fail-soft wiring directly off controlled recall lanes.
+type RecallLane = {
+  chips: RecallChip[];
+  status: 'idle' | 'loading' | 'ready' | 'empty';
+  degraded: boolean;
+  recall: ReturnType<typeof vi.fn>;
+};
+let memoryRecallState: { personal: RecallLane; global: RecallLane };
+const memoryRecallMock = vi.fn(() => memoryRecallState);
+vi.mock('../memory/useMemoryRecall', () => ({ useMemoryRecall: () => memoryRecallMock() }));
+function lane(chips: RecallChip[] = [], opts: { status?: RecallLane['status']; degraded?: boolean } = {}): RecallLane {
+  return { chips, status: opts.status ?? (chips.length ? 'ready' : 'idle'), degraded: opts.degraded ?? false, recall: vi.fn() };
+}
+function hit(modelId: string, distance: number, prompt = 'a prompt', creator?: string): RecallChip {
+  return { modelId, distance, prompt, ...(creator ? { creator } : {}) };
+}
 
 const uploadFilesMock = vi.fn();
 vi.mock('../walrus/useWalrusUpload', () => ({
@@ -260,6 +279,7 @@ beforeEach(() => {
   clearSessionMock.mockReset();
   useSessionMock.mockReturnValue({ session: { address: ADDR, jwt: 'jwt-token' }, clearSession: clearSessionMock });
   useModelIndexMock.mockReturnValue({ models: [summary()], loading: false, error: null, refetch: vi.fn() });
+  memoryRecallState = { personal: lane(), global: lane() };
   uploadFilesMock.mockReset();
   signAndExecuteMock.mockReset();
   signPersonalMessageMock.mockReset();
@@ -310,6 +330,164 @@ describe('LaunchCollectionPage', () => {
     useModelIndexMock.mockReturnValue({ models: [], loading: false, error: null, refetch: vi.fn() });
     renderPage();
     expect(screen.getByTestId('no-base-models')).toBeTruthy();
+  });
+
+  // ---- plan-002 U3: natural-language base finder ----
+  function threeForkable() {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xaa', name: 'Alpha', glbBlobId: 'g1' }),
+        summary({ objectId: '0xbb', name: 'Beta', glbBlobId: 'g2' }),
+        summary({ objectId: '0xcc', name: 'Gamma', glbBlobId: 'g3' }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  }
+  const cardOrder = () =>
+    screen.getAllByTestId(/^base-option-0x[a-c]{2}$/).map((el) => el.getAttribute('data-testid'));
+
+  it('AE1/F1: typing fires recall and reorders matched bases to the front', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([hit('0xbb', 0.3, 'a fast race car')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(memoryRecallState.personal.recall).toHaveBeenCalledWith('race car');
+    expect(memoryRecallState.global.recall).toHaveBeenCalledWith('race car');
+    expect(cardOrder()).toEqual(['base-option-0xbb', 'base-option-0xaa', 'base-option-0xcc']);
+  });
+
+  it('AE2/R5: a single match is highlighted but all bases stay selectable', () => {
+    threeForkable();
+    memoryRecallState.global = lane([hit('0xbb', 0.3, 'race car', '0xc2')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-match-reason-0xbb')).toBeTruthy();
+    // R5 — nothing removed: all three cards still present + clickable.
+    expect(screen.getByTestId('base-option-0xaa')).toBeTruthy();
+    expect(screen.getByTestId('base-option-0xbb')).toBeTruthy();
+    expect(screen.getByTestId('base-option-0xcc')).toBeTruthy();
+  });
+
+  it('R6: the match reason shows the base creator prompt', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([hit('0xbb', 0.3, 'a low-poly race car')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-match-reason-0xbb').textContent).toContain('low-poly race car');
+  });
+
+  it('AE3/F2: a query with no matches shows the "showing all" note and the full grid', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([], { status: 'empty' });
+    memoryRecallState.global = lane([], { status: 'empty' });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'zzzzz' } });
+    expect(screen.getByTestId('base-search-showing-all')).toBeTruthy();
+    expect(cardOrder()).toEqual(['base-option-0xaa', 'base-option-0xbb', 'base-option-0xcc']);
+  });
+
+  it('degraded scope surfaces the honest note, not presented as a complete reorder', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([hit('0xbb', 0.3, 'race car')]);
+    memoryRecallState.global = lane([], { degraded: true });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-search-degraded')).toBeTruthy();
+    expect(screen.queryByTestId('base-search-showing-all')).toBeNull();
+  });
+
+  it('shows a searching indicator while a scope is in flight', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([], { status: 'loading' });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race' } });
+    expect(screen.getByTestId('base-search-loading')).toBeTruthy();
+  });
+
+  it('R8: the coverage hint is always present when the search box is shown', () => {
+    threeForkable();
+    renderPage();
+    expect(screen.getByTestId('base-search-hint')).toBeTruthy();
+    expect(screen.getByTestId('base-search-input')).toBeTruthy();
+  });
+
+  it('clearing the input fires recall with the empty value (reset path)', () => {
+    threeForkable();
+    renderPage();
+    const input = screen.getByTestId('base-search-input');
+    fireEvent.change(input, { target: { value: 'race' } });
+    fireEvent.change(input, { target: { value: '' } });
+    expect(memoryRecallState.personal.recall).toHaveBeenLastCalledWith('');
+  });
+
+  it('distinguishes a strong match from a weak one (ring + reason color differ)', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([hit('0xaa', 0.3, 'strong'), hit('0xbb', 0.6, 'weak')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    const strongCard = screen.getByTestId('base-option-0xaa');
+    const weakCard = screen.getByTestId('base-option-0xbb');
+    expect(strongCard.style.boxShadow).not.toBe(weakCard.style.boxShadow); // ink vs subtle ring
+    expect(screen.getByTestId('base-match-reason-0xaa').style.color).not.toBe(
+      screen.getByTestId('base-match-reason-0xbb').style.color,
+    );
+  });
+
+  it('suppresses notes when the query drops below 3 chars, even with degraded lane state', () => {
+    threeForkable();
+    memoryRecallState.global = lane([], { degraded: true });
+    memoryRecallState.personal = lane([], { status: 'empty' });
+    renderPage();
+    const input = screen.getByTestId('base-search-input');
+    fireEvent.change(input, { target: { value: 'race' } }); // active
+    fireEvent.change(input, { target: { value: 'ra' } }); // below MIN_QUERY_LEN
+    expect(screen.queryByTestId('base-search-degraded')).toBeNull();
+    expect(screen.queryByTestId('base-search-showing-all')).toBeNull();
+    expect(screen.getByTestId('base-search-hint')).toBeTruthy(); // static hint still shown
+  });
+
+  it('never shows the searching and degraded notes together (no contradiction)', () => {
+    threeForkable();
+    memoryRecallState.personal = lane([], { status: 'loading' });
+    memoryRecallState.global = lane([], { degraded: true });
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    expect(screen.getByTestId('base-search-loading')).toBeTruthy();
+    expect(screen.queryByTestId('base-search-degraded')).toBeNull(); // gated on !loading
+  });
+
+  it('discards the search query when a base is picked (CHANGE re-opens unsearched)', async () => {
+    threeForkable();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })));
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xaa'));
+    });
+    await waitFor(() => expect(screen.getByTestId('base-picker-change')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('base-picker-change'));
+    expect((screen.getByTestId('base-search-input') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a matched LOCKED card gets the reason badge but stays non-clickable', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xaa', name: 'Alpha', glbBlobId: 'g1' }),
+        summary({ objectId: '0xbb', name: 'Locked', glbBlobId: 'cipher', isEncrypted: true, policy: 1 }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    memoryRecallState.global = lane([hit('0xbb', 0.3, 'rare locked car', '0xc2')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'rare car' } });
+    expect(screen.getByTestId('base-option-locked-card-0xbb')).toBeTruthy();
+    expect(screen.getByTestId('base-match-reason-0xbb')).toBeTruthy();
+    // locked ≠ forkable: no clickable fork button for the locked base.
+    expect(screen.queryByTestId('base-option-0xbb')).toBeNull();
   });
 
   it('picking a base fetches its GLB from the aggregator and reveals the authoring step', async () => {
@@ -1929,9 +2107,8 @@ describe('LaunchCollectionPage — creator forks their OWN encrypted ALLOW_LIST 
 });
 
 // plan 2026-06-08-001 U3 — base-option description snippets + picked-base
-// preview caption (R4, R5, R6). NOTE: the search match-reason dedupe is moot on
-// this branch — the base-finder (plan-002) is not merged here, so there is no
-// match state to suppress against (merge-seam comment in the component).
+// preview caption (R4, R5, R6) + the plan-002 merge dedupe (a card with a
+// search match shows the MatchReason, never also the static snippet).
 describe('LaunchCollectionPage — description snippets', () => {
   it('R4: a launchable base with a prompt shows the snippet on its base-option card', () => {
     useModelIndexMock.mockReturnValue({
@@ -1969,6 +2146,28 @@ describe('LaunchCollectionPage — description snippets', () => {
     });
     renderPage();
     expect(screen.queryByTestId('base-option-description-0xbase1')).toBeNull();
+  });
+
+  it('DEDUPE (plan-002 merge): a card with a search match shows the MatchReason and SUPPRESSES the static snippet; an unmatched described card still shows its snippet', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xaa', name: 'Alpha', glbBlobId: 'g1', paramsJson: JSON.stringify({ prompt: 'an alpha widget' }) }),
+        summary({ objectId: '0xbb', name: 'Beta', glbBlobId: 'g2', paramsJson: JSON.stringify({ prompt: 'a fast race car' }) }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    // Recall matches only 0xbb (0xaa has a description but no match).
+    memoryRecallState.personal = lane([hit('0xbb', 0.3, 'a fast race car')]);
+    renderPage();
+    fireEvent.change(screen.getByTestId('base-search-input'), { target: { value: 'race car' } });
+    // 0xbb: match-reason shows, static snippet suppressed (never both).
+    expect(screen.getByTestId('base-match-reason-0xbb')).toBeTruthy();
+    expect(screen.queryByTestId('base-option-description-0xbb')).toBeNull();
+    // 0xaa: no match → its static snippet still shows.
+    expect(screen.queryByTestId('base-match-reason-0xaa')).toBeNull();
+    expect(screen.getByTestId('base-option-description-0xaa')).toBeTruthy();
   });
 
   it('R5: picking a described base shows the description caption under the preview', async () => {

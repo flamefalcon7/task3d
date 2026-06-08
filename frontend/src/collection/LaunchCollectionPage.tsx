@@ -29,6 +29,8 @@ import { modelDescription, modelDescriptionLabel } from '@overflow2026/shared';
 import { useSession } from '../auth/useSession';
 import { SignInButton } from '../auth/SignInButton';
 import { useModelIndex } from '../browse/useModelIndex';
+import { useMemoryRecall } from '../memory/useMemoryRecall';
+import { rankForkableMatches, type BaseMatch } from './baseSearchRanking';
 import { QUILT_SIZE, useWalrusUpload } from '../walrus/useWalrusUpload';
 import { BatchProgressPanel } from './BatchProgressPanel';
 import { MemoryPressureBanner } from './MemoryPressureBanner';
@@ -239,6 +241,41 @@ const baseOptionDescription: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+// plan-002 U3 — base-search match highlight. A ring distinct from the accent
+// "picked" border (baseOptionStyle): launchable strong → ink, launchable weak →
+// subtle gray, locked → muted (hint). No ring when the card isn't a match.
+function matchRing(match: BaseMatch | undefined, launchable: boolean): CSSProperties {
+  if (!match) return {};
+  const color = launchable ? (match.strong ? tokens.color.ink : tokens.color.subtle) : tokens.color.hint;
+  return { boxShadow: `0 0 0 2px ${color}` };
+}
+
+function truncateReason(s: string): string {
+  return s.length > 48 ? `${s.slice(0, 47)}…` : s;
+}
+
+// R6 "why it matched" — the base creator's original prompt. Bolder (ink) for a
+// strong launchable match, muted otherwise (incl. all locked cards).
+function MatchReason({
+  match,
+  objectId,
+  launchable,
+}: {
+  match: BaseMatch | undefined;
+  objectId: string;
+  launchable: boolean;
+}) {
+  if (!match) return null;
+  return (
+    <span
+      data-testid={`base-match-reason-${objectId}`}
+      style={{ ...baseOptionMeta, color: launchable && match.strong ? tokens.color.ink : tokens.color.hint }}
+    >
+      ↳ {truncateReason(match.reason)}
+    </span>
+  );
+}
+
 const formGrid: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, 1fr)',
@@ -448,6 +485,28 @@ export function LaunchCollectionPage() {
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
   const forkable = useMemo(() => models.filter((m) => m.glbBlobId !== ''), [models]);
 
+  // plan-002 U3 — natural-language base finder. The query drives debounced
+  // personal + global recall (one shared hook instance, MIN_QUERY_LEN=3); the
+  // pure ranking util reorders/highlights `forkable` WITHOUT ever hiding a base.
+  const [baseQuery, setBaseQuery] = useState('');
+  const { personal: personalRecall, global: globalRecall } = useMemoryRecall();
+  useEffect(() => {
+    personalRecall.recall(baseQuery);
+    globalRecall.recall(baseQuery);
+  }, [baseQuery, personalRecall.recall, globalRecall.recall]);
+  const { ordered: orderedForkable, matches: baseMatches } = useMemo(
+    () => rankForkableMatches(personalRecall.chips, globalRecall.chips, forkable),
+    [personalRecall.chips, globalRecall.chips, forkable],
+  );
+  const baseQueryActive = baseQuery.trim().length >= 3;
+  const baseSearchLoading = personalRecall.status === 'loading' || globalRecall.status === 'loading';
+  // Degraded ≠ empty: when a scope's relayer is down we surface an honest note
+  // rather than presenting a one-sided merge as a complete answer.
+  const baseSearchDegraded =
+    baseQueryActive && !baseSearchLoading && (personalRecall.degraded || globalRecall.degraded);
+  const baseSearchShowingAll =
+    baseQueryActive && !baseSearchLoading && !baseSearchDegraded && baseMatches.size === 0;
+
   // plan-027 U10 / D-078 — which forkable bases the wallet already holds an
   // AccessEntitlement for. RESTRICTED bases are filtered upstream (useModelIndex),
   // so in `forkable` an encrypted base ⇔ ALLOW_LIST. The catalog splits into:
@@ -487,6 +546,9 @@ export function LaunchCollectionPage() {
     setErrorMsg(null);
     setBase(model);
     setVariantGlbs(null);
+    // plan-002 U3 — discard the base-finder query on pick, so a later CHANGE
+    // re-expands the picker in the default (unsearched) order, not a stale reorder.
+    setBaseQuery('');
     // Collapse the base-picker grid so its PreviewCanvas thumbnails
     // unmount (each ≈ 300 MB GPU on a textured Tripo model — see
     // diagnostic in useWalrusUpload.ts). User can click CHANGE to
@@ -1329,9 +1391,39 @@ export function LaunchCollectionPage() {
               </button>
             </div>
           ) : (
-            <div style={basePickerGrid}>
-              {forkable.map((m) => {
+            <>
+              {/* plan-002 U3 — natural-language base finder. Only inside the
+                  expanded picker; query state is discarded on collapse. The R8
+                  coverage hint is a static sub-label (always shown), setting
+                  expectation before the forker types. */}
+              {forkable.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text"
+                    data-testid="base-search-input"
+                    value={baseQuery}
+                    onChange={(e) => setBaseQuery(e.target.value)}
+                    placeholder="Describe a base — e.g. “low-poly race car”"
+                    disabled={busy}
+                    aria-label="Search base models by description"
+                    style={{ ...inputStyle, width: '100%' }}
+                  />
+                  <div style={{ ...baseOptionMeta, marginTop: 4 }} data-testid="base-search-hint">
+                    Matches bases published with a creation prompt.
+                    {baseSearchLoading && <span data-testid="base-search-loading"> · searching…</span>}
+                    {baseSearchShowingAll && (
+                      <span data-testid="base-search-showing-all"> · showing all — no semantic matches</span>
+                    )}
+                    {baseSearchDegraded && (
+                      <span data-testid="base-search-degraded"> · some matches unavailable — showing all</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div style={basePickerGrid}>
+              {orderedForkable.map((m) => {
                 const picked = base?.objectId === m.objectId;
+                const match = baseMatches.get(m.objectId);
                 // plan-027 U10 / D-078 — preview thumbnail (GLB canvas for public
                 // bases; the watermarked public still for encrypted ALLOW_LIST
                 // bases; NEVER the ciphertext as a GLB).
@@ -1362,13 +1454,12 @@ export function LaunchCollectionPage() {
                   </span>
                 );
                 // plan 2026-06-08-001 U3 (R4) — static description snippet; null
-                // for uncaptioned uploads → nothing (R6). MERGE SEAM: when the
-                // base-finder (plan-002) lands here, suppress this snippet for a
-                // card whose search match-reason is showing (match-reason already
-                // renders the prompt — never both). No match state exists on this
-                // branch, so it renders unconditionally for now.
+                // for uncaptioned uploads → nothing (R6). DEDUPE (plan-002 merge):
+                // when this card has a search match, the MatchReason below already
+                // renders the base's prompt — suppress the static snippet so the
+                // two never show together (per-card boolean, no global query state).
                 const description = modelDescription(m);
-                const descriptionNode = description && (
+                const descriptionNode = !match && description && (
                   <span style={baseOptionDescription} data-testid={`base-option-description-${m.objectId}`}>
                     {description.text}
                   </span>
@@ -1383,7 +1474,7 @@ export function LaunchCollectionPage() {
                     <div
                       key={m.objectId}
                       data-testid={`base-option-locked-card-${m.objectId}`}
-                      style={{ ...baseOptionStyle(false), cursor: 'default', opacity: 0.55 }}
+                      style={{ ...baseOptionStyle(false), cursor: 'default', opacity: 0.55, ...matchRing(match, false) }}
                     >
                       <div style={baseOptionPreview} data-testid={`base-option-preview-${m.objectId}`}>
                         {previewNode}
@@ -1392,6 +1483,7 @@ export function LaunchCollectionPage() {
                         <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
                         {descriptionNode}
                         {metaLine}
+                        <MatchReason match={match} objectId={m.objectId} launchable={false} />
                         <span style={{ ...baseOptionMeta, color: tokens.color.muted }}>
                           — LOCKED · ACCESS REQUIRED
                         </span>
@@ -1416,7 +1508,7 @@ export function LaunchCollectionPage() {
                     disabled={busy}
                     data-testid={`base-option-${m.objectId}`}
                     aria-pressed={picked}
-                    style={baseOptionStyle(picked)}
+                    style={{ ...baseOptionStyle(picked), ...matchRing(match, true) }}
                   >
                     {/* bgToggle={false}: a base-option <button> wraps this
                         PreviewCanvas; PreviewCanvas's default BgTogglePill is
@@ -1430,11 +1522,13 @@ export function LaunchCollectionPage() {
                       <span style={baseOptionName}>{m.name || '(unnamed)'}</span>
                       {descriptionNode}
                       {metaLine}
+                      <MatchReason match={match} objectId={m.objectId} launchable />
                     </div>
                   </button>
                 );
               })}
-            </div>
+              </div>
+            </>
           )}
         </section>
 

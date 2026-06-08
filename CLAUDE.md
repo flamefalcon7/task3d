@@ -166,6 +166,25 @@ docs/       # spec.md, decisions.md, phase-progress.md, open-questions.md,
 - Don't make architectural changes without an ADR first.
 - Don't skip the end-of-session update — it's the entire point of this protocol.
 - Don't fabricate file paths, library APIs, or context to satisfy protocol — verify with `view` / web search, and if uncertain, STOP and ask the user.
+- **Don't overwrite, truncate, or regenerate `.env*` files** (`backend/.env`, `frontend/.env.local`, any `.env*`). They hold gitignored secrets git can't restore. Append-only (`>> .env`) and tell the user; if one looks empty/wrong, STOP and report. See "Secrets & `.env` files" below.
+
+### Secrets & `.env` files (never clobber)
+
+`.env*` files hold **gitignored secrets git cannot restore** — a wipe is permanent **and silent** (fail-soft features keep "working", so loss goes unnoticed for days; this bit us once when a session clobbered `backend/.env` and lost the `MEMWAL_*` keys).
+
+- **Never** overwrite, truncate, `cp .env.example .env` over, or "regenerate" an existing env file. Add keys by **appending** (`>> .env`) only, and say what you added.
+- If an env file looks empty, short, or is missing expected keys, **STOP and report** — do not self-heal by regenerating it.
+- Keep **non-secret** config (account ids, URLs, endpoints) in `.env.example` as commented templates, so recovery needs only the secret.
+- The backend warns loudly at startup when MemWal is unconfigured (`backend/src/server.ts`) — don't ignore that banner.
+
+**MemWal recovery** (if `backend/.env` loses `MEMWAL_*`): the delegate key regenerates against the **existing** account (owner = deployer `VITE_TEST_WALLET_KEY`; `accountId` in `docs/decisions.md` D-080):
+
+```
+OWNER_KEY="$(grep '^VITE_TEST_WALLET_KEY=' frontend/.env.local | cut -d= -f2-)" \
+ACCOUNT_ID=<D-080 accountId> pnpm --dir backend exec tsx scripts/memwal-spike.ts
+```
+
+Then append the written `MEMWAL_ACCOUNT_ID` / `MEMWAL_DELEGATE_KEY` (+ `MEMWAL_SERVER_URL=https://relayer.dev.memwal.ai`) into `backend/.env`, delete the temp `backend/.env.memwal-delegate`, and restart the backend.
 
 ---
 
