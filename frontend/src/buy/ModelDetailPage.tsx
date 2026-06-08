@@ -10,6 +10,7 @@ import { useAppSigner } from '../wallet/useAppSigner';
 import { SignInButton } from '../auth/SignInButton';
 import { buildPurchaseAccessPtb } from '../sui/collectionTxBuilders';
 import { decryptViaEntitlement, decryptViaCreator } from '../seal/decryptAndView';
+import { modelDescription } from '@overflow2026/shared';
 
 // plan-027 U8 — L1 published-content detail page (`/model/:objectId`). Three
 // policies branch here:
@@ -257,6 +258,11 @@ export function ModelDetailPage() {
   // mesh is only obtainable by buying access + decrypting (the entitlement flow).
   const previewUrls = previewStillUrlsForSummary(model);
 
+  // plan 2026-06-08-001 U2 — shared resolver; null for uncaptioned uploads, so
+  // both the metadata block and the viewer caption simply don't render (R6).
+  const description = modelDescription(model);
+  const descriptionLabel = description?.kind === 'caption' ? 'AI description' : 'Prompt';
+
   const isAllowList = model.policy === POLICY_ALLOW_LIST;
   const isRestricted = model.policy === POLICY_RESTRICTED;
   const connected = Boolean(address && signer);
@@ -502,6 +508,17 @@ export function ModelDetailPage() {
         >
           {renderViewerPane()}
         </div>
+        {/* plan 2026-06-08-001 U2 (R5) — viewer caption: adjacent block under the
+            3D well (PreviewCanvas/TurntablePreview have no caption slot), keyed
+            off the in-scope model. Null description → nothing (R6). */}
+        {description && (
+          <div
+            data-testid="viewer-caption"
+            style={{ fontSize: 13, marginTop: 8, opacity: 0.85, lineHeight: 1.5 }}
+          >
+            <strong style={{ opacity: 0.7 }}>{descriptionLabel}:</strong> {description.text}
+          </div>
+        )}
         {model.isEncrypted ? (
           <div style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }} data-testid="encrypted-blob-note">
             Encrypted base — the Walrus blob holds ciphertext; buy access to decrypt.
@@ -548,6 +565,21 @@ export function ModelDetailPage() {
           ))}
         </div>
 
+        {/* plan 2026-06-08-001 U2 (R3) — clean labeled description block, the
+            primary description affordance (the raw Params expander below is
+            demoted to a dev-only detail). Null description → nothing (R6).
+            Neutral tokens. */}
+        {description && (
+          <div
+            data-testid="model-description"
+            data-kind={description.kind}
+            style={{ fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}
+          >
+            <strong>{descriptionLabel}:</strong>{' '}
+            <span data-testid="model-description-text">{description.text}</span>
+          </div>
+        )}
+
         {/* plan-027 D-078 — ALLOW_LIST bases now carry a buy-access fee (the
             content gate) AND a per-launch derive fee. PERMISSIONLESS shows only
             the fork fee. */}
@@ -577,6 +609,8 @@ export function ModelDetailPage() {
           </div>
         )}
 
+        {/* plan 2026-06-08-001 U2 — demoted to a dev-only detail; the clean
+            labeled description block above is the primary R3 affordance. */}
         <details style={{ fontSize: 12, marginBottom: 12 }}>
           <summary>Params (json)</summary>
           <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, overflow: 'auto' }}>

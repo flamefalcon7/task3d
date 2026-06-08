@@ -491,3 +491,67 @@ describe('ModelDetailPage', () => {
     });
   });
 });
+
+// plan 2026-06-08-001 U2 — description block + viewer caption (R2,R3,R5,R6).
+describe('ModelDetailPage — description surfacing', () => {
+  it('AE1: Tripo model shows a "Prompt"-labeled block with the prompt text', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xMODEL');
+    const block = screen.getByTestId('model-description');
+    expect(block.getAttribute('data-kind')).toBe('prompt');
+    expect(block.textContent).toMatch(/Prompt:/);
+    expect(screen.getByTestId('model-description-text').textContent).toBe('a low-poly red sports car');
+  });
+
+  it('AE2/R2: captioned upload shows an "AI description"-labeled block with the caption', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({
+        shapeType: 'box',
+        paramsJson: JSON.stringify({ source: 'upload', caption: 'a chunky walrus' }),
+      }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xMODEL');
+    const block = screen.getByTestId('model-description');
+    expect(block.getAttribute('data-kind')).toBe('caption');
+    expect(block.textContent).toMatch(/AI description:/);
+    expect(screen.getByTestId('model-description-text').textContent).toBe('a chunky walrus');
+  });
+
+  it('AE3/R6: uncaptioned upload renders no description block and no viewer caption', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ shapeType: 'box', paramsJson: JSON.stringify({ source: 'upload' }) }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xMODEL');
+    expect(screen.queryByTestId('model-description')).toBeNull();
+    expect(screen.queryByTestId('viewer-caption')).toBeNull();
+  });
+
+  it('R5: the viewer caption renders the same description text alongside the canvas', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ paramsJson: JSON.stringify({ prompt: 'a low-poly red sports car' }) }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xMODEL');
+    const caption = screen.getByTestId('viewer-caption');
+    expect(caption.textContent).toMatch(/a low-poly red sports car/);
+  });
+
+  it('keeps the raw "Params (json)" expander (demoted, not removed)', () => {
+    useModelByIdMock.mockReturnValue({
+      model: makeModel({ paramsJson: JSON.stringify({ prompt: 'a prompt' }) }),
+      loading: false,
+      error: null,
+    });
+    renderAt('/model/0xMODEL');
+    expect(screen.getByText('Params (json)')).toBeTruthy();
+  });
+});
