@@ -26,7 +26,8 @@ Phase 4 — feature/UX polish + stability. **Repo now has a GitHub remote** (`or
 - **D-103 — fixed the prod-build-blank guard bug.** `test-wallet/loadKeypair.ts`'s module-top `if (PROD) throw` (statically imported by the wallet hooks, side-effect un-tree-shakeable) blanked every prod build. Moved the guard into `assertNotProductionBuild()` called inside the entry functions. **Verified: prod bundle now renders** (agent-browser, `#root` populates, no window error). Bonus: the test-wallet module now tree-shakes out → the test private key is no longer baked into `dist`. On branch `fix/prod-build-test-wallet-guard` (off the D-102 branch). Typecheck clean; test-wallet + wallet suites green (13).
 
 ### Next Concrete Step
-Commit D-103 (`loadKeypair.ts` + test, `decisions.md`, this file). Then: **confirm the live Vercel deploy renders** (it may have been serving a blanked build — redeploy if so). Branches `fix/launch-variant-prop-oom` → `refactor/launch-single-quilt` → `fix/prod-build-test-wallet-guard` are stacked, none merged to `main` yet — decide merge/push strategy.
+**Session shipped:** D-100→D-103 fast-forwarded onto `main` and **pushed to GitHub** (`origin/main` = `ec07d80`). Stale `debug/walrus-upload-crash` branch + obsolete `docs/walrus-oom-bugreport/` deleted. The three now-merged feature branches still exist locally (harmless; deletable).
+**Remaining user action:** **confirm the live Vercel deploy renders** — the D-103 blank bug may have been serving a broken build; redeploy from updated `main` if so.
 
 ### Notes for Next Session
 - Servers may be left running: backend `:3001`, frontend `:5173` (started with `VITE_TEST_WALLET=1`).
