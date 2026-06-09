@@ -4282,6 +4282,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-102: Raise Walrus request timeout to 60s + retry ONLY the idempotent relay upload
+**Status**: Accepted
+**Date**: 2026-06-09 · **Phase**: Phase 4 — feature/UX polish + stability
+
+### Context — After D-101 (single-quilt launch), the larger one-shot relay write occasionally hit the Walrus SDK's 30s default request timeout on slow testnet moments, surfacing as a DOMException "signal timed out" that dumped on the user (manual retry then succeeded). Transient, not a logic bug — but a demo risk.
+
+### Decision — (1) Raise the SDK's per-request timeout 30s→60s via `storageNodeClientOptions.timeout` + `uploadRelay.timeout` in `walrusClient.ts`. (2) Wrap ONLY the `flow.upload({digest})` relay step in a 3-attempt retry (1.5s backoff) gated on transient errors (`isRetryableUploadError`: TimeoutError / RetryableWalrusClientError / network heuristics). The relay write is idempotent for an already-registered blob, so repeating it is safe. **Never retry `executeRegister`/`executeCertify`** — those are on-chain txs and would double-spend gas.
+
+### Rationale — most "signal timed out" cases are a slow-but-fine relay; a higher ceiling + a couple idempotent retries make the launch self-heal instead of failing the user mid-demo.
+
+### Alternatives Considered — **Retry the whole flow** — rejected: re-runs on-chain register/certify (gas double-spend, double-register). **Only bump the timeout** — weaker: a hard 60s timeout still fails on the rare slow moment with no recovery. **Revert to multi-quilt** — rejected: D-101's popup win matters more; chunking never demonstrably avoided the timeout (it crashed first, pre-D-100).
+
+### Consequences — ✅ flaky-testnet uploads self-recover; demo-safer · ⚠️ a genuinely dead relay now takes up to ~3×60s before failing (acceptable; transient is the common case) · 🔮 if certify/register start timing out too, handle separately (they need reset()+careful idempotency, not blind retry).
+
+### Related — D-101 (single quilt raised exposure) · `frontend/src/walrus/retryAsync.ts` (+ test), `useWalrusUpload.ts`, `walrusClient.ts`
+
+---
+
 # Reserved Decision Numbers
 
-D-102 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-103 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

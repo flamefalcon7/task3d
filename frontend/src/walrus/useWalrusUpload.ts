@@ -3,6 +3,7 @@ import type { Signer } from '@mysten/sui/cryptography';
 import { WalrusFile } from '@mysten/walrus';
 import { getWalrusClient, type WalrusEnhancedClient } from './walrusClient';
 import { clearTrail, surfaceStaleTrail, writeDiag } from './uploadTrail';
+import { isRetryableUploadError, retryAsync } from './retryAsync';
 
 // Multi-quilt batching size (LATENT). When a caller doesn't override
 // `quiltSize`, N files chunk into ⌈N/QUILT_SIZE⌉ quilts.
@@ -281,7 +282,24 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           lastStage = 'relay-upload';
           setStage(lastStage);
           writeDiag(`pre-upload-${i}`, startedAt, { batchIndex: i });
-          await flow.upload({ digest: registerResult.txDigest });
+          // The relay write is the heaviest network step and the one that
+          // hits the SDK's request timeout ("signal timed out") on a slow
+          // testnet moment. It is idempotent for an already-registered blob
+          // (re-POSTs the same slivers under the same digest), so retry it a
+          // couple times before failing the user. NOT applied to the
+          // register/certify txs above/below — those are on-chain and would
+          // double-spend gas. See retryAsync.ts.
+          const activeFlow = flow;
+          await retryAsync(() => activeFlow.upload({ digest: registerResult.txDigest }), {
+            attempts: 3,
+            backoffMs: 1500,
+            shouldRetry: isRetryableUploadError,
+            onRetry: (err, attempt) =>
+              writeDiag(`upload-retry-${i}-attempt-${attempt}`, startedAt, {
+                batchIndex: i,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+          });
           writeDiag(`post-upload-${i}`, startedAt, { batchIndex: i });
 
           lastStage = 'awaiting-certify';
