@@ -9,22 +9,26 @@
 // when the flag is unset, and ESLint blocks accidental imports from
 // outside frontend/src/wallet/* (see eslint.config.js, plan-016 U6).
 
-// plan-016 code-review hotfix — the wrapper hooks import THIS file
-// directly (`'../test-wallet/loadKeypair'`), not the public `./index`
-// barrel. The PROD throw originally lived in index.ts as a "belt against
-// accidental ship even if tree-shake fails" (D-061), but because nothing
-// in frontend/src/ ever imports index.ts the belt was dead code on the
-// real import graph. Moving the guard here means it fires on the
-// actually-imported module.
-if (import.meta.env.PROD) {
-  throw new Error(
-    'test-wallet/loadKeypair loaded in production build — refusing. ' +
-      'Build with VITE_TEST_WALLET unset; the wrapper hooks dead-eliminate ' +
-      'this import in production.',
-  );
-}
-
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+// D-103 production guard. The test wallet is dev-only. This guard was
+// originally a MODULE-TOP `throw` (D-061) meant to fire on import as a belt
+// against accidental ship. But the wrapper hooks (useAppSigner /
+// useAppAccount) STATICALLY import this module, and a top-level throw is a
+// side effect tree-shaking can't eliminate — so EVERY production build
+// evaluated it and blanked the app (React root unmounts; the error goes to
+// window.onerror, not the console, so it was invisible). The guard now lives
+// inside the entry functions: it still fails loudly if anything actually
+// CALLS the test wallet in a prod build, without the import-time side effect.
+// In a normal prod build TEST_WALLET_ENABLED is false, so neither is called.
+function assertNotProductionBuild(): void {
+  if (import.meta.env.PROD) {
+    throw new Error(
+      'test-wallet/loadKeypair used in a production build — refusing. ' +
+        'The test wallet is dev-only; build with VITE_TEST_WALLET unset.',
+    );
+  }
+}
 
 export class MissingTestWalletKeyError extends Error {
   override name = 'MissingTestWalletKey';
@@ -61,6 +65,7 @@ function readKeyFromEnv(): string | undefined {
 // fighting import.meta.env globals — the production loadKeypair() just
 // reads the env var and delegates here.
 export function keypairFromBech32(bech32: string): Ed25519Keypair {
+  assertNotProductionBuild();
   try {
     return Ed25519Keypair.fromSecretKey(bech32);
   } catch (err) {
@@ -71,6 +76,7 @@ export function keypairFromBech32(bech32: string): Ed25519Keypair {
 }
 
 export function loadKeypair(): Ed25519Keypair {
+  assertNotProductionBuild();
   if (cached) return cached;
   const bech32 = readKeyFromEnv();
   if (!bech32) throw new MissingTestWalletKeyError();

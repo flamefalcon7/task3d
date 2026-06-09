@@ -2776,7 +2776,7 @@ Wrapper-hook adoption is scoped to `useSession.ts` (sign-in JWT challenge) + `La
 
 ## D-061: All test-wallet code lives in `frontend/src/test-wallet/` + ESLint allow-list
 
-**Status**: Accepted
+**Status**: Accepted (prod-guard MECHANISM amended by D-103 — moved from a module-top `throw` to an in-function check; the dev-only intent stands)
 **Date**: 2026-05-27
 **Phase**: Phase 4 follow-up (plan-016)
 
@@ -4300,6 +4300,22 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-103: Test-wallet prod guard moves from module-top `throw` to an in-function check
+**Status**: Accepted · **Amends D-061**
+**Date**: 2026-06-09 · **Phase**: Phase 4 — feature/UX polish + stability
+
+### Context — `test-wallet/loadKeypair.ts` had a MODULE-TOP `if (import.meta.env.PROD) throw` (D-061 belt against shipping the test wallet). But the wrapper hooks (`useAppSigner`, `useAppAccount`) **statically import** that module, and a top-level throw is a side effect tree-shaking cannot drop — so EVERY production build evaluated it and **blanked the app** (React root unmounts; the error routes to `window.onerror`, invisible in the console). `TEST_WALLET_ENABLED` is already `=== '1'` (so `"0"`/unset → false), meaning `loadKeypair()` is never *called* in prod — only the import-time throw caused the blank.
+
+### Decision — Move the guard out of module scope into an `assertNotProductionBuild()` called at the top of `loadKeypair()` and `keypairFromBech32()`. Importing is now side-effect-free; the guard still throws if anything actually CALLS the test wallet in a prod build. The dev-only protection (D-061) is preserved; only the mechanism changed.
+
+### Rationale — fixes a shipped-blocker (local `pnpm build` → blank; likely the Vercel deploy too) while keeping the safety belt. Side-effect-free module = the dead-code elimination the code always assumed now actually happens.
+
+### Consequences — ✅ prod build renders (verified: `#root` populates, no window error) · ✅ the whole test-wallet module + its `VITE_TEST_WALLET_KEY` reference now tree-shake OUT of the prod bundle → **also fixes the test-private-key-baked-into-dist** issue · ⚠️ a top-level throw can't guard import anymore — but the in-function guard + ESLint allow-list (D-061) + `TEST_WALLET_ENABLED === '1'` gate cover it.
+
+### Related — amends D-061 · `frontend/src/test-wallet/loadKeypair.ts` (+ test), `frontend/src/wallet/{useAppSigner,useAppAccount,testWalletEnabled}.ts` · **TODO: confirm the live Vercel deploy renders** (redeploy if it was serving an affected build).
+
+---
+
 # Reserved Decision Numbers
 
-D-103 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-104 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

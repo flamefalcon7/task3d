@@ -22,8 +22,11 @@ Phase 4 — feature/UX polish + stability. **Repo now has a GitHub remote** (`or
 - **D-101 — retired multi-quilt batching; launch now uploads a single quilt.** (committed `d771da1` on `refactor/launch-single-quilt`.) Both forker upload call sites pass `{ quiltSize: swapped.length }` → 1 register + 1 certify (8 variants = 2 popups, not 4). `BatchProgressPanel` pre-flight → single-quilt plan; `QUILT_SIZE`/chunking kept latent + tested. D-062 superseded; mesh-decimation fix moot. **User-verified in Brave** (2 popups, completes — after one transient `signal timed out` that succeeded on retry).
 - **D-102 — Walrus timeout hardening (the `signal timed out` the user hit).** Raised the SDK request timeout 30s→60s (`storageNodeClientOptions.timeout` + `uploadRelay.timeout` in `walrusClient.ts`) and added a 3-attempt retry around ONLY the idempotent `flow.upload()` relay step (`retryAsync.ts` + test; gated on `isRetryableUploadError`). Never retries on-chain register/certify (gas). Typecheck clean, **full suite 1200 pass / 2 skip**. Not yet committed (on `refactor/launch-single-quilt`).
 
+- **D-102 committed.** (`feat(walrus): 60s timeout + retry the idempotent relay upload`.)
+- **D-103 — fixed the prod-build-blank guard bug.** `test-wallet/loadKeypair.ts`'s module-top `if (PROD) throw` (statically imported by the wallet hooks, side-effect un-tree-shakeable) blanked every prod build. Moved the guard into `assertNotProductionBuild()` called inside the entry functions. **Verified: prod bundle now renders** (agent-browser, `#root` populates, no window error). Bonus: the test-wallet module now tree-shakes out → the test private key is no longer baked into `dist`. On branch `fix/prod-build-test-wallet-guard` (off the D-102 branch). Typecheck clean; test-wallet + wallet suites green (13).
+
 ### Next Concrete Step
-Commit D-102 (`retryAsync.ts` + test, `useWalrusUpload.ts`, `walrusClient.ts`, `decisions.md`, this file). Then optionally: fix the prod-build-blank guard bug (D-100 memory) + confirm the live Vercel site isn't blank.
+Commit D-103 (`loadKeypair.ts` + test, `decisions.md`, this file). Then: **confirm the live Vercel deploy renders** (it may have been serving a blanked build — redeploy if so). Branches `fix/launch-variant-prop-oom` → `refactor/launch-single-quilt` → `fix/prod-build-test-wallet-guard` are stacked, none merged to `main` yet — decide merge/push strategy.
 
 ### Notes for Next Session
 - Servers may be left running: backend `:3001`, frontend `:5173` (started with `VITE_TEST_WALLET=1`).
