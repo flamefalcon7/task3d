@@ -4246,6 +4246,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-100: VariantPreview takes a variant blob-URL string, not raw `Uint8Array[]`
+**Status**: Accepted
+**Date**: 2026-06-09 · **Phase**: Phase 4 — feature/UX polish
+
+### Context — `/launch` hard-crashed the renderer ("Aw Snap") during the variant upload, only in dev builds. A Brave Crashpad minidump pinned it to a **V8 JS-heap OOM** (4 GB cage full; `malloced-memory` ~1 MB, so NOT the Walrus/WASM encoder), with the OOM allocation stack inside React's dev-mode prop serializer `addObjectToProperties`/`addValueToProperties` walking `fiber.memoizedProps`. Root cause: `LaunchCollectionPage` passed `variantGlbs: Uint8Array[]` (8 × ~6 MB raw bytes) as a prop to `<VariantPreview>`; React dev serialization does `for...in` over each Uint8Array → ~48 M byte-index keys → heap OOM. (Verified absent from the production bundle, so prod was never affected.)
+
+### Decision — `VariantPreview` accepts `variantGlbUrl?: string | null` (object URL for the selected variant only); `LaunchCollectionPage` owns the bytes and creates/revokes that blob URL (the StrictMode-safe single-effect create+revoke, lifted up from the child). Raw `Uint8Array[]` never crosses a React prop boundary — mirrors how `baseGlbUrl` already worked.
+
+### Rationale — fixes the root cause (no megabyte binary in the prop-serialization surface), is idiomatic React (props carry handles, not buffers), and makes the variant path consistent with the base path. Production was already immune; this restores dev usability and removes the latent footgun.
+
+### Alternatives Considered — **Wrap bytes in a non-enumerable container (option A)** — rejected: band-aid that hides the symptom from `for...in` but leaves megabytes flowing through props + needs a "why" comment. **Leave as-is (dev-only)** — rejected: makes the whole `/launch` flow unusable in local dev.
+
+### Consequences — ✅ dev crash gone, cleaner data flow · ⚠️ bytes still held in `LaunchCollectionPage` state (fine — the crash was prop serialization, not state) · 🔮 establishes the rule "never pass large typed arrays as React props" for future preview wiring.
+
+### Related — `frontend/src/forge/VariantPreview.tsx`, `frontend/src/collection/LaunchCollectionPage.tsx` · separate latent bug found same session (test-wallet guard top-level `throw` blanks local prod builds) — not yet fixed.
+
+---
+
 # Reserved Decision Numbers
 
-D-100 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-101 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

@@ -466,6 +466,12 @@ export function LaunchCollectionPage() {
   const [editorState, setEditorState] = useState<VariantEditorState>(newVariantEditorState);
   const [selectedPreview, setSelectedPreview] = useState(0);
   const [variantGlbs, setVariantGlbs] = useState<Uint8Array[] | null>(null);
+  // Blob URL for the SELECTED variant's GLB. We own the bytes here and hand
+  // VariantPreview a string URL — never the raw Uint8Array[] — so React's
+  // dev-mode prop serializer can't `for...in` over millions of byte indices and
+  // OOM the renderer during the launch/upload flow. Mirrors how baseGlbUrl is
+  // already produced and passed down.
+  const [selectedVariantGlbUrl, setSelectedVariantGlbUrl] = useState<string | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
   // GPU-memory mitigation: each base-picker thumbnail mounts a full Babylon
   // engine + scene + per-mesh textures (~300 MB GPU on a textured Tripo
@@ -514,6 +520,27 @@ export function LaunchCollectionPage() {
     personalRecall.recall(baseQuery);
     globalRecall.recall(baseQuery);
   }, [baseQuery, personalRecall.recall, globalRecall.recall]);
+
+  // Resolve a blob URL only for the currently-selected variant — sidesteps the
+  // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
+  // URL creation co-located with revocation inside one effect so it can't leak
+  // under React 19 StrictMode's mount→unmount→mount double-invoke. (Lifted up
+  // from VariantPreview so the raw Uint8Array[] never crosses a prop boundary.)
+  useEffect(() => {
+    const bytes = variantGlbs?.[selectedPreview];
+    if (!bytes) {
+      setSelectedVariantGlbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(
+      new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }),
+    );
+    setSelectedVariantGlbUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+      setSelectedVariantGlbUrl(null);
+    };
+  }, [variantGlbs, selectedPreview]);
   const { ordered: orderedForkable, matches: baseMatches } = useMemo(
     () => rankForkableMatches(personalRecall.chips, globalRecall.chips, forkable),
     [personalRecall.chips, globalRecall.chips, forkable],
@@ -1709,7 +1736,7 @@ export function LaunchCollectionPage() {
             <div style={previewLayout}>
               <VariantPreview
                 variants={editorState.variants}
-                variantGlbs={variantGlbs ?? undefined}
+                variantGlbUrl={selectedVariantGlbUrl}
                 selectedIndex={selectedPreview}
                 onSelect={setSelectedPreview}
                 mode={effectiveMode}

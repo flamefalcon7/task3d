@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-06-09 (**root-caused + fixed the `/launch` upload renderer crash; pushed `main` to GitHub**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **12 of 38** · demo day (7/20–21): ~41 · winners (8/27): ~79
+
+### Current Phase
+Phase 4 — feature/UX polish + stability. **Repo now has a GitHub remote** (`origin` → `flamefalcon7/task3d`); `main` pushed (security-scanned: no secrets in tree or history, `.env*` gitignored).
+
+### Completed This Session
+- **Root-caused the long-standing "uploading to Walrus crashes the tab" bug.** It is NOT the Walrus encoder and NOT GPU/Brave/extensions. A Brave Crashpad minidump showed a **V8 JS-heap OOM** (4 GB cage full; malloc ~1 MB) whose allocation stack was React's **dev-mode** prop serializer (`addObjectToProperties`) doing `for...in` over `variantGlbs: Uint8Array[]` (8 × ~6 MB) passed as a prop to `<VariantPreview>` → ~48 M byte-index keys → OOM. Confirmed the serializer is **absent from the production bundle** (prod always immune; dev-only crash).
+- **Fixed (D-100):** `VariantPreview` now takes `variantGlbUrl?: string | null`; `LaunchCollectionPage` owns the bytes and creates/revokes the selected variant's blob URL (StrictMode-safe effect lifted up). Raw bytes no longer cross a prop boundary. Typecheck clean, **81/81** affected tests pass, **user verified** the crash is gone in Brave dev (`pickup-truck` × 8).
+- Earlier in session: security check + first GitHub push of `main`; verified the standalone `docs/walrus-oom-bugreport/` repro can't reproduce (different mechanism) — that bugreport's premise is now superseded by D-100.
+
+### Known issues found, NOT yet fixed
+- **Local `pnpm build` produces a BLANK app.** `useAppSigner.ts`/`useAppAccount.ts` statically import `test-wallet/loadKeypair.ts`, whose **top-level `if (import.meta.env.PROD) throw`** is a side effect that survives tree-shaking → fires on every local prod build → React root unmounts silently. (`.env.local` has `VITE_TEST_WALLET=0` but the static import + side-effect throw is flag-independent.) **May affect the Vercel deploy** unless its build env differs — worth confirming the live site renders. Fix: make the test-wallet import dynamic/conditional or move the guard off module top-level.
+- `frontend/dist` inlines the test private key when built locally — treat as secret-bearing; rm after local builds.
+
+### Next Concrete Step
+Commit the D-100 fix (`VariantPreview` + `LaunchCollectionPage` + ADR + this file). Then decide whether to fix the prod-build-blank guard bug (and confirm the live Vercel site isn't blank).
+
+### Notes for Next Session
+- Servers may be left running: backend `:3001`, frontend `:5173` (started with `VITE_TEST_WALLET=1`).
+- Full memory of this investigation in `[[project_walrus_oom_repro_not_reproducible_standalone]]`.
+
+---
+
 ## Last Updated: 2026-06-08 (**post-ship UX pass on browse/market/launch cards — split results, preview drag-only, name hover; all on `feat/browse-semantic-search`**)
 
 ### Hackathon Tracker

@@ -10,7 +10,6 @@
 // labels, 1.5px ink borders on tiles with accent on the active variant.
 
 import type { CSSProperties, Ref } from 'react';
-import { useEffect, useState } from 'react';
 import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanvas';
 import type { CanvasMode } from '../babylon/modePalette';
 import { LEGACY_LABEL, type VariantRow } from './VariantEditor';
@@ -29,9 +28,12 @@ function tileColorFor(row: VariantRow): string {
 
 export interface VariantPreviewProps {
   variants: VariantRow[];
-  // The per-variant GLB bytes after the backend material-swap. Undefined while
-  // /api/collection/build is still in-flight or hasn't been called yet.
-  variantGlbs?: Uint8Array[];
+  // Object URL for the SELECTED variant's swapped GLB. The parent
+  // (LaunchCollectionPage) owns the bytes and creates/revokes this URL, so the
+  // multi-MB Uint8Array[] never crosses a React prop boundary — passing raw
+  // bytes here let React's dev-mode prop serializer `for...in` over millions of
+  // byte indices and OOM the renderer. null/undefined while no variant GLB exists.
+  variantGlbUrl?: string | null;
   selectedIndex: number;
   onSelect: (i: number) => void;
   // plan-015 U6 — canvas-prop pass-through. Defaults preserve existing
@@ -104,7 +106,7 @@ function tileStyle(active: boolean, colorHex: string): CSSProperties {
 
 export function VariantPreview({
   variants,
-  variantGlbs,
+  variantGlbUrl,
   selectedIndex,
   onSelect,
   mode,
@@ -118,41 +120,22 @@ export function VariantPreview({
   encryptedPreviewUrls = [],
   previewRef,
 }: VariantPreviewProps) {
-  // Resolve a blob URL only for the currently-selected variant — sidesteps the
-  // WebGL context cap and the URL-revocation churn of creating N URLs upfront.
-  // plan-015 F1 — URL creation co-located with revocation inside one effect.
-  // The pre-fix useMemo/useEffect split could leak a URL under React 19
-  // StrictMode's mount→unmount→mount double-invoke (the useMemo ran twice
-  // but the cleanup only chased the second value).
-  const [selectedGlbUrl, setSelectedGlbUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const bytes = variantGlbs?.[selectedIndex];
-    if (!bytes) {
-      setSelectedGlbUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(
-      new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }),
-    );
-    setSelectedGlbUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
-      setSelectedGlbUrl(null);
-    };
-  }, [variantGlbs, selectedIndex]);
-
   // plan-015 U7 / R9 — live-recolor fallback. When no swapped variant GLB
   // exists yet, show the base mesh so partColors can paint live before the
-  // user clicks PREVIEW. selectedGlbUrl (the swapped GLB) wins when present
+  // user clicks PREVIEW. variantGlbUrl (the swapped GLB) wins when present
   // — it carries any baked textures the swap pipeline produced.
+  // The variant blob-URL is created/revoked by LaunchCollectionPage (the bytes
+  // owner) and passed in as a string, so the multi-MB Uint8Array[] never
+  // crosses this prop boundary (React dev-mode prop serialization would
+  // `for...in` over its byte indices and OOM the renderer).
   // NOTE (plan-015 F11): the "LOADING BASE MESH…" placeholder below is only
-  // reachable when BOTH selectedGlbUrl AND baseGlbUrl are null. In the
+  // reachable when BOTH variantGlbUrl AND baseGlbUrl are null. In the
   // normal /launch flow, baseGlbUrl is provided by LaunchCollectionPage as
   // soon as onPickBase finishes downloading the base — so that placeholder
   // is effectively unreachable post-base-pick. It remains as defensive
   // fallback for non-/launch consumers (e.g. preview-only mounts that don't
   // pass baseGlbUrl).
-  const displayGlbUrl = selectedGlbUrl ?? baseGlbUrl ?? null;
+  const displayGlbUrl = variantGlbUrl ?? baseGlbUrl ?? null;
 
   return (
     <div data-testid="variant-preview">
