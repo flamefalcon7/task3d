@@ -18,7 +18,7 @@
 
 import type { CSSProperties } from 'react';
 import { tokens } from '../ux/tokens';
-import { QUILT_SIZE, type UploadStage } from '../walrus/useWalrusUpload';
+import { type UploadStage } from '../walrus/useWalrusUpload';
 
 export interface BatchProgressPanelProps {
   variantCount: number;
@@ -47,10 +47,12 @@ export interface BatchProgressPanelProps {
 const TX_PER_QUILT = 2; // register + certify
 const LAUNCH_TX_COUNT = 1;
 
-/** Total user-visible signatures for N variants. */
+/** Total user-visible signatures for N variants. A launch uploads all
+ * variants as a SINGLE quilt (D-101), so it's 1 register + 1 certify + 1
+ * launch = 3 for any N > 0 (just the launch tx when there are no variants). */
 export function totalTxsFor(variantCount: number): number {
   if (variantCount <= 0) return LAUNCH_TX_COUNT;
-  return TX_PER_QUILT * Math.ceil(variantCount / QUILT_SIZE) + LAUNCH_TX_COUNT;
+  return TX_PER_QUILT + LAUNCH_TX_COUNT;
 }
 
 // plan-017 P1-D: 'error' status for the specific step that failed in the
@@ -225,11 +227,13 @@ export function BatchProgressPanel({
   errorBatchIndex,
   errorStage,
 }: BatchProgressPanelProps) {
-  const K = Math.max(1, Math.ceil(Math.max(0, variantCount) / QUILT_SIZE));
   const total = totalTxsFor(variantCount);
+  const hasVariants = variantCount > 0;
 
   // Pre-flight breakdown: shown only at idle. Variant count of 0 stays
   // graceful — the breakdown reads as "0 variants" and the math still works.
+  // D-101 — a launch uploads ALL variants as a single quilt, so the plan is a
+  // fixed 1 register + 1 certify + 1 launch (no per-quilt fan-out).
   if (stage === 'idle') {
     return (
       <div style={panel} data-testid="batch-progress-panel" data-mode="preflight">
@@ -238,11 +242,11 @@ export function BatchProgressPanel({
           your collection: {variantCount} variant{variantCount === 1 ? '' : 's'}
         </p>
         <p style={{ margin: '0 0 4px' }}>
-          walrus packs up to {QUILT_SIZE} variants per quilt — {K} quilt
-          {K === 1 ? '' : 's'} total
+          walrus packs all your variants into a single quilt
         </p>
         <p style={{ margin: 0 }}>
-          you'll sign: {TX_PER_QUILT}×{K} walrus + {LAUNCH_TX_COUNT} launch
+          you'll sign: {hasVariants ? `${TX_PER_QUILT} walrus + ` : ''}
+          {LAUNCH_TX_COUNT} launch
           = <strong data-testid="batch-progress-tx-total">{total}</strong>{' '}
           transaction{total === 1 ? '' : 's'}
         </p>

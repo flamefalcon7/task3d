@@ -4,31 +4,27 @@ import { WalrusFile } from '@mysten/walrus';
 import { getWalrusClient, type WalrusEnhancedClient } from './walrusClient';
 import { clearTrail, surfaceStaleTrail, writeDiag } from './uploadTrail';
 
-// plan-017 U1 / D-062 — multi-quilt batching size. N variants chunked into
-// K = ⌈N/QUILT_SIZE⌉ quilts.
+// Multi-quilt batching size (LATENT). When a caller doesn't override
+// `quiltSize`, N files chunk into ⌈N/QUILT_SIZE⌉ quilts.
 //
-// POST-MORTEM (2026-05-28): R1 multi-quilt batching turned out to NOT
-// solve the OOM it was designed for. Empirical data:
-//   - shuriken (4.40 MB/variant) × 8 = 35 MB total: ✅ at any QS (4/2/16)
-//   - pickup truck (5.80 MB/variant) × 8 = 46 MB total: ❌ at any QS
-// The Walrus WASM encoder (`@mysten/walrus-wasm` Reed-Solomon) has a
-// per-quilt baseline working memory that doesn't scale linearly with
-// input bytes — chunking provides negligible heap savings. The actual
-// OOM gate is total input bytes × encoder constant ≈ 100×, regardless
-// of chunk count. See docs/solutions/integration-issues/
-// walrus-encoder-oom-investigation-2026-05-28.md for the full
-// investigation + open questions filed for Walrus team consult.
+// HISTORY — chunking was introduced (D-062, plan-017) as an OOM mitigation,
+// then the 2026-05-28 post-mortem found it didn't help and blamed a
+// "Walrus encoder OOM gate at ~46 MB total bytes." That was a
+// MISATTRIBUTION (D-100, 2026-06-09): the renderer crash was a V8 heap OOM
+// from React's DEV-MODE prop serializer doing `for...in` over a
+// `Uint8Array[]` prop (~48 M byte-index keys) — NOT the Walrus WASM
+// encoder (the encoder happily encodes >1 GB in isolation; malloc was ~1 MB
+// at crash). The old data fits this exactly: 35 MB ✅ / 46 MB ❌ tracks the
+// byte-index count crossing the 4 GB V8 cage, independent of quilt count.
 //
-// QUILT_SIZE = 4 kept anyway, because:
-//   1. The chunked code path is correct and tested (no harm)
-//   2. BatchProgressPanel UX surfaces the Walrus quilt structure to
-//      users — kept as a hackathon positioning beat for the Walrus track
-//   3. Future SDK improvements may make chunking actually load-bearing
-//   4. Reverting would just be cleanup for cleanup's sake
-//
-// Real root-cause fix (mesh decimation in backend swap pipeline) deferred
-// pending mentor consult; user does not want to sacrifice mesh quality
-// without confirming there's no better path from the Walrus team.
+// With the real cause fixed, chunking has no remaining purpose. Both product
+// callers — publish (CreateModelPage) and launch (LaunchCollectionPage) —
+// now pass `{ quiltSize: files.length }` to upload as a SINGLE quilt (fewest
+// wallet popups: 1 register + 1 certify). The chunking loop + this default
+// remain only as a latent capability (and keep the hook's unit tests
+// meaningful); no product path triggers multi-quilt. The deferred
+// mesh-decimation "root-cause fix" is also moot — it targeted the phantom
+// encoder gate. (D-101 supersedes D-062.)
 export const QUILT_SIZE = 4;
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';

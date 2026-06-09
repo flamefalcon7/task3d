@@ -17,8 +17,12 @@ Phase 4 — feature/UX polish + stability. **Repo now has a GitHub remote** (`or
 - **Local `pnpm build` produces a BLANK app.** `useAppSigner.ts`/`useAppAccount.ts` statically import `test-wallet/loadKeypair.ts`, whose **top-level `if (import.meta.env.PROD) throw`** is a side effect that survives tree-shaking → fires on every local prod build → React root unmounts silently. (`.env.local` has `VITE_TEST_WALLET=0` but the static import + side-effect throw is flag-independent.) **May affect the Vercel deploy** unless its build env differs — worth confirming the live site renders. Fix: make the test-wallet import dynamic/conditional or move the guard off module top-level.
 - `frontend/dist` inlines the test private key when built locally — treat as secret-bearing; rm after local builds.
 
+### Also this session (after D-100)
+- **D-100 committed** on branch `fix/launch-variant-prop-oom` (`3a0e5aa`).
+- **D-101 — retired multi-quilt batching; launch now uploads a single quilt.** Once D-100 showed the "encoder OOM" was a misattribution, the chunking (D-062) lost its only rationale. Both forker upload call sites now pass `{ quiltSize: swapped.length }` (1 register + 1 certify instead of ⌈N/4⌉× → 8 variants = 2 wallet popups, not 4). `BatchProgressPanel` pre-flight → single-quilt plan; `QUILT_SIZE`/chunking kept latent + tested. D-062 marked superseded; deferred mesh-decimation fix is moot. Typecheck clean, **195/195** affected tests pass. On branch `refactor/launch-single-quilt` (stacked on the D-100 branch), not yet committed.
+
 ### Next Concrete Step
-Commit the D-100 fix (`VariantPreview` + `LaunchCollectionPage` + ADR + this file). Then decide whether to fix the prod-build-blank guard bug (and confirm the live Vercel site isn't blank).
+Commit D-101 (`useWalrusUpload` + `LaunchCollectionPage` + `BatchProgressPanel` + their tests + decisions.md + this file). Then user re-verifies in Brave (`/launch` ×8 → **2 walrus popups, not 4**). After that, optionally fix the prod-build-blank guard bug + confirm the live Vercel site isn't blank.
 
 ### Notes for Next Session
 - Servers may be left running: backend `:3001`, frontend `:5173` (started with `VITE_TEST_WALLET=1`).

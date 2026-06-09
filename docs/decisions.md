@@ -2815,7 +2815,7 @@ All test-only code lives under `frontend/src/test-wallet/`. Two production-safet
 
 ## D-062: Multi-quilt batching with `QUILT_SIZE = 4`, exposed in UX
 
-**Status**: Accepted; **partial failure** captured by D-067 post-mortem
+**Status**: Superseded by D-101 (the OOM it mitigated was misattributed — real cause was React dev-mode prop serialization, fixed in D-100; launches now upload a single quilt)
 **Date**: 2026-05-28
 **Phase**: Phase 4 follow-up (plan-017)
 
@@ -4264,6 +4264,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-101: Launch uploads all variants as a single Walrus quilt (retire multi-quilt batching)
+**Status**: Accepted · **Supersedes D-062**
+**Date**: 2026-06-09 · **Phase**: Phase 4 — feature/UX polish + stability
+
+### Context — D-062 chunked N variants into ⌈N/QUILT_SIZE⌉ quilts as a mitigation for a believed Walrus-encoder OOM at ~46 MB total bytes. D-100 proved that OOM was a **misattribution**: the renderer crash was a V8 JS-heap OOM from React's dev-mode prop serializer walking a `Uint8Array[]` prop, not the encoder (which encodes >1 GB in isolation; malloc ~1 MB at crash). The chunking's own 2026-05-28 post-mortem already found it gave negligible heap savings. So multi-quilt batching has no remaining technical justification, and it costs extra wallet popups (2 per quilt: register + certify).
+
+### Decision — A launch uploads ALL variants as a **single quilt** (1 register + 1 certify), matching the publish path which already did this. Both forker call sites pass `uploadFiles(swapped, signer, { quiltSize: swapped.length })`. `BatchProgressPanel`'s pre-flight prediction is now a fixed single-quilt plan (1 register + 1 certify + 1 launch = 3 tx for any N>0). The `QUILT_SIZE` constant + chunking loop are kept as a latent, unit-tested capability but no product path triggers multi-quilt.
+
+### Rationale — fewest wallet popups (8 variants: 2 walrus tx instead of 4) = cleaner demo; the only reason to chunk (encoder OOM) was never real; the BatchProgressPanel "Walrus quilt structure" positioning beat survives as one honest quilt.
+
+### Alternatives Considered — **Keep multi-quilt for the Walrus-track UX beat** — rejected: the beat survives as a single quilt, and the extra popups hurt the demo. **Rip out the chunking machinery entirely** — rejected: larger test rewrite for no product benefit; left latent + documented.
+
+### Consequences — ✅ fewer popups, honest UI, dead OOM-mitigation premise removed · ✅ deferred "mesh decimation root-cause fix" is now moot (targeted the phantom encoder gate) · ⚠️ `QUILT_SIZE`/chunking is now latent code (kept tested) · 🔮 if a real per-quilt size limit ever surfaces, re-introduce chunking deliberately.
+
+### Related — D-062 (superseded), D-100 (the misattribution fix), D-067 (the post-mortem) · `frontend/src/walrus/useWalrusUpload.ts`, `frontend/src/collection/LaunchCollectionPage.tsx`, `frontend/src/collection/BatchProgressPanel.tsx`
+
+---
+
 # Reserved Decision Numbers
 
-D-101 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-102 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

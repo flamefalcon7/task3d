@@ -862,7 +862,11 @@ export function LaunchCollectionPage() {
       // though TS can't see it. The cast scopes the type-erasure to this
       // single call site rather than polluting the AppSigner interface
       // with abstract Signer methods it can't honestly implement.
-      const upload = await uploadFiles(swapped, signer as never);
+      // quiltSize = swapped.length → all variants in ONE quilt (1 register +
+      // 1 certify, fewest wallet popups). Chunking had no benefit (D-101).
+      const upload = await uploadFiles(swapped, signer as never, {
+        quiltSize: swapped.length,
+      });
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
       setPhase('signing');
@@ -1036,7 +1040,11 @@ export function LaunchCollectionPage() {
       const swapped = await runBuildVariants(baseGlb);
 
       setPhase('uploading');
-      const upload = await uploadFiles(swapped, signer as never);
+      // quiltSize = swapped.length → single quilt (1 register + 1 certify),
+      // fewest wallet popups. Chunking had no benefit (D-101).
+      const upload = await uploadFiles(swapped, signer as never, {
+        quiltSize: swapped.length,
+      });
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
       // 2 — launch: pay the derive fee + mint the cap + empty collection. The
