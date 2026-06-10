@@ -35,9 +35,11 @@ describe('TripoGenerator', () => {
     expect(pollMock).toHaveBeenCalledTimes(2);
     expect(pollMock.mock.calls[0]?.[0]).toBe('task-1');
     expect(pollMock.mock.calls[1]?.[0]).toBe('seg-task-1');
-    // Step 2 carries the longer timeout per plan-013.
-    expect(pollMock.mock.calls[0]?.[1]).toEqual({ maxWaitMs: 90_000 });
-    expect(pollMock.mock.calls[1]?.[1]).toEqual({ maxWaitMs: 180_000 });
+    // Step 2 carries the longer timeout per plan-013; both widened 2026-06-04
+    // (90s→180s, 180s→240s) after a post-payment TripoTimeoutError in the
+    // field — see the rationale comment in tripo.ts.
+    expect(pollMock.mock.calls[0]?.[1]).toEqual({ maxWaitMs: 180_000 });
+    expect(pollMock.mock.calls[1]?.[1]).toEqual({ maxWaitMs: 240_000 });
     expect(client.downloadGlb).toHaveBeenCalledWith('https://cdn/x.glb');
   });
 
