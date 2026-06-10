@@ -1,5 +1,36 @@
 # Phase Progress
 
+## Last Updated: 2026-06-10 (**research session (Cowork): AI-agent interface → MCP server recommendation + demo design + pain-point narrative; no code**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **11 of 38** · demo day (7/20–21): ~40 · winners (8/27): ~78
+
+### Current Phase
+Phase 4 — feature/UX polish. This session was research-only (no code, no commits).
+
+### Completed This Session
+- **Researched the "AI agent interface" question** (MCP vs REST vs x402 vs A2A) and wrote the full brief: **`docs/brainstorms/2026-06-10-agent-interface-research.md`**. Key conclusions:
+  - **Recommend a thin MCP server** (`@modelcontextprotocol/sdk`, Streamable HTTP) mounted as a route on the existing Hono backend. MCP is the 2026 de-facto agent-access standard (Linux Foundation, 10k+ servers); Walrus Memory itself launched 2026-06-03 with MCP connectors — same idiom Mysten promotes; we already use MemWal (D-080).
+  - **x402 rejected as the payment rail** — our fees are already native Sui Move calls; an agent with its own keypair pays `access_fee` on-chain like a human. Pitch line: "Other platforms need x402 to charge agents; our contract never cared whether the buyer was human." x402 = roadmap mention only (off-chain metering, e.g. Tripo).
+  - **Tool surface**: v0 read-only (search_models via MemWal recall, get_model, get_license_terms, get_preview) ~1–1.5d; v1 transaction path (build_purchase_tx returns unsigned PTB — agent signs locally; download_content gated on on-chain entitlement + Seal) +1–2d. Agent auth reuses existing `/auth/challenge`+`/verify`.
+  - **90-second demo arc** (brief §7): one human prompt → agent searches → **rejects a candidate on license terms** (autonomy proof) → buys on testnet (split-screen: AccessEntitlement appears live) → Seal-decrypts GLB into `samples/` game scene → kicker: creator balance ticks up → outro `claude mcp add tusk3d <url>` + QR.
+  - **Pain-point narrative** (brief §8): lead = three stacked gaps for agents (payment: no credit card / license: fuzzy human terms vs machine-readable on-chain LicenseTerms / delivery: link rot vs hash-addressed Walrus); kicker = "an AI used your work = you got paid" (Move-enforced royalties); ecosystem M2M-trust argument held for Q&A.
+
+### Next Concrete Step
+**Plan-mode: draft ADR D-104 (MCP agent interface) + implementation plan.** Two risks to verify first: (1) Seal session-key/decryption flow for a non-browser MCP client; (2) whether `purchase_access` has any frontend-only assumption an agent path would bypass (check 2026-06-04 security audit, esp. C-1 fix). Then user decides v0-only vs v0+v1 cut-line (11 days left, deck + video still pending).
+
+### Blockers / Open Questions
+- Scope cut-line: v0 read-only alone still demos; v1 purchase path is the hero shot but +1–2d.
+- Brainstorm doc uncommitted — suggest `docs: agent-interface MCP research + demo + pain points`.
+- Carry-over from 6/09: confirm the live Vercel deploy renders post-D-103 (may need redeploy from `main`).
+
+### Notes for Next Session
+- New dependency (`@modelcontextprotocol/sdk`) + new public API surface ⇒ Full ADR + plan-mode per CLAUDE.md discipline.
+- MCP server design principle locked in brief: server NEVER holds agent keys; build_purchase_tx returns tx bytes, agent signs client-side.
+- Demo agent can reuse the test-wallet keypair pattern (it legitimately owns that key); fund on testnet faucet.
+
+---
+
 ## Last Updated: 2026-06-09 (**root-caused + fixed the `/launch` upload renderer crash; pushed `main` to GitHub**)
 
 ### Hackathon Tracker
