@@ -47,7 +47,9 @@ const GLOBAL_OVERFETCH = 4;
 // like "penis" (0.709) overlaps bare "car" (0.710). 0.66 keeps the descriptive
 // cluster and drops the noisy 0.7+ band (incl. junk and vague single words).
 // Real robustness needs a larger/diverse pool + descriptive queries, not a tighter number.
-const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.66');
+// Exported so the MCP search_models tool (mcp/tools/searchModels.ts) applies
+// the SAME relevance gate as this route — one constant, no drift.
+export const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.66');
 
 const rememberSchema = z.object({
   prompt: z.string().min(1).max(2000),
