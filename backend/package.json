@@ -16,6 +16,7 @@
     "@gltf-transform/core": "^4.1.0",
     "@gltf-transform/extensions": "4.3.0",
     "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@mysten-incubation/memwal": "0.0.6",
     "@mysten/sui": "2.16.2",
     "@overflow2026/shared": "workspace:*",
