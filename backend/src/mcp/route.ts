@@ -16,6 +16,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { bearerAuthInfo } from './auth.js';
 import { buildMcpServer, type BuildMcpServerDeps } from './server.js';
 
 export type McpRouteDeps = BuildMcpServerDeps;
@@ -42,7 +43,12 @@ export function buildMcpRoute(deps: McpRouteDeps = {}) {
       sessionIdGenerator: undefined,
     });
     await server.connect(transport);
-    return transport.handleRequest(c.req.raw);
+    // Thread the (unverified) bearer to tool handlers as `extra.authInfo`
+    // (U3, KTD-4). Verification lives in mcp/auth.ts `requireAgentSub` so auth
+    // failures surface as tool-level errors, not a transport 401 — see the
+    // exposure-mechanism note at the top of auth.ts.
+    const authInfo = bearerAuthInfo(c.req.header('Authorization'));
+    return transport.handleRequest(c.req.raw, authInfo ? { authInfo } : undefined);
   });
 
   return route;
