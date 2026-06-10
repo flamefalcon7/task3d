@@ -114,6 +114,7 @@ describe('POST /mcp tools/list', () => {
     const tools = (msg.result as { tools: Array<{ name: string; inputSchema?: unknown; outputSchema?: unknown }> })
       .tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'build_purchase_tx',
       'get_license_terms',
       'get_model',
       'get_preview',

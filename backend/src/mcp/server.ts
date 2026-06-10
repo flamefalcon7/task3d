@@ -11,12 +11,14 @@
 // inside the tool handlers, never at module load, so importing this file
 // never reads `contracts/networks/testnet.json` or env.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { Transaction } from '@mysten/sui/transactions';
 import type { JwtSigner } from '../lib/jwt.js';
 import type { MemwalClient } from '../lib/memwal-client.js';
 import { registerSearchModels } from './tools/searchModels.js';
 import { registerGetModel } from './tools/getModel.js';
 import { registerGetLicenseTerms } from './tools/getLicenseTerms.js';
 import { registerGetPreview } from './tools/getPreview.js';
+import { registerBuildPurchaseTx } from './tools/buildPurchaseTx.js';
 
 export const MCP_SERVER_NAME = 'tusk3d';
 // Server implementation version surfaced in `InitializeResult.serverInfo`
@@ -30,6 +32,15 @@ export const MCP_SERVER_VERSION = '0.1.0';
  */
 export interface McpSuiClient {
   getObject(params: { id: string; options?: { showContent?: boolean } }): Promise<unknown>;
+  /**
+   * KTD-7 (U5): validates a built PTB before it is returned to the agent.
+   * Optional in the structural slice so U4-era read-only fakes stay tiny; the
+   * live `SuiJsonRpcClient` always has it, and build_purchase_tx fails closed
+   * (`dry_run_failed`) if its client can't dry-run.
+   */
+  dryRunTransactionBlock?(params: { transactionBlock: string }): Promise<{
+    effects?: { status?: { status?: string; error?: string } };
+  }>;
 }
 
 export interface BuildMcpServerDeps {
@@ -49,6 +60,14 @@ export interface BuildMcpServerDeps {
    * baked guess).
    */
   walrusAggregator?: string;
+  /**
+   * Test seam for U5's final BCS build. The default (`tx.build({ client })`)
+   * needs the full core-client surface — object resolution, reference gas
+   * price, gas-coin selection — which is far too wide to fake structurally in
+   * tests. Tests inject a stub that returns fixed bytes (and can inspect the
+   * received `Transaction` for sender/commands); live code omits it.
+   */
+  buildTxBytes?: (tx: Transaction, client: McpSuiClient) => Promise<Uint8Array>;
 }
 
 export function buildMcpServer(deps: BuildMcpServerDeps = {}): McpServer {
@@ -62,6 +81,10 @@ export function buildMcpServer(deps: BuildMcpServerDeps = {}): McpServer {
   registerGetModel(server, deps);
   registerGetLicenseTerms(server, deps);
   registerGetPreview(server, deps);
+
+  // v1 transaction-path tools (U5/U6). Still keyless: build_purchase_tx
+  // returns an UNSIGNED dry-run-validated PTB the agent signs itself (R4/R6).
+  registerBuildPurchaseTx(server, deps);
 
   return server;
 }

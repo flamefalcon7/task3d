@@ -43,7 +43,16 @@ export type McpToolErrorCode =
   // read tools (U4): id resolves to nothing / to a non-Model3D object
   | 'not_found'
   // read tools (U4): the upstream fullnode read itself failed
-  | 'upstream_error';
+  | 'upstream_error'
+  // build_purchase_tx (U5): a Move precondition the server can mirror cheaply
+  // (policy != ALLOW_LIST → ENotPurchasable; sub == creator →
+  // ECreatorCannotSelfPurchase, D-087) — fail fast before building a PTB the
+  // chain would abort.
+  | 'not_purchasable'
+  // build_purchase_tx (U5, KTD-7): the PTB could not be validated — build
+  // failed (e.g. unfunded sender → no gas coins) or the dry run aborted.
+  // An unvalidated PTB is NEVER returned.
+  | 'dry_run_failed';
 
 /**
  * Tool-level error. Thrown from tool handlers; the SDK converts it into an
