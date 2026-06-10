@@ -25,6 +25,7 @@ import { buildPurchaseAccessPtb } from '@overflow2026/shared';
 import { McpToolError, requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps, McpSuiClient } from '../server.js';
 import { MODEL_ID_SHAPE, readModelSummary, resolveSuiDeps } from './getModel.js';
+import { AUTH_HINT, guarded, toolResult, withTimeout } from './common.js';
 
 // Move's LicenseTerms policy constant (POLICY_ALLOW_LIST = 1) — the only
 // policy `purchase_access` accepts (abort ENotPurchasable otherwise).
@@ -66,7 +67,7 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
         'Build an UNSIGNED purchase_access transaction for one Tusk3D model: pays the ' +
         'access_fee (read on-chain) to the creator and mints a soulbound AccessEntitlement ' +
         'to the sender. Returns dry-run-validated BCS bytes for YOU to sign and execute ' +
-        'with your own keypair — the server holds no keys. Requires Authorization: Bearer <jwt>.',
+        `with your own keypair — the server holds no keys. ${AUTH_HINT}`,
       inputSchema: {
         modelId: MODEL_ID_SHAPE,
         agentAddress: z
@@ -77,11 +78,14 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
       },
       outputSchema: OUTPUT_SHAPE,
     },
-    async ({ modelId, agentAddress }, extra) => {
+    guarded(async ({ modelId, agentAddress }, extra) => {
       const sub = await requireAgentSub(extra, { jwt: deps.jwt });
       const sender = agentAddress ? normalizeSuiAddress(agentAddress) : sub;
 
-      const summary = await readModelSummary(deps, modelId);
+      // Resolve once and thread through (review M-009 — readModelSummary
+      // would otherwise re-resolve the same deps).
+      const resolved = await resolveSuiDeps(deps);
+      const summary = await readModelSummary(deps, modelId, resolved);
       if (summary.policy !== POLICY_ALLOW_LIST) {
         throw new McpToolError(
           'not_purchasable',
@@ -98,7 +102,7 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
         );
       }
 
-      const { client, packageId } = await resolveSuiDeps(deps);
+      const { client, packageId } = resolved;
       const { tx, metadata } = buildPurchaseAccessPtb(packageId, {
         modelId,
         accessFeeMist: BigInt(summary.accessFee),
@@ -107,13 +111,20 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
 
       let txBytes: string;
       try {
-        const bytes = await (deps.buildTxBytes ?? defaultBuildTxBytes)(tx, client);
+        const bytes = await withTimeout(
+          (deps.buildTxBytes ?? defaultBuildTxBytes)(tx, client),
+          'transaction build',
+        );
         txBytes = toBase64(bytes);
       } catch (e) {
+        if (e instanceof McpToolError) throw e;
+        // Raw builder messages can carry internal endpoint detail — log them
+        // server-side, return the actionable hint only (review SEC-3).
+        console.warn('[mcp] build_purchase_tx build failed:', e);
         throw new McpToolError(
           'dry_run_failed',
-          `transaction build failed (${e instanceof Error ? e.message : String(e)}) — ` +
-            `is ${sender} funded with SUI gas on this network?`,
+          `transaction build failed — is ${sender} funded with SUI gas on this network? ` +
+            '(gas-coin selection is the most common cause)',
         );
       }
 
@@ -124,14 +135,16 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
       let status: string | undefined;
       let dryRunError: string | undefined;
       try {
-        const dryRun = await client.dryRunTransactionBlock({ transactionBlock: txBytes });
+        const dryRun = await withTimeout(
+          client.dryRunTransactionBlock({ transactionBlock: txBytes }),
+          'dry run',
+        );
         status = dryRun.effects?.status?.status;
         dryRunError = dryRun.effects?.status?.error;
       } catch (e) {
-        throw new McpToolError(
-          'upstream_error',
-          `dry run RPC failed (${e instanceof Error ? e.message : String(e)}); retry shortly`,
-        );
+        if (e instanceof McpToolError) throw e;
+        console.warn('[mcp] build_purchase_tx dry-run RPC failed:', e);
+        throw new McpToolError('upstream_error', 'dry run RPC failed; retry shortly');
       }
       if (status !== 'success') {
         throw new McpToolError(
@@ -151,10 +164,7 @@ export function registerBuildPurchaseTx(server: McpServer, deps: BuildMcpServerD
           expectedEvents: metadata.expectedEvents,
         },
       };
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        structuredContent: result as unknown as Record<string, unknown>,
-      };
-    },
+      return toolResult(result);
+    }),
   );
 }

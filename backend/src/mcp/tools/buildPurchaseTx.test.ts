@@ -205,3 +205,45 @@ describe('build_purchase_tx', () => {
     expect(errorText(result).startsWith('auth_required:')).toBe(true);
   });
 });
+
+// fix(review) regression coverage — T-001 (dry-run-absent + dry-run-RPC-throws
+// branches), T-004 (zero-fee end-to-end).
+describe('build_purchase_tx — review fixes', () => {
+  it('client without dryRunTransactionBlock → dry_run_failed, no PTB returned (T-001a)', async () => {
+    const { deps } = harness();
+    (deps.suiClient as { dryRunTransactionBlock?: unknown }).dryRunTransactionBlock = undefined;
+    const result = await callTool(deps, 'build_purchase_tx', { modelId: MODEL_ID });
+    expect(result.isError).toBe(true);
+    expect(errorText(result).startsWith('dry_run_failed:')).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+  });
+
+  it('dry-run RPC throw → upstream_error (distinct from dry_run_failed; T-001b)', async () => {
+    const { deps } = harness();
+    (deps.suiClient as { dryRunTransactionBlock: unknown }).dryRunTransactionBlock = async () => {
+      throw new Error('fullnode connection reset');
+    };
+    const result = await callTool(deps, 'build_purchase_tx', { modelId: MODEL_ID });
+    expect(result.isError).toBe(true);
+    expect(errorText(result).startsWith('upstream_error:')).toBe(true);
+    // Raw upstream detail is logged server-side, not echoed (review SEC-3).
+    expect(errorText(result)).not.toContain('connection reset');
+  });
+
+  it('zero access_fee model builds and dry-runs cleanly (T-004)', async () => {
+    const { deps, captured } = harness();
+    (deps.suiClient as { getObject: unknown }).getObject = async () => {
+      const obj = modelObject() as {
+        data: { content: { fields: { license: { fields: { access_fee: string } } } } };
+      };
+      obj.data.content.fields.license.fields.access_fee = '0';
+      return obj;
+    };
+    const result = await callTool(deps, 'build_purchase_tx', { modelId: MODEL_ID });
+    expect(result.isError).toBeFalsy();
+    expect(
+      (result.structuredContent as { metadata: { accessFeeMist: string } }).metadata.accessFeeMist,
+    ).toBe('0');
+    expect(captured.dryRunCalls).toBe(1);
+  });
+});

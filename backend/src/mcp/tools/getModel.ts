@@ -21,6 +21,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { jsonToSummary, type Model3DSummary } from '@overflow2026/shared';
 import { McpToolError, requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps, McpSuiClient } from '../server.js';
+import { AUTH_HINT, MODEL_TYPE_SUFFIX, guarded, toolResult, withTimeout } from './common.js';
 
 // Same accepted shape as the auth layer: short-form ids are valid Sui
 // addresses. The SDK validates this BEFORE the handler runs (raw Zod shape →
@@ -29,8 +30,6 @@ export const MODEL_ID_SHAPE = z
   .string()
   .regex(/^0x[0-9a-fA-F]{1,64}$/)
   .describe('Sui object id of the Model3D');
-
-const MODEL_TYPE_SUFFIX = '::model3d::Model3D';
 
 /** Full `Model3DSummary` as a Zod raw shape (mirrors shared/src/types.ts). */
 export const MODEL_SUMMARY_SHAPE = {
@@ -106,12 +105,19 @@ export function unwrapMoveFields(value: unknown): unknown {
 export async function readModelSummary(
   deps: BuildMcpServerDeps,
   modelId: string,
+  // Pass when the caller already resolved the sui deps (review M-009 — avoids
+  // a second resolveSuiDeps round-trip in build_purchase_tx).
+  resolved?: { client: McpSuiClient; packageId: string },
 ): Promise<Model3DSummary> {
-  const { client, packageId } = await resolveSuiDeps(deps);
+  const { client, packageId } = resolved ?? (await resolveSuiDeps(deps));
   let resp: unknown;
   try {
-    resp = await client.getObject({ id: modelId, options: { showContent: true } });
-  } catch {
+    resp = await withTimeout(
+      client.getObject({ id: modelId, options: { showContent: true } }),
+      'model read',
+    );
+  } catch (e) {
+    if (e instanceof McpToolError) throw e;
     throw new McpToolError('upstream_error', 'Sui fullnode read failed; retry shortly');
   }
   const data = (
@@ -145,17 +151,16 @@ export function registerGetModel(server: McpServer, deps: BuildMcpServerDeps): v
       title: 'Get model',
       description:
         'Fetch the full on-chain summary of one Tusk3D Model3D (creator, name, license fees, ' +
-        'policy, encryption flag, Walrus blob ids). Requires Authorization: Bearer <jwt>.',
+        'policy, encryption flag, Walrus blob ids). For a NON-encrypted model, glbBlobId is the ' +
+        'public GLB quilt-patch id — fetch it at <aggregator>/v1/blobs/by-quilt-patch-id/<id>. ' +
+        `${AUTH_HINT}`,
       inputSchema: { modelId: MODEL_ID_SHAPE },
       outputSchema: MODEL_SUMMARY_SHAPE,
     },
-    async ({ modelId }, extra) => {
+    guarded(async ({ modelId }, extra) => {
       await requireAgentSub(extra, { jwt: deps.jwt });
       const summary = await readModelSummary(deps, modelId);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(summary) }],
-        structuredContent: summary as unknown as Record<string, unknown>,
-      };
-    },
+      return toolResult(summary);
+    }),
   );
 }

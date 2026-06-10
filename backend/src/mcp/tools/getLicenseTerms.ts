@@ -10,12 +10,19 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { MODEL_ID_SHAPE, readModelSummary } from './getModel.js';
+import { AUTH_HINT, guarded, toolResult } from './common.js';
 
 const outputSchema = {
+  // Fee fields carry a digit-only pattern (review AC-006): u64 MIST exceeds
+  // Number.MAX_SAFE_INTEGER — agents must parse these with BigInt, never float.
   accessFee: z
     .string()
-    .describe('One-time AccessEntitlement fee in MIST (u64 as string; 1 SUI = 1e9 MIST)'),
-  derivativeMintFee: z.string().describe('Per-launch derive fee in MIST (u64 as string)'),
+    .regex(/^\d+$/)
+    .describe('One-time AccessEntitlement fee in MIST (u64 as DIGIT STRING — parse with BigInt, not float; 1 SUI = 1e9 MIST)'),
+  derivativeMintFee: z
+    .string()
+    .regex(/^\d+$/)
+    .describe('Per-launch derive fee in MIST (u64 as digit string — parse with BigInt)'),
   derivativeRoyaltyBps: z.number().describe('Creator royalty on derivatives, basis points (≤ 3000)'),
   policy: z.number().describe('0 RESTRICTED · 1 ALLOW_LIST · 2 PERMISSIONLESS'),
   isEncrypted: z.boolean().describe('true → content is Seal-encrypted; decryption gated on the entitlement'),
@@ -29,11 +36,11 @@ export function registerGetLicenseTerms(server: McpServer, deps: BuildMcpServerD
       description:
         'Structured LicenseTerms of one Model3D: access fee (MIST), derivative mint fee, royalty bps, ' +
         'policy, encryption flag. Use this to reason over price/policy before purchasing. ' +
-        'Requires Authorization: Bearer <jwt>.',
+        `${AUTH_HINT}`,
       inputSchema: { modelId: MODEL_ID_SHAPE },
       outputSchema,
     },
-    async ({ modelId }, extra) => {
+    guarded(async ({ modelId }, extra) => {
       await requireAgentSub(extra, { jwt: deps.jwt });
       const summary = await readModelSummary(deps, modelId);
       // Exactly the five projection fields — no summary spread, so a future
@@ -45,10 +52,7 @@ export function registerGetLicenseTerms(server: McpServer, deps: BuildMcpServerD
         policy: summary.policy,
         isEncrypted: summary.isEncrypted,
       };
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
-        structuredContent: structured,
-      };
-    },
+      return toolResult(structured);
+    }),
   );
 }

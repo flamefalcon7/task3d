@@ -157,14 +157,21 @@ export interface RunAgentDecryptResult {
 }
 
 function defaultSuiClient(): SealCompatibleClient {
+  // Env-overridable like every other network default in the repo (review
+  // M-007/PS-002) — the 8/27 mainnet cutover must not require a code change.
   return new SuiJsonRpcClient({
-    network: 'testnet',
-    url: getJsonRpcFullnodeUrl('testnet'),
+    network: process.env.SUI_NETWORK ?? 'testnet',
+    url: process.env.SUI_FULLNODE_URL ?? getJsonRpcFullnodeUrl('testnet'),
   }) as unknown as SealCompatibleClient;
 }
 
+// Bound the aggregator fetch (review JFR-001/R-006): a stalled CDN would
+// otherwise hang the agent process until the OS TCP timeout. 60s covers a
+// large ciphertext GLB on a slow link.
+const FETCH_TIMEOUT_MS = Number(process.env.AGENT_DECRYPT_FETCH_TIMEOUT_MS ?? '60000');
+
 async function defaultFetchBytes(url: string): Promise<Uint8Array> {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`ciphertext fetch failed: HTTP ${res.status} from the Walrus aggregator`);
   }

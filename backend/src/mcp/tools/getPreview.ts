@@ -18,12 +18,12 @@ import { z } from 'zod';
 import { requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { MODEL_ID_SHAPE, readModelSummary } from './getModel.js';
+import { AUTH_HINT, BLOB_ID_RE, guarded, toolResult } from './common.js';
 
-// Mirrors frontend/src/walrus/aggregator.ts (the canonical constant + W-4 regex).
-// Backend env analog of VITE_WALRUS_AGGREGATOR; read at call time per the
-// server.ts DI contract.
+// Mirrors frontend/src/walrus/aggregator.ts (the canonical constant; W-4 regex
+// lives in common.ts). Backend env analog of VITE_WALRUS_AGGREGATOR; read at
+// call time per the server.ts DI contract.
 const DEFAULT_WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
-const BLOB_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 export function resolveAggregatorBase(deps: BuildMcpServerDeps): string {
   const base = deps.walrusAggregator ?? process.env.WALRUS_AGGREGATOR ?? DEFAULT_WALRUS_AGGREGATOR;
@@ -44,11 +44,11 @@ export function registerGetPreview(server: McpServer, deps: BuildMcpServerDeps):
       title: 'Get preview',
       description:
         'Public preview-image URLs for one Model3D (watermarked stills served from Walrus). ' +
-        'Empty for models published without previews. Requires Authorization: Bearer <jwt>.',
+        `Empty for models published without previews. ${AUTH_HINT}`,
       inputSchema: { modelId: MODEL_ID_SHAPE },
       outputSchema,
     },
-    async ({ modelId }, extra) => {
+    guarded(async ({ modelId }, extra) => {
       await requireAgentSub(extra, { jwt: deps.jwt });
       const summary = await readModelSummary(deps, modelId);
       const base = resolveAggregatorBase(deps);
@@ -57,10 +57,7 @@ export function registerGetPreview(server: McpServer, deps: BuildMcpServerDeps):
         .filter((id) => id && BLOB_ID_RE.test(id))
         .map((id) => `${base}/v1/blobs/by-quilt-patch-id/${id}`);
       const structured = { modelId: summary.objectId, previewUrls };
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
-        structuredContent: structured,
-      };
-    },
+      return toolResult(structured);
+    }),
   );
 }

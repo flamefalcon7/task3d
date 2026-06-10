@@ -142,6 +142,10 @@ export function mcpRateLimited(address: string, now = Date.now(), opts: McpRateL
         hits.delete(oldest);
       }
     }
+    // Delete-before-set so Map insertion order approximates RECENCY — at the
+    // ceiling, "evict oldest" then targets the stalest window instead of a
+    // recently re-active address (review C-4).
+    hits.delete(address);
     hits.set(address, { count: 1, resetAt: now + windowMs });
     return false;
   }
@@ -220,7 +224,13 @@ export async function requireAgentSub(
   }
   const address = normalizeSuiAddress(sub); // canonical 0x + 64 hex
   if (mcpRateLimited(address, Date.now(), deps.rateLimit)) {
-    throw new McpToolError('rate_limited', 'Too many MCP tool calls for this address; retry after the window resets');
+    // Surface the window size (agent-native review: a 429 without Retry-After
+    // sends agents into a blind retry loop).
+    const windowS = Math.ceil((deps.rateLimit?.windowMs ?? WINDOW_MS) / 1000);
+    throw new McpToolError(
+      'rate_limited',
+      `Too many MCP tool calls for this address; retry after ~${windowS}s when the window resets`,
+    );
   }
   return address;
 }

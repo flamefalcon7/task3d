@@ -43,3 +43,24 @@ describe('GET /llms.txt', () => {
     expect(body).not.toContain('http://example.test');
   });
 });
+
+// fix(review) AC-003 + R-005 — auth wording covers ALL tools; origin honors
+// forwarded headers behind a TLS-terminating proxy.
+describe('/llms.txt review fixes', () => {
+  it('states that ALL tools (read tools included) require the bearer', async () => {
+    const app = buildApp({});
+    const res = await app.request('http://localhost:8787/llms.txt');
+    const body = await res.text();
+    expect(body).toContain('ALL tools (read tools included) require');
+  });
+
+  it('derives the origin from x-forwarded-proto/host when present', async () => {
+    const app = buildApp({});
+    const res = await app.request('http://127.0.0.1:3001/llms.txt', {
+      headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'api.tusk3d.space' },
+    });
+    const body = await res.text();
+    expect(body).toContain('https://api.tusk3d.space/mcp');
+    expect(body).not.toContain('127.0.0.1');
+  });
+});

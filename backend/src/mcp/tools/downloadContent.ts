@@ -29,13 +29,19 @@ import { McpToolError, requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { MODEL_ID_SHAPE, resolveSuiDeps } from './getModel.js';
 import { resolveAggregatorBase } from './getPreview.js';
+import {
+  AUTH_HINT,
+  BLOB_ID_RE,
+  ENTITLEMENT_TYPE_SUFFIX,
+  MODEL_TYPE_SUFFIX,
+  type ObjectResp,
+  guarded,
+  toolResult,
+  withTimeout,
+} from './common.js';
 
-const ENTITLEMENT_TYPE_SUFFIX = '::model3d::AccessEntitlement';
-const MODEL_TYPE_SUFFIX = '::model3d::Model3D';
 // D-085: fixed seal_id length the Move gate enforces (SEAL_ID_LEN).
 const SEAL_ID_LEN = 32;
-// Audit W-4: same base64url charset gate as get_preview / aggregator.ts.
-const BLOB_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 const ENTITLEMENT_ID_SHAPE = z
   .string()
@@ -53,31 +59,24 @@ const OUTPUT_SHAPE = {
         'SealClient with your own keypair — the server never unwraps it.',
     ),
   sealApprove: z.object({
-    modelId: z.string(),
-    entitlementId: z.string(),
+    modelId: z.string().describe('2nd object arg of the seal_approve_entitlement dry-run PTB'),
+    entitlementId: z.string().describe('1st object arg of the seal_approve_entitlement dry-run PTB'),
   }),
   packageId: z
     .string()
     .describe('model3d package id — use for SessionKey.create and the seal_approve_entitlement PTB'),
 };
 
-type ObjectResp = {
-  data?: {
-    type?: string;
-    owner?: { AddressOwner?: string } | string | null;
-    content?: {
-      dataType?: string;
-      type?: string;
-      fields?: Record<string, unknown> | null;
-    } | null;
-  } | null;
-};
-
-const DENY = new McpToolError(
-  'forbidden',
-  'caller does not hold a matching AccessEntitlement for this model ' +
-    '(entitlement type, owner, or model binding failed verification, or the read failed)',
-);
+// Factory, not a shared singleton (review R-008): Error instances are
+// mutable; a shared one thrown across concurrent requests could alias state
+// if anything downstream ever stamps metadata onto a caught error.
+function deny(): McpToolError {
+  return new McpToolError(
+    'forbidden',
+    'caller does not hold a matching AccessEntitlement for this model ' +
+      '(entitlement type, owner, or model binding failed verification, or the read failed)',
+  );
+}
 
 export function registerDownloadContent(server: McpServer, deps: BuildMcpServerDeps): void {
   server.registerTool(
@@ -88,44 +87,53 @@ export function registerDownloadContent(server: McpServer, deps: BuildMcpServerD
         'Entitlement-gated decrypt material for an encrypted Tusk3D model you bought access ' +
         'to: the ciphertext URL, the Seal-wrapped AES key, and the seal_approve identifiers. ' +
         'Decryption happens on YOUR side with YOUR keypair (the server never touches the ' +
-        'plaintext or the AES key). Requires Authorization: Bearer <jwt>.',
+        'plaintext or the AES key). Next step: pipe this tool\'s JSON output to the repo helper ' +
+        '`AGENT_SECRET_KEY=<bech32> pnpm --dir frontend exec tsx scripts/agent-decrypt.ts -` ' +
+        '(SessionKey + seal_approve_entitlement dry-run + SealClient.decrypt + AES-256-GCM → samples/). ' +
+        `${AUTH_HINT}`,
       inputSchema: { modelId: MODEL_ID_SHAPE, entitlementId: ENTITLEMENT_ID_SHAPE },
       outputSchema: OUTPUT_SHAPE,
     },
-    async ({ modelId, entitlementId }, extra) => {
+    guarded(async ({ modelId, entitlementId }, extra) => {
       const sub = await requireAgentSub(extra, { jwt: deps.jwt });
       const { client, packageId } = await resolveSuiDeps(deps);
 
       // --- (1) Entitlement gate, fail-closed (KTD-6) -----------------------
       let ent: ObjectResp;
       try {
-        ent = (await client.getObject({
-          id: entitlementId,
-          options: { showContent: true, showOwner: true, showType: true },
-        })) as ObjectResp;
+        ent = (await withTimeout(
+          client.getObject({
+            id: entitlementId,
+            options: { showContent: true, showOwner: true, showType: true },
+          }),
+          'entitlement read',
+        )) as ObjectResp;
       } catch {
-        throw DENY;
+        throw deny();
       }
       const entData = ent.data;
       const entType = entData?.type ?? entData?.content?.type;
-      if (!entData || entType !== `${packageId}${ENTITLEMENT_TYPE_SUFFIX}`) throw DENY;
+      if (!entData || entType !== `${packageId}${ENTITLEMENT_TYPE_SUFFIX}`) throw deny();
       const owner = entData.owner;
       const ownerAddr =
         owner && typeof owner === 'object' && 'AddressOwner' in owner ? owner.AddressOwner : null;
-      if (!ownerAddr || normalizeSuiAddress(ownerAddr) !== sub) throw DENY;
+      if (!ownerAddr || normalizeSuiAddress(ownerAddr) !== sub) throw deny();
       const entFields = (entData.content?.fields ?? {}) as Record<string, unknown>;
       const boundModelId = String(entFields.model_id ?? '');
       if (!boundModelId || normalizeSuiAddress(boundModelId) !== normalizeSuiAddress(modelId)) {
-        throw DENY;
+        throw deny();
       }
 
       // --- (2) Read the model's decrypt material ---------------------------
       let model: ObjectResp;
       try {
-        model = (await client.getObject({
-          id: modelId,
-          options: { showContent: true },
-        })) as ObjectResp;
+        model = (await withTimeout(
+          client.getObject({
+            id: modelId,
+            options: { showContent: true },
+          }),
+          'model read',
+        )) as ObjectResp;
       } catch {
         throw new McpToolError('upstream_error', 'Sui fullnode read failed; retry shortly');
       }
@@ -172,10 +180,7 @@ export function registerDownloadContent(server: McpServer, deps: BuildMcpServerD
         sealApprove: { modelId, entitlementId },
         packageId,
       };
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        structuredContent: result as unknown as Record<string, unknown>,
-      };
-    },
+      return toolResult(result);
+    }),
   );
 }

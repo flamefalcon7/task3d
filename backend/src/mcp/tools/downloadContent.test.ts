@@ -206,3 +206,59 @@ describe('download_content', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+// fix(review) regression coverage — T-002 (empty sealed_key; model-read RPC
+// throw after a valid entitlement), T-003 (non-Model3D model object after a
+// valid entitlement).
+describe('download_content — review fixes', () => {
+  function twoPhaseClient(modelResponder: () => unknown): {
+    deps: BuildMcpServerDeps;
+    calls: CapturedCall[];
+  } {
+    const calls: CapturedCall[] = [];
+    const suiClient: McpSuiClient = {
+      async getObject(params) {
+        calls.push({ id: params.id, options: params.options as Record<string, unknown> });
+        if (params.id === ENTITLEMENT_ID) return entitlementObject({});
+        return modelResponder();
+      },
+    };
+    return {
+      deps: { jwt: stubJwt, suiClient, packageId: PKG, walrusAggregator: AGGREGATOR },
+      calls,
+    };
+  }
+
+  it('present-but-empty sealed_key → content_invalid (T-002a)', async () => {
+    const { deps } = twoPhaseClient(() => modelObject({ sealedKey: [] }));
+    const result = await callTool(deps, 'download_content', ARGS);
+    expect(result.isError).toBe(true);
+    expect(errorText(result).startsWith('content_invalid:')).toBe(true);
+  });
+
+  it('model read RPC throw AFTER a valid entitlement → upstream_error (T-002b)', async () => {
+    const { deps, calls } = twoPhaseClient(() => {
+      throw new Error('fullnode boom');
+    });
+    const result = await callTool(deps, 'download_content', ARGS);
+    expect(result.isError).toBe(true);
+    expect(errorText(result).startsWith('upstream_error:')).toBe(true);
+    // The entitlement gate passed first (both reads attempted).
+    expect(calls).toHaveLength(2);
+  });
+
+  it('valid entitlement but the model object is not a Model3D → not_found (T-003)', async () => {
+    const { deps } = twoPhaseClient(() => ({
+      data: {
+        content: {
+          dataType: 'moveObject',
+          type: `${PKG}::model3d::NftToken`,
+          fields: {},
+        },
+      },
+    }));
+    const result = await callTool(deps, 'download_content', ARGS);
+    expect(result.isError).toBe(true);
+    expect(errorText(result).startsWith('not_found:')).toBe(true);
+  });
+});

@@ -128,3 +128,13 @@ describe('POST /mcp tools/list', () => {
     }
   });
 });
+
+// fix(review) R-002 — GET must not open a stateless SSE stream.
+describe('/mcp GET', () => {
+  it('returns 405 with an Allow header (no SSE on the stateless endpoint)', async () => {
+    const app = buildApp({});
+    const res = await app.request('/mcp', { method: 'GET' });
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toContain('POST');
+  });
+});

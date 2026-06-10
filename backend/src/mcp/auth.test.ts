@@ -157,3 +157,29 @@ describe('mcpRateLimited window mechanics', () => {
     expect(mcpRateLimitSizeForTest()).toBe(0);
   });
 });
+
+// fix(review) C-4 — window reset refreshes Map insertion order, so at-cap
+// eviction targets the stalest window, not a recently re-active address.
+describe('mcpRateLimited — eviction recency (review C-4)', () => {
+  it('a re-activated address survives at-cap eviction; the stalest is evicted instead', () => {
+    resetMcpRateLimitForTest();
+    const t0 = 1_000_000;
+    const cap = { maxKeys: 2, maxPerWindow: 3 };
+    // 0xaa gets a SHORT window so it can expire and re-activate while 0xbb's
+    // long window stays live (the sweep must not remove 0xbb at the cap).
+    mcpRateLimited('0xaa', t0, { ...cap, windowMs: 1000 });
+    mcpRateLimited('0xbb', t0 + 1, { ...cap, windowMs: 60_000 });
+    // Re-activate 0xaa in a NEW window — delete-before-set moves it to the
+    // back of the insertion order (count resets to 1 at t0+1500).
+    mcpRateLimited('0xaa', t0 + 1500, { ...cap, windowMs: 60_000 });
+    // A 3rd address at the cap evicts the oldest LIVE entry — with the fix
+    // that's 0xbb; without it, insertion order would still say 0xaa.
+    mcpRateLimited('0xcc', t0 + 1600, { ...cap, windowMs: 60_000 });
+    expect(mcpRateLimitSizeForTest()).toBe(2);
+    // 0xaa's entry survived with count=1: three more calls reach count=4 > 3.
+    // (Had 0xaa been evicted, the third call would only reach count=3 -> false.)
+    expect(mcpRateLimited('0xaa', t0 + 1700, { ...cap, windowMs: 60_000 })).toBe(false);
+    expect(mcpRateLimited('0xaa', t0 + 1701, { ...cap, windowMs: 60_000 })).toBe(false);
+    expect(mcpRateLimited('0xaa', t0 + 1702, { ...cap, windowMs: 60_000 })).toBe(true);
+  });
+});

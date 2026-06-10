@@ -34,8 +34,10 @@ export const GLOBAL_NAMESPACE = 'global';
 // model3d.move policy ints (CreateModelPage): RESTRICTED=0, ALLOW_LIST=1, PERMISSIONLESS=2.
 const POLICY_RESTRICTED = 0;
 // Global recall over-fetches (exclude-self filters post-recall, so the page
-// isn't silently short).
-const GLOBAL_OVERFETCH = 4;
+// isn't silently short). Exported: mcp/tools/searchModels.ts must over-fetch
+// for the same reason (review C-2 — its post-recall filters otherwise shrink
+// results below the requested limit).
+export const GLOBAL_OVERFETCH = 4;
 // Relevance gate: vector recall always returns nearest neighbours, so without a
 // distance ceiling a junk query surfaces the whole pool. Drop results at/above
 // this cosine distance. Env-tunable for the demo.
@@ -93,6 +95,12 @@ const denylist = new Set<string>(
     .map((s) => s.trim())
     .filter(Boolean),
 );
+/** True when `creator` is operator-suppressed from global recall. Exported so
+ *  the MCP search_models global scope honors the SAME moderation lever as this
+ *  route (review C-1) — the Set itself stays private. */
+export function isDenylistedCreator(creator: string): boolean {
+  return denylist.has(creator);
+}
 /** Test-only: replace the denylist contents. */
 export function setMemoryDenylistForTest(addresses: string[]): void {
   denylist.clear();

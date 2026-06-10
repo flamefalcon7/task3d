@@ -34,9 +34,20 @@ export function buildMcpRoute(deps: McpRouteDeps = {}) {
     }),
   );
 
-  // `.all` so POST (JSON-RPC), GET (SSE stream), and DELETE (session end) all
-  // reach the transport — the Streamable HTTP spec is a single endpoint. Do
-  // NOT touch `c.req.json()` here: the transport must consume the raw body.
+  // Review R-002: the tools are pure request/response RPCs (KTD-1) — a GET
+  // SSE stream carries no server-push here, and in stateless mode each GET
+  // would leave its per-request McpServer+transport pair alive until GC (the
+  // standalone stream is never close()d). The Streamable HTTP spec permits
+  // 405 for servers that don't offer SSE; register BEFORE `.all` so it wins.
+  route.get('/', (c) =>
+    c.text('This stateless MCP endpoint offers no SSE stream; POST JSON-RPC instead.', 405, {
+      Allow: 'POST, DELETE',
+    }),
+  );
+
+  // `.all` so POST (JSON-RPC) and DELETE (session end) reach the transport —
+  // the Streamable HTTP spec is a single endpoint. Do NOT touch
+  // `c.req.json()` here: the transport must consume the raw body.
   route.all('/', async (c) => {
     const server = buildMcpServer(deps);
     const transport = new WebStandardStreamableHTTPServerTransport({

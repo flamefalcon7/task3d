@@ -22,7 +22,7 @@ export function renderLlmsTxt(origin: string): string {
 ## MCP
 
 - [MCP endpoint](${origin}/mcp): Streamable HTTP, protocol \`2025-11-25\`
-- Auth: cost-bearing tools require \`Authorization: Bearer <jwt>\` minted by the Sui-keypair challenge flow at \`${origin}/api/auth\` (challenge → sign personal message → verify → JWT)
+- Auth: ALL tools (read tools included) require \`Authorization: Bearer <jwt>\` minted by the Sui-keypair challenge flow at \`${origin}/api/auth\` (challenge → sign personal message → verify → JWT); no payment, just a signature
 - Tools: search_models, get_model, get_license_terms, get_preview, build_purchase_tx, download_content
 
 ## Docs
@@ -35,7 +35,13 @@ export function renderLlmsTxt(origin: string): string {
 export function buildLlmsRoute() {
   const route = new Hono();
   route.get('/', (c) => {
-    const origin = new URL(c.req.url).origin;
+    // Behind a TLS-terminating proxy c.req.url carries the PRIVATE origin
+    // (review R-005): honor PUBLIC_ORIGIN, then the standard forwarded
+    // headers, before falling back to the raw request origin.
+    const url = new URL(c.req.url);
+    const proto = c.req.header('x-forwarded-proto') ?? url.protocol.replace(':', '');
+    const host = c.req.header('x-forwarded-host') ?? url.host;
+    const origin = process.env.PUBLIC_ORIGIN ?? `${proto}://${host}`;
     return c.text(renderLlmsTxt(origin), 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
   });
   return route;
