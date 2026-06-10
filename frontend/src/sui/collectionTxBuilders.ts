@@ -21,6 +21,10 @@
 // `tx.object(id)`; primitives through `tx.pure.*`. Never `tx.pure` an object.
 
 import { Transaction } from '@mysten/sui/transactions';
+import {
+  buildPurchaseAccessPtb as buildPurchaseAccessPtbShared,
+  type PurchaseAccessArgs,
+} from '@overflow2026/shared';
 import { TESTNET } from './networkConfig';
 
 // On-chain Clock singleton (shared object at 0x6).
@@ -149,14 +153,10 @@ export interface SealApproveCreatorArgs {
   baseModelId: string;
 }
 
-export interface PurchaseAccessArgs {
-  /** Shared ALLOW_LIST `Model3D` object id to buy access to. */
-  modelId: string;
-  /** The base's `license.access_fee` in MIST. Split from gas; the Move side
-   *  refunds any excess to the buyer. A per-base value read from
-   *  `Model3DSummary.accessFee`, not a builder constant. */
-  accessFeeMist: bigint;
-}
+// plan 2026-06-10-001 U1 (KTD-5) — `PurchaseAccessArgs` lifted into
+// `@overflow2026/shared` (one isomorphic copy for frontend + backend MCP
+// route); re-exported here so existing call sites keep their import path.
+export type { PurchaseAccessArgs } from '@overflow2026/shared';
 
 export interface RegisterIntegrationArgs {
   /** Shared `NftCollection` ID being integrated against. */
@@ -472,24 +472,16 @@ export function buildSealApproveCreatorPtb(
  * side refunds any excess to the buyer and idempotency-guards a double purchase.
  * Mirrors `buildLaunchCollectionPtb`'s split-from-gas shape (caller passes only
  * `accessFeeMist`, not a pre-split coin). Emits `AccessPurchased`.
+ *
+ * plan 2026-06-10-001 U1 (KTD-5) — the builder body now lives in
+ * `@overflow2026/shared` (`shared/src/sui/purchaseAccessPtb.ts`,
+ * package-id parameterized) so the backend MCP route shares the same copy;
+ * this wrapper binds the frontend's `TESTNET.model3dPackageId`.
  */
 export function buildPurchaseAccessPtb(
   args: PurchaseAccessArgs,
 ): TxResult<Record<string, never>> {
-  const tx = new Transaction();
-  const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(args.accessFeeMist)]);
-  tx.moveCall({
-    target: `${PKG}::model3d::purchase_access`,
-    arguments: [tx.object(args.modelId), coin!],
-  });
-  return {
-    tx,
-    handles: {},
-    metadata: {
-      target: `${PKG}::model3d::purchase_access`,
-      expectedEvents: [`${PKG}::model3d::AccessPurchased`],
-    },
-  };
+  return buildPurchaseAccessPtbShared(PKG, args);
 }
 
 /**
