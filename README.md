@@ -2,7 +2,7 @@
 
 **Carve. Mint. Riff.** — a Sui-native composable creator economy for low-poly 3D game assets.
 
-A creator carves a base 3D model (Tripo prompt or GLB upload) and publishes it to [Walrus](https://docs.wal.app/) with a Move-enforced license. Buyers pay once for a **soulbound access entitlement**; holders can **fork** the base into a tradeable NFT collection of paint-variants — batched into Walrus quilts — and the variants you own load straight into a Babylon + Havok racing scene. Restricted content is encrypted with [Seal](https://seal-docs.wal.app/) and unlocked only by the on-chain entitlement.
+Tusk3D is a Sui-native rights layer for low-poly 3D game assets: the license is enforced on-chain by Move — not by a platform's terms of service — and travels with the file. A creator publishes a base model (from a text prompt or a GLB upload) to [Walrus](https://docs.wal.app/) under terms they set. Anyone can buy access **once** for a **soulbound entitlement** that can't be resold or revoked — and that same entitlement is both the consumer view *and* the right to **fork** the base into a tradeable collection of repainted variants, batched into Walrus quilts. Restricted bases are encrypted with [Seal](https://seal-docs.wal.app/) and unlock only for the on-chain entitlement holder. The 3D generator (Tripo) is a swappable upstream commodity; the durable product is the contract. The goal: make it easy for creators to bring tokenized 3D into their own games and experiences, give holders a reason to *use* — not just hold — what they bought, and let a community grow around the content itself.
 
 > **Status**: Sui Overflow 2026 submission, **Walrus track**. Live on **Sui testnet** — package `0xbf0affb8…02d1`. Security-audited (D-085…D-089). Demo recording in progress.
 > Built for [Sui Overflow 2026](https://overflow.sui.io/). Submission deadline **2026-06-21**.
@@ -15,7 +15,7 @@ Most "NFT collection" products ship N variants of one base mesh (think BAYC trai
 
 - **One base, paid access, real forks.** A creator publishes a `Model3D` (the base content) once. Buyers pay an `access_fee` **a single time** for a soulbound `AccessEntitlement` — a permanent, non-transferable receipt. That entitlement is both the consumer view *and* the precondition to forking.
 - **Forks are tradeable collections.** An entitlement holder pays a per-launch derive fee to `launch_collection`, receives a soulbound creator cap, and mints `NftToken`s — paint-variants of the base mesh batched into **Walrus quilts** (up to 4 variants share one blob as internal byte-range patches; `⌈N/4⌉` quilts overall — **4× fewer stores** than one-blob-per-variant). Tokens are Kiosk-placeable and resell under their own `TransferPolicy`.
-- **Owned assets are playable.** The same Walrus quilt-patch URL that mints on-chain is the URL the [Tiny Racetrack](#the-demo-arc) loads — your car drives in a Havok rigid-body scene. No re-export, no second source of truth.
+- **Owned assets are made to be used.** Because every variant lives at a stable Walrus patch URL, a creator can pull tokenized 3D straight into their own game or experience — our demo loads owned variants into a Havok [Tiny Racetrack](#the-demo-arc) and drives them as rigid bodies, with creator download-and-adapt on the roadmap.
 - **Restricted content is actually private.** `allow_list` / `restricted` bases are encrypted with Seal envelope encryption; decryption is gated by the on-chain `AccessEntitlement`, not by a server check.
 
 ### Architecture (live on testnet)

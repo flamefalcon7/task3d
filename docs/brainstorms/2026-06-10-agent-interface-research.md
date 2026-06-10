@@ -89,6 +89,18 @@ x402 solves payments for services that *lack* a native on-chain economy. Tusk3D'
 - Demo agent wallet funding on testnet (faucet ok).
 - Does the contract's `purchase_access` have any human-UX assumption (e.g. frontend-only checks) that an agent path would bypass? Verify against the 2026-06-04 security audit findings before exposing.
 
+## 6a. Resolution (2026-06-10, post risk-verification)
+
+**Cut-line: v0 + v1 full** (the hero purchase demo is the prize shot; risks cleared, contract needs no change). Proceed to ADR D-104 + plan-mode.
+
+**Risk ① — Seal decrypt for a non-browser MCP client: NOT a blocker.** `@mysten/seal` is isomorphic; `SessionKey.create` + `setPersonalMessageSignature` is signer-agnostic — an agent signs the personal message with its own Ed25519 keypair in Node. The only browser-coupled step is `decryptAndView.ts`'s `URL.createObjectURL` + Babylon view, which the agent path skips (it wants raw GLB bytes for `samples/`). Contract is self-consistent: `seal_approve_entitlement` (model3d.move:1408-1409) asserts `entitlement.holder == ctx.sender()`; agent buys, holds, and decrypts under one address.
+
+**Open design fork (deferred to plan-mode): where `download_content` decrypts.** (a) server returns ciphertext, agent decrypts locally (heaviest client, server never holds decrypt capability); (b) agent signs the SessionKey personal message locally and passes the *session signature* (a capability, not the private key) to the server, which fetches shares + decrypts (thin client, server can decrypt the buyer's own content within the SessionKey TTL). Both keep the private key client-side. Tie to the MCP-process-hosting question.
+
+**Risk ② — `purchase_access` frontend-only assumptions: NONE.** All fee paths are on-chain (`>=` check + exact split + refund), audit-confirmed robust. `SignConfirmation` (D-053), price re-fetch (L-8), royalty floor (M-2) are client-side UX only; the contract self-validates. `download_content` over-return is structurally safe — only the entitlement holder's SessionKey gets key-server shares ("never trust the client" is built in, not server-enforced). Backend payment-replay findings (B-1/B-4/B-11) target the **Tripo generation** gate, which MCP does **not** expose — out of scope.
+
+**Plan precheck:** confirm the live testnet package is the **D-085 republished** build (C-1 fix `vector::length == SEAL_ID_LEN` is live at the `seal_approve_entitlement` gate) before the demo relies on Seal decryption.
+
 ## 7. Demo design (added 2026-06-10 — how to make judges gasp)
 
 Principles: make the invisible visible (split-screen agent ↔ chain), close the economic loop (creator gets paid), prove autonomy (agent *rejects* something), end with "try it yourself".
