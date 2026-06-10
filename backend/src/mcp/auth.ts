@@ -160,9 +160,58 @@ export function sweepMcpRateLimit(now = Date.now()): void {
   }
 }
 
-/** Test-only: clear all rate-limit windows. */
+// ---------------------------------------------------------------------------
+// Per-IP fixed window (review RATE-1). Sui addresses (and JWTs for them) are
+// FREE to mint, so the per-address window alone caps nothing in aggregate — a
+// rotating-keypair attacker gets a fresh budget per identity. This coarse
+// per-IP window bounds the aggregate. Defaults are generous (many agents can
+// share a NAT/proxy); it is an amplification cap, not a fairness mechanism.
+// Honest limitation: per-process (like the address window) and, behind a
+// reverse proxy WITHOUT MCP_TRUST_FORWARDED=1, all traffic shares the proxy's
+// socket IP — the cap then applies to the whole proxied pool.
+// ---------------------------------------------------------------------------
+const IP_MAX_PER_WINDOW = Number(process.env.MCP_IP_RATE_MAX_PER_WINDOW ?? '1200');
+const ipHits = new Map<string, WindowEntry>();
+
+/** True when `ip` has exhausted its fixed window. Exported for tests. */
+export function mcpIpRateLimited(ip: string, now = Date.now(), opts: McpRateLimitOptions = {}): boolean {
+  const windowMs = opts.windowMs ?? WINDOW_MS;
+  const maxPerWindow = opts.maxPerWindow ?? IP_MAX_PER_WINDOW;
+  const maxKeys = opts.maxKeys ?? MAX_KEYS;
+  const entry = ipHits.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    if (!entry && ipHits.size >= maxKeys) {
+      sweepMcpIpRateLimit(now);
+      while (ipHits.size >= maxKeys) {
+        const oldest = ipHits.keys().next().value;
+        if (oldest === undefined) break;
+        ipHits.delete(oldest);
+      }
+    }
+    ipHits.delete(ip);
+    ipHits.set(ip, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > maxPerWindow;
+}
+
+/** Evict expired IP windows. Swept on the same interval; exported for tests. */
+export function sweepMcpIpRateLimit(now = Date.now()): void {
+  for (const [ip, entry] of ipHits) {
+    if (now >= entry.resetAt) ipHits.delete(ip);
+  }
+}
+
+/** Test-only: clear the IP windows. */
+export function resetMcpIpRateLimitForTest(): void {
+  ipHits.clear();
+}
+
+/** Test-only: clear all rate-limit windows (address + IP). */
 export function resetMcpRateLimitForTest(): void {
   hits.clear();
+  ipHits.clear();
 }
 
 /** Test-only: current key-map size (cap/sweep assertions). */
@@ -172,7 +221,7 @@ export function mcpRateLimitSizeForTest(): number {
 
 // unref so the sweep timer never keeps Node alive on shutdown (same guard as
 // routes/auth.ts — typeof check because some runtimes return a number).
-const sweepHandle = setInterval(() => sweepMcpRateLimit(), SWEEP_INTERVAL_MS);
+const sweepHandle = setInterval(() => { sweepMcpRateLimit(); sweepMcpIpRateLimit(); }, SWEEP_INTERVAL_MS);
 if (typeof sweepHandle === 'object' && sweepHandle !== null && 'unref' in sweepHandle) {
   (sweepHandle as { unref: () => void }).unref();
 }

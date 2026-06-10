@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { encodeMemory } from '@overflow2026/shared';
 import type { MemwalClient, RecallOpts } from '../../lib/memwal-client.js';
-import { GLOBAL_NAMESPACE } from '../../routes/memory.js';
+import { GLOBAL_NAMESPACE } from '../../lib/memoryConfig.js';
 import { resetMcpRateLimitForTest } from '../auth.js';
 import { AGENT_SUB, callTool, errorText, stubJwt } from './testUtils.js';
 
@@ -148,7 +148,7 @@ describe('search_models — auth gate', () => {
 // SEC-1 id-shape gate on the `m` trailer.
 describe('search_models — review fixes', () => {
   it('drops operator-denylisted creators from global results (C-1)', async () => {
-    const { setMemoryDenylistForTest } = await import('../../routes/memory.js');
+    const { setMemoryDenylistForTest } = await import('../../lib/memoryConfig.js');
     const BAD = `0x${'b'.repeat(64)}`;
     setMemoryDenylistForTest([BAD]);
     try {
@@ -167,7 +167,7 @@ describe('search_models — review fixes', () => {
   });
 
   it('over-fetches global recall by GLOBAL_OVERFETCH and still returns at most `limit` (C-2)', async () => {
-    const { GLOBAL_OVERFETCH } = await import('../../routes/memory.js');
+    const { GLOBAL_OVERFETCH } = await import('../../lib/memoryConfig.js');
     const { client, calls } = fakeMemwal([
       // Two unactionable records outrank the valid ones — without over-fetch a
       // limit-2 recall would return only what survives filtering.

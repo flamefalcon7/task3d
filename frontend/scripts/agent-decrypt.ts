@@ -34,7 +34,7 @@ import process from 'node:process';
 import {
   parseDownloadContentMaterial,
   runAgentDecrypt,
-} from '../src/seal/agentDecrypt';
+} from './agentDecrypt';
 
 const USAGE =
   'usage: AGENT_SECRET_KEY=suiprivkey1... pnpm --dir frontend exec tsx ' +

@@ -16,10 +16,29 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { bearerAuthInfo } from './auth.js';
+import type { Context } from 'hono';
+import { bearerAuthInfo, mcpIpRateLimited, type McpRateLimitOptions } from './auth.js';
 import { buildMcpServer, type BuildMcpServerDeps } from './server.js';
 
-export type McpRouteDeps = BuildMcpServerDeps;
+export type McpRouteDeps = BuildMcpServerDeps & {
+  /** Test seam: derive the client IP for the per-IP window (review RATE-1). */
+  getClientIp?: (c: Context) => string;
+  /** Test seam: override the per-IP window budget. */
+  ipRateLimit?: McpRateLimitOptions;
+};
+
+// Per-IP key derivation: socket address by default; the first X-Forwarded-For
+// hop only when the operator declares the proxy trustworthy (XFF is
+// client-spoofable otherwise — the same gap the /api/auth challenge limiter
+// has, which is what made free-JWT minting an amplification vector).
+function clientIpOf(c: Context): string {
+  if (process.env.MCP_TRUST_FORWARDED === '1') {
+    const xff = c.req.header('x-forwarded-for');
+    if (xff) return xff.split(',')[0]!.trim();
+  }
+  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming;
+  return incoming?.socket?.remoteAddress ?? 'local';
+}
 
 export function buildMcpRoute(deps: McpRouteDeps = {}) {
   const route = new Hono();
@@ -49,6 +68,12 @@ export function buildMcpRoute(deps: McpRouteDeps = {}) {
   // the Streamable HTTP spec is a single endpoint. Do NOT touch
   // `c.req.json()` here: the transport must consume the raw body.
   route.all('/', async (c) => {
+    // Aggregate cap BEFORE any per-request server/transport work (RATE-1):
+    // pre-auth, so it answers at the HTTP layer (429), not as a tool error.
+    const ip = (deps.getClientIp ?? clientIpOf)(c);
+    if (mcpIpRateLimited(ip, Date.now(), deps.ipRateLimit)) {
+      return c.json({ error: 'rate_limited', message: 'Too many requests from this address pool; retry shortly' }, 429);
+    }
     const server = buildMcpServer(deps);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

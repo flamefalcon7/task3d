@@ -138,3 +138,27 @@ describe('/mcp GET', () => {
     expect(res.headers.get('allow')).toContain('POST');
   });
 });
+
+// fix(review) RATE-1 — coarse per-IP window caps aggregate abuse from freely
+// minted addresses/JWTs; answered at the HTTP layer, pre-auth.
+describe('/mcp per-IP rate limit', () => {
+  it('429 after the per-IP budget; a different IP is unaffected', async () => {
+    const { buildMcpRoute } = await import('./route.js');
+    const { resetMcpRateLimitForTest } = await import('./auth.js');
+    resetMcpRateLimitForTest();
+    let ip = '10.0.0.1';
+    const route = buildMcpRoute({
+      getClientIp: () => ip,
+      ipRateLimit: { maxPerWindow: 2, windowMs: 60_000 },
+    });
+    const post = () =>
+      route.request('/', { method: 'POST', headers: HEADERS, body: initializeBody() });
+    expect((await post()).status).toBe(200);
+    expect((await post()).status).toBe(200);
+    // 3rd call: count 3 > maxPerWindow 2 → limited.
+    expect((await post()).status).toBe(429);
+    ip = '10.0.0.2';
+    expect((await post()).status).toBe(200);
+    resetMcpRateLimitForTest();
+  });
+});

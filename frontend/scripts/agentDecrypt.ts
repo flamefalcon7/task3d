@@ -35,8 +35,8 @@ import { fromBase64 } from '@mysten/sui/utils';
 import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { getSealClient, SESSION_KEY_TTL_MIN } from './sealClient';
-import { recoverFullSealId, decryptBaseGlb } from './forkerDecrypt';
+import { getSealClient, SESSION_KEY_TTL_MIN } from '../src/seal/sealClient';
+import { recoverFullSealId, decryptBaseGlb } from '../src/seal/forkerDecrypt';
 
 // D-085 — the Move gate (ESealIdWrongLength) and the MCP server both enforce a
 // FIXED 32-byte seal_id prefix; envelope.ts appends a 16-byte nonce at encrypt

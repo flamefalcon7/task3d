@@ -18,7 +18,7 @@ import {
   type CreateSessionKey,
   type DownloadContentMaterial,
 } from './agentDecrypt';
-import { DECRYPT_KEY_MAX_ATTEMPTS } from './forkerDecrypt';
+import { DECRYPT_KEY_MAX_ATTEMPTS } from '../src/seal/forkerDecrypt';
 
 const MODEL_ID = '0x' + 'aa'.repeat(32);
 const ENT_ID = '0x' + 'bb'.repeat(32);

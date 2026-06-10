@@ -151,40 +151,115 @@ describe('auth_unavailable when no jwt configured', () => {
   });
 });
 
-describe('U8 — global dual-write', () => {
-  it('PERMISSIONLESS publish writes BOTH personal and global', async () => {
+// The global mirror is verified ON-CHAIN before writing (review SEC-1): type
+// must be our Model3D, creator must equal the JWT wallet, and the mirrored
+// decision uses the CHAIN policy, not the client-sent one.
+const PKG = `0x${'9'.repeat(64)}`;
+
+function fakeSui(
+  over: { creator?: string; policy?: number; type?: string; throws?: boolean } = {},
+) {
+  return {
+    getObject: vi.fn(async () => {
+      if (over.throws) throw new Error('rpc boom');
+      return {
+        data: {
+          content: {
+            dataType: 'moveObject',
+            type: over.type ?? `${PKG}::model3d::Model3D`,
+            fields: {
+              creator: over.creator ?? WALLET,
+              license: { type: `${PKG}::model3d::LicenseTerms`, fields: { policy: over.policy ?? 2 } },
+            },
+          },
+        },
+      };
+    }),
+  };
+}
+
+describe('U8 — global dual-write (on-chain verified, review SEC-1)', () => {
+  it('PERMISSIONLESS publish writes BOTH personal and global after chain verification', async () => {
     const client = fakeClient();
-    const route = buildMemoryRoute({ jwt: stubJwt, client });
+    const suiClient = fakeSui({ policy: 2 });
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient, packageId: PKG });
     const res = await route.request('/remember', {
       method: 'POST',
       headers: auth(),
       body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 2 }),
     });
     expect(res.status).toBe(202);
+    expect(suiClient.getObject).toHaveBeenCalledWith({ id: MODEL, options: { showContent: true } });
     expect(client.remember).toHaveBeenCalledWith(WALLET, encodeMemory('p', { m: MODEL }));
     expect(client.remember).toHaveBeenCalledWith('global', encodeMemory('p', { m: MODEL, c: WALLET }));
     expect(client.remember).toHaveBeenCalledTimes(2);
+    expect(await res.json()).toEqual({ status: 'accepted', globalMirror: 'written' });
   });
 
   it('ALLOW_LIST publish also dual-writes', async () => {
     const client = fakeClient();
-    const route = buildMemoryRoute({ jwt: stubJwt, client });
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient: fakeSui({ policy: 1 }), packageId: PKG });
     await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 1 }) });
     expect(client.remember).toHaveBeenCalledTimes(2);
   });
 
-  it('RESTRICTED publish writes personal ONLY (never global)', async () => {
+  it('RESTRICTED publish writes personal ONLY — no chain read needed', async () => {
     const client = fakeClient();
-    const route = buildMemoryRoute({ jwt: stubJwt, client });
+    const suiClient = fakeSui();
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient, packageId: PKG });
     await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 0 }) });
     expect(client.remember).toHaveBeenCalledTimes(1);
     expect(client.remember).toHaveBeenCalledWith(WALLET, encodeMemory('p', { m: MODEL }));
+    expect(suiClient.getObject).not.toHaveBeenCalled();
   });
 
-  it('policy omitted → personal only (back-compat)', async () => {
+  it('policy omitted → personal only (back-compat), no chain read', async () => {
     const client = fakeClient();
-    const route = buildMemoryRoute({ jwt: stubJwt, client });
+    const suiClient = fakeSui();
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient, packageId: PKG });
     await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL }) });
+    expect(client.remember).toHaveBeenCalledTimes(1);
+    expect(suiClient.getObject).not.toHaveBeenCalled();
+  });
+
+  it('creator mismatch on-chain → global mirror SKIPPED (personal still written)', async () => {
+    const client = fakeClient();
+    const route = buildMemoryRoute({
+      jwt: stubJwt,
+      client,
+      suiClient: fakeSui({ creator: CREATOR2 }),
+      packageId: PKG,
+    });
+    const res = await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 2 }) });
+    expect(client.remember).toHaveBeenCalledTimes(1);
+    expect(client.remember).toHaveBeenCalledWith(WALLET, encodeMemory('p', { m: MODEL }));
+    expect(await res.json()).toEqual({ status: 'accepted', globalMirror: 'skipped' });
+  });
+
+  it('client claims PERMISSIONLESS but chain says RESTRICTED → mirror SKIPPED', async () => {
+    const client = fakeClient();
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient: fakeSui({ policy: 0 }), packageId: PKG });
+    await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 2 }) });
+    expect(client.remember).toHaveBeenCalledTimes(1);
+  });
+
+  it('foreign-package lookalike Model3D → mirror SKIPPED', async () => {
+    const client = fakeClient();
+    const route = buildMemoryRoute({
+      jwt: stubJwt,
+      client,
+      suiClient: fakeSui({ type: `0x${'f'.repeat(64)}::model3d::Model3D` }),
+      packageId: PKG,
+    });
+    await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 2 }) });
+    expect(client.remember).toHaveBeenCalledTimes(1);
+  });
+
+  it('chain read RPC error → mirror SKIPPED (fail-closed), personal unaffected', async () => {
+    const client = fakeClient();
+    const route = buildMemoryRoute({ jwt: stubJwt, client, suiClient: fakeSui({ throws: true }), packageId: PKG });
+    const res = await route.request('/remember', { method: 'POST', headers: auth(), body: JSON.stringify({ prompt: 'p', modelId: MODEL, policy: 2 }) });
+    expect(res.status).toBe(202);
     expect(client.remember).toHaveBeenCalledTimes(1);
   });
 });

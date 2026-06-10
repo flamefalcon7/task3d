@@ -20,6 +20,57 @@ export interface MemoryRouteDeps {
   jwt?: JwtSigner;
   /** Defaults to the env-backed singleton; tests inject a fake. */
   client?: MemwalClient;
+  /** On-chain read slice for the global-mirror verification (review SEC-1).
+   *  Defaults to the live `getSuiClient()` at call time; tests inject a fake. */
+  suiClient?: { getObject(params: { id: string; options?: { showContent?: boolean } }): Promise<unknown> };
+  /** Deployed model3d package id; defaults to `NETWORK.packageId` at call time. */
+  packageId?: string;
+}
+
+// model3d.move LicenseTerms policy int for RESTRICTED (never mirrored).
+const CHAIN_POLICY_RESTRICTED = 0;
+
+/**
+ * Review SEC-1 — the GLOBAL community mirror must not trust client-supplied
+ * claims: before mirroring, verify on-chain that `modelId` is OUR package's
+ * Model3D, that its `creator` is the authenticated wallet, and read the
+ * POLICY from the object (the client-sent `policy` is only the trigger to
+ * attempt mirroring). Fail-CLOSED: any read error or mismatch skips the
+ * mirror (the personal write is unaffected — a user can only pollute their
+ * own namespace).
+ */
+async function verifyGlobalMirror(
+  deps: MemoryRouteDeps,
+  modelId: string,
+  creator: string,
+): Promise<{ ok: boolean; chainPolicy?: number }> {
+  try {
+    let client = deps.suiClient;
+    let packageId = deps.packageId;
+    if (!client || !packageId) {
+      // Dynamic import on purpose: sui/client.ts reads testnet.json at module
+      // load; importing this route must not trigger that (mirrors mcp/tools).
+      const live = await import('../sui/client.js');
+      client = client ?? live.getSuiClient();
+      packageId = packageId ?? live.NETWORK.packageId;
+    }
+    const resp = (await client.getObject({ id: modelId, options: { showContent: true } })) as {
+      data?: { content?: { dataType?: string; type?: string; fields?: Record<string, unknown> | null } | null } | null;
+    };
+    const content = resp.data?.content;
+    if (!content || content.dataType !== 'moveObject' || content.type !== `${packageId}::model3d::Model3D`) {
+      return { ok: false };
+    }
+    const fields = (content.fields ?? {}) as Record<string, unknown>;
+    const chainCreator = String(fields.creator ?? '');
+    if (!chainCreator || normalizeSuiAddress(chainCreator) !== creator) return { ok: false };
+    // JSON-RPC renders nested structs as { type, fields }.
+    const license = fields.license as { fields?: Record<string, unknown> } | undefined;
+    const chainPolicy = Number(license?.fields?.policy ?? CHAIN_POLICY_RESTRICTED);
+    return { ok: true, chainPolicy };
+  } catch {
+    return { ok: false };
+  }
 }
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -28,30 +79,25 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
 // a user (review). Read and write both normalize → namespaces stay consistent.
 const RAW_ADDRESS_RE = /^0x[0-9a-fA-F]{1,64}$/;
 
-// Shared community namespace (D-080 Global Recall). Personal records live under
-// `namespace = wallet address`; non-RESTRICTED publishes are ALSO mirrored here.
-export const GLOBAL_NAMESPACE = 'global';
+// Shared memory config moved to lib/memoryConfig.ts (review M-004) so the MCP
+// search_models tool shares it without importing this route module. Re-exported
+// here for existing importers (tests, seeds).
+export {
+  GLOBAL_NAMESPACE,
+  GLOBAL_OVERFETCH,
+  RECALL_MAX_DISTANCE,
+  isDenylistedCreator,
+  setMemoryDenylistForTest,
+} from '../lib/memoryConfig.js';
+import {
+  GLOBAL_NAMESPACE,
+  GLOBAL_OVERFETCH,
+  RECALL_MAX_DISTANCE,
+  isDenylistedCreator,
+} from '../lib/memoryConfig.js';
 // model3d.move policy ints (CreateModelPage): RESTRICTED=0, ALLOW_LIST=1, PERMISSIONLESS=2.
 const POLICY_RESTRICTED = 0;
-// Global recall over-fetches (exclude-self filters post-recall, so the page
-// isn't silently short). Exported: mcp/tools/searchModels.ts must over-fetch
-// for the same reason (review C-2 — its post-recall filters otherwise shrink
-// results below the requested limit).
-export const GLOBAL_OVERFETCH = 4;
-// Relevance gate: vector recall always returns nearest neighbours, so without a
-// distance ceiling a junk query surfaces the whole pool. Drop results at/above
-// this cosine distance. Env-tunable for the demo.
-//
-// LIMITATION (honest): a single global threshold CANNOT perfectly separate
-// relevant from irrelevant — an unrelated word can sit as "close" as a related
-// one. Probe (text-embedding-3-small, tiny pool): descriptive prompts cluster
-// low ("sports car" 0.545, "fast car" 0.590, "vehicle" 0.619), but a junk word
-// like "penis" (0.709) overlaps bare "car" (0.710). 0.66 keeps the descriptive
-// cluster and drops the noisy 0.7+ band (incl. junk and vague single words).
-// Real robustness needs a larger/diverse pool + descriptive queries, not a tighter number.
-// Exported so the MCP search_models tool (mcp/tools/searchModels.ts) applies
-// the SAME relevance gate as this route — one constant, no drift.
-export const RECALL_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? '0.66');
+
 
 const rememberSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -86,26 +132,6 @@ export function memoryWrites(address: string, prompt: string, modelId: string, p
   return writes;
 }
 
-// Operator break-glass: addresses suppressed from global recall. Testnet's free
-// publish fee is no spam deterrent, so this denylist — not the fee — is the real
-// lever for the demo window. Seeded from env (comma-separated), mutable in tests.
-const denylist = new Set<string>(
-  (process.env.MEMORY_DENYLIST ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-);
-/** True when `creator` is operator-suppressed from global recall. Exported so
- *  the MCP search_models global scope honors the SAME moderation lever as this
- *  route (review C-1) — the Set itself stays private. */
-export function isDenylistedCreator(creator: string): boolean {
-  return denylist.has(creator);
-}
-/** Test-only: replace the denylist contents. */
-export function setMemoryDenylistForTest(addresses: string[]): void {
-  denylist.clear();
-  for (const a of addresses) denylist.add(a);
-}
 
 // Per-address fixed-window limiter (in-memory; demo-grade). Protects the shared
 // sponsored relayer account from a single user's abuse. Mirrors the
@@ -187,13 +213,22 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
 
     const { prompt, modelId, policy } = parsed.data;
     const client = getClient();
-    // Dual-write (best-effort, non-atomic — fire-and-forget; divergence tolerated,
-    // consistent with fail-soft). Personal: all policies. Global: non-RESTRICTED
-    // only. See memoryWrites — shared with the U7 seed for format parity.
-    for (const w of memoryWrites(ns, prompt, modelId, policy)) {
-      void client.remember(w.namespace, w.text);
+    // Personal write: fire-and-forget, all policies (a user can only pollute
+    // their own namespace). Format parity with the U7 seed via encodeMemory.
+    void client.remember(ns, encodeMemory(prompt, { m: modelId }));
+    // Global mirror: only after on-chain verification (review SEC-1) — the
+    // client-sent `policy` merely triggers the attempt; type, creator, and
+    // the mirrored-or-not decision come from the chain. Awaited (one fullnode
+    // read at publish time), the write itself stays fire-and-forget.
+    let globalMirror: 'written' | 'skipped' = 'skipped';
+    if (policy !== undefined && policy !== CHAIN_POLICY_RESTRICTED) {
+      const verdict = await verifyGlobalMirror(deps, modelId, ns);
+      if (verdict.ok && verdict.chainPolicy !== CHAIN_POLICY_RESTRICTED) {
+        void client.remember(GLOBAL_NAMESPACE, encodeMemory(prompt, { m: modelId, c: ns }));
+        globalMirror = 'written';
+      }
     }
-    return c.json({ status: 'accepted' }, 202);
+    return c.json({ status: 'accepted', globalMirror }, 202);
   });
 
   route.post('/recall', async (c) => {
@@ -224,7 +259,7 @@ export function buildMemoryRoute(deps: MemoryRouteDeps) {
       const results: RecallChip[] = outcome.results
         .map((m) => ({ ...parseMemory(m.text), distance: m.distance }))
         // Drop unverifiable authorship; exclude the caller's own; honor denylist.
-        .filter((r) => r.ref?.c && r.ref.c !== ns && !denylist.has(r.ref.c))
+        .filter((r) => r.ref?.c && r.ref.c !== ns && !isDenylistedCreator(r.ref.c))
         .slice(0, n)
         .map((r) => ({ prompt: r.prompt, modelId: r.ref!.m, creator: r.ref!.c, distance: r.distance }));
       if (outcome.errored) c.header('x-memwal-degraded', '1');

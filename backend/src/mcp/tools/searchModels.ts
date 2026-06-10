@@ -22,7 +22,7 @@ import {
   GLOBAL_OVERFETCH,
   RECALL_MAX_DISTANCE,
   isDenylistedCreator,
-} from '../../routes/memory.js';
+} from '../../lib/memoryConfig.js';
 import { requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { AUTH_HINT, guarded, toolResult } from './common.js';
