@@ -150,6 +150,9 @@ importers:
 
   shared:
     dependencies:
+      '@mysten/sui':
+        specifier: 2.16.2
+        version: 2.16.2(typescript@5.9.3)
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -1034,7 +1037,7 @@ packages:
       '@mysten/sui': ^2.16.2
     dependencies:
       '@mysten/bcs': 2.0.5
-      '@mysten/sui': 2.16.2(typescript@5.8.3)
+      '@mysten/sui': 2.16.2(typescript@5.9.3)
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
     dev: false
