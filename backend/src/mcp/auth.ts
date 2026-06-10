@@ -34,7 +34,16 @@ import type { JwtSigner } from '../lib/jwt.js';
 // and namespace consistently with the memory route.
 const RAW_ADDRESS_RE = /^0x[0-9a-fA-F]{1,64}$/;
 
-export type McpToolErrorCode = 'auth_unavailable' | 'auth_required' | 'auth_invalid' | 'rate_limited';
+export type McpToolErrorCode =
+  // auth/limit (this module)
+  | 'auth_unavailable'
+  | 'auth_required'
+  | 'auth_invalid'
+  | 'rate_limited'
+  // read tools (U4): id resolves to nothing / to a non-Model3D object
+  | 'not_found'
+  // read tools (U4): the upstream fullnode read itself failed
+  | 'upstream_error';
 
 /**
  * Tool-level error. Thrown from tool handlers; the SDK converts it into an

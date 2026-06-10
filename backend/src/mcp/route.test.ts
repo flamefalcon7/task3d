@@ -95,7 +95,7 @@ describe('POST /mcp initialize', () => {
 });
 
 describe('POST /mcp tools/list', () => {
-  it('returns an empty tool list without error (zero tools in U2)', async () => {
+  it('lists the four v0 read tools, each with input AND output schemas (U4)', async () => {
     const app = buildApp();
     // Stateless mode: no session id; each POST gets a fresh server. An
     // initialize round-trip first mirrors real client behavior.
@@ -111,6 +111,18 @@ describe('POST /mcp tools/list', () => {
     const msg = await readJsonRpc(res);
     expect(msg.error).toBeUndefined();
     expect(msg.id).toBe(2);
-    expect((msg.result as { tools: unknown[] }).tools).toEqual([]);
+    const tools = (msg.result as { tools: Array<{ name: string; inputSchema?: unknown; outputSchema?: unknown }> })
+      .tools;
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'get_license_terms',
+      'get_model',
+      'get_preview',
+      'search_models',
+    ]);
+    // Agents need machine-readable output: every tool advertises an outputSchema.
+    for (const tool of tools) {
+      expect(tool.inputSchema, `${tool.name} inputSchema`).toBeTruthy();
+      expect(tool.outputSchema, `${tool.name} outputSchema`).toBeTruthy();
+    }
   });
 });
