@@ -19,6 +19,7 @@ import { registerGetModel } from './tools/getModel.js';
 import { registerGetLicenseTerms } from './tools/getLicenseTerms.js';
 import { registerGetPreview } from './tools/getPreview.js';
 import { registerBuildPurchaseTx } from './tools/buildPurchaseTx.js';
+import { registerDownloadContent } from './tools/downloadContent.js';
 
 export const MCP_SERVER_NAME = 'tusk3d';
 // Server implementation version surfaced in `InitializeResult.serverInfo`
@@ -31,7 +32,10 @@ export const MCP_SERVER_VERSION = '0.1.0';
  * live `getSuiClient()` singleton satisfies it.
  */
 export interface McpSuiClient {
-  getObject(params: { id: string; options?: { showContent?: boolean } }): Promise<unknown>;
+  getObject(params: {
+    id: string;
+    options?: { showContent?: boolean; showOwner?: boolean; showType?: boolean };
+  }): Promise<unknown>;
   /**
    * KTD-7 (U5): validates a built PTB before it is returned to the agent.
    * Optional in the structural slice so U4-era read-only fakes stay tiny; the
@@ -85,6 +89,7 @@ export function buildMcpServer(deps: BuildMcpServerDeps = {}): McpServer {
   // v1 transaction-path tools (U5/U6). Still keyless: build_purchase_tx
   // returns an UNSIGNED dry-run-validated PTB the agent signs itself (R4/R6).
   registerBuildPurchaseTx(server, deps);
+  registerDownloadContent(server, deps);
 
   return server;
 }

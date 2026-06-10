@@ -52,7 +52,18 @@ export type McpToolErrorCode =
   // build_purchase_tx (U5, KTD-7): the PTB could not be validated — build
   // failed (e.g. unfunded sender → no gas coins) or the dry run aborted.
   // An unvalidated PTB is NEVER returned.
-  | 'dry_run_failed';
+  | 'dry_run_failed'
+  // download_content (U6, KTD-6): the fail-closed entitlement gate denied —
+  // wrong type, wrong owner, wrong model binding, or the read failed. ONE
+  // uniform code/detail for all four (no which-check-failed oracle).
+  | 'forbidden'
+  // download_content (U6): on-chain content fails a local invariant — seal_id
+  // length != 32 (D-085 mirror) or a malformed glbBlobId (audit W-4). Material
+  // is never emitted from content that fails these.
+  | 'content_invalid'
+  // download_content (U6): the model is not encrypted — there is nothing to
+  // decrypt; the public GLB is reachable via get_model's glbBlobId.
+  | 'not_encrypted';
 
 /**
  * Tool-level error. Thrown from tool handlers; the SDK converts it into an

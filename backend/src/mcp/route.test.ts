@@ -115,6 +115,7 @@ describe('POST /mcp tools/list', () => {
       .tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
       'build_purchase_tx',
+      'download_content',
       'get_license_terms',
       'get_model',
       'get_preview',
