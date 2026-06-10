@@ -1,5 +1,42 @@
 # Phase Progress
 
+## Last Updated: 2026-06-10 19:25 (**ce-work execution: MCP agent interface SHIPPED on feat/mcp-agent-interface — U0–U8 complete + Tier-2 review + all validated findings fixed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **11 of 38** · demo day (7/20–21): ~40 · winners (8/27): ~78
+
+### Current Phase
+Phase 4 — feature/UX polish. Plan `docs/plans/2026-06-10-001-feat-mcp-agent-interface-plan.md` (D-104) fully executed on branch **`feat/mcp-agent-interface`** (12 commits, NOT pushed/merged yet).
+
+### Completed This Session
+- **U0 precheck PASSED**: live testnet package `0xbf0affb8…` confirmed as the D-085 republish (on-chain prevTx == v12 publish digest `9gzrkk2s…`); 32-byte seal_id gate live. No republish needed.
+- **U1**: `buildPurchaseAccessPtb` + `jsonToSummary` lifted to `shared/` (packageId-parameterized; frontend re-points via thin wrapper).
+- **U2**: stateless MCP server at `/mcp` (`@modelcontextprotocol/sdk@1.29.0`, WebStandard transport, per-request server, scoped CORS mounted before global CORS). No hono bump needed.
+- **U3**: bearer auth via `authInfo` seam → `requireAgentSub` (tool-level errors, not 401s) + per-address rate limit (120/min, capped map, unref sweep).
+- **U4–U6**: all six tools — search_models (MemWal, global/personal, fail-soft degraded), get_model (+`unwrapMoveFields` for JSON-RPC nested structs — KEY: shared jsonToSummary expects GraphQL-flat), get_license_terms, get_preview (W-4 charset), build_purchase_tx (unsigned dry-run-validated PTB, KTD-7, Move-precondition fast-fails), download_content (fail-closed entitlement gate per capVerifier pattern, fullnode by-id, D-085 mirror, W-9 asserted in tests).
+- **U7**: `frontend/scripts/agentDecrypt.ts` (+CLI `agent-decrypt.ts`) — agent-side Seal decrypt to `samples/<modelId>.glb`; invocation: `AGENT_SECRET_KEY=suiprivkey1… pnpm --dir frontend exec tsx scripts/agent-decrypt.ts <json|->`.
+- **U8**: `/llms.txt` manifest (request-origin-derived URL + PUBLIC_ORIGIN/x-forwarded override).
+- **Tier-2 ce-code-review** (9 personas + 2 CE agents + 10 validators): all validated findings FIXED in `365ec25` + `2af2842`, incl. llms.txt auth wording (P1), denylist/over-fetch parity in search_models, on-chain-verified global mirror (SEC-1: /remember now reads chain before mirroring), per-IP cap on /mcp (RATE-1), fullnode read timeouts, GET→405 (transport leak), guarded() error wrapper, shared tools/common.ts.
+- Also: fixed pre-existing tripo.test.ts timeout drift (3271d2f).
+
+### In Progress
+- Nothing mid-flight. Branch ready for user review + merge/PR.
+
+### Next Concrete Step
+- **User reviews + merges `feat/mcp-agent-interface`** (or asks for a PR), then: fund a fresh agent keypair on testnet faucet and run the hero demo arc end-to-end in Claude Code (search → license check → buy → decrypt → samples/) against the live backend.
+
+### Blockers / Open Questions
+- Demo prep (not build blockers): testnet E2E of the full arc; verify `/mcp` also works in Cursor for the 5-second "standard, not bespoke" beat (plan OQ).
+- Accepted residuals (advisory, in review report): per-process limiters don't span workers (R-003); `decryptKeyWithRetry` burns 4 retries on permanent NoAccessError (**pre-existing**, untouched); agent-side fetch has timeout but no host allowlist/size cap; shared `buildPurchaseAccessPtb` is now 2-arg (frontend wrapper keeps 1-arg).
+- Plan OQ: run `/ce-compound` on three seams (MemWal namespace, purchase_access/AccessEntitlement flow, Walrus read-path CDN) — `unwrapMoveFields` (JSON-RPC vs GraphQL shape) is a prime capture candidate.
+
+### Notes for Next Session
+- MCP env knobs: `MCP_RATE_WINDOW_MS`/`MCP_RATE_MAX_PER_WINDOW` (per-address), `MCP_IP_RATE_MAX_PER_WINDOW` + `MCP_TRUST_FORWARDED` (per-IP), `MCP_FULLNODE_TIMEOUT_MS`, `WALRUS_AGGREGATOR`, `PUBLIC_ORIGIN`; agent script: `AGENT_SECRET_KEY`, `SUI_FULLNODE_URL`/`SUI_NETWORK`, `AGENT_DECRYPT_FETCH_TIMEOUT_MS`. None are secrets; consider .env.example entries.
+- `/remember` now does ONE fullnode read per non-RESTRICTED publish (global-mirror verification, fail-closed). The seed script `backend/scripts/sync-models-to-memory.ts` still uses `memoryWrites` directly (trusted indexed data) — unaffected.
+- Subagent worktree gotcha: shell cwd drifted into `.claude/worktrees/*` twice this session — always `cd` explicitly / use `git -C` before merges.
+
+---
+
 ## Last Updated: 2026-06-10 (**research session (Cowork): AI-agent interface → MCP server recommendation + demo design + pain-point narrative; no code**)
 
 ### Hackathon Tracker
