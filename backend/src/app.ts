@@ -9,6 +9,8 @@ import { buildCopilotRoute } from './routes/copilot.js';
 import { buildCaptionRoute } from './routes/caption.js';
 import { buildCollectionsRoute } from './api/collections.js';
 import { buildPreflightRoute } from './routes/preflight.js';
+import { buildMcpRoute } from './mcp/route.js';
+import { buildLlmsRoute } from './routes/llms.js';
 import type { IntegrationIndexer } from './events/integrationIndexer.js';
 import type { PaymentVerifier } from './sui/paymentVerifier.js';
 import type { BalanceProvider } from './events/tripoBalancePoller.js';
@@ -31,8 +33,15 @@ export interface BuildAppDeps {
 
 export function buildApp(deps: BuildAppDeps = {}) {
   const app = new Hono();
+  // /mcp mounts BEFORE the global browser-origin CORS so its own /mcp-scoped
+  // CORS (origin '*', MCP session/protocol headers) answers preflights —
+  // Hono middleware registered after a route never runs for it (U2, D-104).
+  app.route('/mcp', buildMcpRoute({ jwt: deps.jwt }));
   app.use('*', cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
   app.get('/', (c) => c.text('overflow2026 backend ok'));
+  // /llms.txt — public MCP discovery manifest (U8, D-104). Plain GET; normal
+  // (after-CORS) placement is fine, unlike /mcp above.
+  app.route('/llms.txt', buildLlmsRoute());
 
   const router = deps.router ?? new HardcodedRouter();
   app.route('/api/generate', buildGenerateRoute({ router, jwt: deps.jwt, paymentVerifier: deps.paymentVerifier }));

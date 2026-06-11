@@ -4316,6 +4316,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-104: MCP agent interface — thin Streamable-HTTP MCP server on Hono, native-Sui payment rail, client-side Seal decrypt
+**Status**: Accepted
+**Date**: 2026-06-10 · **Phase**: Phase 4 — feature/UX polish
+
+### Context — Walrus track wants agentic workflows over Walrus; Walrus Memory launched 2026-06-03 with MCP connectors. Tusk3D already enforces a full content economy on-chain (`LicenseTerms`, soulbound `AccessEntitlement`, hash-addressed Walrus) but only a browser app can reach it. We want AI agents as a **third user class** — discover, reason over licenses, buy, and use content — without changing the contract. Two pre-implementation risks were verified clear against the codebase (origin §6a): Seal decrypt is signer-agnostic (no browser dependency) and `purchase_access` has no frontend-only assumptions (all fee paths on-chain). x402 was rejected at brainstorm (our fees are already native Sui Move).
+
+### Decision — Build a **thin, stateless MCP server** mounted on the existing Hono backend in the same Node process: `@modelcontextprotocol/sdk@^1.29.0`, `WebStandardStreamableHTTPServerTransport` consuming `c.req.raw`, fresh `McpServer`+transport per request, `app.route('/mcp', …)`. Six tools — v0 read-only (`search_models` over MemWal recall, `get_model`, `get_license_terms`, `get_preview`) and v1 transaction-path (`build_purchase_tx` returns an **unsigned**, dry-run-validated `purchase_access` PTB the agent signs with its own keypair; `download_content` verifies the on-chain `AccessEntitlement` fail-closed then returns **decrypt material** — ciphertext URL + `sealed_key` + seal_approve ids). **The server never holds agent keys and never touches plaintext or the AES key: Seal decryption happens client-side (pattern a)**, mirroring the existing frontend architecture and preserving audit W-9. All tools sit behind a **lightweight JWT** (existing `/auth/challenge`+`/verify`, sign a nonce, **no payment**) for namespace derivation + rate limiting. Demo client = **Claude Code** (has native code execution to run the local decrypt helper). Shared builders (`buildPurchaseAccessPtb`, `jsonToSummary`) lifted into `shared/`. Plus a static `/llms.txt`. MCP does **not** expose Tripo generation. Full plan: `docs/plans/2026-06-10-001-feat-mcp-agent-interface-plan.md`.
+
+### Rationale — MCP is the 2026 de-facto agent-access standard and the idiom Mysten is promoting; native-Sui payment is *more* impressive to Sui judges than bolting on x402 ("the contract never cared whether the buyer is human"). Client-side decrypt keeps the server keyless/plaintext-free — a pitch asset for a decentralized-storage submission ("even our own server can't read your content") — and matches how the browser already works (backend never in the decrypt data path). Stateless transport avoids session bookkeeping for request/response RPCs.
+
+### Alternatives Considered — **Server-side decrypt (pattern b)** — rejected for v1: maximizes stock-no-code-client (Claude Desktop) portability but breaks W-9 (server transiently unwraps the buyer's AES key + holds plaintext) and adds a backend data path; the expensive Seal key-server round-trip is identical either way, so W-9 — not load — is the deciding factor. Kept as roadmap. **Hybrid local stdio decrypt tool** — keyless-server + stock-client portable, but +1 installable component in an 11-day window; deferred. **x402 rail** — rejected at brainstorm (duplicate settlement layer). **Separate Node process / stateful sessions** — no benefit for v1.
+
+### Consequences — ✅ agents become a paying buyer class with zero contract change; literal Walrus-track fulfillment; hero demo (search→reject→buy→decrypt→samples/) runnable live · ✅ backend stays keyless and Seal-free (W-9 preserved); no `@mysten/seal` added server-side · ⚠️ pattern (a) needs client-side code execution → demo is Claude Code, not stock Desktop (Desktop one-click delivery is roadmap) · ⚠️ first streaming surface + new public API surface + new dependency · 🔮 Seal correctness depends on the live testnet package being the D-085 republish (precheck U0 before demo reliance); server-side/hybrid decrypt and x402 metering are roadmap.
+
+### Related — origin `docs/brainstorms/2026-06-10-agent-interface-research.md` (§6a) · plan `docs/plans/2026-06-10-001-feat-mcp-agent-interface-plan.md` · audit `docs/audits/2026-06-04-security-audit-seal-move-frontend.md` (C-1/D-085, W-9) · D-080 (MemWal) · D-058 (keypair-as-Signer) · D-019 (SuiJsonRpcClient) · D-043 (fullnode by-id reads) · D-034 (builder fixes amount, user signs)
+
+---
+
 # Reserved Decision Numbers
 
-D-104 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-105 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

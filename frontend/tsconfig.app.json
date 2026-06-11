@@ -22,5 +22,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src"]
+  // scripts/ is opted in per-file: seal-roundtrip.ts is a stale throwaway spike
+  // that predates the builder/summary renames and no longer typechecks.
+  "include": ["src", "scripts/agent-decrypt.ts", "scripts/agentDecrypt.ts", "scripts/agentDecrypt.test.ts"]
 }
