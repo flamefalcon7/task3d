@@ -4350,6 +4350,10 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ### Related — runbook `docs/runbooks/app-deploy.md` · D-104 (MCP interface — the public `/mcp` this serves) · D-073 (CDN Worker, deferred) · D-070 (frontend host ≠ Walrus Sites) · D-080 (MemWal — secrets the VM needs) · supersedes the `tusk3d.space` domain references (e.g. the 2026-05-30 `.xyz→.space` rename) with `tusk3d.store`.
 
+### Live-deploy addendum (2026-06-16) — two refinements found during the actual deploy:
+1. **TLS = Caddy `tls internal` + CF SSL mode "Full"** (not the Origin-cert + Full-Strict originally specified). Removes manual cert generation / private-key handling; CF↔origin still encrypted. Origin-cert + Full (Strict) kept as the documented hardening path. VM = DO droplet `152.42.213.241` (1 GB, Singapore).
+2. **Frontend → backend uses a same-origin `/api` proxy, not split-origin + CORS.** The app calls relative `/api/*`; a committed Pages Function (`functions/api/[[path]].js`) forwards `tusk3d.store/api/*` → `api.tusk3d.store/api/*`. The browser stays same-origin, so CORS is bypassed and the backend's localhost-only CORS needed no change. Agents still call `api.tusk3d.store/mcp` directly.
+
 ---
 
 # Reserved Decision Numbers

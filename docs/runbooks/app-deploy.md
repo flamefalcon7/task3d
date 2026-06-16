@@ -26,6 +26,11 @@ Facts that shaped this runbook (verified in code, not assumed):
 - **MCP / `llms.txt` URLs are origin-derived**, honoring `PUBLIC_ORIGIN` first. → Set `PUBLIC_ORIGIN=https://api.tusk3d.store` on the VM; no hostname is hardcoded.
 - **Node pin: `v22.x` (local is `22.22.3`).** `node:sqlite` loads unflagged on this version. If the VM Node errors with an "experimental sqlite" message, either match `22.22.x` exactly or add `--experimental-sqlite` to the systemd `ExecStart`.
 
+> **Live-deploy addendum (2026-06-16) — what actually shipped, vs the procedure below:**
+> - **VM**: DigitalOcean droplet `152.42.213.241` (1 GB, Singapore), Ubuntu 24.04.3.
+> - **TLS**: used **Caddy `tls internal` + Cloudflare SSL mode "Full"** (NOT the Origin-cert + Full-Strict in A5). Reason: zero manual cert handling, no private key passed around; CF↔origin still encrypted. Origin-cert + Full (Strict) remains the documented hardening upgrade (A5).
+> - **Frontend → backend**: the app calls **relative `/api/*`**, so production needs a same-origin proxy — added as a **Pages Function** (`functions/api/[[path]].js`) that forwards `tusk3d.store/api/*` → `api.tusk3d.store/api/*`. This bypasses CORS entirely (browser stays same-origin), so the backend's localhost-only CORS is irrelevant to the app. See A8.
+
 ---
 
 ## 1. Prerequisites / accounts
@@ -190,6 +195,19 @@ sudo systemctl enable tusk3d-api
 4. **Custom domains** (Pages → Custom domains): add `tusk3d.store` and `www.tusk3d.store`. CF auto-creates the proxied CNAMEs from A4.
 
 > Frontend builds in **CF's** cloud, never on the VM. Pushes to `main` auto-rebuild. (Manual alternative: `pnpm --filter frontend... build && npx wrangler pages deploy frontend/dist --project-name tusk3d`.)
+
+---
+
+### A8. Frontend → backend wiring (same-origin `/api` proxy)
+
+The app calls the backend with **relative paths** (`fetch('/api/...')`); Vite proxies these to `localhost:3001` in dev. Production has no such proxy, so a Pages Function bridges it:
+
+- `functions/api/[[path]].js` (repo root, committed) forwards every `tusk3d.store/api/*` request to `https://api.tusk3d.store/api/*`.
+- CF Pages picks up the `functions/` directory automatically on deploy (root directory = repo root).
+- The browser only ever calls its own origin → **no CORS preflight**, so the backend's `cors({ origin: ['http://localhost:5173', …] })` doesn't need a production origin added.
+- Agents bypass this entirely and call `https://api.tusk3d.store/mcp` directly.
+
+Verify after deploy: `curl -sS -X POST https://tusk3d.store/api/auth/challenge` should reach the backend (a JSON body or a 400/4xx from the app — **not** a Pages 404).
 
 ---
 
