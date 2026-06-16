@@ -593,3 +593,15 @@ Non-blocking residuals the reviewers surfaced; none reachable as an external exp
 4. **operator bypass skips amount/destination** (paymentVerifier) — only reachable by a deployer-key-signed JWT (not external), and self-pay NET≈-gas can't pass the amount check anyway. Accepted D-034/D-089 tradeoff; noted for completeness.
 
 **Blocker level**: 🟢 Deferred (post-demo / 8/27 mainnet-window polish).
+
+---
+
+## OQ-035: Frontend should derive Copilot availability from the backend, not a build-time `VITE_COPILOT_ENABLED` flag (low, post-submission)
+
+**Surfaced**: 2026-06-16 (deploy session — user questioned why a backend-owned capability is gated by a frontend env var).
+
+The real source of truth for "is Copilot available" is the **backend** (`GOOGLE_GENERATIVE_AI_API_KEY` presence + auth + Gemini quota — `routes/copilot.ts` / `geminiQuotaGate.ts`). The frontend separately gates whether the UI renders on a **build-time** flag `VITE_COPILOT_ENABLED` (`CreateModelPage.tsx:709`). Two consequences: (1) enabling requires a frontend rebuild, and (2) the flag can drift from backend reality (`frontend/.env.example` even warns "set true ONLY when the backend has the key"). The runtime degraded states (`quota`/`unavailable`) are already handled well (D-084, never-hide). The flag is just a visibility/rollout toggle.
+
+**Possible fix**: have the frontend derive availability from the backend (a capabilities/preflight response — the `preflight` route already exists) and drop the build-time visibility flag, so backend config is the single source of truth.
+
+**Blocker level**: 🟢 Deferred (post-submission). For now `VITE_COPILOT_ENABLED=true` is safe because the backend key is configured (no drift).

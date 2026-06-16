@@ -191,7 +191,7 @@ sudo systemctl enable tusk3d-api
    - Root directory: repo root (monorepo — the filter handles the rest)
    - Note: the workspace package names are `frontend`, `backend`, `@overflow2026/shared` (only `shared` is scoped).
 3. **Environment variables** (Pages → Settings → Variables) — set every `VITE_*` the app needs for testnet:
-   `VITE_TEST_WALLET` (leave **unset/0** in prod — see the VITE_TEST_WALLET gotcha), `VITE_WALRUS_AGGREGATOR` (unset = testnet default, or the CDN later), plus any package id / network vars from `frontend/.env.example`.
+   `VITE_TEST_WALLET` (leave **unset/0** in prod — see the VITE_TEST_WALLET gotcha), `VITE_WALRUS_AGGREGATOR` (unset = testnet default, or the CDN later), `VITE_COPILOT_ENABLED=true` (surfaces the Riff Copilot UI; backend already has the Gemini key). Note: chain config (package id, RPC, policy ids) is **baked from `frontend/src/sui/networkConfig.ts`**, NOT a CF var — `VITE_MODEL3D_PACKAGE_ID` in `.env.example` is vestigial. VITE_* are **build-time** — changing one needs a fresh deployment. Landing flags `VITE_LANDING_LIVE_WELLS`/`VITE_LANDING_SCROLL_SPINE` default **on** (unset ≠ '0').
 4. **Custom domains** (Pages → Custom domains): add `tusk3d.store` and `www.tusk3d.store`. CF auto-creates the proxied CNAMEs from A4.
 
 > Frontend builds in **CF's** cloud, never on the VM. Pushes to `main` auto-rebuild. (Manual alternative: `pnpm --filter frontend... build && npx wrangler pages deploy frontend/dist --project-name tusk3d`.)
