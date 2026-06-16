@@ -1,5 +1,34 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 21:05 (**D-106: async (dispatch+poll) generation — fixes live 524 on /create; backend deployed, frontend redeploying**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 4 — post-deploy bugfix. Live `/create` generation 524'd (paid SUI, no model). Root-caused + fixed.
+
+### Completed This Session (D-106)
+- **Root cause**: backend polls Tripo up to ~7 min (`generators/tripo.ts`: 180s base + 240s seg) but Cloudflare aborts proxied requests at ~100s → **HTTP 524** before the synchronous `POST /api/generate` returns. Not payment/Tripo/key (all verified fine: Tripo balance 200/0.33s from VM, treasury+fee config matches frontend). The 524 was the only clue (backend silently swallowed errors — now logged).
+- **Fix (D-106)**: generation is **async** — `POST /api/generate` verifies payment synchronously then returns **202 `{jobId}`**; Tripo runs in the background; client polls **`GET /api/generate/result/:jobId`** every 3s (poll-first-then-sleep). Every HTTP hop <5s → no CDN timeout.
+- **New** `backend/src/lib/generate-jobs.ts` — in-memory store, bounded 3 ways (delete-on-fetch, TTL sweep unref'd 15min, hard cap 30, oldest-eviction). `generate.ts` split into POST dispatch + GET result (owner-scoped); reused D-083 Tripo error taxonomy in the bg job.
+- **Frontend** `lib/api.ts` `generate()` → dispatch+poll; same `GenerateError` mapping so page copy unchanged. `shared`: `GenerateDispatchResponse` + `GenerateJobResult`.
+- **Tests** migrated to async shape: backend **398 green**, frontend **1207 green**, typecheck + full `tsc` build clean. (Caught a test-helper type error only `tsc` build surfaces, not vitest — fixed.)
+- Backend **deployed to VM** (`724e7bf`), endpoints verified live (POST 401 / GET result 401 / proxy forwards). Frontend CF Pages rebuild in flight.
+
+### Next Concrete Step
+- Confirm frontend bundle redeployed, then **user retries a paid generation** at `tusk3d.store/create` (Slush) — expect it to complete (no 524). Each attempt costs 0.4 SUI.
+
+### Blockers / Open Questions
+- Accepted residual (D-106): backend restart mid-generation loses that in-flight job (digest already spent → refundable/contact path). Rare on single VM.
+- OQ-035 (copilot availability should derive from backend) still open, post-submission.
+
+### Notes for Next Session
+- Redeploy backend: `ssh -i ~/.ssh/id_tusk3d tusk@152.42.213.241 '~/app/deploy.sh'`. **Always run `pnpm --filter backend... build` locally before deploy** — `tsc` build type-checks test files (vitest/esbuild does not).
+- `VITE_COPILOT_ENABLED=true` is set in CF Pages (D-106 session); copilot UI is behind wallet login (verify in real Chrome, not agent-browser).
+
+---
+
 ## Last Updated: 2026-06-16 19:10 (**🚀 FULL STACK DEPLOYED LIVE — frontend + backend + same-origin /api proxy all green on `tusk3d.store`**)
 
 ### Hackathon Tracker
