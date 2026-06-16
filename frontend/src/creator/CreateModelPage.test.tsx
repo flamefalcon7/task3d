@@ -417,7 +417,9 @@ describe('CreateModelPage', () => {
     );
     await clickGenerate();
     expect(signAndExecuteMock).not.toHaveBeenCalled(); // R1 — never charged
-    expect(screen.getByTestId('gen-error').textContent).toMatch(/temporarily unavailable/i);
+    // Credit-dry gets honest copy that points to the no-Tripo .glb upload path.
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/credits are exhausted/i);
+    expect(screen.getByTestId('gen-error').textContent).toMatch(/upload your own model/i);
   });
 
   it('pre-flight network failure → treated as unavailable (no charge), distinct message', async () => {

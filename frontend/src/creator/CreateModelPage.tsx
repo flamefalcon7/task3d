@@ -66,7 +66,12 @@ type GenStatus = 'idle' | 'preflight' | 'paying' | 'generating' | 'error';
 // fee-refundable copy (R3) cannot be fully finalized until it's set.
 const CONTACT_PATH = 'the Tusk3D team';
 const GEN_MSG = {
-  // (1) pre-flight says credit is dry / server couldn't verify → not charged.
+  // (1) pre-flight says the operator's generation credits are dry → not charged.
+  // Honest (no "try again shortly" — retrying won't help until the operator tops
+  // up) and points to the no-Tripo path: a user .glb upload still mints.
+  creditsExhausted:
+    'Generation credits are exhausted for now. You can still upload your own model manually (.glb).',
+  // (1b) pre-flight couldn't verify availability (server-side) → not charged.
   unavailable: 'Generation is temporarily unavailable — please try again shortly.',
   // (2) the pre-flight request itself failed (distinct from a balance-dry answer).
   preflightNetwork: "Couldn't check generation availability — please try again.",
@@ -871,7 +876,13 @@ export function CreateModelPage() {
       pre = { available: false, reason: 'network' as const };
     }
     if (!pre.available) {
-      setGenError(pre.reason === 'network' ? GEN_MSG.preflightNetwork : GEN_MSG.unavailable);
+      setGenError(
+        pre.reason === 'network'
+          ? GEN_MSG.preflightNetwork
+          : pre.reason === 'insufficient'
+            ? GEN_MSG.creditsExhausted
+            : GEN_MSG.unavailable,
+      );
       setGenStatus('error');
       return; // R1 — no signAndExecute, no charge
     }
