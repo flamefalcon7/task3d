@@ -1,0 +1,63 @@
+/* GLB-load overlay shared by PreviewCanvas + TaggingCanvas. A wireframe cube
+   over the (gray, D-107) viewer well while LoadAssetContainerAsync runs, so the
+   well doesn't read as a frozen box. Brutalist: mono label, soft white-on-well
+   strokes. Motion mirrors IndeterminateBar's reduced-motion gating. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.cube {
+  transform-origin: center;
+}
+
+.label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* A slow tumble plus a gentle breathing pulse reads as "working" without the
+   busy spin of a generic spinner. */
+@media (prefers-reduced-motion: no-preference) {
+  .cube {
+    animation: wlo-rotate 4s linear infinite;
+  }
+  .overlay {
+    animation: wlo-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+/* Reduced-motion fallback: a static, dimmed cube still reads as a placeholder. */
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    opacity: 0.6;
+  }
+}
+
+@keyframes wlo-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wlo-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}

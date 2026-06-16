@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
   type AbstractMesh,
@@ -20,6 +19,7 @@ import { applyCanvasMode } from './applyCanvasMode';
 import { renderableMaterialNames } from './partMaterials';
 import { type BgKey, DEFAULT_BG, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
+import { WireframeLoadingOverlay } from './WireframeLoadingOverlay';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
 import { ModeTogglePill } from './ModeTogglePill';
 import { tokens, viewerWell } from '../ux/tokens';
@@ -294,21 +294,7 @@ export function TaggingCanvas({
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
       {!meshLoaded && (
-        <div data-testid="tagging-canvas-loading" style={loadingOverlay} aria-hidden>
-          <svg width="80" height="80" viewBox="0 0 100 100">
-            <g
-              fill="none"
-              stroke="rgba(255,255,255,0.4)"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-            >
-              <path d="M 20 30 L 50 15 L 80 30 L 80 70 L 50 85 L 20 70 Z" />
-              <path d="M 20 30 L 50 45 L 80 30" />
-              <path d="M 50 45 L 50 85" />
-            </g>
-          </svg>
-          <span style={loadingLabel}>— LOADING MESH</span>
-        </div>
+        <WireframeLoadingOverlay testId="tagging-canvas-loading" label="LOADING MESH" />
       )}
       {modeToggle && onModeCycle && (
         <ModeTogglePill
@@ -328,21 +314,3 @@ export function TaggingCanvas({
   );
 }
 
-const loadingOverlay: CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 8,
-  pointerEvents: 'none',
-};
-
-const loadingLabel: CSSProperties = {
-  fontFamily: tokens.font.mono,
-  fontSize: 10,
-  letterSpacing: '1.5px',
-  textTransform: 'uppercase',
-  color: 'rgba(255,255,255,0.5)',
-};

@@ -292,6 +292,83 @@ describe('PreviewCanvas', () => {
     expect(canvas.getAttribute('data-bg')).toBe('gray');
   });
 
+  // plan-2026-06-16-001 — GLB-load overlay.
+  describe('load overlay', () => {
+    async function babylonSpy() {
+      const babylon = await import('@babylonjs/core');
+      return {
+        babylon,
+        spy: babylon.LoadAssetContainerAsync as unknown as ReturnType<typeof vi.fn>,
+      };
+    }
+
+    it('shows no overlay when glbUrl is null', () => {
+      render(<PreviewCanvas glbUrl={null} />);
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+    });
+
+    it('shows the overlay while a GLB loads, hides it after the load resolves', async () => {
+      const { babylon, spy } = await babylonSpy();
+      let resolve!: (v: unknown) => void;
+      spy.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
+
+      render(<PreviewCanvas glbUrl="blob:http://localhost/a" />);
+      expect(screen.queryByTestId('preview-canvas-loading')).not.toBeNull();
+
+      await act(async () => {
+        resolve(new babylon.AssetContainer());
+        await flushAsync();
+      });
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+    });
+
+    it('hides the overlay after a failed load (no stuck spinner)', async () => {
+      const { spy } = await babylonSpy();
+      spy.mockImplementationOnce(async () => { throw new Error('load failed'); });
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      render(<PreviewCanvas glbUrl="blob:http://localhost/err" />);
+      await act(async () => { await flushAsync(); });
+
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+      errSpy.mockRestore();
+    });
+
+    it('does not leave the overlay stuck when a superseded load resolves late', async () => {
+      const { babylon, spy } = await babylonSpy();
+      let resolveFirst!: (v: unknown) => void;
+      // First (slow) load hangs; the second load uses the default immediate impl.
+      spy.mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }));
+
+      const { rerender } = render(<PreviewCanvas glbUrl="blob:http://localhost/first" />);
+      await act(async () => {
+        rerender(<PreviewCanvas glbUrl="blob:http://localhost/second" />);
+        await flushAsync();
+      });
+      // Second load won the token → overlay cleared.
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+
+      // The stale first load resolving late must not re-show or stick the overlay.
+      await act(async () => {
+        resolveFirst(new babylon.AssetContainer());
+        await flushAsync();
+      });
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+    });
+
+    it('hides the overlay while disposed (LaunchCollectionPage upload window)', async () => {
+      const { spy } = await babylonSpy();
+      spy.mockImplementationOnce(() => new Promise(() => {})); // never resolves
+      const ref = createRef<PreviewCanvasHandle>();
+
+      render(<PreviewCanvas ref={ref} glbUrl="blob:http://localhost/c" />);
+      expect(screen.queryByTestId('preview-canvas-loading')).not.toBeNull();
+
+      act(() => ref.current!.dispose());
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
+    });
+  });
+
   it('calls LoadAssetContainerAsync when glbUrl is provided', async () => {
     const babylon = await import('@babylonjs/core');
     const spy = babylon.LoadAssetContainerAsync as unknown as ReturnType<typeof vi.fn>;

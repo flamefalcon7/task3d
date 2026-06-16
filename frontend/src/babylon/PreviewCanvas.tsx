@@ -20,6 +20,7 @@ import { applyCanvasMode } from './applyCanvasMode';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
 import { ModeTogglePill } from './ModeTogglePill';
 import { captureStillsFromScene, captureFramesFromScene } from './captureStills';
+import { WireframeLoadingOverlay } from './WireframeLoadingOverlay';
 
 // plan-015 U2 — accent color hex inlined here so the mode/highlight effect
 // doesn't need to round-trip through the ux/tokens module. Matches
@@ -196,6 +197,12 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   // `cancelled` flag below, so a load completing after unmount cannot
   // fire state on a dead component.
   const [loadEpoch, setLoadEpoch] = useState(0);
+  // plan-2026-06-16-001 — drives the wireframe-cube load overlay. false while a
+  // GLB is loading, true once the load attempt SETTLES (success OR failure), so
+  // the overlay never sticks. Mirrors TaggingCanvas's meshLoaded flag. All
+  // mutations are gated on the load token (see the GLB-load effect) so a slow
+  // first load can't clear a fast second load's overlay.
+  const [meshLoaded, setMeshLoaded] = useState(false);
 
   // Latest-callback ref so the picking observable (registered once on
   // mount) calls the current onPartClick. Mirrors TaggingCanvas pattern.
@@ -342,6 +349,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !glbUrl) return;
+    // plan-2026-06-16-001 — a new load is starting: show the overlay.
+    setMeshLoaded(false);
     // plan-015 F9 — capture this effect run's token. Increment so any prior
     // in-flight load sees its captured token != latestRef.current and bails
     // before mutating shared refs. The per-effect `cancelled` flag only
@@ -382,9 +391,17 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         }
         // Re-trigger the mode effect now that meshesRef is populated.
         setLoadEpoch((e) => e + 1);
+        // plan-2026-06-16-001 — load settled successfully: hide the overlay.
+        setMeshLoaded(true);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('PreviewCanvas: load failed', err);
+        // plan-2026-06-16-001 — clear the overlay on failure too (canvas keeps
+        // its clearColor; an explicit error glyph is deferred). Token-gated so
+        // a superseded load's late failure can't clobber a newer load's state.
+        if (!cancelled && token === loadTokenRef.current && !isDisposedRef.current) {
+          setMeshLoaded(true);
+        }
       }
     })();
     return () => {
@@ -471,6 +488,13 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         data-mode={mode}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
+      {/* plan-2026-06-16-001 — load overlay. Only while a GLB is actually
+          loading (glbUrl set + not yet settled) and the canvas is mounted (not
+          in the LaunchCollectionPage dispose/upload window). Rendered before the
+          pills so they paint above it; pointerEvents:none keeps pill clicks. */}
+      {mounted && glbUrl && !meshLoaded && (
+        <WireframeLoadingOverlay testId="preview-canvas-loading" />
+      )}
       {modeToggle && onModeCycle && (
         <ModeTogglePill
           entry={MODE_PALETTE[mode]}
