@@ -1,5 +1,29 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 23:58 (**feat: PreviewCanvas GLB-load wireframe overlay shipped (plan-2026-06-16-001)**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session (continued)
+- **Loading-overlay feature shipped** on branch `feat/preview-loading-overlay` (commit `d3a444a`). Plan `docs/plans/2026-06-16-001-feat-preview-canvas-loading-overlay-plan.md` executed U1–U4:
+  - **U1** new shared `frontend/src/babylon/WireframeLoadingOverlay.tsx` + `.module.css` (animated wireframe cube, `prefers-reduced-motion` fallback mirroring `IndeterminateBar`).
+  - **U2** wired into `PreviewCanvas` via `meshLoaded` state; overlay shows only when `mounted && glbUrl && !meshLoaded`; cleared on success/failure/superseded loads, all token-gated (no stuck spinner). 5 new race/dispose/null tests.
+  - **U3** `TaggingCanvas` refactored onto the shared component (its `tagging-canvas-loading` behavior preserved, gains the animation; dead inline styles + unused `CSSProperties` import removed).
+  - **U4** typecheck clean; 155 babylon tests green; headed-browser verified on `/dev/compare` — 8 overlays render during load (animated cube), clear after; gray wells (D-107) confirmed live.
+- Known pre-existing dev-only warning: `CompareGlbsPage` wraps PreviewCanvas in a `<button>` → `<div>`-in-`<button>` hydration warning (not introduced here; dev page only).
+
+### Next Concrete Step
+Decide review depth (frontend roster incl. `ce-julik-frontend-races-reviewer` per CLAUDE.md) and merge `feat/preview-loading-overlay` → main. D-107 (commits `364b3f0`/`711807f`) is still on `main` directly from earlier.
+
+### Notes for Next Session
+- The race paths (stale-token, error, dispose) are unit-tested in `PreviewCanvas.test.tsx` → "load overlay" describe block.
+
+---
+
 ## Last Updated: 2026-06-16 23:20 (**D-107: viewer-well default bg black → GRAY (global + encrypted snapshot)**)
 
 ### Hackathon Tracker
