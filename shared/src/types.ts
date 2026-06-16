@@ -56,6 +56,21 @@ export interface GenerateResponse {
   lineageStub: Partial<LineageRecord>;
 }
 
+// D-106: async (dispatch + poll) generation. `POST /api/generate` returns this
+// 202 body immediately; the heavy Tripo work runs in the background so no single
+// request crosses Cloudflare's ~100s proxy timeout.
+export interface GenerateDispatchResponse {
+  jobId: string;
+}
+
+// D-106: `GET /api/generate/result/:jobId` body. `done` carries the full
+// GenerateResponse fields; `error` mirrors the synchronous error taxonomy
+// (D-083/U5) so the frontend's honest-copy mapping is unchanged.
+export type GenerateJobResult =
+  | { status: 'pending' }
+  | ({ status: 'done' } & GenerateResponse)
+  | { status: 'error'; error: string; refundable?: boolean };
+
 // --- Zod schemas (request validation) -------------------------------------
 // D-033: only the Tripo prompt schema survives. The 7 procedural shape
 // schemas + paramRanges + GenerateParamsSchema were removed with the

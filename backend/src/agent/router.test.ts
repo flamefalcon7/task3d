@@ -78,8 +78,25 @@ const fakeJwt = {
   },
 };
 
+// D-106: generation is async — POST dispatches (202 { jobId }), the outcome is
+// read from GET /api/generate/result/:jobId. Poll until the background job lands.
+async function pollGenerateResult(
+  app: { request: (path: string, init?: RequestInit) => Promise<Response> },
+  jobId: string,
+): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 100; i++) {
+    const r = await app.request(`/api/generate/result/${jobId}`, {
+      headers: { Authorization: `Bearer ${TEST_BEARER}` },
+    });
+    const j = (await r.json()) as Record<string, unknown>;
+    if (j.status !== 'pending') return j;
+    await new Promise((res) => setImmediate(res));
+  }
+  throw new Error('generate job never reached a terminal state');
+}
+
 describe('/api/generate integration (D-023 Tripo passthrough)', () => {
-  it('POST { prompt } with valid Authorization + Tripo registered returns 200', async () => {
+  it('POST { prompt } with valid Authorization + Tripo registered dispatches, then resolves to a done result', async () => {
     const stubTripo: Generator = {
       async generate() {
         return {
@@ -97,13 +114,18 @@ describe('/api/generate integration (D-023 Tripo passthrough)', () => {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
       body: JSON.stringify({ prompt: 'red car' }),
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { lineageStub: { prompt?: string; generatorSource?: string } };
+    expect(res.status).toBe(202);
+    const { jobId } = (await res.json()) as { jobId: string };
+    const body = (await pollGenerateResult(app, jobId)) as {
+      status: string;
+      lineageStub: { prompt?: string; generatorSource?: string };
+    };
+    expect(body.status).toBe('done');
     expect(body.lineageStub.generatorSource).toBe('tripo');
     expect(body.lineageStub.prompt).toBe('red car');
   });
 
-  it('POST { prompt } when Tripo NOT registered returns 400 tripo_disabled', async () => {
+  it('POST { prompt } when Tripo NOT registered → job resolves to tripo_disabled error', async () => {
     const router = new HardcodedRouter();
     const { buildApp } = await import('../app.js');
     const app = buildApp({ router, jwt: fakeJwt });
@@ -113,8 +135,10 @@ describe('/api/generate integration (D-023 Tripo passthrough)', () => {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_BEARER}` },
       body: JSON.stringify({ prompt: 'red car' }),
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    expect(res.status).toBe(202);
+    const { jobId } = (await res.json()) as { jobId: string };
+    const body = (await pollGenerateResult(app, jobId)) as { status: string; error: string };
+    expect(body.status).toBe('error');
     expect(body.error).toBe('tripo_disabled');
   });
 

@@ -1,5 +1,6 @@
 import type {
-  GenerateResponse,
+  GenerateDispatchResponse,
+  GenerateJobResult,
   LineageRecord,
   TripoParams,
 } from '@overflow2026/shared';
@@ -71,32 +72,78 @@ export async function generate(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+  // D-106: dispatch. The backend verifies payment synchronously and returns a
+  // jobId immediately; the ~7-min Tripo work runs in the background so no single
+  // request crosses Cloudflare's ~100s proxy timeout. A non-2xx here is a
+  // synchronous failure (auth / payment / validation) — surfaced as today.
   const requestBody = paymentDigest ? { ...params, paymentDigest } : params;
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers,
     body: JSON.stringify(requestBody),
   });
-  if (!res.ok) {
-    // Surface the backend's classified error (U5) as a structured GenerateError so
-    // the page can map it to honest copy without parsing a raw string.
-    let code = 'unknown';
-    let refundable = false;
+  if (!res.ok) throw await toGenerateError(res);
+  const { jobId } = (await res.json()) as GenerateDispatchResponse;
+
+  // Poll the result endpoint until the job is terminal. Each request is fast, so
+  // a multi-minute generation is a sequence of short polls, not one long request.
+  const pollHeaders: Record<string, string> = {};
+  if (authToken) pollHeaders.Authorization = `Bearer ${authToken}`;
+  const POLL_INTERVAL_MS = 3000;
+  const deadline = Date.now() + 8 * 60 * 1000; // > the ~7-min backend Tripo budget
+
+  // Poll first, sleep only while still pending — so a fast (or mocked) result
+  // returns without waiting an interval.
+  while (Date.now() < deadline) {
+    let pres: Response | undefined;
     try {
-      const j = (await res.json()) as { error?: unknown; refundable?: unknown };
-      if (typeof j.error === 'string') code = j.error;
-      if (j.refundable === true) refundable = true;
+      pres = await fetch(`/api/generate/result/${jobId}`, { headers: pollHeaders });
     } catch {
-      /* non-JSON body — keep the generic code */
+      // transient network blip — fall through to the wait + retry
     }
-    throw new GenerateError(code, res.status, refundable);
+    if (pres) {
+      if (pres.status === 401) throw new GenerateError('auth_invalid', 401);
+      if (pres.status === 404) throw new GenerateError('job_not_found', 404);
+      if (pres.ok) {
+        let body: GenerateJobResult | undefined;
+        try {
+          body = (await pres.json()) as GenerateJobResult;
+        } catch {
+          /* unparseable — retry */
+        }
+        if (body && body.status === 'error') {
+          throw new GenerateError(body.error, 502, body.refundable === true);
+        }
+        if (body && body.status === 'done') {
+          return {
+            glbBytes: base64ToBytes(body.glbBytes),
+            lineageJson: new TextEncoder().encode(body.lineageJson),
+            lineageStub: body.lineageStub,
+          };
+        }
+      }
+    }
+    await sleep(POLL_INTERVAL_MS);
   }
-  const body = (await res.json()) as GenerateResponse;
-  return {
-    glbBytes: base64ToBytes(body.glbBytes),
-    lineageJson: new TextEncoder().encode(body.lineageJson),
-    lineageStub: body.lineageStub,
-  };
+  throw new GenerateError('tripo_timeout', 504, !!paymentDigest);
+}
+
+/** Parse a non-2xx /api/generate response into a classified GenerateError. */
+async function toGenerateError(res: Response): Promise<GenerateError> {
+  let code = 'unknown';
+  let refundable = false;
+  try {
+    const j = (await res.json()) as { error?: unknown; refundable?: unknown };
+    if (typeof j.error === 'string') code = j.error;
+    if (j.refundable === true) refundable = true;
+  } catch {
+    /* non-JSON body — keep the generic code */
+  }
+  return new GenerateError(code, res.status, refundable);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function base64ToBytes(b64: string): Uint8Array {

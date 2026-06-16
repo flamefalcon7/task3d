@@ -285,9 +285,12 @@ afterEach(() => {
 // (GET /api/generate/preflight) BEFORE charging, then POSTs /api/generate. The
 // pre-flight answers available:true by default; pass overrides to exercise the
 // blocked-before-pay path and classified post-payment errors.
-function tripoFetchMock(opts: { preflight?: () => Response; generate?: () => Response } = {}) {
-  const okGlb = () =>
-    new Response(JSON.stringify({ glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }), {
+// D-106: generation is now dispatch (POST → 202 { jobId }) + poll (GET
+// /result/:jobId). `result` overrides the terminal poll response (for the async
+// Tripo-error paths); `dispatch` overrides the POST (for sync auth/payment errors).
+function tripoFetchMock(opts: { preflight?: () => Response; dispatch?: () => Response; result?: () => Response } = {}) {
+  const okDone = () =>
+    new Response(JSON.stringify({ status: 'done', glbBytes: 'Z2xURg==', lineageJson: '{}', lineageStub: {} }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -296,9 +299,16 @@ function tripoFetchMock(opts: { preflight?: () => Response; generate?: () => Res
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+  const okDispatch = () =>
+    new Response(JSON.stringify({ jobId: 'job-1' }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
+    });
   return vi.fn(async (url: string | URL) => {
-    if (String(url).includes('/api/generate/preflight')) return (opts.preflight ?? okPreflight)();
-    return (opts.generate ?? okGlb)();
+    const u = String(url);
+    if (u.includes('/api/generate/preflight')) return (opts.preflight ?? okPreflight)();
+    if (u.includes('/api/generate/result/')) return (opts.result ?? okDone)();
+    return (opts.dispatch ?? okDispatch)(); // POST /api/generate
   });
 }
 
@@ -430,9 +440,9 @@ describe('CreateModelPage', () => {
     vi.stubGlobal(
       'fetch',
       tripoFetchMock({
-        generate: () =>
-          new Response(JSON.stringify({ error: 'tripo_failed', refundable: true }), {
-            status: 502,
+        result: () =>
+          new Response(JSON.stringify({ status: 'error', error: 'tripo_failed', refundable: true }), {
+            status: 200,
             headers: { 'Content-Type': 'application/json' },
           }),
       }),
@@ -447,9 +457,9 @@ describe('CreateModelPage', () => {
     vi.stubGlobal(
       'fetch',
       tripoFetchMock({
-        generate: () =>
-          new Response(JSON.stringify({ error: 'tripo_unavailable' }), {
-            status: 503,
+        result: () =>
+          new Response(JSON.stringify({ status: 'error', error: 'tripo_unavailable' }), {
+            status: 200,
             headers: { 'Content-Type': 'application/json' },
           }),
       }),
@@ -464,7 +474,7 @@ describe('CreateModelPage', () => {
     vi.stubGlobal(
       'fetch',
       tripoFetchMock({
-        generate: () =>
+        result: () =>
           new Response(JSON.stringify({ error: 'auth_invalid' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json' },

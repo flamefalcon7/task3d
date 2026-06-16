@@ -4356,6 +4356,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-106: Async (dispatch + poll) Tripo generation — long jobs can't cross Cloudflare's 100s proxy timeout
+**Status**: Accepted
+**Date**: 2026-06-16 · **Phase**: Phase 4 — post-deploy fix
+
+### Context — After the D-105 deploy, live `/create` generation failed with **HTTP 524** (Cloudflare proxy timeout). Root cause: the backend polls Tripo for up to **180s (base) + 240s (segmentation) = ~7 min** (`backend/src/generators/tripo.ts`), but Cloudflare proxies (orange-cloud) abort an origin request after **~100s** (not configurable on Free/Pro). So any generation > 100s gets a 524 before the synchronous `POST /api/generate` can return — independent of payment/Tripo/key correctness. The same-origin `/api` Pages-Function proxy (D-105) sits on Cloudflare too, so a single long synchronous request is structurally incompatible with the CDN.
+
+### Decision — Make generation **asynchronous (dispatch + poll)**. `POST /api/generate` verifies payment **synchronously** (pay-gate unchanged), creates a `jobId`, kicks off the Tripo work in the background (fire-and-forget), and returns **202 `{ jobId }`** immediately. A new **`GET /api/generate/result/:jobId`** (JWT-gated, owner-scoped) returns `{ status: 'pending' }` | `{ status: 'done', ...GenerateResponse }` | `{ status: 'error', error, refundable? }`. The frontend polls every ~3s up to ~8 min. Every HTTP request is now < 5s, so no CDN/proxy timeout. Job state lives in an **in-memory store** (`backend/src/lib/generate-jobs.ts`) bounded three ways — **delete-on-fetch** (frees the 1–6 MB GLB the moment it's delivered), **TTL sweep** (unref'd timer, ~15 min, clears orphaned/abandoned jobs), **hard cap** (~30, oldest-eviction) — mirroring the existing `auth.ts` nonce-store / rate-limiter idiom. The same Tripo error taxonomy (D-083/U5: `tripo_timeout`/`tripo_failed`/`tripo_unavailable`, `refundable` when paid) is applied inside the background job and surfaced through the result endpoint.
+
+### Rationale — Async is the standard fix for long operations behind any CDN/proxy and is the ONLY robust option (CF's 100s is fixed on our plan). It also improves demo UX (a progress state beats a 3-minute dead spinner). Reusing the existing error taxonomy keeps the frontend's honest-copy mapping intact.
+
+### Alternatives Considered — **Grey-cloud `api.tusk3d.store` (DNS-only) + Let's Encrypt on Caddy** — removes the 100s limit on the api hop without code, but exposes the VM IP, drops CF's shield, needs a real origin cert, and the Pages-Function proxy hop stays on CF (uncertain it fully fixes it). Rejected as a fragile stopgap. **Raise the CF timeout** — Enterprise-only. **Reduce Tripo budget < 100s / drop segmentation** — would fail legitimate slow generations and kill the part-labels feature. **Durable (SQLite) job store** — survives restart but storing multi-MB GLB blobs in the counters DB is heavy; in-memory + delete-on-fetch is bounded and far simpler (accepted residual: a backend restart mid-generation loses that in-flight job — rare on a single VM; deploy off-peak).
+
+### Consequences — ✅ generation works through Cloudflare; live demo unblocked; progress-able UX · ✅ memory bounded (delete-on-fetch + TTL + cap), GLB freed on delivery · ⚠️ a redeploy/restart while a job is generating loses that job (digest already spent → existing refundable/contact path) · ⚠️ new public API surface (`GET /result/:jobId`) + breaks the synchronous `generate.test.ts` (updated) · 🔮 durable job store + true progress percentage are post-submission polish.
+
+### Related — D-105 (deploy + `/api` Pages-Function proxy that exposes the 100s limit) · D-034 (pay-gate, unchanged) · D-083/U5 (Tripo error taxonomy reused) · plan `docs/plans/2026-06-16-async-tripo-generation.md`.
+
+---
+
 # Reserved Decision Numbers
 
-D-106 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-107 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
