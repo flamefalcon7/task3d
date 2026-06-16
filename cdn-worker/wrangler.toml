@@ -1,6 +1,6 @@
 # Tusk3D Walrus read-path CDN Worker — Method B (D-073 / plan-018).
 # Deploy:  CLOUDFLARE_API_TOKEN="$CF_API_TOKEN" npx wrangler deploy
-# Requires: tusk3d.space active as a zone in our Cloudflare account.
+# Requires: tusk3d.store active as a zone in our Cloudflare account.
 
 name = "tusk3d-walrus-cdn"
 main = "src/worker.js"
@@ -12,8 +12,8 @@ compatibility_date = "2026-05-01"
 WALRUS_AGGREGATORS = "https://aggregator.walrus-testnet.walrus.space"
 
 # Custom-domain route. custom_domain = true makes wrangler create the
-# cdn.tusk3d.space DNS record and bind it to this Worker on deploy — no manual
+# cdn.tusk3d.store DNS record and bind it to this Worker on deploy — no manual
 # DNS or Cache Rule needed. Requires the zone to be Active first.
 [[routes]]
-pattern = "cdn.tusk3d.space"
+pattern = "cdn.tusk3d.store"
 custom_domain = true

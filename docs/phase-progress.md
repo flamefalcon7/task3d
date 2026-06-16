@@ -1,5 +1,35 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 18:00 (**ce-brainstorm: app deployment plan — CF Pages + DO VM + domain `tusk3d.store`; ADR D-105 + runbook written**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 4 — pre-submission deploy planning. Session was brainstorm + docs (one small code change: domain switch). No backend logic changed.
+
+### Completed This Session
+- **Deployment topology decided (ADR `D-105`)**: frontend → **Cloudflare Pages** (CF-cloud build from GitHub `main`); backend → **single DigitalOcean droplet** (1 GB + swap) behind **CF orange proxy → Caddy (CF Origin cert, Full Strict) → Node :3001**, **systemd**-managed; deploy model = **manual `deploy.sh` + systemd** (Actions/Docker rejected for the 5-day window).
+- **End-to-end runbook written**: `docs/runbooks/app-deploy.md` — one-time setup (CF zone, droplet, runtime, TLS, secrets, systemd, CF Pages) + recurring deploy + smoke test + rollback + troubleshooting + env inventory.
+- **Domain correction `tusk3d.space → tusk3d.store`** (user holds `.store`, never `.space`): switched the **5 functional refs** (test fixture `llms.test.ts`, 3 code comments, `cdn-worker/wrangler.toml` route); historical docs left as records. `llms.test.ts` green (4/4).
+- **Key code-truths verified for the runbook** (not assumed): backend holds **no signing key** (returns unsigned PTBs; TRIPO_FEE_* are addresses) → VM needs no wallet key; backend keeps a **`node:sqlite`** quota DB (`TUSK_DB_PATH`) = persistent state to keep outside rebuilds; **zero native npm modules** → on-VM build compiles nothing; MCP/llms URLs honor `PUBLIC_ORIGIN`.
+
+### In Progress
+- Nothing mid-flight. Runbook ready to execute; D-105 Accepted.
+
+### Next Concrete Step
+- **Suggest commit** of this session (domain switch + D-105 + runbook + phase-progress), then **execute Part A1 first** (add `tusk3d.store` zone to Cloudflare + repoint registrar nameservers — propagation lag, start before everything else).
+
+### Blockers / Open Questions
+- MCP agent interface (D-104) is **already merged into `main`** (merge `c6d0080`, 2026-06-11; `backend/src/mcp/server.ts` + `/mcp` route on main; no feature branch remains). Deploy ships `main` as-is — the public `/mcp` hero demo is included. (An earlier phase-progress note said "unmerged"; that predated the 06-11 merge.)
+- Deferred (post-6/21): `cdn.tusk3d.store` Worker; GitHub-Actions auto-deploy; mainnet contract swap.
+
+### Notes for Next Session
+- Deploy-specific env overrides for the VM: `PORT=3001`, `PUBLIC_ORIGIN=https://api.tusk3d.store`, `TUSK_DB_PATH=/home/tusk/data/quota.db`, `MCP_TRUST_FORWARDED=true`. Secrets copied (not regenerated) from local `backend/.env`.
+- `node:sqlite` emits an "experimental" warning on Node 22.22.3 but loads **unflagged** — runbook covers the version-gate caveat.
+
+---
+
 ## Last Updated: 2026-06-10 19:25 (**ce-work execution: MCP agent interface SHIPPED on feat/mcp-agent-interface — U0–U8 complete + Tier-2 review + all validated findings fixed**)
 
 ### Hackathon Tracker

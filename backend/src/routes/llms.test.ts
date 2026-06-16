@@ -57,10 +57,10 @@ describe('/llms.txt review fixes', () => {
   it('derives the origin from x-forwarded-proto/host when present', async () => {
     const app = buildApp({});
     const res = await app.request('http://127.0.0.1:3001/llms.txt', {
-      headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'api.tusk3d.space' },
+      headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'api.tusk3d.store' },
     });
     const body = await res.text();
-    expect(body).toContain('https://api.tusk3d.space/mcp');
+    expect(body).toContain('https://api.tusk3d.store/mcp');
     expect(body).not.toContain('127.0.0.1');
   });
 });

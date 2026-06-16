@@ -58,7 +58,7 @@ export interface BuildMcpServerDeps {
   packageId?: string;
   /**
    * Walrus read-path base for get_preview / download_content URLs. Defaults at
-   * call time to `WALRUS_AGGREGATOR` env (e.g. the cdn.tusk3d.space worker,
+   * call time to `WALRUS_AGGREGATOR` env (e.g. the cdn.tusk3d.store worker,
    * D-073) or the public testnet aggregator — mirrors the frontend's
    * `walrus/aggregator.ts` canonical constant (audit W-3: env-driven, never a
    * baked guess).

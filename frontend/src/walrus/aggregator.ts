@@ -9,7 +9,7 @@ import type { Model3DSummary } from '@overflow2026/shared';
 // Audit W-3: env-driven (was hardcoded testnet). On mainnet the read path would
 // otherwise silently resolve every blob against the testnet aggregator (404s, or
 // worse, a same-id-different-content collision). Override at build time with
-// VITE_WALRUS_AGGREGATOR (e.g. the cdn.tusk3d.space worker, or the mainnet
+// VITE_WALRUS_AGGREGATOR (e.g. the cdn.tusk3d.store worker, or the mainnet
 // aggregator); falls back to the testnet aggregator for local dev.
 export const WALRUS_AGGREGATOR =
   (import.meta.env.VITE_WALRUS_AGGREGATOR as string | undefined)?.replace(/\/+$/, '') ??

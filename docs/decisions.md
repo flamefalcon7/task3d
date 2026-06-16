@@ -4334,6 +4334,24 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-105: App deployment topology — frontend on Cloudflare Pages, backend on a DigitalOcean VM, domain `tusk3d.store`
+**Status**: Accepted
+**Date**: 2026-06-16 · **Phase**: Phase 4 — feature/UX polish (pre-submission deploy)
+
+### Context — The app is feature-complete on testnet but only runs locally; the 6/21 submission needs a public deploy, and the MCP agent demo (D-104) needs a public `…/mcp` URL (`claude mcp add tusk3d <url>`). The user holds the domain **`tusk3d.store`** (NOT the `tusk3d.space` referenced throughout earlier docs — `.space` was never activated and is not held). Code was inspected to pick a topology that fits what the backend actually is: it holds **no signing key** (returns unsigned PTBs), keeps a small **`node:sqlite`** quota/budget DB (`TUSK_DB_PATH`), and has **zero native npm modules**.
+
+### Decision — **Frontend → Cloudflare Pages** (CF-cloud build from GitHub `main`, custom domains `tusk3d.store` + `www`). **Backend → a single DigitalOcean droplet** (Ubuntu 24.04, 1 GB + 2 GB swap), behind **Cloudflare orange-cloud proxy → Caddy (TLS via CF Origin cert, SSL mode Full Strict) → Node :3001**, kept alive by a **systemd** unit. Deploy model = **manual script + systemd** (chosen over GitHub-Actions auto-deploy and Docker): `git push` for the frontend (CF auto-rebuilds), `ssh … ~/app/deploy.sh` for the backend. The backend is **built on the VM, scoped to the backend subtree** (`pnpm --filter @overflow2026/backend... && build shared + backend`) rather than shipping prebuilt `dist/` — because the `@overflow2026/shared` `workspace:*` dependency makes artifact-shipping fragile, and with zero native modules the on-VM build compiles nothing. The sqlite DB lives at `/home/tusk/data/quota.db`, **outside** any rebuilt path. MCP/`llms.txt` URLs come from `PUBLIC_ORIGIN=https://api.tusk3d.store`. The CDN Worker (`cdn-worker/`, `cdn.tusk3d.store`) stays **deferred** off the 6/21 path. Full procedure: `docs/runbooks/app-deploy.md`. The five functional `tusk3d.space` references (one test fixture, three comments, the Worker route) were switched to `.store`; historical docs were left as records.
+
+### Rationale — One CF account already fronts the planned CDN zone, so Pages + the `api` proxy reuse the same account/tooling (DDoS shielding + hidden origin IP for free). Manual+systemd is the lowest-risk choice for a 5-day window: no new CI link to misconfigure, full `journalctl` access when something breaks, and it shares one `deploy.sh` with a trivial later upgrade to GitHub-Actions if wanted. Docker's reproducibility buys little for a keyless, near-stateless, native-free service and risks last-day Dockerfile churn. Building on the VM (not shipping `dist/`) sidesteps pnpm-workspace + lockfile reconciliation, which is the real fragility here.
+
+### Alternatives Considered — **GitHub Actions auto-deploy** — deferred; nice post-6/21, but SSH-key/permission/workflow setup is a fresh failure surface mid-sprint (shares the same `deploy.sh`, so cheap to add later). **Docker + Compose** — rejected for this sprint; reproducibility unneeded (no native deps, no real state), heaviest disk/setup, most likely to bite on the last day. **Ship prebuilt `dist/`, run-only VM** — rejected; the `workspace:*` shared dep + lockfile make it fragile, and the native-OOM concern that motivates it doesn't exist here. **Vercel for frontend** (earlier assumption in phase-progress) — superseded by CF Pages to keep one CF account. **Frontend on Walrus Sites** — already out of scope (see project memory / D-070). **Let's Encrypt on the VM** — replaced by CF Origin cert (no renewal, encrypted origin under Full Strict).
+
+### Consequences — ✅ public submission stack at ~$6/mo; live `https://api.tusk3d.store/mcp` for the hero demo; one-command releases · ✅ origin IP hidden + DDoS-shielded; keyless backend means no wallet secret on the VM · ⚠️ manual backend release (not push-to-deploy) — acceptable, documented, upgradeable · ⚠️ `node:sqlite` is version-gated → VM Node must match local `22.x` (or `--experimental-sqlite`) · ⚠️ quota DB is single-VM state; losing it resets counters (low stakes) · 🔮 post-6/21: GitHub-Actions deploy, `cdn.tusk3d.store` Worker, mainnet contract swap (separate runbook).
+
+### Related — runbook `docs/runbooks/app-deploy.md` · D-104 (MCP interface — the public `/mcp` this serves) · D-073 (CDN Worker, deferred) · D-070 (frontend host ≠ Walrus Sites) · D-080 (MemWal — secrets the VM needs) · supersedes the `tusk3d.space` domain references (e.g. the 2026-05-30 `.xyz→.space` rename) with `tusk3d.store`.
+
+---
+
 # Reserved Decision Numbers
 
-D-105 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-106 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
