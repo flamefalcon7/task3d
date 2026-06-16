@@ -1,5 +1,35 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 19:10 (**🚀 FULL STACK DEPLOYED LIVE — frontend + backend + same-origin /api proxy all green on `tusk3d.store`**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 4 — **submission stack is LIVE on testnet.** Executed D-105 runbook end-to-end this session.
+
+### Completed This Session (deploy execution)
+- **Frontend LIVE**: `https://tusk3d.store` (Cloudflare Pages, GitHub auto-build from `main`). HTTP 200. Fixed two build blockers: wrong workspace filter (`@overflow2026/frontend` → `frontend`) and the Namecheap parking DNS records (A `192.64.119.23` + CNAME `parkingpage.namecheap.com`) that caused 522/525 — deleted them, added the domain via Pages → Custom domains.
+- **Backend LIVE**: `https://api.tusk3d.store` on DO droplet **`152.42.213.241`** (1 GB, Singapore, Ubuntu 24.04.3). Caddy (`tls internal`) → Node :3001, `systemd` unit `tusk3d-api`, 2 GB swap, UFW (22+443). CF SSL mode **Full**. `/llms.txt` 200, `GET /mcp` 405. MemWal loaded (no unconfigured banner).
+- **Frontend↔backend wired**: app uses relative `/api/*`; added a **Pages Function** `functions/api/[[path]].js` forwarding `tusk3d.store/api/*` → `api.tusk3d.store/api/*`. Same-origin ⇒ **CORS bypassed** (backend's localhost-only CORS untouched). Verified: `POST /api/auth/challenge` → `{"nonce":...}` 200.
+- **One-command deploys ready**: VM `~/app/deploy.sh` (git pull → `pnpm --filter backend... build` → restart). Frontend = `git push`.
+- **Deploy key**: `~/.ssh/id_tusk3d` (local) authorized for `root` + `tusk` on the VM.
+- Docs synced: D-105 live-deploy addendum + runbook A8 (proxy) + A5 note (tls internal vs Origin cert).
+
+### Next Concrete Step
+- **Functional end-to-end test** (infra is up; app flows not yet exercised live): wallet sign-in in the user's own Chrome (Slush) at `tusk3d.store`, then the agent arc `claude mcp add tusk3d https://api.tusk3d.store/mcp` → search → buy (testnet) → decrypt.
+
+### Blockers / Open Questions
+- **`www.tusk3d.store`** not added (apex works). Optional: add in Pages → Custom domains, or a www→apex redirect.
+- **VITE_* on CF Pages**: confirm wallet/zkLogin env (`VITE_ENOKI_API_KEY`, `VITE_GOOGLE_CLIENT_ID`) are set in Pages → Variables, else only Slush works. `VITE_TEST_WALLET` MUST stay unset in prod.
+- Optional hardening (post-6/21): CF Origin cert + Full (Strict); restrict VM :443 to Cloudflare IP ranges; GitHub-Actions auto-deploy; `cdn.tusk3d.store` Worker; mainnet swap.
+
+### Notes for Next Session
+- SSH: `ssh -i ~/.ssh/id_tusk3d tusk@152.42.213.241`. Logs: `journalctl -u tusk3d-api -f`. Redeploy backend: `ssh -i ~/.ssh/id_tusk3d tusk@152.42.213.241 '~/app/deploy.sh'`.
+- VM `backend/.env` was scp'd from local + 3 overrides appended (`PUBLIC_ORIGIN`, `TUSK_DB_PATH=/home/tusk/data/quota.db`, `MCP_TRUST_FORWARDED=true`). Never clobber it.
+
+---
+
 ## Last Updated: 2026-06-16 18:00 (**ce-brainstorm: app deployment plan — CF Pages + DO VM + domain `tusk3d.store`; ADR D-105 + runbook written**)
 
 ### Hackathon Tracker
