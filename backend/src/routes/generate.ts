@@ -102,9 +102,11 @@ export function buildGenerateRoute(deps: GenerateRouteDeps) {
       jobs.setDone(jobId, result);
     } catch (err) {
       const { code, httpStatus, refundable } = classifyTripoError(err, paid);
-      // Genuinely-unknown failures were a raw 500 before; log them so the VM's
-      // journal shows a cause instead of a silent typed error (the deploy blind-spot).
-      if (code === 'internal') console.error(`[generate] job ${jobId} unknown failure:`, err);
+      // Log EVERY terminal failure (not just unknown) with the full error — the
+      // stack pinpoints which Tripo call threw and TripoFailedError carries the
+      // upstream status + body snippet. Without this the VM journal showed nothing
+      // for a classified error (the deploy blind-spot that cost us a debugging round).
+      console.error(`[generate] job ${jobId} → ${code} (${httpStatus}):`, err);
       jobs.setError(jobId, code, httpStatus, refundable);
     }
   }
