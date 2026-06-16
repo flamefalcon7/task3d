@@ -1,5 +1,36 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 23:10 (**✅ END-TO-END LIVE: full stack deployed + paid Tripo generation verified working on `tusk3d.store` (D-105 + D-106)**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 4 — **submission stack is LIVE and generation works end-to-end on testnet.** Long deploy + bugfix session.
+
+### Completed This Session (the whole arc)
+- **Deployed the full stack** (D-105): frontend → Cloudflare Pages (`tusk3d.store`), backend → DO droplet `152.42.213.241` (Caddy `tls internal` + CF "Full" → Node:3001, systemd, swap), same-origin `/api` Pages-Function proxy (no CORS). Domain corrected `.space → .store`.
+- **Fixed live 524** (D-106): generation was a single ~7-min synchronous request crossing Cloudflare's 100s cap. Made it **async (dispatch→202 jobId, poll `/result/:jobId`)** with a bounded in-memory job store. Backend 398 + frontend 1207 tests green.
+- **Verified paid generation END-TO-END on production**: user paid SUI → preview appeared → Tripo balance dropped 340→280 (one full base+segmentation chain). 🎉
+- **Honest credit-dry copy**: pre-flight already blocks (no charge) when the operator's Tripo credits are dry, but said "temporarily unavailable — try again shortly" (misleading). Now: *"Generation credits are exhausted for now. You can still upload your own model manually (.glb)."* — points to the no-Tripo path.
+- **`VITE_COPILOT_ENABLED=true`** set in CF Pages (Riff Copilot UI surfaced; behind wallet login).
+- Added backend failure logging (was silently swallowing classified errors — the deploy blind-spot).
+
+### Next Concrete Step
+- Demo prep: the live arc (`/ → /create generate → /launch → /market → /track`) + the agent MCP arc (`claude mcp add tusk3d https://api.tusk3d.store/mcp`). Monitor Tripo credits (280 left, ~55–60/gen).
+
+### Blockers / Open Questions
+- **Pre-flight stale-cache gap (KNOWN, NOT fixed — user chose wording over code change)**: a warm cache showing a stale-high balance can pass a generation that the real (lower) balance can't finish → charges SUI for a doomed run. Mitigated by honest copy + the fact it self-corrects within ~60s. The code fix (live re-query near threshold) was drafted then reverted at user request. Revisit post-submission.
+- OQ-035 (copilot availability should derive from backend) — post-submission.
+- Accepted D-106 residual: backend restart mid-generation loses that in-flight job.
+
+### Notes for Next Session
+- **Ops**: SSH `ssh -i ~/.ssh/id_tusk3d tusk@152.42.213.241`; redeploy backend `… '~/app/deploy.sh'`; logs `journalctl -u tusk3d-api -f`. Frontend = `git push` (CF auto-build). **Always `pnpm --filter backend... build` locally before deploy** (tsc checks tests; vitest doesn't).
+- Tripo account credits deplete ~55–60/generation; top up at api.tripo3d.ai before demo day.
+- Pre-flight threshold = 120cr (`TRIPO_PREFLIGHT_MIN_CREDITS` to override).
+
+---
+
 ## Last Updated: 2026-06-16 21:05 (**D-106: async (dispatch+poll) generation — fixes live 524 on /create; backend deployed, frontend redeploying**)
 
 ### Hackathon Tracker
