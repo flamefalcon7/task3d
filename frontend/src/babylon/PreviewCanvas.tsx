@@ -392,6 +392,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         // Re-trigger the mode effect now that meshesRef is populated.
         setLoadEpoch((e) => e + 1);
         // plan-2026-06-16-001 — load settled successfully: hide the overlay.
+        // Already guarded against stale/cancelled/disposed runs by the
+        // early-return above (this branch is unreachable for a superseded
+        // load). Keep that return intact if inserting code between here and it.
         setMeshLoaded(true);
       } catch (err) {
         // eslint-disable-next-line no-console

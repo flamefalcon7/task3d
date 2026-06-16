@@ -367,6 +367,33 @@ describe('PreviewCanvas', () => {
       act(() => ref.current!.dispose());
       expect(screen.queryByTestId('preview-canvas-loading')).toBeNull();
     });
+
+    // The dispose→remount reload is the real LaunchCollectionPage flow (dispose
+    // for the Walrus upload window, remount after). The meshLoaded flag must
+    // survive the cycle and re-show then clear on the remount reload.
+    it('re-shows then clears the overlay across a dispose→remount reload', async () => {
+      const { babylon, spy } = await babylonSpy();
+      const ref = createRef<PreviewCanvasHandle>();
+
+      render(<PreviewCanvas ref={ref} glbUrl="blob:http://localhost/d" />);
+      await act(async () => { await flushAsync(); });
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull(); // settled
+
+      act(() => ref.current!.dispose());
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull(); // hidden (unmounted)
+
+      // Control the remount reload timing so we can observe the re-show.
+      let resolveReload!: (v: unknown) => void;
+      spy.mockImplementationOnce(() => new Promise((res) => { resolveReload = res; }));
+      act(() => ref.current!.remount());
+      expect(screen.queryByTestId('preview-canvas-loading')).not.toBeNull(); // reload re-shows
+
+      await act(async () => {
+        resolveReload(new babylon.AssetContainer());
+        await flushAsync();
+      });
+      expect(screen.queryByTestId('preview-canvas-loading')).toBeNull(); // cleared
+    });
   });
 
   it('calls LoadAssetContainerAsync when glbUrl is provided', async () => {
