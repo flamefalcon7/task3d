@@ -289,7 +289,7 @@ describe('PreviewCanvas', () => {
     const canvas = screen.getByTestId('preview-canvas');
     expect(canvas.tagName).toBe('CANVAS');
     expect(canvas.getAttribute('data-mode')).toBe('pbr');
-    expect(canvas.getAttribute('data-bg')).toBe('black');
+    expect(canvas.getAttribute('data-bg')).toBe('gray');
   });
 
   it('calls LoadAssetContainerAsync when glbUrl is provided', async () => {

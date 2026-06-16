@@ -1,8 +1,10 @@
-// Plan-013 UAT polish: viewer wells are pure black per D-044, but black-PBR
-// Tripo meshes become invisible against a black background. Expose a tiny
-// 3-state cycle (BLACK → PAPER → GRAY → BLACK) so the user can toggle the
-// well bg when a model is hard to see. Single source of truth used by both
-// PreviewCanvas and TaggingCanvas.
+// Viewer-well backgrounds. The 3D clearColor DEFAULTS to mid-gray per D-107
+// (amends D-044's original pure-black default): near-black PBR Tripo meshes
+// disappear against black, and gray is the documented middle ground that reads
+// across light + dark meshes. A tiny 3-state cycle (GRAY → BLACK → PAPER → GRAY)
+// lets the user toggle when a specific model wants a different backdrop. Single
+// source of truth used by both PreviewCanvas and TaggingCanvas — and by the
+// encrypted-base snapshot, which inherits scene.clearColor at capture time.
 
 import { useCallback, useState } from 'react';
 
@@ -28,7 +30,12 @@ export const BG_PALETTE: Record<BgKey, BgPaletteEntry> = {
 
 const CYCLE: readonly BgKey[] = ['black', 'paper', 'gray'];
 
-export function useBgCycle(initial: BgKey = 'black'): {
+// D-107 — global default well background. Mid-gray (amends D-044's black).
+// Both PreviewCanvas and TaggingCanvas default their `defaultBg` prop to this,
+// and useBgCycle falls back to it, so there is one place to change the default.
+export const DEFAULT_BG: BgKey = 'gray';
+
+export function useBgCycle(initial: BgKey = DEFAULT_BG): {
   bg: BgKey;
   entry: BgPaletteEntry;
   cycle: () => void;

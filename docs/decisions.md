@@ -4374,6 +4374,35 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 
 ---
 
+## D-107: Viewer-well default background = GRAY (amends D-044)
+**Status**: Accepted
+**Date**: 2026-06-16 · **Phase**: 5 (UX polish window)
+
+### Context
+D-044 set the 3D viewer well default to pure black ("contrast makes the model pop"; `design-tokens.md` line 54 — "wells are always `--well` pure black"). In practice, near-black PBR meshes from Tripo disappear against black — `bgPalette.ts` already documented this and shipped a BLACK→PAPER→GRAY toggle as the escape hatch. Forcing every creator to discover + click the toggle to see a dark model is poor default ergonomics. Worse, the watermarked **encrypted-base snapshot** is captured from `scene.clearColor` (no separate capture-bg override exists), so a black default also bakes black into the buyer-facing preview thumbnails.
+
+### Decision
+Change the **global default** `defaultBg` for `PreviewCanvas` and `TaggingCanvas` — and the underlying `useBgCycle` fallback — from `'black'` to `'gray'` (mid-gray `[0.5, 0.5, 0.5]`), via a single `DEFAULT_BG` constant in `bgPalette.ts`. The 3-state BLACK↔PAPER↔GRAY toggle is unchanged; only the starting state moves (cycle from gray → black → paper → gray). The encrypted-base snapshot inherits this automatically. The `--well` CSS token stays `#000` (only the Babylon `clearColor` default moves; a brief pre-first-frame flash is still the black CSS well).
+
+### Rationale
+- Gray is the documented middle ground; safest default across light + dark meshes.
+- Snapshot/thumbnail quality for dark models improves with zero extra capture code (inherits `clearColor`).
+- One constant + one-line-per-site change; the toggle preserves every prior state.
+
+### Alternatives Considered
+- **Only `/create` gray, keep global black** — rejected: snapshot + `/market` + `/model` stay black; user wants the global default and the snapshot covered.
+- **Also change the `--well` CSS token to gray** — deferred: design-system-wide (code blocks + demo-tape banner share `--well`), not requested. Reopen if the CSS frame should also go gray.
+
+### Consequences
+- ✅ Dark PBR meshes visible by default everywhere + in encrypted-base snapshots.
+- ⚠️ Partially reverses D-044's black-well rationale; `design-tokens.md` lines 53–54 amended to point here.
+- ⚠️ `CollectionCard`'s explicit `defaultBg="gray"` is now redundant (left in place — harmless, documents browse intent).
+- 🔮 If `--well` should also go gray, that's a follow-up decision (design-token change).
+
+### Related — Amends D-044 (brutalist identity; black-well sub-rule). Landing exceptions D-093/D-094 (hero well) and D-091 (`/track`) untouched — they have their own bg logic, not via `defaultBg`. `docs/ux/design-tokens.md`; `bgPalette.ts` `DEFAULT_BG`.
+
+---
+
 # Reserved Decision Numbers
 
-D-107 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-108 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

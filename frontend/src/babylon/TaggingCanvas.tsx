@@ -18,7 +18,7 @@ import '@babylonjs/loaders/glTF/index.js';
 import { frameCameraToMeshes } from './PreviewCanvas';
 import { applyCanvasMode } from './applyCanvasMode';
 import { renderableMaterialNames } from './partMaterials';
-import { type BgKey, useBgCycle } from './bgPalette';
+import { type BgKey, DEFAULT_BG, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
 import { ModeTogglePill } from './ModeTogglePill';
@@ -52,7 +52,7 @@ interface TaggingCanvasProps {
    * — name-keyed swap needs unique non-empty part material names).
    */
   onLoaded?: (info: { partCount: number; materialNames: (string | null)[] }) => void;
-  /** Initial well background — defaults to D-044 black. */
+  /** Initial well background — defaults to DEFAULT_BG (gray, D-107; amends D-044). */
   defaultBg?: BgKey;
   /** Render the BG cycle pill in the well's top-right. Default true. */
   bgToggle?: boolean;
@@ -84,7 +84,7 @@ export function TaggingCanvas({
   selectedIndex,
   onPartSelect,
   onLoaded,
-  defaultBg = 'black',
+  defaultBg = DEFAULT_BG,
   bgToggle = true,
   mode = 'pbr',
   onModeCycle,

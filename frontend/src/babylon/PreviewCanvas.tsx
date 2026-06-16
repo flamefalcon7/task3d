@@ -14,7 +14,7 @@ import {
   Vector3,
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF/index.js';
-import { type BgKey, useBgCycle } from './bgPalette';
+import { type BgKey, DEFAULT_BG, useBgCycle } from './bgPalette';
 import { BgTogglePill } from './BgTogglePill';
 import { applyCanvasMode } from './applyCanvasMode';
 import { type CanvasMode, MODE_PALETTE } from './modePalette';
@@ -66,7 +66,7 @@ interface PreviewCanvasProps {
   /**
    * Initial well background. Read ONLY on first render — subsequent prop
    * changes are ignored (the BG state is owned by the internal useBgCycle
-   * hook once mounted). Defaults to D-044 black.
+   * hook once mounted). Defaults to DEFAULT_BG (gray, D-107; amends D-044).
    */
   defaultBg?: BgKey;
   /** Render the BG cycle pill in the well's top-right. Default true. */
@@ -155,7 +155,7 @@ export interface PreviewCanvasHandle {
 // end — re-fires after remount so the new scene picks up the user's BG.
 export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>(function PreviewCanvas({
   glbUrl,
-  defaultBg = 'black',
+  defaultBg = DEFAULT_BG,
   bgToggle = true,
   testIdSuffix,
   mode = 'pbr',

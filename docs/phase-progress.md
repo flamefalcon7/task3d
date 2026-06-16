@@ -1,5 +1,25 @@
 # Phase Progress
 
+## Last Updated: 2026-06-16 23:20 (**D-107: viewer-well default bg black → GRAY (global + encrypted snapshot)**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~5** · demo day (7/20–21): ~34 · winners (8/27): ~72
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **D-107 — viewer-well default background gray (amends D-044).** Single `DEFAULT_BG` constant in `frontend/src/babylon/bgPalette.ts`; `PreviewCanvas` + `TaggingCanvas` default props + `useBgCycle` fallback now reference it. Default well backdrop is mid-gray across all PreviewCanvas/TaggingCanvas mounts (`/create`, `/market`, `/model`, collection, NFT, `/track`-tagging) and the **encrypted-base watermarked snapshot** (inherits `scene.clearColor` at capture — no override needed). `--well` CSS token stays `#000` (deferred). Tests updated (`bgPalette.test.tsx`, `PreviewCanvas.test.tsx`); `design-tokens.md` line 54 amended. Typecheck + 62 babylon/browse tests green.
+- **Open brainstorm:** `docs/brainstorms/2026-06-16-preview-canvas-loading-state-requirements.md` — GLB-load spinner (wireframe-cube pulse) inside PreviewCanvas; not yet planned/implemented. Note: `TaggingCanvas` already ships a load-overlay pattern (`TaggingCanvas.tsx:114`) worth reusing.
+
+### Next Concrete Step
+Commit D-107, then (optional) `/ce-plan` the PreviewCanvas loading-state brainstorm.
+
+### Notes for Next Session
+- D-107 moved only the Babylon `clearColor` default; if the `--well` CSS frame should also go gray, that's a follow-up design-token decision.
+
+---
+
 ## Last Updated: 2026-06-16 23:10 (**✅ END-TO-END LIVE: full stack deployed + paid Tripo generation verified working on `tusk3d.store` (D-105 + D-106)**)
 
 ### Hackathon Tracker

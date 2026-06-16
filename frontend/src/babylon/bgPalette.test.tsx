@@ -3,8 +3,12 @@ import { act, renderHook } from '@testing-library/react';
 import { BG_PALETTE, useBgCycle } from './bgPalette';
 
 describe('useBgCycle', () => {
-  it('defaults to black and cycles BLACK → PAPER → GRAY → BLACK', () => {
+  it('defaults to gray (D-107) and cycles GRAY → BLACK → PAPER → GRAY', () => {
     const { result } = renderHook(() => useBgCycle());
+    expect(result.current.bg).toBe('gray');
+    expect(result.current.entry.label).toBe('BG: GRAY');
+
+    act(() => result.current.cycle());
     expect(result.current.bg).toBe('black');
     expect(result.current.entry.label).toBe('BG: BLACK');
 
@@ -14,9 +18,6 @@ describe('useBgCycle', () => {
 
     act(() => result.current.cycle());
     expect(result.current.bg).toBe('gray');
-
-    act(() => result.current.cycle());
-    expect(result.current.bg).toBe('black');
   });
 
   it('honors the initial bg argument', () => {

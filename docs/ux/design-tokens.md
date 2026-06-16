@@ -51,7 +51,7 @@ Twelve total values. Do not introduce a thirteenth without updating this file.
 - The accent `#FF4500` appears at most five times on any one page. Counting includes underlines, fills, and outlines. If you can't count them on one hand, you're using accent as decoration. Stop.
 - Never use a gray. All "muted" states are black at reduced opacity (`rgba(0,0,0,0.6)` for hints, `rgba(0,0,0,0.9)` for body). This keeps the system to two colors of ink: full black or transparent black.
 - Never tint a surface. `--paper`, `--paper-pure`, and `--well` are the only allowed backgrounds. No `#FAFAFA`, no `#F0F0E8`, no almost-white-but-different.
-- 3D viewer wells are always `--well` (pure black), never `--paper`. The contrast is what makes the model visible.
+- 3D viewer well **CSS container** is always `--well` (pure black), never `--paper`. The white-page-frames-black-stage contrast is the brutalist move. **Exception (D-107):** the Babylon **`clearColor`** (the rendered 3D backdrop inside the well, owned by `bgPalette.ts` `DEFAULT_BG`, not by `--well`) defaults to **mid-gray**, not black — near-black PBR meshes vanish against pure black, and the encrypted-base snapshot inherits this `clearColor`. The 3-state BLACK↔PAPER↔GRAY toggle is unchanged. This moves only the rendered backdrop default; the `--well` CSS token stays `#000`.
 
 ---
 
