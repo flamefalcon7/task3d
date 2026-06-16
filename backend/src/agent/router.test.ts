@@ -81,7 +81,7 @@ const fakeJwt = {
 // D-106: generation is async — POST dispatches (202 { jobId }), the outcome is
 // read from GET /api/generate/result/:jobId. Poll until the background job lands.
 async function pollGenerateResult(
-  app: { request: (path: string, init?: RequestInit) => Promise<Response> },
+  app: { request: (path: string, init?: RequestInit) => Response | Promise<Response> },
   jobId: string,
 ): Promise<Record<string, unknown>> {
   for (let i = 0; i < 100; i++) {
