@@ -181,14 +181,15 @@ sudo systemctl enable tusk3d-api
 1. CF → **Workers & Pages → Create → Pages → Connect to Git** → pick the GitHub repo.
 2. Build settings:
    - Framework preset: **None / Vite**
-   - Build command: `pnpm install --frozen-lockfile && pnpm --filter @overflow2026/frontend... build`
+   - Build command: `pnpm --filter frontend... build`  (CF runs `pnpm install` automatically first; `frontend...` builds the `@overflow2026/shared` dep then `frontend`)
    - Build output directory: `frontend/dist`
    - Root directory: repo root (monorepo — the filter handles the rest)
+   - Note: the workspace package names are `frontend`, `backend`, `@overflow2026/shared` (only `shared` is scoped).
 3. **Environment variables** (Pages → Settings → Variables) — set every `VITE_*` the app needs for testnet:
    `VITE_TEST_WALLET` (leave **unset/0** in prod — see the VITE_TEST_WALLET gotcha), `VITE_WALRUS_AGGREGATOR` (unset = testnet default, or the CDN later), plus any package id / network vars from `frontend/.env.example`.
 4. **Custom domains** (Pages → Custom domains): add `tusk3d.store` and `www.tusk3d.store`. CF auto-creates the proxied CNAMEs from A4.
 
-> Frontend builds in **CF's** cloud, never on the VM. Pushes to `main` auto-rebuild. (Manual alternative: `pnpm --filter @overflow2026/frontend... build && npx wrangler pages deploy frontend/dist --project-name tusk3d`.)
+> Frontend builds in **CF's** cloud, never on the VM. Pushes to `main` auto-rebuild. (Manual alternative: `pnpm --filter frontend... build && npx wrangler pages deploy frontend/dist --project-name tusk3d`.)
 
 ---
 
@@ -204,9 +205,9 @@ set -euo pipefail
 cd ~/app
 git pull --ff-only
 # install backend + its workspace dep (shared); the trailing ... pulls deps, skips frontend
-pnpm install --frozen-lockfile --filter @overflow2026/backend...
-pnpm --filter @overflow2026/shared build
-pnpm --filter @overflow2026/backend build
+# package names: frontend, backend, @overflow2026/shared (only shared is scoped)
+pnpm install --frozen-lockfile --filter backend...
+pnpm --filter backend... build      # builds @overflow2026/shared then backend, in order
 sudo systemctl restart tusk3d-api
 echo "deployed: $(git rev-parse --short HEAD)"
 ```
