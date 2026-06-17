@@ -252,7 +252,9 @@ export function CollectionDetailPage() {
         </div>
 
         <p style={{ marginTop: 24 }}>
-          <Link to="/integrate" style={registerLink}>Register your game →</Link>
+          <Link to={`/integrate?collection=${collection.collectionId}`} style={registerLink}>
+            Register your work →
+          </Link>
         </p>
       </div>
     </div>

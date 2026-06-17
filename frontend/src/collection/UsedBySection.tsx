@@ -72,7 +72,7 @@ export function UsedBySection({ collectionId, integrationPolicy }: UsedBySection
 
       {!open && (
         <p data-testid="usedby-restricted" style={{ color: '#888', fontSize: 13 }}>
-          This collection is not accepting game integrations.
+          This collection is not accepting integrations.
         </p>
       )}
 
