@@ -95,7 +95,9 @@ const bodyStyle: CSSProperties = {
 
 const nameStyle: CSSProperties = {
   fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // plan 2026-06-17-001 — upright (not italic) collection name per request; the
+  // display serif reads cleaner non-slanted in the dense card grid.
+  fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
   whiteSpace: 'nowrap',

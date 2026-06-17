@@ -242,7 +242,9 @@ const baseOptionBody: CSSProperties = {
 
 const baseOptionName: CSSProperties = {
   fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // plan 2026-06-17-001 — upright (not italic) base name, consistent with Browse
+  // + Market cards.
+  fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
   // No inline color: inherits ink, so the `.nav-name` :hover accent rule can win
