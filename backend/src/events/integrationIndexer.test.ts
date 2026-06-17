@@ -103,4 +103,60 @@ describe('integrationIndexer', () => {
     await indexer.pollOnce();
     expect(indexer.getIntegrations('0x' + 'f'.repeat(64))).toEqual([]);
   });
+
+  describe('getLeaderboard', () => {
+    const COLL_B = '0x' + 'e'.repeat(64);
+    const intg = (n: number) => '0x' + String(n).padStart(64, '0');
+    const ev = (collection_id: string, integrator: string, registered_at_ms: string) => ({
+      parsedJson: { collection_id, integrator, registered_at_ms },
+    });
+
+    it('returns [] for an empty store', async () => {
+      const client = mockClient({ events: [], appMetadata: b64({ name: 'X', url: 'https://x.io' }) });
+      const indexer = createIntegrationIndexer({ client, packageId: PKG });
+      await indexer.pollOnce();
+      expect(indexer.getLeaderboard()).toEqual([]);
+    });
+
+    it('counts distinct integrators and reports the latest timestamp per collection', async () => {
+      const client = mockClient({
+        events: [
+          ev(COLL, intg(1), '1000'),
+          ev(COLL, intg(2), '3000'),
+          ev(COLL, intg(3), '2000'),
+        ],
+        appMetadata: b64({ name: 'CoolGame', url: 'https://coolgame.example' }),
+      });
+      const indexer = createIntegrationIndexer({ client, packageId: PKG });
+      await indexer.pollOnce();
+      expect(indexer.getLeaderboard()).toEqual([
+        { collectionId: COLL, count: 3, latestRegisteredAtMs: 3000 },
+      ]);
+    });
+
+    it('dedupes a repeated (integrator, collection) pair in the count', async () => {
+      const client = mockClient({
+        events: [ev(COLL, intg(1), '1000'), ev(COLL, intg(1), '5000')],
+        appMetadata: b64({ name: 'CoolGame', url: 'https://coolgame.example' }),
+      });
+      const indexer = createIntegrationIndexer({ client, packageId: PKG });
+      await indexer.pollOnce();
+      const board = indexer.getLeaderboard();
+      expect(board).toHaveLength(1);
+      expect(board[0]).toEqual({ collectionId: COLL, count: 1, latestRegisteredAtMs: 5000 });
+    });
+
+    it('returns one entry per collection seen', async () => {
+      const client = mockClient({
+        events: [ev(COLL, intg(1), '1000'), ev(COLL_B, intg(2), '4000'), ev(COLL_B, intg(3), '2000')],
+        appMetadata: b64({ name: 'CoolGame', url: 'https://coolgame.example' }),
+      });
+      const indexer = createIntegrationIndexer({ client, packageId: PKG });
+      await indexer.pollOnce();
+      const board = indexer.getLeaderboard();
+      expect(board).toHaveLength(2);
+      expect(board).toContainEqual({ collectionId: COLL, count: 1, latestRegisteredAtMs: 1000 });
+      expect(board).toContainEqual({ collectionId: COLL_B, count: 2, latestRegisteredAtMs: 4000 });
+    });
+  });
 });
