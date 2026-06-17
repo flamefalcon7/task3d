@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
 import { SignInButton } from '../auth/SignInButton';
 import { useOwnedTokens, type OwnedToken } from '../track/useOwnedTokens';
-import { useListings, fetchOwnedKiosk } from './useListings';
+import { useListings, fetchOwnedKiosk, type Listing } from './useListings';
 import {
   buildListNftTokenForSalePtb,
   buildPurchaseNftTokenPtb,
@@ -325,8 +325,15 @@ export function MarketPage() {
   // field removal may still be unindexed, and showing it as buyable misleads
   // the buyer (they already own it; the purchase tx succeeded).
   const visibleListings = useMemo(() => {
-    if (!boughtTokenId) return listings;
-    return listings.filter((l) => l.tokenId !== boughtTokenId);
+    const filtered = boughtTokenId
+      ? listings.filter((l) => l.tokenId !== boughtTokenId)
+      : listings;
+    // plan 2026-06-17-001 U3 — newest-listed first. A listing with no indexed
+    // ItemListed event yet (just-listed via the wallet union, indexer lag)
+    // has listedAtMs === undefined → treated as newest so it leads rather than
+    // sinking to the bottom while the indexer catches up.
+    const at = (l: Listing) => l.listedAtMs ?? Number.POSITIVE_INFINITY;
+    return [...filtered].sort((a, b) => at(b) - at(a));
   }, [listings, boughtTokenId]);
 
   // Tokens already listed are filtered out of the "list" section so the seller

@@ -28,6 +28,11 @@ export interface Listing {
   patchId: string; // by-quilt-patch-id GLB resolution (preview)
   collectionId: string;
   kioskId: string; // the kiosk the buyer purchases from
+  // plan 2026-06-17-001 U3 — epoch-ms of the latest `ItemListed` event for this
+  // token, used for newest-first ordering. Undefined when the listing has no
+  // indexed event yet (wallet-union just-listed item, indexer lag) — the sort
+  // treats undefined as newest so a seller's just-listed item isn't buried.
+  listedAtMs?: number;
 }
 
 // One object by id. Sui GraphQL's ObjectFilter has no `objectIds` field, so we
@@ -118,10 +123,15 @@ function withDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 // `type` field). See the solution doc for the verified shape.
 const ITEM_LISTED_EVENT_TYPE = `0x2::kiosk::ItemListed<${NFT_TOKEN_TYPE}>`;
 
+// plan 2026-06-17-001 U3 — pull the protocol-level event `timestamp` (a
+// DateTime scalar, verified live on testnet) alongside the payload so listings
+// can be ordered newest-first. The payload `json` carries the listed token id
+// (`id`) and `kiosk`; `id` keys the recency map (a token relists across many
+// ItemListed events — history, not truth — so we take the MAX timestamp per id).
 const ITEM_LISTED_EVENTS_QUERY = /* GraphQL */ `
   query ListedKiosks($type: String!, $after: String) {
     events(filter: { type: $type }, first: 50, after: $after) {
-      nodes { contents { json } }
+      nodes { contents { json } timestamp }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -130,18 +140,30 @@ const ITEM_LISTED_EVENTS_QUERY = /* GraphQL */ `
 interface ItemListedEventsResponse {
   data?: {
     events?: {
-      nodes?: Array<{ contents?: { json?: { kiosk?: string } | null } | null }>;
+      nodes?: Array<{
+        contents?: { json?: { kiosk?: string; id?: string } | null } | null;
+        timestamp?: string | null;
+      }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
     } | null;
   };
   errors?: Array<{ message: string }>;
 }
 
-/** Distinct kiosk ids that have ever listed our NftToken. Public primitive —
- * shaped for direct reuse by other discovery surfaces (e.g. a future agent
- * tool); tests cover it indirectly via useListings. */
-export async function fetchListedKioskIds(signal?: AbortSignal): Promise<string[]> {
+/** Result of one ItemListed scan: the distinct kiosks to inspect plus a
+ * tokenId → latest-listing epoch-ms map for newest-first ordering. */
+export interface ListedKioskScan {
+  kioskIds: string[];
+  /** tokenId → epoch-ms of its most recent ItemListed event. */
+  listedAtMs: Map<string, number>;
+}
+
+/** Scan `ItemListed<NftToken>` events network-wide. Returns the kiosks that
+ * have ever listed our token AND the latest listing time per token id. Single
+ * pass over the event pages — both outputs come from the same fetch. */
+export async function scanItemListedEvents(signal?: AbortSignal): Promise<ListedKioskScan> {
   const ids = new Set<string>();
+  const listedAtMs = new Map<string, number>();
   let after: string | null = null;
   for (let page = 0; page < MAX_EVENT_PAGES; page++) {
     const resp = await fetch(SUI_GRAPHQL_ENDPOINT, {
@@ -162,6 +184,13 @@ export async function fetchListedKioskIds(signal?: AbortSignal): Promise<string[
     for (const node of events?.nodes ?? []) {
       const kiosk = node.contents?.json?.kiosk;
       if (typeof kiosk === 'string') ids.add(kiosk);
+      // Recency map keyed on the listed token id; keep the max across relists.
+      const tokenId = node.contents?.json?.id;
+      const ts = node.timestamp ? Date.parse(node.timestamp) : NaN;
+      if (typeof tokenId === 'string' && Number.isFinite(ts)) {
+        const prev = listedAtMs.get(tokenId);
+        if (prev === undefined || ts > prev) listedAtMs.set(tokenId, ts);
+      }
     }
     if (events?.pageInfo?.hasNextPage && events.pageInfo.endCursor) {
       after = events.pageInfo.endCursor;
@@ -174,7 +203,14 @@ export async function fetchListedKioskIds(signal?: AbortSignal): Promise<string[
       break;
     }
   }
-  return Array.from(ids);
+  return { kioskIds: Array.from(ids), listedAtMs };
+}
+
+/** Distinct kiosk ids that have ever listed our NftToken. Thin wrapper over
+ * `scanItemListedEvents` — kept as a public primitive for discovery surfaces
+ * (e.g. a future agent tool) that only need the kiosk set. */
+export async function fetchListedKioskIds(signal?: AbortSignal): Promise<string[]> {
+  return (await scanItemListedEvents(signal)).kioskIds;
 }
 
 /** Listed-token id + price as decoded from the seller kiosk. */
@@ -361,8 +397,8 @@ export function useListings(
         // tolerance; the regression of bundling it into Promise.all with the
         // events fetch was found in code review). KioskClient doesn't expose
         // an AbortSignal so we bound it with a wall-clock deadline.
-        const [fromEvents, fromWallet] = await Promise.all([
-          fetchListedKioskIds(signal),
+        const [eventsScan, fromWallet] = await Promise.all([
+          scanItemListedEvents(signal),
           walletAddress
             ? withDeadline(
                 fetchOwnedKioskIds(walletAddress),
@@ -371,7 +407,7 @@ export function useListings(
               ).catch(() => [] as string[])
             : Promise.resolve<string[]>([]),
         ]);
-        const ids = Array.from(new Set([...fromEvents, ...fromWallet]));
+        const ids = Array.from(new Set([...eventsScan.kioskIds, ...fromWallet]));
         if (ids.length === 0) {
           if (!cancelled) setListings([]);
           return;
@@ -388,7 +424,14 @@ export function useListings(
           if (r.status === 'fulfilled') perKiosk.push(r.value);
           else console.warn('[useListings] kiosk read failed:', r.reason);
         }
-        if (!cancelled) setListings(perKiosk.flat());
+        // plan 2026-06-17-001 U3 — stamp each listing with its latest ItemListed
+        // time (from the same event scan). Missing → undefined, which the page's
+        // sort treats as newest (just-listed via wallet union, not yet indexed).
+        const withTime = perKiosk.flat().map((l) => ({
+          ...l,
+          listedAtMs: eventsScan.listedAtMs.get(l.tokenId),
+        }));
+        if (!cancelled) setListings(withTime);
       } catch (e) {
         // AbortError on cleanup is expected; don't surface to the user.
         if (cancelled) return;

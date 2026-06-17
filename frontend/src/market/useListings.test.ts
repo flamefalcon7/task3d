@@ -24,6 +24,7 @@ interface ListingFix {
   price: string; // u64 MIST as a decimal string (raw Listing dynamic-field value)
   name?: string;
   typeRepr?: string; // defaults to our NftToken type
+  timestamp?: string; // ISO DateTime on the ItemListed event (recency)
 }
 
 function resp(data: unknown, ok = true, status = 200): Response {
@@ -50,8 +51,9 @@ function marketFetch(
 
     if (q.includes('events(')) {
       const nodes = eventKioskIds.flatMap((kioskId) =>
-        (kiosks[kioskId] ?? [{ tokenId: 'x', price: '0' }]).map((l) => ({
+        (kiosks[kioskId] ?? [{ tokenId: 'x', price: '0' } as ListingFix]).map((l) => ({
           contents: { json: { kiosk: kioskId, id: l.tokenId, price: l.price } },
+          timestamp: l.timestamp,
         })),
       );
       return resp({ data: { events: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } });
@@ -329,5 +331,70 @@ describe('useListings', () => {
     const { result } = renderHook(() => useListings());
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.listings).toHaveLength(1);
+  });
+
+  // ─── U3: listing-time recency (listedAtMs) ───
+
+  it('U3: stamps listedAtMs from the ItemListed event timestamp', async () => {
+    const ts = '2026-06-10T00:00:00.000Z';
+    vi.stubGlobal(
+      'fetch',
+      marketFetch({
+        [KIOSK_A]: [{ tokenId: TOKEN_A, price: '10000000', name: 'A', timestamp: ts }],
+      }),
+    );
+    const { result } = renderHook(() => useListings());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.listings[0]?.listedAtMs).toBe(Date.parse(ts));
+  });
+
+  it('U3: leaves listedAtMs undefined when the event carries no timestamp', async () => {
+    vi.stubGlobal(
+      'fetch',
+      marketFetch({ [KIOSK_A]: [{ tokenId: TOKEN_A, price: '10000000', name: 'A' }] }),
+    );
+    const { result } = renderHook(() => useListings());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.listings[0]?.listedAtMs).toBeUndefined();
+  });
+
+  it('U3: uses the latest timestamp when a token relists across events', async () => {
+    const older = '2026-06-01T00:00:00.000Z';
+    const newer = '2026-06-12T00:00:00.000Z';
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}');
+      const q = String(body.query);
+      if (q.includes('events(')) {
+        return resp({
+          data: { events: {
+            // Same token id, two ItemListed events out of chronological order.
+            nodes: [
+              { contents: { json: { kiosk: KIOSK_A, id: TOKEN_A, price: '10000000' } }, timestamp: newer },
+              { contents: { json: { kiosk: KIOSK_A, id: TOKEN_A, price: '10000000' } }, timestamp: older },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          } } });
+      }
+      if (q.includes('dynamicFields')) {
+        return resp({
+          data: { object: { dynamicFields: { nodes: [{
+            name: { type: { repr: '0x2::kiosk::Listing' }, json: { id: TOKEN_A, is_exclusive: false } },
+            value: { __typename: 'MoveValue', json: '10000000' },
+          }] } } },
+        });
+      }
+      const id = body.variables?.id as string;
+      return resp({
+        data: { object: { address: id, asMoveObject: { contents: {
+          type: { repr: NFT_TYPE },
+          json: { name: 'A', patch_id: 'p', collection_id: '0xc1' },
+        } } } },
+      });
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { result } = renderHook(() => useListings());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.listings[0]?.listedAtMs).toBe(Date.parse(newer));
   });
 });

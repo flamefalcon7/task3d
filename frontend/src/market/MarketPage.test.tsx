@@ -284,4 +284,44 @@ describe('MarketPage', () => {
     expect(screen.queryByTestId(`owned-${OWNED}`)).toBeNull();
     expect(screen.getByTestId('no-owned')).toBeTruthy();
   });
+
+  // ─── U3: newest-listed-first ordering ───
+
+  const TOKEN2 = '0x' + '4'.repeat(64);
+  const TOKEN3 = '0x' + '5'.repeat(64);
+  const precedesEl = (a: Element, b: Element) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('U3: orders the For sale grid newest-listed first by listedAtMs', () => {
+    useListingsMock.mockReturnValue({
+      listings: [
+        listing({ tokenId: TOKEN, listedAtMs: 1000 }),
+        listing({ tokenId: TOKEN2, listedAtMs: 3000 }),
+        listing({ tokenId: TOKEN3, listedAtMs: 2000 }),
+      ],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    const newest = screen.getByTestId(`listing-${TOKEN2}`);
+    const mid = screen.getByTestId(`listing-${TOKEN3}`);
+    const oldest = screen.getByTestId(`listing-${TOKEN}`);
+    expect(precedesEl(newest, mid)).toBe(true);
+    expect(precedesEl(mid, oldest)).toBe(true);
+  });
+
+  it('U3/R4: a just-listed item with no indexed event (undefined listedAtMs) leads', () => {
+    useListingsMock.mockReturnValue({
+      listings: [
+        listing({ tokenId: TOKEN, listedAtMs: 5000 }),
+        listing({ tokenId: TOKEN2, listedAtMs: undefined }), // just-listed, not yet indexed
+      ],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    const fresh = screen.getByTestId(`listing-${TOKEN2}`);
+    const indexed = screen.getByTestId(`listing-${TOKEN}`);
+    expect(precedesEl(fresh, indexed)).toBe(true);
+  });
 });
