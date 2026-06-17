@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-06-17 11:55 (**feat: Browse/Market newest-first sort + lazy-mounted card previews (plan-2026-06-17-001)**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~4** · demo day (7/20–21): ~33 · winners (8/27): ~71
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **Sort + lazy-mount feature shipped** on branch `feat/browse-market-sort-lazy-mount`. Plan `docs/plans/2026-06-17-001-feat-browse-market-sort-lazy-mount-plan.md` executed U1–U4:
+  - **U1** new shared `frontend/src/babylon/LazyCanvasMount.tsx` (+ test) — wraps the existing `useInView` hook; renders a placeholder until the card scrolls into view, then mounts children (a `PreviewCanvas`), and UNMOUNTS them off-screen (React unmount → `engine.dispose()`) to bound concurrent WebGL contexts. `keepMounted` (latch) escape hatch; default `rootMargin '300px 0px'`.
+  - **U2** Browse newest-first (`BrowsePage.tsx`): `sortedModels` memo sorts `models` desc by `Number(createdAtMs)` before `groupByCollection`; the search-active `rankCollectionMatches` path is untouched. No cache bump.
+  - **U3** Market newest-listed-first (`useListings.ts` + `MarketPage.tsx`): new `scanItemListedEvents` reads the `ItemListed` event `timestamp` (DateTime scalar, verified live), builds a tokenId→latest-time map (keyed on `contents.json.id`, max across relists), stamps `Listing.listedAtMs`; page sorts `visibleListings` desc with `undefined`=newest so a just-listed (un-indexed) item leads. `fetchListedKioskIds` kept as a thin wrapper.
+  - **U4** wired `LazyCanvasMount` into `CollectionCard` (Browse glb branch) + both Market wells.
+- **QA**: full suite green (110 files / 1235 passed / 2 skipped); `tsc -b` clean. Browser-verified `/browse` — DOM order's `created_at_ms` strictly descending (7 cards), and only 4 live `<canvas>` for the 4 glb cards (lazy-mount bounding contexts confirmed). `/market` pre-wallet renders the connect screen; post-wallet listing-sort is the user's own-Chrome check (wallet protocol).
+- **Review**: focused frontend pass (`ce-julik-frontend-races-reviewer` + `ce-correctness-reviewer`) — zero high/critical. Applied the one medium: `PreviewCanvas` GLB-load now guards the post-await success path with `scene.isDisposed` (mirrors `LiveWell`) so a React-unmount-mid-load on the lazy path can't mutate a disposed scene (was defended only by the `cancelled` flag). Added a both-undefined market-sort test.
+
+### Next Concrete Step
+Merge `feat/browse-market-sort-lazy-mount` → main (and `feat/preview-loading-overlay` if still unmerged), then optionally deploy. Post-wallet Market listing-sort verification in the user's own Chrome.
+
+### Notes for Next Session
+- Deferred (in plan Scope Boundaries): fullnode by-id timestamp splice for Market just-listed items if the Infinity fallback proves insufficient; a demo-safety WebGL kill-switch / ≥768px gate for grid canvases if scroll thrash shows on the demo box (debounce the inView→unmount transition is the ~12-line fix); unify `LiveWell` + `LazyCanvasMount` if a third consumer appears.
+- The catalog is small (~7 cards) so the unmount-on-scroll dynamic couldn't be stressed in-browser; the mount/unmount logic is covered by unit tests instead.
+
+---
+
 ## Last Updated: 2026-06-16 23:58 (**feat: PreviewCanvas GLB-load wireframe overlay shipped (plan-2026-06-16-001)**)
 
 ### Hackathon Tracker
