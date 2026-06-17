@@ -158,6 +158,29 @@ describe('RegisterIntegrationPage', () => {
     expect(screen.queryByTestId('integration-form')).toBeNull();
   });
 
+  it('a manual pick after a deep-link is NOT overridden by the consumed param (regression)', async () => {
+    const COLL2 = '0x' + 'c'.repeat(64);
+    useCollectionsMock.mockReturnValue({
+      collections: [collection(), collection({ collectionId: COLL2, registerFee: '200000000' })],
+      loading: false,
+      error: null,
+    });
+    useLeaderboardMock.mockReturnValue({
+      rows: [
+        { collectionId: COLL, name: 'A collection', count: 0, latestRegisteredAtMs: 0, registerFee: '100000000' },
+        { collectionId: COLL2, name: 'B collection', count: 0, latestRegisteredAtMs: 0, registerFee: '200000000' },
+      ],
+      loading: false,
+      error: null,
+    });
+    // Land deep-linked to COLL (0.1 SUI), then manually pick COLL2 (0.2 SUI).
+    renderPage([`/integrate?collection=${COLL}`]);
+    await waitFor(() => expect(screen.getByTestId('register-button').textContent).toMatch(/0\.1 SUI/));
+    fireEvent.click(screen.getByTestId(`collection-option-${COLL2}`));
+    // The consumed param must not snap the selection back to COLL.
+    expect(screen.getByTestId('register-button').textContent).toMatch(/0\.2 SUI/);
+  });
+
   it('rejects a non-https URL client-side and disables Register', () => {
     renderPage();
     fireEvent.click(screen.getByTestId(`collection-option-${COLL}`));

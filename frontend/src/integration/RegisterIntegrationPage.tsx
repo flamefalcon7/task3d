@@ -68,7 +68,7 @@ export function RegisterIntegrationPage() {
   const account = useCurrentAccount();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const { collections, loading: collLoading, error: collError } = useCollections();
-  const { rows, loading: boardLoading } = useIntegrationLeaderboard();
+  const { rows, loading: boardLoading, error: boardError } = useIntegrationLeaderboard();
   const [searchParams, setSearchParams] = useSearchParams();
   const formRef = useRef<HTMLDivElement>(null);
 
@@ -86,18 +86,27 @@ export function RegisterIntegrationPage() {
     [collections],
   );
 
+  // Index leaderboard rows by collectionId so the picker name lookup is O(1),
+  // not an O(n²) rows.find() inside the registerable map.
+  const rowByCollection = useMemo(
+    () => new Map(rows.map((r) => [r.collectionId, r])),
+    [rows],
+  );
+
   // Deep-link pre-seed (R5): resolve ?collection=<id> → the loaded permissionless
-  // collection. Re-runs as `registerable` populates (load race); no-op when the
-  // id isn't in the permissionless set (nil/empty/not-found/not-permissionless).
+  // collection, then CONSUME the param (clear it from the URL). Consume-once means
+  // a later manual pick in the form isn't overridden by the still-present param,
+  // and re-clicking a row re-applies cleanly. Retries as `registerable` populates
+  // (load race); no-op when the id isn't in the permissionless set.
   const paramCollection = searchParams.get('collection');
   useEffect(() => {
     if (!paramCollection) return;
     const match = registerable.find((c) => c.collectionId === paramCollection);
-    if (match && match.collectionId !== selected?.collectionId) {
-      setSelected(match);
-      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [paramCollection, registerable, selected]);
+    if (!match) return; // not loaded yet (retry on registerable change) or unknown id
+    setSelected(match);
+    setSearchParams({}, { replace: true });
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [paramCollection, registerable, setSearchParams]);
 
   const nameCheck = validateName(name);
   const urlCheck = validateUrl(url);
@@ -148,17 +157,17 @@ export function RegisterIntegrationPage() {
           {boardLoading && (
             <div data-testid="leaderboard-loading" style={statusStrip}>LOADING…</div>
           )}
-          {!boardLoading && collError && (
+          {!boardLoading && boardError && (
             <div role="alert" data-testid="leaderboard-error" style={errorBox}>
-              × Couldn’t load collections · {collError.message}
+              × Couldn’t load collections · {boardError.message}
             </div>
           )}
-          {!boardLoading && !collError && rows.length === 0 && (
+          {!boardLoading && !boardError && rows.length === 0 && (
             <div data-testid="leaderboard-empty" style={emptyBox}>
               No collections on-chain yet — check back after the first launch.
             </div>
           )}
-          {!boardLoading && !collError && rows.length > 0 && (
+          {!boardLoading && !boardError && rows.length > 0 && (
             <div data-testid="leaderboard" style={{ ...card, marginTop: tokens.space[3] }}>
               {rows.map((row, i) => (
                 <div
@@ -222,7 +231,7 @@ export function RegisterIntegrationPage() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.space[2] }}>
                   {registerable.map((c) => {
                     const picked = selected?.collectionId === c.collectionId;
-                    const board = rows.find((r) => r.collectionId === c.collectionId);
+                    const board = rowByCollection.get(c.collectionId);
                     return (
                       <button
                         key={c.collectionId}
