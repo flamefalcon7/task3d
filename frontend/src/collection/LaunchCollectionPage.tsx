@@ -63,6 +63,7 @@ import { PreviewCanvas, type PreviewCanvasHandle } from '../babylon/PreviewCanva
 import { extractMaterialNames } from '../babylon/extractMaterialNames';
 import { allNamesUniqueNonEmpty } from '../babylon/partMaterials';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
+import { TurntablePreview } from '../ux/TurntablePreview';
 // plan-027 U10 — entitlement-gated encrypted ALLOW_LIST fork. Unlock is now a
 // FREE entitlement-gated decrypt (decryptViaEntitlement); the derive fee + cap
 // are deferred to mint (launchEncryptedCollection now routes through the
@@ -509,7 +510,18 @@ export function LaunchCollectionPage() {
 
   // Only models published with a standalone GLB (D-037) are forkable — older
   // mints with an empty glb_blob_id can't be resolved to a base mesh.
-  const forkable = useMemo(() => models.filter((m) => m.glbBlobId !== ''), [models]);
+  // plan 2026-06-17-001 — default order is newest-first (mirrors Browse U2):
+  // sort desc by created_at_ms so the most recently published base leads the
+  // picker. created_at_ms is a u64-as-string (demo values < 2^53 → Number()
+  // compares exactly; missing '0' sinks). The search-active rankForkableMatches
+  // path reorders matches to the front and inherits this order for the rest.
+  const forkable = useMemo(
+    () =>
+      models
+        .filter((m) => m.glbBlobId !== '')
+        .sort((a, b) => Number(b.createdAtMs) - Number(a.createdAtMs)),
+    [models],
+  );
 
   // plan-002 U3 — natural-language base finder. The query drives debounced
   // personal + global recall (one shared hook instance, MIN_QUERY_LEN=3); the
@@ -1493,10 +1505,14 @@ export function LaunchCollectionPage() {
                     return <PreviewCanvas glbUrl={thumb.url} bgToggle={false} />;
                   }
                   return thumb.url ? (
-                    <img
-                      src={thumb.url}
+                    // plan 2026-06-17-001 — 360° turntable of ALL preview stills
+                    // (mirrors ModelDetailPage), not a single static still, so an
+                    // encrypted base reads the same in the picker as on its detail
+                    // page. previewStillUrlsForSummary returns the full set.
+                    <TurntablePreview
+                      urls={previewStillUrlsForSummary(m)}
+                      testId={`base-option-still-${m.objectId}`}
                       alt={`${m.name || 'model'} preview`}
-                      data-testid={`base-option-still-${m.objectId}`}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   ) : (

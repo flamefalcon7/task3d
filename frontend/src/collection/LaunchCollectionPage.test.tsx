@@ -409,6 +409,22 @@ describe('LaunchCollectionPage', () => {
     expect(cardOrder()).toEqual(['base-option-0xaa', 'base-option-0xbb', 'base-option-0xcc']);
   });
 
+  it('plan-2026-06-17-001: default base picker order is newest-first by created_at_ms', () => {
+    // Input order is NOT chronological; the picker must reorder newest-first.
+    useModelIndexMock.mockReturnValue({
+      models: [
+        summary({ objectId: '0xaa', name: 'Alpha', glbBlobId: 'g1', createdAtMs: '1000' }),
+        summary({ objectId: '0xbb', name: 'Beta', glbBlobId: 'g2', createdAtMs: '3000' }),
+        summary({ objectId: '0xcc', name: 'Gamma', glbBlobId: 'g3', createdAtMs: '2000' }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(cardOrder()).toEqual(['base-option-0xbb', 'base-option-0xcc', 'base-option-0xaa']);
+  });
+
   it('degraded scope surfaces the honest note, not presented as a complete reorder', () => {
     threeForkable();
     memoryRecallState.personal = lane([hit('0xbb', 0.3, 'race car')]);
