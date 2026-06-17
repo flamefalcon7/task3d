@@ -241,9 +241,9 @@ const baseOptionBody: CSSProperties = {
 };
 
 const baseOptionName: CSSProperties = {
-  fontFamily: tokens.font.display,
-  // plan 2026-06-17-001 — upright (not italic) base name, consistent with Browse
-  // + Market cards.
+  // Sans body font (Inter), not the Newsreader serif — consistent with Browse +
+  // Market card names (the serif read too "scripty" per request).
+  fontFamily: tokens.font.body,
   fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,

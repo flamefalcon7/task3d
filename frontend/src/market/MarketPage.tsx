@@ -157,9 +157,9 @@ const cardLayerBadge: CSSProperties = {
 };
 
 const cardName: CSSProperties = {
-  fontFamily: tokens.font.display,
-  // plan 2026-06-17-001 — upright (not italic) NFT name, consistent with Browse
-  // + /launch cards.
+  // Sans body font (Inter), not the Newsreader serif — consistent with Browse +
+  // /launch card names (the serif read too "scripty" per request).
+  fontFamily: tokens.font.body,
   fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
