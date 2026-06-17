@@ -20,7 +20,8 @@ function coll(
   };
 }
 
-const model = (objectId: string, name: string) => ({ objectId, name }) as Model3DSummary;
+const model = (objectId: string, name: string, createdAtMs = '0') =>
+  ({ objectId, name, createdAtMs }) as Model3DSummary;
 
 describe('buildLeaderboardRows', () => {
   it('includes zero-count collections (left-join) and ranks by count desc', () => {
@@ -42,6 +43,28 @@ describe('buildLeaderboardRows', () => {
       [cid('b'), { count: 2, latestRegisteredAtMs: 9000 }],
     ]);
     const rows = buildLeaderboardRows(collections, [], counts);
+    expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
+  });
+
+  it('orders equal-count (incl. all-zero) collections newest-first by base model publish time', () => {
+    const collections = [
+      coll(cid('a'), { baseModelId: cid('1') }),
+      coll(cid('b'), { baseModelId: cid('2') }),
+    ];
+    const models = [model(cid('1'), 'Older', '1000'), model(cid('2'), 'Newer', '5000')];
+    const rows = buildLeaderboardRows(collections, models, new Map());
+    // both count 0 → newer base model (b) ranks first
+    expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
+  });
+
+  it('count still outranks publish time', () => {
+    const collections = [
+      coll(cid('a'), { baseModelId: cid('1') }), // newer but no integrations
+      coll(cid('b'), { baseModelId: cid('2') }), // older but has an integration
+    ];
+    const models = [model(cid('1'), 'Newer', '9000'), model(cid('2'), 'Older', '1000')];
+    const counts = new Map([[cid('b'), { count: 1, latestRegisteredAtMs: 100 }]]);
+    const rows = buildLeaderboardRows(collections, models, counts);
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
   });
 

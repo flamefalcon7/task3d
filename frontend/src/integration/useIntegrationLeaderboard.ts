@@ -16,6 +16,9 @@ export interface LeaderboardRow {
   name: string;
   count: number;
   latestRegisteredAtMs: number;
+  /** Base model publish time (ms) — used as the count/latest tie-break so the
+   * all-zero state orders newest-first instead of by raw id. */
+  publishTimeMs: number;
   registerFee: string;
 }
 
@@ -40,30 +43,31 @@ function truncate(addr: string, head = 6, tail = 4): string {
   return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
 }
 
-// NftCollection has no on-chain name — join base_model_id → Model3D.name.
-function nameForCollection(c: NftCollectionSummary, models: Model3DSummary[]): string {
-  const model = models.find((m) => m.objectId === c.baseModelId);
-  return model?.name ? `${model.name} collection` : `Collection ${truncate(c.collectionId)}`;
-}
-
 /**
  * Pure join + sort. Exported for unit testing. Includes zero-count collections
- * (left-join), sorts count desc → most-recent integration desc → collectionId.
+ * (left-join), sorts count desc → most-recent integration desc → base-model
+ * publish time desc (newest first) → collectionId (stable final key). The
+ * publish-time tie-break means the common all-zero state reads newest-first
+ * instead of by raw id.
  */
 export function buildLeaderboardRows(
   collections: NftCollectionSummary[],
   models: Model3DSummary[],
   counts: Map<string, CountEntry>,
 ): LeaderboardRow[] {
+  // NftCollection has no on-chain name/publish time — join base_model_id →
+  // Model3D for both (one find per collection).
   return collections
     .filter((c) => c.integrationPolicy === POLICY_PERMISSIONLESS)
     .map((c) => {
       const entry = counts.get(c.collectionId);
+      const model = models.find((m) => m.objectId === c.baseModelId);
       return {
         collectionId: c.collectionId,
-        name: nameForCollection(c, models),
+        name: model?.name ? `${model.name} collection` : `Collection ${truncate(c.collectionId)}`,
         count: entry?.count ?? 0,
         latestRegisteredAtMs: entry?.latestRegisteredAtMs ?? 0,
+        publishTimeMs: Number(model?.createdAtMs ?? 0),
         registerFee: c.registerFee,
       };
     })
@@ -71,6 +75,7 @@ export function buildLeaderboardRows(
       (a, b) =>
         b.count - a.count ||
         b.latestRegisteredAtMs - a.latestRegisteredAtMs ||
+        b.publishTimeMs - a.publishTimeMs ||
         a.collectionId.localeCompare(b.collectionId),
     );
 }
