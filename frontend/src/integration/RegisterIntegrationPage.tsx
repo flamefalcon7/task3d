@@ -56,6 +56,12 @@ function mistToSui(mist: string): string {
   return (n / 1e9).toString();
 }
 
+// Short collection id — disambiguates collections that share a display name
+// (two forks of the same base model derive the same "<base> collection" name).
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
+}
+
 type Phase = 'idle' | 'signing' | 'success' | 'error';
 
 export function RegisterIntegrationPage() {
@@ -166,7 +172,8 @@ export function RegisterIntegrationPage() {
                       {row.name}
                     </Link>
                     <div style={countStyle}>
-                      {row.count === 0 ? 'No integrations yet' : `Used by ${row.count}`}
+                      {(row.count === 0 ? 'No integrations yet' : `Used by ${row.count}`) +
+                        ` · ${shortId(row.collectionId)}`}
                     </div>
                   </div>
                   <button
@@ -234,10 +241,10 @@ export function RegisterIntegrationPage() {
                         }}
                       >
                         <div style={{ fontFamily: tokens.font.body, fontWeight: tokens.weight.medium }}>
-                          {board?.name ?? `Collection ${c.collectionId.slice(0, 6)}…`}
+                          {board?.name ?? `Collection ${shortId(c.collectionId)}`}
                         </div>
                         <div style={{ ...monoLabel, color: tokens.color.hint, marginTop: tokens.space[1] }}>
-                          register fee: {mistToSui(c.registerFee)} SUI
+                          {shortId(c.collectionId)} · fee {mistToSui(c.registerFee)} SUI
                         </div>
                       </button>
                     );
