@@ -681,7 +681,7 @@ export function LaunchCollectionPage() {
     // commit. The decrypt + bake happens inside onLaunch's 3-step path.
     if (model.isEncrypted) {
       setBaseGlb(null);
-      if (!collectionName) setCollectionName(`${model.name} variants`);
+      if (!collectionName) setCollectionName(model.name);
       setPhase('editing-variants');
       return;
     }
@@ -695,7 +695,7 @@ export function LaunchCollectionPage() {
       if (!res.ok) throw new Error(`Walrus aggregator ${res.status} for the base GLB`);
       const bytes = new Uint8Array(await res.arrayBuffer());
       setBaseGlb(bytes);
-      if (!collectionName) setCollectionName(`${model.name} variants`);
+      if (!collectionName) setCollectionName(model.name);
       setPhase('editing-variants');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
@@ -912,7 +912,7 @@ export function LaunchCollectionPage() {
       if (!upload.blobIds[0]) throw new Error('Walrus upload returned no quilt blob');
 
       setPhase('signing');
-      const name = collectionName.trim() || `${base.name} variants`;
+      const name = collectionName.trim() || base.name;
       const tokenNames = swapped.map((_, i) => `${name} #${i + 1}`);
       const tokenPatchIds = swapped.map((_, i) => upload.patchIds[i] ?? '');
       const { tx } = buildLaunchCollectionWithTokensPtb({
@@ -1119,7 +1119,7 @@ export function LaunchCollectionPage() {
 
       // 3 — mint_tokens (set quilt + batch-mint into the just-created collection).
       setPhase('signing');
-      const name = collectionName.trim() || `${base.name} variants`;
+      const name = collectionName.trim() || base.name;
       const tokenNames = swapped.map((_, i) => `${name} #${i + 1}`);
       const tokenPatchIds = swapped.map((_, i) => upload.patchIds[i] ?? '');
       const digest = await mintEncryptedTokens({
