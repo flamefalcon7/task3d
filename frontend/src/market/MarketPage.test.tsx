@@ -325,6 +325,22 @@ describe('MarketPage', () => {
     expect(precedesEl(fresh, indexed)).toBe(true);
   });
 
+  it('U3: two listings both lacking an event (undefined listedAtMs) both render, no sort corruption', () => {
+    // Both undefined → comparator returns Infinity-Infinity = NaN; sort treats
+    // it as equal (stable). Neither item is dropped; both lead.
+    useListingsMock.mockReturnValue({
+      listings: [
+        listing({ tokenId: TOKEN, listedAtMs: undefined }),
+        listing({ tokenId: TOKEN2, listedAtMs: undefined }),
+      ],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getByTestId(`listing-${TOKEN}`)).toBeTruthy();
+    expect(screen.getByTestId(`listing-${TOKEN2}`)).toBeTruthy();
+  });
+
   // ─── U4: lazy-mounted preview canvas in the For-sale well ───
   describe('lazy-mount (U4)', () => {
     class MockIO {

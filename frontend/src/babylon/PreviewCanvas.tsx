@@ -368,10 +368,20 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
         const container = await LoadAssetContainerAsync(glbUrl, scene, {
           pluginExtension: '.glb',
         });
-        // plan-017 U2 — isDisposedRef catches the case where dispose() ran
-        // between effect start and load resolution; the per-effect cancelled
-        // flag covers same-cycle re-runs, this covers the cross-cycle dispose.
-        if (cancelled || token !== loadTokenRef.current || isDisposedRef.current) {
+        // plan-017 U2 — isDisposedRef catches the case where the imperative
+        // dispose() handle ran between effect start and load resolution; the
+        // per-effect cancelled flag covers same-cycle re-runs. plan-2026-06-17-001
+        // — `scene.isDisposed` additionally covers a React UNMOUNT mid-load
+        // (the LazyCanvasMount scroll-away path doesn't call dispose(), so
+        // isDisposedRef stays false there): without it, addAllToScene/
+        // frameCameraToMeshes below would mutate a disposed scene. Mirrors
+        // LiveWell's post-await guard.
+        if (
+          cancelled ||
+          token !== loadTokenRef.current ||
+          isDisposedRef.current ||
+          scene.isDisposed
+        ) {
           container.dispose();
           return;
         }
