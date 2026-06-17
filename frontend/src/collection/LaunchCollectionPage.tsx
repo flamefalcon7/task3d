@@ -136,6 +136,13 @@ function mistToSui(mist: string): string {
   return (n / 1e9).toString();
 }
 
+// plan 2026-06-17-001 — fee display: "Free" for 0, else "<n> SUI". Mirrors the
+// Browse card's formatSui so the two surfaces read the same.
+function feeSui(mist: string): string {
+  const n = Number(mist);
+  return Number.isFinite(n) && n > 0 ? `${n / 1e9} SUI` : 'Free';
+}
+
 // plan-015 U7 / R9 — resolve a variant's label→hex palette into a positional
 // hex[] aligned with `partLabels`. Same algorithm as runBuildVariants's
 // inline resolver but returns hex strings (for the live-recolor canvas
@@ -250,6 +257,27 @@ const baseOptionMeta: CSSProperties = {
   textTransform: 'none',
   fontSize: 11,
 };
+
+// plan 2026-06-17-001 — fee block: aligned label/value rows (was a cramped
+// run-on "fork fee: X SUI · royalty: Y%"). Access fee only shows for encrypted
+// (ALLOW_LIST) bases, where it's an actual cost.
+const baseOptionFees: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  marginTop: 2,
+};
+const feeRow: CSSProperties = {
+  ...monoLabel,
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 8,
+  letterSpacing: '0.5px',
+  textTransform: 'none',
+  fontSize: 11,
+};
+const feeRowLabel: CSSProperties = { color: tokens.color.muted, letterSpacing: '1px' };
+const feeRowValue: CSSProperties = { color: tokens.color.ink };
 
 // plan 2026-06-08-001 U3 (R4) — single-line description snippet on a base-option
 // card. Neutral tokens; ellipsis truncation so a long prompt/caption stays one
@@ -1525,9 +1553,22 @@ export function LaunchCollectionPage() {
                   );
                 })();
                 const metaLine = (
-                  <span style={baseOptionMeta}>
-                    fork fee: {mistToSui(m.derivativeMintFee)} SUI · royalty: {(m.derivativeRoyaltyBps / 100).toFixed(2)}%
-                  </span>
+                  <div style={baseOptionFees} data-testid={`base-option-fees-${m.objectId}`}>
+                    <span style={feeRow}>
+                      <span style={feeRowLabel}>FORK FEE</span>
+                      <span style={feeRowValue}>{feeSui(m.derivativeMintFee)}</span>
+                    </span>
+                    {m.isEncrypted && (
+                      <span style={feeRow}>
+                        <span style={feeRowLabel}>ACCESS FEE</span>
+                        <span style={feeRowValue}>{feeSui(m.accessFee)}</span>
+                      </span>
+                    )}
+                    <span style={feeRow}>
+                      <span style={feeRowLabel}>ROYALTY</span>
+                      <span style={feeRowValue}>{(m.derivativeRoyaltyBps / 100).toFixed(2)}%</span>
+                    </span>
+                  </div>
                 );
                 // plan 2026-06-08-001 U3 (R4) — static description snippet; null
                 // for uncaptioned uploads → nothing (R6). DEDUPE (plan-002 merge):

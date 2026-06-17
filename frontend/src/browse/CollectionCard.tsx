@@ -154,7 +154,7 @@ function MatchReason({ match }: { match: BaseMatch }) {
 const priceRow: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
-  alignItems: 'baseline',
+  alignItems: 'flex-end',
 };
 
 const shapeChip: CSSProperties = {
@@ -163,11 +163,38 @@ const shapeChip: CSSProperties = {
   fontSize: 10,
 };
 
+// plan 2026-06-17-001 — the card surfaces the two real on-chain fees from the
+// LicenseTerms (D-078): the fork/derive fee (prominent) and the buy-access fee
+// (secondary). The old `direct_access_price` field was retired from the Move
+// struct, so it always read 0 → every card showed "Free".
+const priceCol: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 2,
+};
+
 const priceStyle: CSSProperties = {
   fontFamily: tokens.font.display,
   fontStyle: 'italic',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
+};
+
+// Small mono tag appended to the headline fork fee ("2 SUI · FORK").
+const feeTag: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.muted,
+  fontSize: 9,
+  letterSpacing: '1px',
+};
+
+// Secondary access-fee line under the fork fee.
+const accessFeeStyle: CSSProperties = {
+  ...monoLabel,
+  color: tokens.color.hint,
+  fontSize: 10,
+  letterSpacing: '0.5px',
 };
 
 export function CollectionCard({ collectionId, variants, match }: Props) {
@@ -253,9 +280,14 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
         )}
         <div style={priceRow}>
           <span style={shapeChip}>{first.shapeType}</span>
-          <span data-testid="collection-card-price" style={priceStyle}>
-            {formatSui(first.directAccessPrice)}
-          </span>
+          <div style={priceCol}>
+            <span data-testid="collection-card-price" style={priceStyle}>
+              {formatSui(first.derivativeMintFee)} <span style={feeTag}>· FORK</span>
+            </span>
+            <span data-testid="collection-card-access-fee" style={accessFeeStyle}>
+              {formatSui(first.accessFee)} · ACCESS
+            </span>
+          </div>
         </div>
       </Link>
     </div>

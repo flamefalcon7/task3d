@@ -425,6 +425,21 @@ describe('LaunchCollectionPage', () => {
     expect(cardOrder()).toEqual(['base-option-0xbb', 'base-option-0xcc', 'base-option-0xaa']);
   });
 
+  it('plan-2026-06-17-001: a permissionless base fee block shows FORK + ROYALTY, omits ACCESS', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [summary({ objectId: '0xbase1', glbBlobId: 'g', derivativeMintFee: '200000000' })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    const fees = screen.getByTestId('base-option-fees-0xbase1').textContent ?? '';
+    expect(fees).toContain('FORK FEE');
+    expect(fees).toContain('0.2 SUI');
+    expect(fees).toContain('ROYALTY');
+    expect(fees).not.toContain('ACCESS FEE'); // no access gate on a public base
+  });
+
   it('degraded scope surfaces the honest note, not presented as a complete reorder', () => {
     threeForkable();
     memoryRecallState.personal = lane([hit('0xbb', 0.3, 'race car')]);
@@ -1741,6 +1756,20 @@ describe('LaunchCollectionPage — encrypted ALLOW_LIST base (entitlement-gated)
       previewBlobIds: ['still-1'],
       ...overrides,
     });
+
+  it('plan-2026-06-17-001: an encrypted base fee block includes an ACCESS FEE row', () => {
+    useModelIndexMock.mockReturnValue({
+      models: [encBase({ accessFee: '100000000', derivativeMintFee: '0' })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    const fees = screen.getByTestId('base-option-fees-0xenc').textContent ?? '';
+    expect(fees).toContain('FORK FEE');
+    expect(fees).toContain('ACCESS FEE');
+    expect(fees).toContain('0.1 SUI');
+  });
 
   // Seed the owned-entitlements mock so the wallet HOLDS an entitlement for the
   // given base id → the catalog surfaces it as launchable + the free unlock has

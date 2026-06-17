@@ -208,6 +208,34 @@ describe('CollectionCard', () => {
     expect(screen.queryByTestId('collection-card-description')).toBeNull();
   });
 
+  // plan 2026-06-17-001 — fees come from LicenseTerms (D-078), NOT the retired
+  // direct_access_price field (which always read 0 → every card showed "Free").
+  it('shows the fork fee and access fee from the license', () => {
+    renderCard({
+      collectionId: '0xc',
+      variants: [makeModel({
+        derivativeMintFee: '2000000000',
+        accessFee: '1000000000',
+        directAccessPrice: '0', // retired field — must NOT drive the display
+      })],
+    });
+    const fork = screen.getByTestId('collection-card-price').textContent ?? '';
+    expect(fork).toContain('2.00 SUI');
+    expect(fork).toContain('FORK');
+    const access = screen.getByTestId('collection-card-access-fee').textContent ?? '';
+    expect(access).toContain('1.00 SUI');
+    expect(access).toContain('ACCESS');
+  });
+
+  it('shows Free for a permissionless base whose fork + access fees are zero', () => {
+    renderCard({
+      collectionId: '0xc',
+      variants: [makeModel({ derivativeMintFee: '0', accessFee: '0' })],
+    });
+    expect(screen.getByTestId('collection-card-price').textContent).toContain('Free');
+    expect(screen.getByTestId('collection-card-access-fee').textContent).toContain('Free');
+  });
+
   // plan 2026-06-08-002 U2 — semantic-search match highlight + reason.
   const strongMatch: BaseMatch = { distance: 0.2, strong: true, reason: 'a fast race car' };
   const weakMatch: BaseMatch = { distance: 0.6, strong: false, reason: 'a slow tractor' };
