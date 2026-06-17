@@ -1,5 +1,31 @@
 # Phase Progress
 
+## Last Updated: 2026-06-17 12:25 (**feat: /launch base picker newest-first + 360° encrypted preview; sort/lazy-mount shipped & deployed**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~4** · demo day (7/20–21): ~33 · winners (8/27): ~71
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session (continued)
+- **Browse/Market sort + lazy-mount (plan-2026-06-17-001) merged to main & deployed** (`tusk3d.store`, bundle `index-CC27tTG0.js`). See the block below for unit detail.
+- **/launch base picker follow-up** (commit `5a36eb2`, deployed bundle `index-dv18rQ6e.js`) — two fixes in `frontend/src/collection/LaunchCollectionPage.tsx`:
+  - **Newest-first order**: `forkable` memo now sorts desc by `Number(createdAtMs)` (mirrors Browse U2). The picker was rendering raw GraphQL server order (an old base stuck first); the most recently published base now leads. Search-active `rankForkableMatches` path unaffected (rest band inherits the order).
+  - **360° encrypted preview**: swapped the single static `<img>` for `<TurntablePreview urls={previewStillUrlsForSummary(m)}>` so an encrypted base spins in the picker exactly like on `/model/:id` (root cause of the user's "no 360 on /launch": the two pages used different components — detail used TurntablePreview, picker used a one-still `<img>`; NOT a local-vs-prod or blob issue).
+  - New unit test: default base-picker order is newest-first. Full suite green (110 files / 1236 passed / 2 skipped); tsc clean.
+- **Dev servers**: confirmed sign-in `challenge failed: 502` was simply the **backend not running** — Vite proxies `/api` → `localhost:3001`; started `pnpm --dir backend dev` (listening, `.env` MemWal keys loaded, no warning banner). Challenge endpoint now 200.
+
+### Next Concrete Step
+User to verify `/launch` in their own wallet-connected Chrome (base picker: newest base first + encrypted thumbnails spin). `/market` listing-sort still pending the same post-wallet check.
+
+### Notes for Next Session
+- `/launch` and `/market` base/listing pickers are **wallet-gated** → agent-browser can't drive them; visual verification is the user's own-Chrome job. Logic is unit-test-covered.
+- Stale branch `feat/preview-loading-overlay` — content already in main, safe to delete (`git branch -D`).
+- Deferred (plan Scope Boundaries): Market just-listed fullnode timestamp splice; WebGL grid kill-switch / scroll-thrash debounce if observed on the demo box.
+
+---
+
 ## Last Updated: 2026-06-17 11:55 (**feat: Browse/Market newest-first sort + lazy-mounted card previews (plan-2026-06-17-001)**)
 
 ### Hackathon Tracker
