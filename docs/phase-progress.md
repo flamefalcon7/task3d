@@ -1,5 +1,32 @@
 # Phase Progress
 
+## Last Updated: 2026-06-17 14:30 (**feat: Integration Ecosystem leaderboard at /integrate (plan-002, D-109) — built, tested, browser-verified**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~4** · demo day (7/20–21): ~33 · winners (8/27): ~71
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **Integration Ecosystem leaderboard shipped** on branch `feat/integration-ecosystem-leaderboard`. Brainstorm → plan → 5-reviewer doc-review → execute. Plan `docs/plans/2026-06-17-002-feat-integration-ecosystem-leaderboard-plan.md`; ADR **D-109**. `/integrate` went from a write-only register form to a discovery hub. U1–U6, one commit each:
+  - **U1** `backend/src/events/integrationIndexer.ts` — new `getLeaderboard()` accessor (unsorted `{collectionId,count,latestRegisteredAtMs}` from the in-memory store) + 4 tests.
+  - **U2** new `backend/src/api/integrations.ts` — `GET /api/integrations/leaderboard` (own limiter instance, sort count→latest→id, `.slice(0,500)`, snake_case). Mounted in `app.ts` (widened `BuildAppDeps.integrationIndexer` Pick + dual stub); fixed `collections.test.ts` mock; +4 route tests; ADR D-109.
+  - **U3** new `frontend/src/integration/useIntegrationLeaderboard.ts` — left-join GraphQL collections (permissionless) × backend counts, snake→camel map, name-join via useModelIndex, sort; exported pure `buildLeaderboardRows` helper + 4 tests. **Indexer-absent collections render at count 0** (R2).
+  - **U4** `frontend/src/integration/RegisterIntegrationPage.tsx` — full D-044 token migration (was dark `#15171b`), leaderboard primary view (4 states, italic-serif rank, "Used by N" mono), `?collection=<id>` deep-link pre-seed with id→object resolution + load-race handling, form always below + wallet-gated, all tx logic + testids preserved. Test rewritten (12 tests).
+  - **U5** `frontend/src/ux/TopNav.tsx` — `Integrate` nav item + test.
+  - **U6** copy sweep: `ActorCards.tsx` / `UsedBySection.tsx` / `CollectionDetailPage.tsx` — neutral "work" (not "game"); CollectionDetail CTA now deep-links `?collection=<id>`. (`gameDev` actor key kept — test-coupled designed taxonomy.)
+- **Verification**: backend 406 tests + frontend 1248 (+2 skipped) all green; tsc clean both packages. Browser-verified `/integrate` (agent-browser, pre-wallet): paper bg confirmed, 6 collections left-joined at count 0, nav `Integrate` active, neutral CTAs, register section gated behind real connect/sign-in. Screenshot `/tmp/integrate-page.png`.
+
+### Next Concrete Step
+Suggest opening a PR for `feat/integration-ecosystem-leaderboard` → main (6 commits). Optional: run `/code-review` first. Post-wallet check (user's own Chrome): the `?collection=<id>` deep-link should pre-fill the register form with the picked collection — agent-browser can't drive the wallet-gated form.
+
+### Notes for Next Session
+- Leaderboard counts are eventually-consistent + reset on backend restart (in-memory indexer) — by design; deferred: indexer persistence, Browse/Market integration badges, per-token counts (plan Scope Boundaries).
+- Live testnet leaderboard endpoint returns `{"leaderboard":[]}` (zero registrations on current package) → all rows show "No integrations yet". Seed an integration before demo day to show a non-zero ecosystem.
+
+---
+
 ## Last Updated: 2026-06-17 12:25 (**feat: /launch base picker newest-first + 360° encrypted preview; sort/lazy-mount shipped & deployed**)
 
 ### Hackathon Tracker
