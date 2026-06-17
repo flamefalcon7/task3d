@@ -8,6 +8,7 @@ import { buildMemoryRoute } from './routes/memory.js';
 import { buildCopilotRoute } from './routes/copilot.js';
 import { buildCaptionRoute } from './routes/caption.js';
 import { buildCollectionsRoute } from './api/collections.js';
+import { buildIntegrationsRoute } from './api/integrations.js';
 import { buildPreflightRoute } from './routes/preflight.js';
 import { buildMcpRoute } from './mcp/route.js';
 import { buildLlmsRoute } from './routes/llms.js';
@@ -21,7 +22,7 @@ export interface BuildAppDeps {
   jwt?: JwtSigner;
   // U7: provides the "Used by" read API. When omitted, the route is still
   // mounted but returns empty lists (server.ts injects the live indexer).
-  integrationIndexer?: Pick<IntegrationIndexer, 'getIntegrations'>;
+  integrationIndexer?: Pick<IntegrationIndexer, 'getIntegrations' | 'getLeaderboard'>;
   // U10/D-034: when present, prompt-mode generate requires a verified SUI
   // service-fee payment. server.ts injects the live verifier.
   paymentVerifier?: PaymentVerifier;
@@ -53,10 +54,12 @@ export function buildApp(deps: BuildAppDeps = {}) {
   app.route('/api/memory', buildMemoryRoute({ jwt: deps.jwt }));
   app.route('/api/copilot', buildCopilotRoute({ jwt: deps.jwt }));
   app.route('/api/caption', buildCaptionRoute({ jwt: deps.jwt }));
-  app.route(
-    '/api/collections',
-    buildCollectionsRoute({ indexer: deps.integrationIndexer ?? { getIntegrations: () => [] } }),
-  );
+  const integrationIndexer = deps.integrationIndexer ?? {
+    getIntegrations: () => [],
+    getLeaderboard: () => [],
+  };
+  app.route('/api/collections', buildCollectionsRoute({ indexer: integrationIndexer }));
+  app.route('/api/integrations', buildIntegrationsRoute({ indexer: integrationIndexer }));
 
   return app;
 }

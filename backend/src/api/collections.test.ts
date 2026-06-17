@@ -6,7 +6,7 @@ const VALID_ID = '0x' + 'a'.repeat(64);
 
 function appWith(records: UsedByRecord[]) {
   return buildApp({
-    integrationIndexer: { getIntegrations: () => records },
+    integrationIndexer: { getIntegrations: () => records, getLeaderboard: () => [] },
   });
 }
 

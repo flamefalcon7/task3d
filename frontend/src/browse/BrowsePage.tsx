@@ -220,8 +220,10 @@ const integrationCell: CSSProperties = {
 };
 
 const integrationName: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // Sans body font (Inter), not the Newsreader serif — consistent with the other
+  // card names (the serif read too "scripty" per request).
+  fontFamily: tokens.font.body,
+  fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
 };

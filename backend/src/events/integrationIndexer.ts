@@ -34,11 +34,25 @@ export type IndexerClient = Pick<
   'queryEvents' | 'getObject' | 'getDynamicFieldObject'
 >;
 
+/** Cross-collection aggregate row for the integration leaderboard. */
+export interface LeaderboardEntry {
+  collectionId: string;
+  count: number;
+  latestRegisteredAtMs: number;
+}
+
 export interface IntegrationIndexer {
   start(): void;
   stop(): void;
   /** Records for one collection, newest registrations last (insertion order). */
   getIntegrations(collectionId: string): UsedByRecord[];
+  /**
+   * Cross-collection counts for the leaderboard. UNSORTED (raw store iteration
+   * order) — the route owns ordering (plan-2026-06-17-002 U1/U2). Only includes
+   * collections with >=1 registration; zero-count collections are left-joined in
+   * on the client.
+   */
+  getLeaderboard(): LeaderboardEntry[];
   /** Run a single poll tick — exposed for tests + manual triggering. */
   pollOnce(): Promise<void>;
 }
@@ -179,6 +193,15 @@ export function createIntegrationIndexer(opts: IndexerOptions): IntegrationIndex
     },
     getIntegrations(collectionId: string): UsedByRecord[] {
       return Array.from(store.get(collectionId)?.values() ?? []);
+    },
+    getLeaderboard(): LeaderboardEntry[] {
+      return Array.from(store.entries()).map(([collectionId, inner]) => {
+        let latestRegisteredAtMs = 0;
+        for (const rec of inner.values()) {
+          if (rec.registeredAtMs > latestRegisteredAtMs) latestRegisteredAtMs = rec.registeredAtMs;
+        }
+        return { collectionId, count: inner.size, latestRegisteredAtMs };
+      });
     },
     pollOnce,
   };

@@ -4432,6 +4432,24 @@ Default upload storage to **53 epochs** via a single `DEFAULT_STORAGE_EPOCHS` co
 
 ---
 
+## D-109: Integration Ecosystem leaderboard — new public read API + neutral terminology
+**Status**: Accepted
+**Date**: 2026-06-17 · **Phase**: Phase 5 (polish / discovery)
+
+### Context — `/integrate` was a write-only registration form: not in the nav, off the D-044 token system, and the integration *result* (which collections games/works have integrated) was invisible — so a buyer/forker had no way to find collections with a rich integration ecosystem. Integrations are stored per-collection as a `Table<address, IntegrationRecord>` on `NftCollection` (D-029/D-030); the in-memory indexer (plan-008 U7) already counts them per collection but exposed no cross-collection aggregate.
+
+### Decision — Turn `/integrate` into an Integration Ecosystem hub ranking collections by integration count. Add a new public, no-auth, rate-limited endpoint `GET /api/integrations/leaderboard` (own Hono builder + own limiter instance, mounted at `/api/integrations`) backed by a new `getLeaderboard()` indexer accessor returning `{collectionId, count, latestRegisteredAtMs}`. The route owns sorting (count desc, then latest-integration desc, then id) and caps the payload at 500 rows; the accessor returns unsorted. Frontend left-joins the GraphQL collection list with these counts (indexer-absent → count 0). Separately, neutralize game-specific UI copy across integration surfaces ("work", not "game") since an integration may be a video, webpage, or app — the on-chain `app_metadata{name,url}` field is unchanged.
+
+### Rationale — No contract change (read-only product work). Public/no-auth is correct: published trust-signal data, no metered upstream (per `cors-is-browser-only…` learning). Separate limiter instance avoids draining the per-collection endpoint's budget. Neutral copy mirrors the "not every model is a car" principle (NFT/`/track` wording).
+
+### Alternatives Considered — N client calls to the existing per-collection endpoint (rejected: O(collections) requests per page load, no single tie-break source). Reusing the shared collections limiter Map (rejected: cross-endpoint budget drain). Per-NFT-token counts (rejected: integrations live on the collection; tokens inherit the signal).
+
+### Consequences — ✅ Integration ecosystem becomes a visible, rankable value signal; `/integrate` is discoverable + on-brand. ⚠️ Counts are eventually-consistent and reset on backend restart (in-memory indexer) — not presented as authoritative. 🔮 Browse/Market integration badges and indexer persistence deferred to follow-up.
+
+### Related — plan `docs/plans/2026-06-17-002-feat-integration-ecosystem-leaderboard-plan.md`; brainstorm `docs/brainstorms/2026-06-17-integration-ecosystem-leaderboard-requirements.md`; D-029 / D-030 (integration architecture); D-044 (design tokens). Files: `backend/src/api/integrations.ts`, `backend/src/events/integrationIndexer.ts`.
+
+---
+
 # Reserved Decision Numbers
 
-D-109 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-110 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

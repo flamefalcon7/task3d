@@ -94,9 +94,9 @@ const bodyStyle: CSSProperties = {
 };
 
 const nameStyle: CSSProperties = {
-  fontFamily: tokens.font.display,
-  // plan 2026-06-17-001 — upright (not italic) collection name per request; the
-  // display serif reads cleaner non-slanted in the dense card grid.
+  // Sans body font (Inter), not the Newsreader serif — card names read cleaner
+  // as plain sans in the dense grid (the serif looked too "scripty" per request).
+  fontFamily: tokens.font.body,
   fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
@@ -177,8 +177,9 @@ const priceCol: CSSProperties = {
 };
 
 const priceStyle: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // Mono, not the Newsreader serif — the fork fee is chain-numeric data, so it
+  // matches the access-fee / "· FORK" tag below it (card = Inter name + Mono data).
+  fontFamily: tokens.font.mono,
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
 };

@@ -1,5 +1,39 @@
 # Phase Progress
 
+## Last Updated: 2026-06-17 14:30 (**feat: Integration Ecosystem leaderboard at /integrate (plan-002, D-109) — built, tested, browser-verified**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~4** · demo day (7/20–21): ~33 · winners (8/27): ~71
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **Integration Ecosystem leaderboard shipped** on branch `feat/integration-ecosystem-leaderboard`. Brainstorm → plan → 5-reviewer doc-review → execute. Plan `docs/plans/2026-06-17-002-feat-integration-ecosystem-leaderboard-plan.md`; ADR **D-109**. `/integrate` went from a write-only register form to a discovery hub. U1–U6, one commit each:
+  - **U1** `backend/src/events/integrationIndexer.ts` — new `getLeaderboard()` accessor (unsorted `{collectionId,count,latestRegisteredAtMs}` from the in-memory store) + 4 tests.
+  - **U2** new `backend/src/api/integrations.ts` — `GET /api/integrations/leaderboard` (own limiter instance, sort count→latest→id, `.slice(0,500)`, snake_case). Mounted in `app.ts` (widened `BuildAppDeps.integrationIndexer` Pick + dual stub); fixed `collections.test.ts` mock; +4 route tests; ADR D-109.
+  - **U3** new `frontend/src/integration/useIntegrationLeaderboard.ts` — left-join GraphQL collections (permissionless) × backend counts, snake→camel map, name-join via useModelIndex, sort; exported pure `buildLeaderboardRows` helper + 4 tests. **Indexer-absent collections render at count 0** (R2).
+  - **U4** `frontend/src/integration/RegisterIntegrationPage.tsx` — full D-044 token migration (was dark `#15171b`), leaderboard primary view (4 states, italic-serif rank, "Used by N" mono), `?collection=<id>` deep-link pre-seed with id→object resolution + load-race handling, form always below + wallet-gated, all tx logic + testids preserved. Test rewritten (12 tests).
+  - **U5** `frontend/src/ux/TopNav.tsx` — `Integrate` nav item + test.
+  - **U6** copy sweep: `ActorCards.tsx` / `UsedBySection.tsx` / `CollectionDetailPage.tsx` — neutral "work" (not "game"); CollectionDetail CTA now deep-links `?collection=<id>`. (`gameDev` actor key kept — test-coupled designed taxonomy.)
+- **Verification**: backend 406 tests + frontend 1248 (+2 skipped) all green; tsc clean both packages. Browser-verified `/integrate` (agent-browser, pre-wallet): paper bg confirmed, 6 collections left-joined at count 0, nav `Integrate` active, neutral CTAs, register section gated behind real connect/sign-in. Screenshot `/tmp/integrate-page.png`.
+
+### Post-feature polish (same session, same branch — 15 commits total)
+- **ce-code-review (high) run on the diff** → 1 real bug fixed: deep-link `?collection=` effect was overriding manual picks (consume-once: apply param then clear it from URL); + regression test. Also: leaderboard states now key off the hook's own error (not the page's 2nd `useCollections` → divergence), and O(1) picker name lookup (`Map`, was `rows.find` O(n²)).
+- **Leaderboard ordering**: tie-break changed from collectionId → **base-model publish time desc** (count desc → latest-integration desc → publishTimeMs desc → id), so the all-zero demo state reads newest-first instead of id-random. +2 sort tests.
+- **Copy/naming polish** (user-driven): dropped " collection" suffix from leaderboard/picker names; dropped " variants" from `/launch` default collection name (future tokens are "pickup-truck #6" not "...variants #6" — existing on-chain names unchanged); disambiguate same-named collections by short id on the leaderboard.
+- **Card font unification** (D-044): card NAMES switched Newsreader serif → **Inter sans** (CollectionCard, Market, /launch, Browse integration view); card PRICE/fee switched Newsreader-italic-serif → **Mono**. Every preview card is now **Inter name + Mono data**, no stray serif. Browser-verified on /browse.
+- Full suites still green; tsc clean both packages.
+
+### Next Concrete Step
+Open a PR for `feat/integration-ecosystem-leaderboard` → main (**15 commits**: leaderboard feature U1–U6 + code-review fixes + font/naming polish). Post-wallet checks for the user's own Chrome: (1) `?collection=<id>` deep-link pre-fills the register form; (2) manual pick after a deep-link sticks (the fixed bug); (3) optionally register an integration to see a non-zero "Used by N". **Deferred (user paused mid-task):** unifying Newsreader-serif text inside preview cards on OTHER pages (detail pages etc.) — only Browse/Market/launch cards done so far; the broader font sweep was not finished.
+
+### Notes for Next Session
+- Leaderboard counts are eventually-consistent + reset on backend restart (in-memory indexer) — by design; deferred: indexer persistence, Browse/Market integration badges, per-token counts (plan Scope Boundaries).
+- Live testnet leaderboard endpoint returns `{"leaderboard":[]}` (zero registrations on current package) → all rows show "No integrations yet". Seed an integration before demo day to show a non-zero ecosystem.
+
+---
+
 ## Last Updated: 2026-06-17 12:25 (**feat: /launch base picker newest-first + 360° encrypted preview; sort/lazy-mount shipped & deployed**)
 
 ### Hackathon Tracker

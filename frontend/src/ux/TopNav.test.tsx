@@ -51,6 +51,7 @@ describe('TopNav', () => {
     expect(screen.getByTestId('nav-create')).toBeTruthy();
     expect(screen.getByTestId('nav-launch')).toBeTruthy();
     expect(screen.getByTestId('nav-market')).toBeTruthy();
+    expect(screen.getByTestId('nav-integrate').getAttribute('href')).toBe('/integrate');
     // 'Track' is no longer a nav item — /track is the reskinned Rage Racing
     // game, not a Tusk3D feature tab (plan 2026-06-05-001).
     expect(screen.queryByTestId('nav-track')).toBeNull();

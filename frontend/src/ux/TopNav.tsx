@@ -9,6 +9,7 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; path: string }> = [
   { label: 'Create', path: '/create' },
   { label: 'Launch', path: '/launch' },
   { label: 'Market', path: '/market' },
+  { label: 'Integrate', path: '/integrate' },
   // '/track' is intentionally NOT a nav item: it's reskinned as "Rage Racing"
   // (a third-party game) and must not present as a Tusk3D feature tab. It's
   // reachable via the race-on-mint deep link and direct URL. See HIDDEN_ROUTES

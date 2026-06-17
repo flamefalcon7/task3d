@@ -64,7 +64,7 @@ const ACTORS: readonly Actor[] = [
     // in-game runtime/SDK render path (none ships for 6/21). Avoids the
     // S4 IN-GAME overclaim. The aspiration lives in the flavor line, not
     // the literal ability.
-    ability: 'Registers an on-chain integration that any game can verify.',
+    ability: 'Registers an on-chain integration any app can verify.',
     flavor: 'Where the carving ends up.',
     route: '/integrate',
     downstream: true,
