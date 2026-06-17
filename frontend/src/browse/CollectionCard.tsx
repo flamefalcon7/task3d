@@ -177,8 +177,9 @@ const priceCol: CSSProperties = {
 };
 
 const priceStyle: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // Mono, not the Newsreader serif — the fork fee is chain-numeric data, so it
+  // matches the access-fee / "· FORK" tag below it (card = Inter name + Mono data).
+  fontFamily: tokens.font.mono,
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
 };

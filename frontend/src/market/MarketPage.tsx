@@ -206,8 +206,9 @@ const priceRow: CSSProperties = {
 };
 
 const priceMain: CSSProperties = {
-  fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // Mono, not the Newsreader serif — price is chain-numeric data, matching the
+  // card's other data lines (card = Inter name + Mono data).
+  fontFamily: tokens.font.mono,
   fontSize: tokens.size.lg,
   fontWeight: tokens.weight.medium,
 };
