@@ -64,7 +64,7 @@ export function buildLeaderboardRows(
       const model = models.find((m) => m.objectId === c.baseModelId);
       return {
         collectionId: c.collectionId,
-        name: model?.name ? `${model.name} collection` : `Collection ${truncate(c.collectionId)}`,
+        name: model?.name ?? `Collection ${truncate(c.collectionId)}`,
         count: entry?.count ?? 0,
         latestRegisteredAtMs: entry?.latestRegisteredAtMs ?? 0,
         publishTimeMs: Number(model?.createdAtMs ?? 0),

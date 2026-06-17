@@ -80,7 +80,7 @@ describe('buildLeaderboardRows', () => {
   it('joins the base model name, falling back to a truncated id', () => {
     const collections = [coll(cid('a'), { baseModelId: cid('d') })];
     const withName = buildLeaderboardRows(collections, [model(cid('d'), 'Tusk')], new Map());
-    expect(withName[0].name).toBe('Tusk collection');
+    expect(withName[0].name).toBe('Tusk');
     const noName = buildLeaderboardRows(collections, [], new Map());
     expect(noName[0].name).toMatch(/^Collection 0x/);
   });

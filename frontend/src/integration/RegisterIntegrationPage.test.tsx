@@ -82,7 +82,7 @@ beforeEach(() => {
     rows: [
       {
         collectionId: COLL,
-        name: 'Roadster collection',
+        name: 'Roadster',
         count: 2,
         latestRegisteredAtMs: 100,
         registerFee: '100000000',
@@ -122,7 +122,7 @@ describe('RegisterIntegrationPage', () => {
 
   it('joins base_model_id → Model3D.name for the collection label', () => {
     renderPage();
-    expect(screen.getByTestId(`collection-option-${COLL}`).textContent).toMatch(/Roadster collection/);
+    expect(screen.getByTestId(`collection-option-${COLL}`).textContent).toMatch(/Roadster/);
   });
 
   it('renders the leaderboard with a "Used by N" count and a /collection drill-in (R1/R4)', () => {
