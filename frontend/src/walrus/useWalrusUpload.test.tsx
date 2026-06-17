@@ -151,7 +151,7 @@ describe('useWalrusUpload', () => {
     expect(flow.encode).toHaveBeenCalledOnce();
     expect(flow.executeRegister).toHaveBeenCalledOnce();
     expect(flow.executeRegister.mock.calls[0]?.[0]).toMatchObject({
-      epochs: 10,
+      epochs: 53,
       deletable: false,
       owner: '0xCAFE',
     });
@@ -333,7 +333,7 @@ describe('useWalrusUpload', () => {
       expect(writeFilesFlowFactory).not.toHaveBeenCalled();
       expect(flow.encode).toHaveBeenCalledOnce();
       expect(flow.executeRegister.mock.calls[0]?.[0]).toMatchObject({
-        epochs: 10,
+        epochs: 53,
         deletable: false,
         owner: '0xCAFE',
       });

@@ -28,6 +28,16 @@ import { isRetryableUploadError, retryAsync } from './retryAsync';
 // encoder gate. (D-101 supersedes D-062.)
 export const QUILT_SIZE = 4;
 
+// D-108 — default Walrus storage duration. Set to the network max
+// (`max_epochs_ahead`, 53 on both networks). On testnet (1 day/epoch) that's
+// ~53 days, which covers the whole hackathon runway (6/21 submission +
+// 7/20–21 demo day); on mainnet (2 weeks/epoch) it's ~2 years. The old
+// default of 10 epochs = ~10 days on testnet silently GC'd demo content
+// (Walrus returns 503 BLOB_UNAVAILABLE once `end_epoch` passes — no grace
+// period). True multi-month persistence on testnet still needs `extend_blob`
+// before expiry; this just maxes out the single-upload window. See spec §2.2/§2.5.
+const DEFAULT_STORAGE_EPOCHS = 53;
+
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
 // Finer-grained stage exposed reactively so consumers (MintButton) can label
@@ -77,7 +87,7 @@ export interface UploadError {
 export interface UseWalrusUploadOptions {
   /** Override client (for tests / Phase 4 mainnet switcher). */
   client?: WalrusEnhancedClient;
-  /** Storage epochs. Default 10 per spec.md §2.5. */
+  /** Storage epochs. Default DEFAULT_STORAGE_EPOCHS (53, network max) — D-108. */
   epochs?: number;
 }
 
@@ -154,7 +164,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
         setStage(lastStage);
         const registerResult = await flow.executeRegister({
           signer,
-          epochs: options.epochs ?? 10,
+          epochs: options.epochs ?? DEFAULT_STORAGE_EPOCHS,
           deletable: false,
           owner,
         });
@@ -268,7 +278,7 @@ export function useWalrusUpload(options: UseWalrusUploadOptions = {}) {
           // "Either resume.blobObjectId or upload digest must be provided".
           const registerResult = await flow.executeRegister({
             signer,
-            epochs: options.epochs ?? 10,
+            epochs: options.epochs ?? DEFAULT_STORAGE_EPOCHS,
             deletable: false,
             owner,
           });

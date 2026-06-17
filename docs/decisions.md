@@ -4403,6 +4403,35 @@ Change the **global default** `defaultBg` for `PreviewCanvas` and `TaggingCanvas
 
 ---
 
+## D-108: Default Walrus storage = 53 epochs (network max), was 10
+**Status**: Accepted
+**Date**: 2026-06-17 · **Phase**: 5 (UX polish / submission prep)
+
+### Context
+A live NFT detail page hung forever on the 3D preview. Root cause: the GLB blob was **gone from Walrus testnet** — `walrus blob-status` → "not stored on Walrus"; aggregators return `503 BLOB_UNAVAILABLE` (no 404, no grace period) once a blob's `end_epoch` passes. `useWalrusUpload.ts` defaulted to `epochs: 10`; on testnet (1 day/epoch) that's only **~10 days** of storage, and neither product caller (publish, launch) overrode it. So any content minted >10 days prior had already been garbage-collected — and content uploaded today would not survive to the 7/20–21 demo day.
+
+### Decision
+Default upload storage to **53 epochs** via a single `DEFAULT_STORAGE_EPOCHS` constant in `frontend/src/walrus/useWalrusUpload.ts`. 53 is `max_epochs_ahead` (the protocol cap on both networks) — testnet ≈ 53 days, mainnet ≈ ~2 years. Callers may still override per upload.
+
+### Rationale
+- testnet 53 days covers the full runway: 6/21 submission + 7/20–21 demo day.
+- Per-epoch storage cost scales linearly, but testnet WAL is faucet-funded → bumping to the cap is effectively free.
+- Single constant = no drift between the two upload paths.
+
+### Alternatives Considered
+- **Keep 10, re-mint before demo** — rejected: silent expiry is a foot-gun; maxing the window is nearly free.
+- **>53 epochs for true 2-month+ persistence** — impossible in one upload (protocol rejects beyond `max_epochs_ahead`). Requires `extend_blob` before expiry, or mainnet (2-week epochs). Deferred to a follow-up (auto-renew / mainnet permanence).
+
+### Consequences
+- ✅ Demo content survives the whole testnet phase; no mid-hackathon GC.
+- ⚠️ Does NOT retroactively restore already-expired blobs (e.g. the `nasty-guy variants #3` token) — those must be re-minted.
+- ⚠️ True multi-month testnet persistence still needs `extend_blob`; not automated.
+- 🔮 Follow-up: a SharedBlob/extend renewal path (spec §2.2 "viewer 集資養 NFT") and/or mainnet permanence.
+
+### Related — spec.md §2.2 / §2.5 (updated); `useWalrusUpload.ts` `DEFAULT_STORAGE_EPOCHS`. Surfaced while diagnosing a 503 BLOB_UNAVAILABLE on `/nft/0xa3e4…ca9e`.
+
+---
+
 # Reserved Decision Numbers
 
-D-108 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-109 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

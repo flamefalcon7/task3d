@@ -296,8 +296,8 @@ Demo 主路徑是 Browse(20% 時間)+ Generate(20% 時間)+ Buy Access 顯示 pr
 | 概念 | 細節 |
 |---|---|
 | Epoch 長度 | **testnet = 1 天 / epoch**,**mainnet = 2 週 / epoch** |
-| `epochs` 參數 | writeBlob 時付幾個 epoch 的儲存費。`epochs: 10` 在 testnet ≈ 10 天,mainnet ≈ 20 週 |
-| 最長期限 | 兩個 network 都是 `max_epochs_ahead = 53`(testnet ≈ 53 天,mainnet ≈ ~2 年) |
+| `epochs` 參數 | writeBlob 時付幾個 epoch 的儲存費。**app 預設 = `53`(network max,D-108)** — testnet ≈ 53 天(涵蓋 6/21 提交 + 7/20–21 demo day),mainnet ≈ ~2 年。**舊預設 10 epochs ≈ testnet 10 天會讓 demo 內容被 GC**(aggregator 回 503 `BLOB_UNAVAILABLE`,無 grace period) |
+| 最長期限 | 兩個 network 都是 `max_epochs_ahead = 53`(testnet ≈ 53 天,mainnet ≈ ~2 年)。**單次上傳超過 53 epochs 會被協定拒絕** — 想存更久只能在過期前 `extend_blob` 續存,或上 mainnet |
 | `deletable: true` | 持有者可以呼叫 `system::delete_blob` 提前釋放並**回收 Storage resource** 拿去存別的 blob |
 | `deletable: false` | `delete_blob` 會 abort(`EBlobNotDeletable`)— bytes 保證活到付的 epoch 結束 |
 | 過期 | **沒有 grace period** — `end_epoch` 一到 storage nodes 就可以 GC slivers |
@@ -357,7 +357,7 @@ JSON-RPC client deprecation 期限 July 2026(在 Phase 5 submission 之後),`Sui
 const { blobId, blobObject } = await client.walrus.writeBlob({
   blob: file,              // Uint8Array(GLB bytes)
   deletable: false,        // Model3D 包住它,生命週期由合約管
-  epochs: 10,
+  epochs: 53,              // D-108 — network max; app 預設見 useWalrusUpload.ts
   signer: keypair,
 });
 ```
@@ -368,7 +368,7 @@ const { blobId, blobObject } = await client.walrus.writeBlob({
 const flow = client.walrus.writeFilesFlow({ files: [glb] });
 await flow.encode();                                            // 本地 WASM
 const registerTx = await flow.executeRegister({                 // wallet popup 1
-  signer, epochs: 10, deletable: false, owner: address,
+  signer, epochs: 53, deletable: false, owner: address,   // D-108 — network max
 });
 await flow.upload({ digest: registerTx.txDigest });             // relay HTTP
 await flow.executeCertify({ signer });                          // wallet popup 2
