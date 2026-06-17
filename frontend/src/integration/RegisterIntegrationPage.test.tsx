@@ -24,6 +24,11 @@ vi.mock('./useCollections', () => ({
 const useModelIndexMock = vi.fn();
 vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMock() }));
 
+const useLeaderboardMock = vi.fn();
+vi.mock('./useIntegrationLeaderboard', () => ({
+  useIntegrationLeaderboard: () => useLeaderboardMock(),
+}));
+
 const buildRegisterMock = vi.fn();
 vi.mock('../sui/collectionTxBuilders', () => ({
   buildRegisterIntegrationPtb: (...args: unknown[]) => buildRegisterMock(...args),
@@ -48,13 +53,18 @@ function collection(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderPage() {
+function renderPage(initialEntries: string[] = ['/integrate']) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <RegisterIntegrationPage />
     </MemoryRouter>,
   );
 }
+
+// jsdom doesn't implement scrollIntoView; the deep-link effect calls it.
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 beforeEach(() => {
   useCurrentAccountMock.mockReset();
@@ -62,11 +72,25 @@ beforeEach(() => {
   useCollectionsMock.mockReset();
   fetchCollectionByIdMock.mockReset();
   useModelIndexMock.mockReset();
+  useLeaderboardMock.mockReset();
   buildRegisterMock.mockReset();
 
   useCurrentAccountMock.mockReturnValue({ address: ADDR });
   useCollectionsMock.mockReturnValue({ collections: [collection()], loading: false, error: null });
   useModelIndexMock.mockReturnValue({ models: [{ objectId: '0xbase', name: 'Roadster' }], loading: false });
+  useLeaderboardMock.mockReturnValue({
+    rows: [
+      {
+        collectionId: COLL,
+        name: 'Roadster collection',
+        count: 2,
+        latestRegisteredAtMs: 100,
+        registerFee: '100000000',
+      },
+    ],
+    loading: false,
+    error: null,
+  });
   fetchCollectionByIdMock.mockResolvedValue(collection());
   buildRegisterMock.mockReturnValue({ tx: { __tx: true } });
   signAndExecuteMock.mockResolvedValue({ digest: '0xdigest' });
@@ -101,10 +125,37 @@ describe('RegisterIntegrationPage', () => {
     expect(screen.getByTestId(`collection-option-${COLL}`).textContent).toMatch(/Roadster collection/);
   });
 
-  it('plan-020 U4 — connected header "← Browse" link points at /browse', () => {
+  it('renders the leaderboard with a "Used by N" count and a /collection drill-in (R1/R4)', () => {
     renderPage();
-    const back = screen.getByText('← Browse') as HTMLAnchorElement;
-    expect(back.getAttribute('href')).toBe('/browse');
+    const row = screen.getByTestId(`leaderboard-row-${COLL}`);
+    expect(row.textContent).toMatch(/Used by 2/);
+    const link = row.querySelector('a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(`/collection/${COLL}`);
+  });
+
+  it('renders the leaderboard even when no wallet is connected (public discovery)', () => {
+    useCurrentAccountMock.mockReturnValue(null);
+    renderPage();
+    expect(screen.getByTestId(`leaderboard-row-${COLL}`)).toBeTruthy();
+    expect(screen.getByTestId('sign-in-button')).toBeTruthy();
+  });
+
+  it('shows a named empty state when there are no permissionless collections (R2)', () => {
+    useLeaderboardMock.mockReturnValue({ rows: [], loading: false, error: null });
+    renderPage();
+    expect(screen.getByTestId('leaderboard-empty')).toBeTruthy();
+  });
+
+  it('deep-link ?collection=<id> pre-targets the register form (R5)', async () => {
+    renderPage([`/integrate?collection=${COLL}`]);
+    await waitFor(() => expect(screen.getByTestId('integration-form')).toBeTruthy());
+    // The pre-targeted collection's fee is shown in the form.
+    expect(screen.getByTestId('register-button').textContent).toMatch(/0\.1 SUI/);
+  });
+
+  it('deep-link with an unknown collection id is a no-op (no form)', () => {
+    renderPage([`/integrate?collection=${RESTRICTED}`]);
+    expect(screen.queryByTestId('integration-form')).toBeNull();
   });
 
   it('rejects a non-https URL client-side and disables Register', () => {
