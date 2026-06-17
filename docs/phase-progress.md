@@ -18,8 +18,15 @@ Phase 5 — UX polish window.
   - **U6** copy sweep: `ActorCards.tsx` / `UsedBySection.tsx` / `CollectionDetailPage.tsx` — neutral "work" (not "game"); CollectionDetail CTA now deep-links `?collection=<id>`. (`gameDev` actor key kept — test-coupled designed taxonomy.)
 - **Verification**: backend 406 tests + frontend 1248 (+2 skipped) all green; tsc clean both packages. Browser-verified `/integrate` (agent-browser, pre-wallet): paper bg confirmed, 6 collections left-joined at count 0, nav `Integrate` active, neutral CTAs, register section gated behind real connect/sign-in. Screenshot `/tmp/integrate-page.png`.
 
+### Post-feature polish (same session, same branch — 15 commits total)
+- **ce-code-review (high) run on the diff** → 1 real bug fixed: deep-link `?collection=` effect was overriding manual picks (consume-once: apply param then clear it from URL); + regression test. Also: leaderboard states now key off the hook's own error (not the page's 2nd `useCollections` → divergence), and O(1) picker name lookup (`Map`, was `rows.find` O(n²)).
+- **Leaderboard ordering**: tie-break changed from collectionId → **base-model publish time desc** (count desc → latest-integration desc → publishTimeMs desc → id), so the all-zero demo state reads newest-first instead of id-random. +2 sort tests.
+- **Copy/naming polish** (user-driven): dropped " collection" suffix from leaderboard/picker names; dropped " variants" from `/launch` default collection name (future tokens are "pickup-truck #6" not "...variants #6" — existing on-chain names unchanged); disambiguate same-named collections by short id on the leaderboard.
+- **Card font unification** (D-044): card NAMES switched Newsreader serif → **Inter sans** (CollectionCard, Market, /launch, Browse integration view); card PRICE/fee switched Newsreader-italic-serif → **Mono**. Every preview card is now **Inter name + Mono data**, no stray serif. Browser-verified on /browse.
+- Full suites still green; tsc clean both packages.
+
 ### Next Concrete Step
-Suggest opening a PR for `feat/integration-ecosystem-leaderboard` → main (6 commits). Optional: run `/code-review` first. Post-wallet check (user's own Chrome): the `?collection=<id>` deep-link should pre-fill the register form with the picked collection — agent-browser can't drive the wallet-gated form.
+Open a PR for `feat/integration-ecosystem-leaderboard` → main (**15 commits**: leaderboard feature U1–U6 + code-review fixes + font/naming polish). Post-wallet checks for the user's own Chrome: (1) `?collection=<id>` deep-link pre-fills the register form; (2) manual pick after a deep-link sticks (the fixed bug); (3) optionally register an integration to see a non-zero "Used by N". **Deferred (user paused mid-task):** unifying Newsreader-serif text inside preview cards on OTHER pages (detail pages etc.) — only Browse/Market/launch cards done so far; the broader font sweep was not finished.
 
 ### Notes for Next Session
 - Leaderboard counts are eventually-consistent + reset on backend restart (in-memory indexer) — by design; deferred: indexer persistence, Browse/Market integration badges, per-token counts (plan Scope Boundaries).
