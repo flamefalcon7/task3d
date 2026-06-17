@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 
@@ -270,5 +270,42 @@ describe('CollectionCard', () => {
     const text = screen.getByTestId('collection-card-match-reason').textContent ?? '';
     expect(text).toContain('…');
     expect(text.length).toBeLessThan(longReason.length);
+  });
+
+  // ─── U4: lazy-mounted preview canvas ───
+  describe('lazy-mount (U4)', () => {
+    class MockIO {
+      static instances: MockIO[] = [];
+      cb: IntersectionObserverCallback;
+      observed = new Set<Element>();
+      constructor(cb: IntersectionObserverCallback) {
+        this.cb = cb;
+        MockIO.instances.push(this);
+      }
+      observe(el: Element) { this.observed.add(el); }
+      unobserve(el: Element) { this.observed.delete(el); }
+      disconnect() { this.observed.clear(); }
+      fire(isIntersecting: boolean) {
+        this.cb([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    const original = globalThis.IntersectionObserver;
+    beforeEach(() => {
+      MockIO.instances = [];
+      globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
+    });
+    afterEach(() => {
+      globalThis.IntersectionObserver = original;
+    });
+    const live = () => MockIO.instances[MockIO.instances.length - 1]!;
+
+    it('defers the PreviewCanvas until the card scrolls into view, then mounts it', () => {
+      renderCard({ collectionId: '0xlazy', variants: [makeModel({ patchId: 'p' })] });
+      // Off-screen: no WebGL canvas yet.
+      expect(screen.queryByTestId('preview-canvas-stub')).toBeNull();
+      act(() => live().fire(true));
+      // In view: the canvas mounts.
+      expect(screen.getByTestId('preview-canvas-stub')).toBeTruthy();
+    });
   });
 });

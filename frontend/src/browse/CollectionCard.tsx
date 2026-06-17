@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { modelDescription } from '@overflow2026/shared';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { LazyCanvasMount } from '../babylon/LazyCanvasMount';
 import { thumbSourceForSummary, previewStillUrlsForSummary } from '../walrus/aggregator';
 import { TurntablePreview } from '../ux/TurntablePreview';
 import { monoLabel, tokens, viewerWell } from '../ux/tokens';
@@ -194,17 +195,19 @@ export function CollectionCard({ collectionId, variants, match }: Props) {
           ArcRotateCamera attaches its own pointer controls, so dragging here
           rotates the model; a click does nothing (no detail-page jump). */}
       <div style={wellStyle} data-testid="collection-card-preview">
-        {/* One Babylon canvas per card. Browsers cap WebGL contexts at
-            ~8-16 per page — if the marketplace grows past ~6 cards, later
-            cards will render black. Tracked as a Phase 5 follow-up
-            (IntersectionObserver lazy-mount, or shared-engine thumbnails).
-            plan-026 — encrypted ALLOW_LIST bases render the public still
-            instead (no GLB mesh exists publicly). */}
+        {/* One Babylon canvas per card. Browsers cap WebGL contexts at ~8-16
+            per page, so the canvas is lazy-mounted (plan 2026-06-17-001 U4):
+            LazyCanvasMount only renders PreviewCanvas while the card is in view
+            and unmounts it (engine.dispose()) when it scrolls away, bounding
+            concurrent contexts. plan-026 — encrypted ALLOW_LIST bases render the
+            public still instead (no GLB mesh exists publicly). */}
         {thumb.kind === 'glb' ? (
           // Default the well to GRAY (not D-044 black): mid-gray reads better for
           // the mixed-tone PBR meshes in the catalog grid. Still toggleable via
           // the BG pill (BLACK / PAPER / GRAY).
-          <PreviewCanvas glbUrl={thumb.url} defaultBg="gray" />
+          <LazyCanvasMount testId="collection-card-lazy">
+            <PreviewCanvas glbUrl={thumb.url} defaultBg="gray" />
+          </LazyCanvasMount>
         ) : thumb.url ? (
           <TurntablePreview
             urls={previewStillUrlsForSummary(first)}

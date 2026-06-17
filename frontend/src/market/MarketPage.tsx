@@ -23,6 +23,7 @@ import {
 } from '../sui/kioskTxBuilders';
 import { TESTNET } from '../sui/networkConfig';
 import { PreviewCanvas } from '../babylon/PreviewCanvas';
+import { LazyCanvasMount } from '../babylon/LazyCanvasMount';
 import { glbUrlForToken } from '../walrus/aggregator';
 import {
   buttonOutline,
@@ -501,7 +502,11 @@ export function MarketPage() {
                 const well = (
                   <div style={cardWell} data-testid={`listing-preview-${l.tokenId}`}>
                     {l.patchId ? (
-                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
+                      // Lazy-mount the WebGL canvas (plan 2026-06-17-001 U4) so a
+                      // long For-sale grid doesn't blow the WebGL-context cap.
+                      <LazyCanvasMount testId={`listing-lazy-${l.tokenId}`}>
+                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: l.patchId, blobId: '' })} />
+                      </LazyCanvasMount>
                     ) : (
                       <span style={cardWellPlaceholder}>— NO PREVIEW</span>
                     )}
@@ -573,7 +578,9 @@ export function MarketPage() {
                 const well = (
                   <div style={cardWell} data-testid={`owned-preview-${t.tokenId}`}>
                     {t.patchId || t.blobId ? (
-                      <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                      <LazyCanvasMount testId={`owned-lazy-${t.tokenId}`}>
+                        <PreviewCanvas glbUrl={glbUrlForToken({ patchId: t.patchId, blobId: t.blobId })} />
+                      </LazyCanvasMount>
                     ) : (
                       <span style={cardWellPlaceholder}>— NO PREVIEW</span>
                     )}

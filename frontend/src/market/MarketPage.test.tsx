@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TESTNET } from '../sui/networkConfig';
 
@@ -323,5 +323,48 @@ describe('MarketPage', () => {
     const fresh = screen.getByTestId(`listing-${TOKEN2}`);
     const indexed = screen.getByTestId(`listing-${TOKEN}`);
     expect(precedesEl(fresh, indexed)).toBe(true);
+  });
+
+  // ─── U4: lazy-mounted preview canvas in the For-sale well ───
+  describe('lazy-mount (U4)', () => {
+    class MockIO {
+      static instances: MockIO[] = [];
+      cb: IntersectionObserverCallback;
+      observed = new Set<Element>();
+      constructor(cb: IntersectionObserverCallback) {
+        this.cb = cb;
+        MockIO.instances.push(this);
+      }
+      observe(el: Element) { this.observed.add(el); }
+      unobserve(el: Element) { this.observed.delete(el); }
+      disconnect() { this.observed.clear(); }
+      fire(isIntersecting: boolean) {
+        this.cb([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    const original = globalThis.IntersectionObserver;
+    beforeEach(() => {
+      MockIO.instances = [];
+      globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
+    });
+    afterEach(() => {
+      globalThis.IntersectionObserver = original;
+    });
+
+    it('defers the listing PreviewCanvas until its card scrolls into view', () => {
+      useListingsMock.mockReturnValue({
+        listings: [listing({ tokenId: TOKEN, patchId: 'pA', listedAtMs: 1000 })],
+        loading: false,
+        error: null,
+      });
+      renderPage();
+      // Off-screen: no WebGL canvas mounted yet.
+      expect(screen.queryByTestId('preview-canvas-mock')).toBeNull();
+      // Fire intersection on the listing well's observer.
+      act(() => {
+        for (const io of MockIO.instances) io.fire(true);
+      });
+      expect(screen.getByTestId('preview-canvas-mock')).toBeTruthy();
+    });
   });
 });
