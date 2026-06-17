@@ -547,4 +547,69 @@ describe('BrowsePage', () => {
     expect(screen.getByTestId('model-grid')).toBeTruthy();
     expect(screen.queryByTestId('collection-card-match-reason')).toBeNull();
   });
+
+  // ─── U2: newest-first default order ───
+
+  it('U2: default grid orders collections newest-first by created_at_ms', () => {
+    // Input order is deliberately NOT chronological; the grid must reorder.
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xa', collectionId: '0xc-a', createdAtMs: '1000' }),
+        makeModel({ objectId: '0xb', collectionId: '0xc-b', createdAtMs: '3000' }),
+        makeModel({ objectId: '0xc', collectionId: '0xc-c', createdAtMs: '2000' }),
+      ],
+    });
+    renderPage();
+    const b = screen.getByTestId('collection-card-0xc-b'); // newest
+    const c = screen.getByTestId('collection-card-0xc-c');
+    const a = screen.getByTestId('collection-card-0xc-a'); // oldest
+    expect(precedes(b, c)).toBe(true);
+    expect(precedes(c, a)).toBe(true);
+  });
+
+  it('U2: a collection is positioned by its newest variant', () => {
+    // Two collections, variants interleaved in time. Collection X owns the
+    // single newest variant (4000) so it must lead, even though collection Y
+    // has a variant (3000) newer than X's other variant (1000).
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xy1', collectionId: '0xc-y', patchId: 'p1', createdAtMs: '2000' }),
+        makeModel({ objectId: '0xx1', collectionId: '0xc-x', patchId: 'p1', createdAtMs: '1000' }),
+        makeModel({ objectId: '0xy2', collectionId: '0xc-y', patchId: 'p2', createdAtMs: '3000' }),
+        makeModel({ objectId: '0xx2', collectionId: '0xc-x', patchId: 'p2', createdAtMs: '4000' }),
+      ],
+    });
+    renderPage();
+    const x = screen.getByTestId('collection-card-0xc-x');
+    const y = screen.getByTestId('collection-card-0xc-y');
+    expect(precedes(x, y)).toBe(true);
+  });
+
+  it('U2: a model with missing created_at_ms sinks to the bottom', () => {
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xz', collectionId: '0xc-z', createdAtMs: '0' }),
+        makeModel({ objectId: '0xn', collectionId: '0xc-n', createdAtMs: '5000' }),
+      ],
+    });
+    renderPage();
+    const n = screen.getByTestId('collection-card-0xc-n');
+    const z = screen.getByTestId('collection-card-0xc-z');
+    expect(precedes(n, z)).toBe(true);
+  });
+
+  it('U2/R2: search ranking still wins over newest-first (an older match promotes ahead of a newer non-match)', () => {
+    memoryRecallState.global = lane([hit('0xold', 0.2, 'a fast race car')]);
+    mockHook({
+      models: [
+        makeModel({ objectId: '0xold', collectionId: '0xc-old', createdAtMs: '1000' }),
+        makeModel({ objectId: '0xnew', collectionId: '0xc-new', createdAtMs: '9000' }),
+      ],
+    });
+    renderPage();
+    fireEvent.change(screen.getByTestId('browse-search-input'), { target: { value: 'race car' } });
+    const matched = screen.getByTestId('collection-card-0xc-old'); // older, but matched
+    const other = screen.getByTestId('collection-card-0xc-new'); // newer, not matched
+    expect(precedes(matched, other)).toBe(true);
+  });
 });

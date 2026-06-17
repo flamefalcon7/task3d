@@ -251,20 +251,34 @@ export function BrowsePage() {
     [collections],
   );
 
+  // plan 2026-06-17-001 U2 — default order is newest-first. Sort the flat list
+  // desc by created_at_ms BEFORE grouping: groupByCollection preserves
+  // insertion order, so each collection lands at the position of its newest
+  // variant and its variants[0] (the card's representative) is the newest one.
+  // created_at_ms is a u64-as-string; demo-era ms values are < 2^53 so Number()
+  // compares exactly. Missing ('0') sinks to the bottom. This only feeds the
+  // !searchActive grid path — the searchActive rankCollectionMatches order is
+  // untouched (R2). Sorting in this derivation (not the hook's cache) needs no
+  // cache bump.
+  const sortedModels = useMemo(
+    () => [...models].sort((a, b) => Number(b.createdAtMs) - Number(a.createdAtMs)),
+    [models],
+  );
+
   // Distinct tags across the loaded set — Phase 2 catalog is small enough
   // that client-side derivation is fine (plan §U8 "Tag filter").
   const allTags = useMemo(() => {
     const s = new Set<string>();
-    for (const m of models) for (const t of m.tags) s.add(t);
+    for (const m of sortedModels) for (const t of m.tags) s.add(t);
     // When a tag filter is active we still want to expose the full set so
     // users can clear/switch — recompute by ignoring the filter would
     // require a second pass; for the demo catalog size this is acceptable.
     return Array.from(s).sort();
-  }, [models]);
+  }, [sortedModels]);
 
   // Phase 3 (U5): group by collectionId so the Browse grid shows collection
-  // cards, not individual variants.
-  const collectionGroups = useMemo(() => groupByCollection(models), [models]);
+  // cards, not individual variants. Fed the newest-first sortedModels (U2).
+  const collectionGroups = useMemo(() => groupByCollection(sortedModels), [sortedModels]);
 
   // plan 2026-06-08-002 U3 — natural-language semantic search. ALL hooks below
   // run unconditionally (no early return precedes them) so an in-page sign-in
