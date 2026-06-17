@@ -221,7 +221,9 @@ const integrationCell: CSSProperties = {
 
 const integrationName: CSSProperties = {
   fontFamily: tokens.font.display,
-  fontStyle: 'italic',
+  // upright (not italic) collection name — consistent with the upright names on
+  // Browse / Market / launch cards (plan 2026-06-17-001).
+  fontStyle: 'normal',
   fontSize: tokens.size.md,
   fontWeight: tokens.weight.medium,
 };
