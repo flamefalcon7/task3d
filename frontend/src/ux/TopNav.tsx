@@ -22,7 +22,7 @@ const brandStyle: CSSProperties = {
   gap: 8,
   fontFamily: tokens.font.display,
   fontStyle: 'italic',
-  fontSize: tokens.size.md,
+  fontSize: 20,
   fontWeight: tokens.weight.medium,
   letterSpacing: '-0.5px',
   color: tokens.color.ink,
@@ -38,7 +38,7 @@ const navLinksContainer: CSSProperties = {
 function navLinkStyle(active: boolean): CSSProperties {
   return {
     fontFamily: tokens.font.body,
-    fontSize: tokens.size.sm,
+    fontSize: 15,
     color: tokens.color.ink,
     textDecoration: 'none',
     paddingBottom: 2,
@@ -54,14 +54,14 @@ const rightCluster: CSSProperties = {
 
 const walletPill: CSSProperties = {
   fontFamily: tokens.font.mono,
-  fontSize: 11,
+  fontSize: 13,
   color: tokens.color.ink,
   letterSpacing: '0.5px',
 };
 
 const networkBadge: CSSProperties = {
   fontFamily: tokens.font.mono,
-  fontSize: 10,
+  fontSize: 11,
   letterSpacing: '1.5px',
   textTransform: 'uppercase',
   color: tokens.color.accent,
@@ -71,7 +71,7 @@ const networkBadge: CSSProperties = {
 
 const disconnectButton: CSSProperties = {
   fontFamily: tokens.font.mono,
-  fontSize: 10,
+  fontSize: 11,
   letterSpacing: '1px',
   textTransform: 'uppercase',
   color: tokens.color.muted,
@@ -117,8 +117,8 @@ export function TopNav() {
         <img
           src="/mark/tusk-facet.svg"
           alt=""
-          width={20}
-          height={20}
+          width={24}
+          height={24}
           style={{ display: 'block' }}
           data-testid="brand-mark-symbol"
           onError={(e) => {

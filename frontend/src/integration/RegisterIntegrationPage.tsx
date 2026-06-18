@@ -45,7 +45,6 @@ import {
   input as inputStyle,
   buttonPrimary,
   buttonOutline,
-  eyebrow,
   displayHeadline,
   monoLabel,
 } from '../ux/tokens';
@@ -143,7 +142,6 @@ export function RegisterIntegrationPage() {
     <div data-testid="integrate-page" style={pagePaper}>
       <main style={mainStyle}>
         <section style={{ marginBottom: tokens.space[8] }}>
-          <span style={eyebrow}>— INTEGRATE / ECOSYSTEM</span>
           <h1 style={{ ...displayHeadline, marginTop: tokens.space[2] }}>Integration ecosystem</h1>
           <p style={subtitleStyle}>
             Collections ranked by how many works — games, videos, apps — have integrated them.
