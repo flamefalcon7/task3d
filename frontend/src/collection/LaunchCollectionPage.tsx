@@ -32,6 +32,7 @@ import { useModelIndex } from '../browse/useModelIndex';
 import { useMemoryRecall } from '../memory/useMemoryRecall';
 import { rankForkableMatches, type BaseMatch } from './baseSearchRanking';
 import { QUILT_SIZE, useWalrusUpload } from '../walrus/useWalrusUpload';
+import { retryAsync, isRetryableUploadError } from '../walrus/retryAsync';
 import { BatchProgressPanel } from './BatchProgressPanel';
 import { MemoryPressureBanner } from './MemoryPressureBanner';
 import {
@@ -88,6 +89,20 @@ import { IndeterminateBar } from '../ux/IndeterminateBar';
 import { useElapsedSeconds } from '../ux/useElapsedSeconds';
 
 const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
+
+// Thrown when the aggregator returns a non-2xx for the base GLB read. `transient`
+// marks the statuses worth retrying: a fresh-mint propagation 404, plus the
+// aggregator's occasional 408/429/5xx. The final message keeps the original
+// "Walrus aggregator <status> for the base GLB" wording so the error surface is
+// unchanged once retries are spent.
+class AggregatorReadError extends Error {
+  readonly transient: boolean;
+  constructor(readonly status: number) {
+    super(`Walrus aggregator ${status} for the base GLB`);
+    this.name = 'AggregatorReadError';
+    this.transient = status === 404 || status === 408 || status === 429 || status >= 500;
+  }
+}
 
 type Phase =
   | 'picking'
@@ -690,9 +705,32 @@ export function LaunchCollectionPage() {
     // the Walrus aggregator before the editor opens).
     setPhase('downloading-base');
     try {
-      const res = await fetch(`${WALRUS_AGGREGATOR}/v1/blobs/${model.glbBlobId}`);
-      if (!res.ok) throw new Error(`Walrus aggregator ${res.status} for the base GLB`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      // A freshly-minted base can 404 on the aggregator for a short propagation
+      // window after certify — the slivers are still distributing across storage
+      // nodes, so the aggregator can't reconstruct the blob yet (confirmed
+      // 2026-06-18: two just-minted public bases 404'd at fork time, then served
+      // 200 minutes later, unchanged on-chain). The testnet aggregator also
+      // occasionally 5xx/times-out. A single fetch turned that transient window
+      // into a permanent dead-end "FAILED"; retry with backoff so the fork
+      // self-heals once the base propagates (~5 × 2s ≈ 10s of cover). The base
+      // GLB read is idempotent, so repeating it is safe. A genuinely-missing
+      // blob still surfaces the same error after the attempts are spent.
+      const bytes = await retryAsync(
+        async () => {
+          const res = await fetch(`${WALRUS_AGGREGATOR}/v1/blobs/${model.glbBlobId}`);
+          if (!res.ok) throw new AggregatorReadError(res.status);
+          return new Uint8Array(await res.arrayBuffer());
+        },
+        {
+          attempts: 5,
+          backoffMs: 2000,
+          // Retry the propagation 404 + transient aggregator statuses, plus the
+          // network/timeout failures retryAsync already classifies.
+          shouldRetry: (err) =>
+            (err instanceof AggregatorReadError && err.transient) ||
+            isRetryableUploadError(err),
+        },
+      );
       setBaseGlb(bytes);
       if (!collectionName) setCollectionName(model.name);
       setPhase('editing-variants');

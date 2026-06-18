@@ -553,6 +553,26 @@ describe('LaunchCollectionPage', () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/v1/blobs/glb-base-1'));
   });
 
+  it('rides out a fresh-mint propagation 404: retries the aggregator read and reaches authoring', async () => {
+    // A just-certified base 404s on the aggregator until its slivers propagate.
+    // The first read fails, the retry (backoff) succeeds → the fork self-heals
+    // into the authoring step instead of dead-ending on phase='error'.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('base-option-0xbase1'));
+    });
+    // The retry fires after the 2000ms backoff — wait for the second read.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    // Self-heal: the second (200) read lands us in authoring, NOT the error banner.
+    await waitFor(() => expect(screen.queryByTestId('launch-error')).toBeNull());
+    expect(screen.getByTestId('authoring')).toBeTruthy();
+  });
+
   it('launch passes the base model derive fee + quilt blob + N token names to the batch builder', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/v1/blobs/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
