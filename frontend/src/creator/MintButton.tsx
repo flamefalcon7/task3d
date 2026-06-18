@@ -72,12 +72,16 @@ export function MintButton({
   }
 
   const busy = status === 'uploading' || status === 'signing';
+  // A completed publish is terminal: keep the button non-interactive so a stray
+  // click on "Minted" can't re-fire the mint. The explorer link below is the
+  // post-success action; loading a new model resets status back to 'idle'.
+  const done = status === 'success';
 
   return (
     <div>
       <button
         onClick={onClick}
-        disabled={disabled || busy}
+        disabled={disabled || busy || done}
         data-testid="mint-button"
         style={buttonPrimary}
       >

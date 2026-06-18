@@ -842,6 +842,13 @@ export function CreateModelPage() {
     // the previous GLB, since part counts and node order can both change.
     setPartLabels([]);
     setTagged(false);
+    // A new model invalidates any prior publish: reset the mint lifecycle so the
+    // button reads "Mint" again instead of a stale "Minted"/"Failed". Without
+    // this, uploading a second model after a successful mint left the button on
+    // the success label (clickable → would re-publish the new model unguarded).
+    setMintStatus('idle');
+    setMintError(null);
+    setTxDigest(null);
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'model/gltf-binary' }));
     setGlbUrl(url);
   }, []);

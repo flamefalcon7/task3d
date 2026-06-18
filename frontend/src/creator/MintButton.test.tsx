@@ -94,6 +94,21 @@ describe('MintButton', () => {
     expect(screen.getByTestId('mint-button').textContent).toMatch(/Minted/);
   });
 
+  it('disables the button in the success ("Minted") state so it cannot re-fire', () => {
+    const onClick = vi.fn();
+    render(
+      <MintButton
+        status="success"
+        onClick={onClick}
+        explorerUrl="https://suiscan.xyz/testnet/tx/0xabc"
+      />,
+    );
+    const btn = screen.getByTestId('mint-button') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('renders error message in error status', () => {
     render(
       <MintButton
