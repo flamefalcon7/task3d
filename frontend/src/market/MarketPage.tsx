@@ -29,7 +29,6 @@ import {
   buttonOutline,
   buttonPrimary,
   displayHeadline,
-  eyebrow,
   input as inputStyle,
   monoLabel,
   pagePaper,
@@ -353,7 +352,12 @@ export function MarketPage() {
     if (confirmedToken && !owned.some((t) => t.tokenId === confirmedToken.tokenId)) {
       owned.push(confirmedToken);
     }
-    return owned;
+    // Newest-acquired first (mirrors visibleListings' newest-listed ordering).
+    // acquiredAtMs is the token's last-tx checkpoint time; the just-bought
+    // confirmedToken has none → treated as newest so it leads while the GraphQL
+    // indexer catches up, rather than sinking under already-held tokens.
+    const at = (t: OwnedToken) => t.acquiredAtMs ?? Number.POSITIVE_INFINITY;
+    return owned.sort((a, b) => at(b) - at(a));
   }, [ownedTokens, listedIds, confirmedToken]);
 
   const onList = useCallback(
@@ -453,7 +457,6 @@ export function MarketPage() {
       <div data-testid="market-page" style={pagePaper}>
         <main style={mainStyle}>
           <div style={headerStack}>
-            <span style={eyebrow}>— L2 / MARKET</span>
             <h1 style={displayHeadline}>The marketplace.</h1>
             <p style={{ ...monoLabel, color: tokens.color.muted, textTransform: 'none', letterSpacing: '0.5px' }}>
               Connect a wallet to buy and sell NFTs.
@@ -469,7 +472,6 @@ export function MarketPage() {
     <div data-testid="market-page" style={pagePaper}>
       <main style={mainStyle}>
         <div style={headerStack}>
-          <span style={eyebrow}>— L2 / MARKET</span>
           <h1 style={displayHeadline}>The marketplace.</h1>
         </div>
 

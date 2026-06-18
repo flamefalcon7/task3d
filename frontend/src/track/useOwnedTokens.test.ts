@@ -81,6 +81,33 @@ describe('useOwnedTokens', () => {
     expect(result.current.tokens[0]!.patchId).toMatch(/^patch-/);
   });
 
+  it('parses previousTransaction.timestamp → acquiredAtMs (epoch ms)', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      objectsResponse([
+        {
+          ...tokenNode('0xa'),
+          previousTransaction: { effects: { timestamp: '2026-06-17T00:56:28.079Z' } },
+        },
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useOwnedTokens('0xWALLET'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.tokens[0]!.acquiredAtMs).toBe(
+      Date.parse('2026-06-17T00:56:28.079Z'),
+    );
+  });
+
+  it('collapses a missing/unparseable timestamp to acquiredAtMs=0', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(objectsResponse([tokenNode('0xa')]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useOwnedTokens('0xWALLET'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.tokens[0]!.acquiredAtMs).toBe(0);
+  });
+
   it('filters the owned-objects query by the live package NftToken type', async () => {
     const fetchMock = vi.fn().mockResolvedValue(objectsResponse([]));
     vi.stubGlobal('fetch', fetchMock);

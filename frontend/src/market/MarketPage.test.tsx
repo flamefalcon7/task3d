@@ -341,6 +341,52 @@ describe('MarketPage', () => {
     expect(screen.getByTestId(`listing-${TOKEN2}`)).toBeTruthy();
   });
 
+  // ─── Your NFTs: newest-acquired-first ordering ───
+
+  const OWNED2 = '0x' + '6'.repeat(64);
+  const OWNED3 = '0x' + '7'.repeat(64);
+  const ownedTok = (tokenId: string, acquiredAtMs?: number) => ({
+    tokenId,
+    name: `Tok ${tokenId.slice(0, 4)}`,
+    patchId: 'p',
+    collectionId: '0xc',
+    baseModelId: '0xb',
+    blobId: '',
+    acquiredAtMs,
+  });
+
+  it('orders Your NFTs newest-acquired first by acquiredAtMs', () => {
+    useListingsMock.mockReturnValue({ listings: [], loading: false, error: null });
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [
+        ownedTok(OWNED, 1000),
+        ownedTok(OWNED2, 3000),
+        ownedTok(OWNED3, 2000),
+      ],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    const newest = screen.getByTestId(`owned-${OWNED2}`);
+    const mid = screen.getByTestId(`owned-${OWNED3}`);
+    const oldest = screen.getByTestId(`owned-${OWNED}`);
+    expect(precedesEl(newest, mid)).toBe(true);
+    expect(precedesEl(mid, oldest)).toBe(true);
+  });
+
+  it('a token with no acquiredAtMs (just-bought / unindexed) leads Your NFTs', () => {
+    useListingsMock.mockReturnValue({ listings: [], loading: false, error: null });
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [ownedTok(OWNED, 5000), ownedTok(OWNED2, undefined)],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    const fresh = screen.getByTestId(`owned-${OWNED2}`);
+    const indexed = screen.getByTestId(`owned-${OWNED}`);
+    expect(precedesEl(fresh, indexed)).toBe(true);
+  });
+
   // ─── U4: lazy-mounted preview canvas in the For-sale well ───
   describe('lazy-mount (U4)', () => {
     class MockIO {
