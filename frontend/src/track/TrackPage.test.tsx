@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import {
+  BOUND_COLLECTION_ID,
+  DEFAULT_CAR_TOKEN_ID,
+} from './rageRacing/brand';
 
 // Phase 3 U6 + Plan-004 U4 + U11 — TrackPage shell tests. Mock everything
 // Babylon-shaped so the tests stay in jsdom: useOwnedTokens/useTokenById return
@@ -48,13 +52,17 @@ function token(
     patchId: string;
     blobId: string;
     name: string;
+    collectionId: string;
   }> = {},
 ) {
   return {
     tokenId: overrides.tokenId ?? overrides.objectId ?? '0xv1',
     name: overrides.name ?? 'My Car',
     patchId: overrides.patchId ?? 'patch-1',
-    collectionId: '0xcoll',
+    // Plan-2026-06-18-002 U3 — owned tokens are now filtered to the bound
+    // collection, so the factory default must match it or the car would be
+    // filtered out of the carousel.
+    collectionId: overrides.collectionId ?? BOUND_COLLECTION_ID,
     baseModelId: '0xbase',
     blobId: overrides.blobId ?? '',
   };
@@ -66,6 +74,13 @@ function renderPage(path = '/track') {
       <TrackPage />
     </MemoryRouter>,
   );
+}
+
+// Plan-2026-06-18-002 — selecting the NFT car: with the default car always at
+// index 0, the first owned NFT is tile-1. Helper centralizes that offset so the
+// tests read intent ("drive the NFT") not arithmetic.
+function selectFirstNft() {
+  fireEvent.click(screen.getByTestId('carousel-tile-1'));
 }
 
 beforeEach(() => {
@@ -144,7 +159,8 @@ function installLiveScene() {
 }
 
 describe('TrackPage', () => {
-  it('shows sign-in prompt when no wallet is connected', () => {
+  // Plan-2026-06-18-002 U4 — free-to-play flip: no wallet no longer dead-ends.
+  it('no wallet: drives the default car + shows connect & buy-collection CTAs (no sign-in gate)', () => {
     useCurrentAccountMock.mockReturnValue(null);
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
@@ -152,30 +168,62 @@ describe('TrackPage', () => {
       error: null,
     });
     renderPage();
-    expect(screen.getByTestId('track-needs-signin')).toBeTruthy();
+    // The game renders (default car), NOT the old own-or-die sign-in dead-end.
+    expect(screen.queryByTestId('track-needs-signin')).toBeNull();
+    expect(screen.getByTestId('track-page')).toBeTruthy();
+    expect(screen.getByTestId('track-canvas')).toBeTruthy();
+    // Connect affordance + buy-collection CTA both present for the no-wallet visitor.
+    expect(screen.getByTestId('track-connect')).toBeTruthy();
+    expect(screen.getByTestId('track-buy-cta')).toBeTruthy();
   });
 
-  it('AE3 — empty state: Rage Racing voice, inward routes never the primary CTA', () => {
+  // Plan-2026-06-18-002 U4/R5 — connected but owns no bound-collection NFT.
+  it('connected non-owner: default car playable + buy-collection CTA to the collection page', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
       loading: false,
       error: null,
     });
     const { container } = renderPage();
-    expect(screen.getByTestId('track-empty')).toBeTruthy();
-    // R8 — the old "back to the app" /browse link is gone, and no /browse or
-    // /launch nav-dump appears. The ONLY inward affordance is a single
-    // SECONDARY "get a car" pointer to the marketplace (a third-party game
-    // pointing at its asset source) — never the primary CTA (the headline).
-    expect(screen.queryByTestId('track-empty-browse')).toBeNull();
+    expect(screen.queryByTestId('track-empty')).toBeNull();
+    expect(screen.getByTestId('track-page')).toBeTruthy();
+    const cta = screen.getByTestId('track-buy-cta');
+    expect(cta.getAttribute('href')).toBe(`/collection/${BOUND_COLLECTION_ID}`);
+    // No /browse or /launch nav-dump; the only inward route is the collection CTA.
     const hrefs = Array.from(container.querySelectorAll('a')).map((a) =>
       a.getAttribute('href'),
     );
     expect(hrefs).not.toContain('/browse');
     expect(hrefs).not.toContain('/launch');
-    expect(hrefs.filter((h) => h === '/market')).toHaveLength(1);
-    // The primary CTA (headline) is text, not a link.
-    expect(screen.getByText('Your garage is empty.').closest('a')).toBeNull();
+  });
+
+  // Plan-2026-06-18-002 U3 — owning a bound-collection NFT adds it to the picker.
+  it('owner: NFT car appears as a tile and the buy CTA is gone', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xnft', name: 'My NFT Car' })],
+      loading: false,
+      error: null,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    renderPage();
+    // [default, NFT] → default at 0, NFT at 1.
+    expect(screen.getByTestId('carousel-tile-0')).toBeTruthy();
+    expect(screen.getByTestId('carousel-tile-1')).toBeTruthy();
+    expect(screen.queryByTestId('track-buy-cta')).toBeNull();
+  });
+
+  // Plan-2026-06-18-002 U3/R3 — tokens from other collections are filtered out.
+  it('filters out NFTs that are not from the bound collection', () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xother', collectionId: '0xsomeothercoll' })],
+      loading: false,
+      error: null,
+    });
+    renderPage();
+    // Only the default car remains → no NFT tile, and the buy CTA shows.
+    expect(screen.getByTestId('carousel-tile-0')).toBeTruthy();
+    expect(screen.queryByTestId('carousel-tile-1')).toBeNull();
+    expect(screen.getByTestId('track-buy-cta')).toBeTruthy();
   });
 
   it('AE1 — renders the Rage Racing wordmark, not the Tusk3D track header', () => {
@@ -190,7 +238,7 @@ describe('TrackPage', () => {
     expect(screen.queryByText(/L3 \/ DRIVE/)).toBeNull();
   });
 
-  it('AE2 — shows a Sui + Walrus provenance caption for the selected car', () => {
+  it('AE2 — shows a Sui + Walrus provenance caption for a selected NFT car', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [token({ objectId: '0xa', blobId: 'blob-abcdef123456' })],
       loading: false,
@@ -198,12 +246,23 @@ describe('TrackPage', () => {
     });
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
     renderPage();
+    // Default car is selected first; switch to the NFT to see its proof line.
+    selectFirstNft();
     const prov = screen.getByTestId('track-provenance');
     expect(prov.textContent).toMatch(/Sui \+ Walrus/);
     // Assert the REAL truncated ids render (not just the static label) — this
     // fails if truncateId regresses or the template stops interpolating.
     expect(prov.textContent).toMatch(/blob blob-a…3456/); // truncateId('blob-abcdef123456')
-    expect(prov.textContent).toMatch(/collection 0xcoll/); // factory default collectionId
+    expect(prov.textContent).toMatch(/collection 0xa194…1242/); // truncateId(BOUND_COLLECTION_ID)
+  });
+
+  // Plan-2026-06-18-002 U4/R6 — the default car shows an identity-only caption.
+  it('default car: provenance caption is identity-only, no fabricated ids', () => {
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    renderPage();
+    const prov = screen.getByTestId('track-provenance');
+    expect(prov.textContent).toMatch(/Default car · not an NFT/);
+    expect(prov.textContent).not.toMatch(/Sui \+ Walrus/);
   });
 
   it('renders the carousel + canvas when variants exist', () => {
@@ -235,26 +294,45 @@ describe('TrackPage', () => {
     expect(await screen.findByTestId('track-scene-loading')).toBeTruthy();
   });
 
-  it('shows the variants-loading state', () => {
+  // Plan-2026-06-18-002 U4/R4 — owned-tokens loading must NOT block the default car.
+  it('owned-tokens loading: default car still playable, no full-page loading gate', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
       loading: true,
       error: null,
     });
     renderPage();
-    expect(screen.getByTestId('track-loading-variants')).toBeTruthy();
+    expect(screen.queryByTestId('track-loading-variants')).toBeNull();
+    expect(screen.getByTestId('track-page')).toBeTruthy();
+    expect(screen.getByTestId('track-canvas')).toBeTruthy();
+    // CTA is suppressed while the connected wallet's query is in flight (no flicker).
+    expect(screen.queryByTestId('track-buy-cta')).toBeNull();
   });
 
-  it('shows the variants-error state', () => {
+  // Plan-2026-06-18-002 U4/R4 — a failed owned-tokens read degrades, never blocks.
+  it('owned-tokens error: default car still playable, no full-page error gate', () => {
     useOwnedTokensMock.mockReturnValue({
       tokens: [],
       loading: false,
       error: new Error('boom'),
     });
     renderPage();
-    expect(screen.getByTestId('track-variants-error').textContent).toMatch(
-      /boom/,
-    );
+    expect(screen.queryByTestId('track-variants-error')).toBeNull();
+    expect(screen.getByTestId('track-page')).toBeTruthy();
+    expect(screen.getByTestId('track-canvas')).toBeTruthy();
+  });
+
+  // Plan-2026-06-18-002 U3 — the default car never triggers a Walrus fetch.
+  it('default car build skips the Walrus fetch entirely', async () => {
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    const fetchMock = vi.fn(() => new Promise(() => undefined));
+    vi.stubGlobal('fetch', fetchMock);
+    const { captured } = installLiveScene();
+    // installLiveScene re-stubs fetch; re-assert after it to capture our spy.
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('clicking a carousel tile updates the selected index', () => {
@@ -296,12 +374,12 @@ describe('TrackPage', () => {
 
   it('U4 — HUD pulls existing PB from localStorage on car-load', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [token({ objectId: '0xa' })],
+      tokens: [],
       loading: false,
       error: null,
     });
-    // Pre-seed a stored PB for this car.
-    localStorage.setItem('track-pb:0xa', '24310');
+    // Pre-seed a stored PB for the (default) car that loads first.
+    localStorage.setItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`, '24310');
     installLiveScene();
     renderPage();
     const hudBest = await screen.findByTestId('track-hud-best');
@@ -310,7 +388,7 @@ describe('TrackPage', () => {
 
   it('U4 — finishing a lap renders the ResultOverlay with the lap time', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [token({ objectId: '0xa' })],
+      tokens: [],
       loading: false,
       error: null,
     });
@@ -333,8 +411,8 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-result-time').textContent).toMatch(/24\.31s/);
     // New PB on the first lap.
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
-    // PB written to storage.
-    expect(localStorage.getItem('track-pb:0xa')).toBe('24310');
+    // PB written to storage under the default car's key.
+    expect(localStorage.getItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`)).toBe('24310');
   });
 
   it('U4/AE5 — Retry button calls scene.reset() and clears the overlay', async () => {
@@ -465,11 +543,11 @@ describe('TrackPage', () => {
 
   it('U4 — improving on a stored PB writes the new value to localStorage', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [token({ objectId: '0xa' })],
+      tokens: [],
       loading: false,
       error: null,
     });
-    localStorage.setItem('track-pb:0xa', '25100');
+    localStorage.setItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`, '25100');
     const { captured } = installLiveScene();
     renderPage();
     await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
@@ -485,29 +563,25 @@ describe('TrackPage', () => {
     });
     await screen.findByTestId('track-result-overlay');
     // Improved from 25100 → 23420, so storage updates.
-    expect(localStorage.getItem('track-pb:0xa')).toBe('23420');
+    expect(localStorage.getItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`)).toBe('23420');
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/NEW PB/);
   });
 
   // ─── U5: carousel switching teardown (per-car PB isolation, R14/AE6) ───
 
-  it('U5/AE6 — switching to another car clears the overlay and reloads its PB', async () => {
+  it('U5/AE6 — switching from default car to the NFT clears the overlay and reloads its PB', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [
-        token({ objectId: '0xA', name: 'Red' }),
-        token({ objectId: '0xB', name: 'Blue' }),
-      ],
+      tokens: [token({ objectId: '0xA', name: 'Red' })],
       loading: false,
       error: null,
     });
-    // Car A starts with no PB; car B has a stored PB.
-    localStorage.setItem('track-pb:0xB', '22500');
+    // The NFT car has a stored PB; the default car starts fresh.
+    localStorage.setItem('track-pb:0xA', '22500');
     const { captured } = installLiveScene();
     renderPage();
     await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
 
-    // Drive a lap on car A so the result modal is on screen with car A's
-    // freshly-written PB.
+    // Drive a lap on the DEFAULT car (selected first) → result modal + PB.
     act(() => {
       captured.onLapStateChange!({
         status: 'finished',
@@ -520,23 +594,20 @@ describe('TrackPage', () => {
     });
     expect(screen.queryByTestId('track-result-overlay')).toBeTruthy();
     expect(screen.getByTestId('track-hud-best').textContent).toMatch(/24\.00s/);
-    expect(localStorage.getItem('track-pb:0xA')).toBe('24000');
+    expect(localStorage.getItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`)).toBe('24000');
 
-    // Switch to car B via the carousel. The selected-effect must reset lap
+    // Switch to the NFT car (tile-1). The selected-effect must reset lap
     // state, clear lastResult, and re-read PB for the new car.
-    fireEvent.click(screen.getByTestId('carousel-tile-1'));
+    selectFirstNft();
 
     expect(screen.queryByTestId('track-result-overlay')).toBeNull();
     expect(screen.getByTestId('track-hud-best').textContent).toMatch(/22\.50s/);
     expect(screen.getByTestId('track-hud-lap').textContent).toMatch(/Lap: 0\.00s/);
   });
 
-  it('U5/AE6 — after switching cars, the next lap-finish writes under the new car\'s storage key', async () => {
+  it('U5/AE6 — after switching to the NFT, the next lap-finish writes under its storage key', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [
-        token({ objectId: '0xA' }),
-        token({ objectId: '0xB' }),
-      ],
+      tokens: [token({ objectId: '0xA' })],
       loading: false,
       error: null,
     });
@@ -544,14 +615,14 @@ describe('TrackPage', () => {
     renderPage();
     await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
 
-    // Switch to car B before any lap is driven on car A.
-    fireEvent.click(screen.getByTestId('carousel-tile-1'));
+    // Switch from the default car to the NFT before any lap is driven.
+    selectFirstNft();
     // Scene rebuilds for the new car — wait for the new callback capture.
     await waitFor(() =>
       expect(createSceneMock.mock.calls.length).toBeGreaterThanOrEqual(2),
     );
 
-    // Drive a lap on car B (simulated via the most recently captured callback).
+    // Drive a lap on the NFT (simulated via the most recently captured callback).
     act(() => {
       captured.onLapStateChange!({
         status: 'finished',
@@ -562,18 +633,35 @@ describe('TrackPage', () => {
         introStartedAtMs: null,
       });
     });
-    // PB written under car B's key only; car A's slot stays empty.
-    expect(localStorage.getItem('track-pb:0xB')).toBe('21000');
-    expect(localStorage.getItem('track-pb:0xA')).toBeNull();
+    // PB written under the NFT's key only; the default car's slot stays empty.
+    expect(localStorage.getItem('track-pb:0xA')).toBe('21000');
+    expect(localStorage.getItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`)).toBeNull();
+  });
+
+  // Plan-2026-06-18-002 U3 — selection survives the async owned-tokens fill-in
+  // (StrictMode double-mount also exercised here per the cleanup-only-effect
+  // learning: the default car must still build, not silently no-op).
+  it('default car builds under StrictMode (no cleanup-only no-op)', async () => {
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    const { captured } = installLiveScene();
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/track']}>
+          <TrackPage />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    expect(screen.getByTestId('track-canvas')).toBeTruthy();
   });
 
   it('U4 — slower than stored PB shows positive delta and keeps the old PB in storage', async () => {
     useOwnedTokensMock.mockReturnValue({
-      tokens: [token({ objectId: '0xa' })],
+      tokens: [],
       loading: false,
       error: null,
     });
-    localStorage.setItem('track-pb:0xa', '25100');
+    localStorage.setItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`, '25100');
     const { captured } = installLiveScene();
     renderPage();
     await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
@@ -589,7 +677,7 @@ describe('TrackPage', () => {
     });
     await screen.findByTestId('track-result-overlay');
     // Regression: storage stays at the old (better) PB.
-    expect(localStorage.getItem('track-pb:0xa')).toBe('25100');
+    expect(localStorage.getItem(`track-pb:${DEFAULT_CAR_TOKEN_ID}`)).toBe('25100');
     expect(screen.getByTestId('track-result-delta').textContent).toMatch(/\+1\.40s/);
   });
 

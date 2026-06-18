@@ -15,6 +15,9 @@ import { formatHudTime } from './formatLapTime';
 import { Countdown } from './Countdown';
 import {
   RAGE_RACING,
+  BOUND_COLLECTION_ID,
+  DEFAULT_CAR_TOKEN_ID,
+  DEFAULT_CAR_NAME,
   arcadeLabel,
   arcadeTitle,
   studioCredit,
@@ -169,6 +172,16 @@ const signInWrap: CSSProperties = {
   width: '100%',
 };
 
+// Plan-2026-06-18-002 U4 — row holding the connect button + buy-collection CTA,
+// sitting between the carousel and the canvas (never over the gameplay).
+const ctaRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 16,
+  flexWrap: 'wrap',
+  padding: '4px 0 12px',
+};
+
 // Rage Racing masthead — wordmark + studio credit. Replaces the Tusk3D
 // "— L3 / DRIVE / Tiny Racetrack." editorial header.
 function RageRacingHeader() {
@@ -218,13 +231,35 @@ export function TrackPage() {
     loading: ownedLoading,
     error: ownedError,
   } = useOwnedTokens(isOverrideMode ? undefined : account?.address);
-  const tokensList: OwnedToken[] = blobToken
-    ? [blobToken]
-    : modelToken
-      ? [modelToken]
-      : isOverrideMode
-        ? []
-        : ownedTokens;
+  // Plan-2026-06-18-002 U1/U3 — the always-available primitive default car,
+  // modeled as a synthetic OwnedToken (empty chain fields, like the ?blob=
+  // hatch). Memoized so its reference is stable across renders — the scene-build
+  // effect keys on `selected`, so an unstable default token would rebuild the
+  // scene every render.
+  const defaultCarToken = useMemo<OwnedToken>(
+    () => ({
+      tokenId: DEFAULT_CAR_TOKEN_ID,
+      name: DEFAULT_CAR_NAME,
+      patchId: '',
+      collectionId: '',
+      baseModelId: '',
+      blobId: '',
+    }),
+    [],
+  );
+  // Plan-2026-06-18-002 U3 — the picker. Override modes (?blob=/?model=) resolve
+  // their own single car and keep current behavior. Otherwise the list is
+  // [default car, ...NFTs the player owns FROM THE BOUND COLLECTION], newest
+  // first. Non-bound tokens are filtered out (R3).
+  const tokensList: OwnedToken[] = useMemo(() => {
+    if (blobToken) return [blobToken];
+    if (modelToken) return [modelToken];
+    if (isOverrideMode) return [];
+    const bound = ownedTokens
+      .filter((t) => t.collectionId === BOUND_COLLECTION_ID)
+      .sort((a, b) => (b.acquiredAtMs ?? 0) - (a.acquiredAtMs ?? 0));
+    return [defaultCarToken, ...bound];
+  }, [blobToken, modelToken, isOverrideMode, ownedTokens, defaultCarToken]);
   // Unified loading/error across the three discovery paths. The ?blob= hatch is
   // synchronous (no fetch), so it never reports loading/error.
   const tokensLoading = blobToken
@@ -233,7 +268,11 @@ export function TrackPage() {
       ? modelLoading
       : ownedLoading;
   const tokensError = blobToken ? null : isOverrideMode ? modelError : ownedError;
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  // Plan-2026-06-18-002 U3 — selection tracked by token IDENTITY, not index, so
+  // it survives the async owned-tokens fill-in and post-mint refreshes: a player
+  // who switched to their NFT must not snap back to the default car when the
+  // list grows/reorders. null = "follow the first car" (the default car).
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
   // U4 — lap state mirrored from the scene's onLapStateChange callback.
@@ -252,11 +291,20 @@ export function TrackPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<RacetrackSceneHandles | null>(null);
 
-  // Keep selectedIdx in range when the token list changes (initial fetch
-  // or post-mint refresh).
-  useEffect(() => {
-    if (selectedIdx >= tokensList.length) setSelectedIdx(0);
-  }, [tokensList.length, selectedIdx]);
+  // Resolve the selected index from the tracked token id. When the selected
+  // token genuinely disappears (or none picked yet), fall back to the first car
+  // — which is always the default car in non-override mode. No clamp effect
+  // needed: the derivation handles list growth, reorder, and removal.
+  const selectedIdx = useMemo(() => {
+    if (selectedTokenId === null) return 0;
+    const i = tokensList.findIndex((t) => t.tokenId === selectedTokenId);
+    return i >= 0 ? i : 0;
+  }, [tokensList, selectedTokenId]);
+
+  const handleSelect = useCallback(
+    (idx: number) => setSelectedTokenId(tokensList[idx]?.tokenId ?? null),
+    [tokensList],
+  );
 
   const selected = tokensList[selectedIdx];
 
@@ -287,16 +335,23 @@ export function TrackPage() {
     setSceneError(null);
     (async () => {
       try {
-        const url = glbUrlForToken(selected);
-        // glbUrlForToken returns '' for a missing/malformed blob id (audit W-4).
-        // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
-        // which would slip past the !res.ok check and fail later as a confusing
-        // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
-        if (!url) throw new Error('This car has no loadable model.');
-        const res = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
-        const carGlbBytes = new Uint8Array(await res.arrayBuffer());
-        if (cancelled) return;
+        const isDefaultCar = selected.tokenId === DEFAULT_CAR_TOKEN_ID;
+        // Plan-2026-06-18-002 U3 — the default car is built from primitives in
+        // the scene, so it skips the Walrus fetch entirely (no blob, no 404/expiry
+        // risk). NFT cars still resolve + fetch their GLB.
+        let carGlbBytes: Uint8Array | undefined;
+        if (!isDefaultCar) {
+          const url = glbUrlForToken(selected);
+          // glbUrlForToken returns '' for a missing/malformed blob id (audit W-4).
+          // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
+          // which would slip past the !res.ok check and fail later as a confusing
+          // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
+          if (!url) throw new Error('This car has no loadable model.');
+          const res = await fetch(url, { signal: controller.signal });
+          if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
+          carGlbBytes = new Uint8Array(await res.arrayBuffer());
+          if (cancelled) return;
+        }
         sceneRef.current?.dispose();
         sceneRef.current = null;
         // Plan-006 U8 — onIntroSkipRequested is wired through a mutable ref
@@ -309,6 +364,7 @@ export function TrackPage() {
         const handles = await createRacetrackScene({
           canvas,
           carGlbBytes,
+          useDefaultCar: isDefaultCar,
           onLapStateChange: setLapState,
           // Plan-006 U8 — show the countdown once the orbit completes.
           onOrbitComplete: () => setOrbitDone(true),
@@ -434,37 +490,25 @@ export function TrackPage() {
     };
   }, []);
 
-  // U11 — only the carousel (owned-tokens) path needs a connected wallet. Both
-  // override modes (?model= / ?blob=) resolve a token without one.
-  if (!isOverrideMode && !account) {
-    return (
-      <div style={wellPage} data-testid="track-needs-signin">
-        <div style={wellMain}>
-          <RageRacingHeader />
-          <div style={emptyStack}>
-            <p style={arcadeTitle}>Connect your wallet to hit the track.</p>
-            <p style={emptySub}>RAGE RACING LOADS THE CARS YOU OWN ON-CHAIN</p>
-            <div style={signInWrap}>
-              <SignInButton />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (tokensLoading) {
+  // Plan-2026-06-18-002 U4 — the free-to-play path NEVER blocks: in non-override
+  // mode the default car is always in tokensList, so a missing wallet, an
+  // in-flight query, or a failed owned-tokens read all still render a drivable
+  // game (the default car) below. These full-page states are now scoped to the
+  // override modes (?model=/?blob=), where a single car is resolved on its own
+  // and the race-on-mint demo arc still needs visible loading / error / not-found.
+  if (isOverrideMode && tokensLoading) {
     return (
       <div style={wellPage} data-testid="track-loading-variants">
         <div style={wellMain}>
           <RageRacingHeader />
           <p style={{ ...arcadeLabel, color: RAGE_RACING.color.inkDim }}>
-            — LOADING YOUR GARAGE
+            — LOADING CAR
           </p>
         </div>
       </div>
     );
   }
-  if (tokensError) {
+  if (isOverrideMode && tokensError) {
     return (
       <div style={wellPage} data-testid="track-variants-error">
         <div style={wellMain}>
@@ -477,34 +521,35 @@ export function TrackPage() {
               letterSpacing: '0.5px',
             }}
           >
-            × FAILED · Couldn't load your cars: {tokensError.message}
+            × FAILED · Couldn't load that car: {tokensError.message}
           </p>
         </div>
       </div>
     );
   }
-  if (tokensList.length === 0) {
-    // R8 — Rage Racing voice, NO Tusk3D-internal route as the primary CTA.
-    // The game doesn't send you "back to the marketplace"; it just tells you
-    // it needs a car from the collection it reads.
+  if (isOverrideMode && tokensList.length === 0) {
     return (
       <div style={wellPage} data-testid="track-empty">
         <div style={wellMain}>
           <RageRacingHeader />
           <div style={emptyStack}>
-            <p style={arcadeTitle}>Your garage is empty.</p>
+            <p style={arcadeTitle}>Car not found.</p>
             <p style={emptySub}>
-              RAGE RACING DRIVES CARS MINTED FROM A TUSK3D COLLECTION — ACQUIRE
-              ONE TO ROLL OUT.
+              THAT CAR COULDN'T BE RESOLVED ON-CHAIN.
             </p>
-            <Link to="/market" data-testid="track-empty-market" style={secondaryLink}>
-              Get a car on the marketplace →
-            </Link>
           </div>
         </div>
       </div>
     );
   }
+
+  // R5 — show the conversion CTA whenever the player has no NFT from the bound
+  // collection (list holds only the default car), covering BOTH the no-wallet
+  // visitor and the connected-but-non-owner. Suppressed while a connected
+  // wallet's query is still in flight so NFT tiles can fill in without flicker.
+  const showBuyCta =
+    !isOverrideMode && !tokensLoading && tokensList.length === 1;
+  const isDefaultCarSelected = selected?.tokenId === DEFAULT_CAR_TOKEN_ID;
 
   return (
     <div style={wellPage} data-testid="track-page">
@@ -513,8 +558,30 @@ export function TrackPage() {
         <CarCarousel
           tokens={tokensList}
           selectedIdx={selectedIdx}
-          onSelect={setSelectedIdx}
+          onSelect={handleSelect}
         />
+        {/* Plan-2026-06-18-002 U4 — secondary affordances below the carousel,
+            distinct from the on-canvas provenance caption. No-wallet visitors
+            get a connect button; anyone without a bound-collection NFT gets the
+            buy-to-drive CTA. Both stay out of the way of the gameplay. */}
+        {(!account || showBuyCta) && (
+          <div style={ctaRow}>
+            {!isOverrideMode && !account && (
+              <div style={signInWrap} data-testid="track-connect">
+                <SignInButton />
+              </div>
+            )}
+            {showBuyCta && (
+              <Link
+                to={`/collection/${BOUND_COLLECTION_ID}`}
+                data-testid="track-buy-cta"
+                style={secondaryLink}
+              >
+                Own a car from this collection to drive it here →
+              </Link>
+            )}
+          </div>
+        )}
         <div style={canvasShell}>
           <canvas
             ref={canvasRef}
@@ -563,10 +630,22 @@ export function TrackPage() {
               <div data-testid="track-hud-best" style={hudBest}>
                 Best: {pb !== null ? formatHudTime(pb) : '—'}
               </div>
-              {/* Provenance caption (R7) — the proof line. This car is a Tusk3D
-                  asset stored on Walrus, running in a different studio's game.
-                  Shows real on-chain / Walrus ids from the selected token. */}
-              {selected && (
+              {/* Provenance caption — the proof line for NFT cars (this is a
+                  Tusk3D asset on Walrus, running in another studio's game).
+                  Plan-2026-06-18-002 U4/R6: the default car has no on-chain
+                  provenance, so it shows an identity-only caption (no fabricated
+                  ids, no "connect" copy — the CTA carries the conversion prompt
+                  for both no-wallet and connected-non-owner). */}
+              {selected && isDefaultCarSelected && (
+                <div data-testid="track-provenance" style={provenanceBox}>
+                  <span
+                    style={{ ...provenanceHead, color: RAGE_RACING.color.inkFaint }}
+                  >
+                    ◇ Default car · not an NFT
+                  </span>
+                </div>
+              )}
+              {selected && !isDefaultCarSelected && (
                 <div data-testid="track-provenance" style={provenanceBox}>
                   <span style={provenanceHead}>◇ Imported asset · Sui + Walrus</span>
                   <span style={provenanceSub}>

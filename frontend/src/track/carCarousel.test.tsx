@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CarCarousel } from './carCarousel';
-import { RAGE_RACING } from './rageRacing/brand';
+import { RAGE_RACING, DEFAULT_CAR_TOKEN_ID, DEFAULT_CAR_NAME } from './rageRacing/brand';
 import { tokens as tuskTokens } from '../ux/tokens';
 import type { OwnedToken } from './useOwnedTokens';
 
@@ -61,5 +61,25 @@ describe('CarCarousel (Rage Racing reskin)', () => {
     expect(tile1.getAttribute('data-selected')).toBe('false');
     fireEvent.click(tile1);
     expect(onSelect).toHaveBeenCalledWith(1);
+  });
+
+  // Plan-2026-06-18-002 U5 — the default car renders as a distinct tile.
+  it('labels the default car "default · starter", not "imported"', () => {
+    render(
+      <CarCarousel
+        tokens={[
+          car({ tokenId: DEFAULT_CAR_TOKEN_ID, name: DEFAULT_CAR_NAME }),
+          car({ tokenId: '0xnft', name: 'NFT Car' }),
+        ]}
+        selectedIdx={0}
+        onSelect={() => undefined}
+      />,
+    );
+    const defaultTile = screen.getByTestId('carousel-tile-0');
+    expect(defaultTile.textContent).toContain('default · starter');
+    expect(defaultTile.textContent).not.toContain('imported');
+    // The NFT tile keeps the imported-provenance sub-label.
+    const nftTile = screen.getByTestId('carousel-tile-1');
+    expect(nftTile.textContent).toContain('imported');
   });
 });

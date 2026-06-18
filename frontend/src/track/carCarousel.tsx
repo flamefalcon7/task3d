@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { OwnedToken } from './useOwnedTokens';
-import { RAGE_RACING, truncateId } from './rageRacing/brand';
+import { RAGE_RACING, DEFAULT_CAR_TOKEN_ID, truncateId } from './rageRacing/brand';
 
 // Rage Racing garage strip — horizontal row of the cars the player owns,
 // IMPORTED from a Tusk3D collection (plan 2026-06-05-001). Click a tile to
@@ -100,6 +100,10 @@ export function CarCarousel({
     <div data-testid="car-carousel" style={carouselRow}>
       {ownedTokens.map((t, idx) => {
         const selected = idx === selectedIdx;
+        // Plan-2026-06-18-002 U5 — the default car is a synthetic token, not an
+        // imported NFT, so it gets a distinct sub-label ("default · starter")
+        // instead of the "imported · <id>" provenance line.
+        const isDefaultCar = t.tokenId === DEFAULT_CAR_TOKEN_ID;
         return (
           <button
             key={t.tokenId}
@@ -112,7 +116,9 @@ export function CarCarousel({
             <div aria-hidden style={{ ...tileSwatch, background: swatch(t.tokenId) }} />
             <div style={tileBody}>
               <span style={tileName}>{t.name || `Car ${truncateId(t.tokenId, 4)}`}</span>
-              <span style={tileId}>imported · {truncateId(t.tokenId, 4)}</span>
+              <span style={tileId}>
+                {isDefaultCar ? 'default · starter' : `imported · ${truncateId(t.tokenId, 4)}`}
+              </span>
               {selected && <span style={selectedLabel}>▶ in garage</span>}
             </div>
           </button>
