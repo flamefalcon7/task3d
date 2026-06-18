@@ -23,6 +23,7 @@
 // hook so the file is fingerprinted; out of scope for the hackathon MVP.)
 
 import {
+  AbstractMesh,
   ArcRotateCamera,
   Color3,
   CubeTexture,
@@ -32,6 +33,7 @@ import {
   HemisphericLight,
   KeyboardEventTypes,
   LoadAssetContainerAsync,
+  Mesh,
   MeshBuilder,
   PBRMaterial,
   PhysicsAggregate,
@@ -57,6 +59,7 @@ import {
   sampleOvalCurve,
   tangentAt,
 } from './oval';
+import { RAGE_RACING } from './rageRacing/brand';
 import {
   initialLapState,
   lapReducer,
@@ -73,7 +76,17 @@ const HAVOK_WASM_PATH = '/HavokPhysics.wasm';
 
 export interface RacetrackSceneOptions {
   canvas: HTMLCanvasElement;
-  carGlbBytes: Uint8Array;
+  /**
+   * GLB bytes for an NFT car. Required UNLESS `useDefaultCar` is set, in which
+   * case the scene builds the primitive default car and ignores this field.
+   */
+  carGlbBytes?: Uint8Array;
+  /**
+   * Plan-2026-06-18-002 U2 — build the always-available primitive default car
+   * (Babylon boxes/cylinders, no GLB/Walrus) instead of loading `carGlbBytes`.
+   * Drives identically to a GLB car (same physics block).
+   */
+  useDefaultCar?: boolean;
   /**
    * U3 — invoked whenever the internal lap state machine transitions.
    * TrackPage (U4) mirrors this into React state for the HUD overlay.
@@ -354,6 +367,60 @@ const CHECKER_DARK: [number, number, number] = [0.08, 0.08, 0.08];
 // the test mock surface flat — no Babylon Animation API to stub.
 const INTRO_ORBIT_DURATION_MS = 2000;
 const INTRO_HOLD_W_SKIP_MS = 200;
+
+// Plan-2026-06-18-002 U2 — the always-available default car, assembled from
+// Babylon primitives so it needs no GLB and no Walrus blob (no testnet
+// blob-expiry risk; see brand.ts). Built facing +Z at ~TARGET_CAR_LENGTH so the
+// GLB-tuned handling constants (CAR_MASS, LATERAL_GRIP_PER_FRAME, STEER_*)
+// transfer without re-tuning — the caller treats it with geometryYaw=0/scale=1.
+// Cabin + wheels are parented to the body, so the shared parent block's
+// body-only rotation never clobbers their local orientation. Returns the body
+// (the single carPart); the BOX collider is sized from the whole hierarchy.
+function buildPrimitiveDefaultCar(scene: Scene): Mesh {
+  const bodyMat = new StandardMaterial('default-car-body-mat', scene);
+  bodyMat.diffuseColor = Color3.FromHexString(RAGE_RACING.color.accent);
+  const wheelMat = new StandardMaterial('default-car-wheel-mat', scene);
+  wheelMat.diffuseColor = new Color3(0.05, 0.05, 0.07);
+
+  // Chassis — Z is the drive axis, length ≈ TARGET_CAR_LENGTH.
+  const body = MeshBuilder.CreateBox(
+    'default-car-body',
+    { width: 1.3, height: 0.6, depth: TARGET_CAR_LENGTH },
+    scene,
+  );
+  body.material = bodyMat;
+
+  // Cabin — a smaller box for a recognizable car silhouette.
+  const cabin = MeshBuilder.CreateBox(
+    'default-car-cabin',
+    { width: 1.0, height: 0.5, depth: 1.2 },
+    scene,
+  );
+  cabin.material = bodyMat;
+  cabin.position = new Vector3(0, 0.5, -0.1);
+  cabin.parent = body;
+
+  // Four wheels — cylinders with the axle along X (rotate the default Y axis).
+  const wheelOffsets: Array<[number, number]> = [
+    [0.75, 0.9],
+    [-0.75, 0.9],
+    [0.75, -0.9],
+    [-0.75, -0.9],
+  ];
+  wheelOffsets.forEach(([x, z], i) => {
+    const wheel = MeshBuilder.CreateCylinder(
+      `default-car-wheel-${i}`,
+      { diameter: 0.7, height: 0.3 },
+      scene,
+    );
+    wheel.material = wheelMat;
+    wheel.rotation = new Vector3(0, 0, Math.PI / 2);
+    wheel.position = new Vector3(x, -0.35, z);
+    wheel.parent = body;
+  });
+
+  return body;
+}
 
 export async function createRacetrackScene(
   opts: RacetrackSceneOptions,
@@ -708,42 +775,70 @@ export async function createRacetrackScene(
   checkpointMat.alpha = 0.6;
   checkpoint.material = checkpointMat;
 
-  // 7. Load car GLB from bytes. Wrap the Uint8Array in a Blob + object URL
-  // so Babylon's loader (which expects a URL) can ingest it. .glb forces
-  // the GLB pipeline rather than gltf-json.
-  const blob = new Blob([opts.carGlbBytes as BlobPart], {
-    type: 'model/gltf-binary',
-  });
-  const blobUrl = URL.createObjectURL(blob);
-  const carContainer = await LoadAssetContainerAsync(blobUrl, scene, {
-    pluginExtension: '.glb',
-  });
-  URL.revokeObjectURL(blobUrl);
-  carContainer.addAllToScene();
-  // A GLB may be MULTI-MESH: Tripo's mesh_segmentation and user GLB uploads
-  // (D-077) split a model into one mesh PER PART (chassis + each wheel, etc.).
-  // We must move EVERY geometry-bearing mesh with the car. The old code
-  // parented only the FIRST vertex-bearing mesh, which left a segmented
-  // truck's other parts orphaned under `__root__` at the native origin/scale —
-  // the player saw a single wheel driving around. `meshes[0]` is typically
-  // Babylon's `__root__` TransformNode (0 vertices); the vertex filter skips
-  // it so the box collider wraps real geometry, not a degenerate root.
-  const carParts = carContainer.meshes.filter(
-    (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
-  );
-  // Fallback for a degenerate container where nothing reports vertices: keep
-  // the old single-mesh behavior so we still render something drivable.
-  if (carParts.length === 0 && carContainer.meshes[0]) {
-    carParts.push(carContainer.meshes[0]);
+  // 7. Build the car. Two sources converge on the SAME parent/scale/physics
+  // block below: the primitive default car (no GLB, no Walrus) and a loaded
+  // GLB. The branch only decides `carParts` (the geometry to parent), the
+  // uniform `carScale`, and the local `geometryYaw` correction.
+  let carParts: AbstractMesh[];
+  let carScale: number;
+  let geometryYaw: number;
+  // Only set on the GLB path; the dispose() closure tears it down (the
+  // primitive default car has no container — its meshes dispose with the scene).
+  let carContainer: Awaited<ReturnType<typeof LoadAssetContainerAsync>> | null =
+    null;
+  if (opts.useDefaultCar) {
+    // Plan-2026-06-18-002 U2 — the always-available primitive car. Built facing
+    // +Z at native scale, so no yaw correction and no uniform rescale.
+    carParts = [buildPrimitiveDefaultCar(scene)];
+    carScale = 1;
+    geometryYaw = 0;
+  } else {
+    if (!opts.carGlbBytes) {
+      throw new Error(
+        'racetrackScene: carGlbBytes is required unless useDefaultCar is set',
+      );
+    }
+    // Load car GLB from bytes. Wrap the Uint8Array in a Blob + object URL so
+    // Babylon's loader (which expects a URL) can ingest it. .glb forces the GLB
+    // pipeline rather than gltf-json.
+    const blob = new Blob([opts.carGlbBytes as BlobPart], {
+      type: 'model/gltf-binary',
+    });
+    const blobUrl = URL.createObjectURL(blob);
+    carContainer = await LoadAssetContainerAsync(blobUrl, scene, {
+      pluginExtension: '.glb',
+    });
+    URL.revokeObjectURL(blobUrl);
+    carContainer.addAllToScene();
+    // A GLB may be MULTI-MESH: Tripo's mesh_segmentation and user GLB uploads
+    // (D-077) split a model into one mesh PER PART (chassis + each wheel, etc.).
+    // We must move EVERY geometry-bearing mesh with the car. The old code
+    // parented only the FIRST vertex-bearing mesh, which left a segmented
+    // truck's other parts orphaned under `__root__` at the native origin/scale —
+    // the player saw a single wheel driving around. `meshes[0]` is typically
+    // Babylon's `__root__` TransformNode (0 vertices); the vertex filter skips
+    // it so the box collider wraps real geometry, not a degenerate root.
+    carParts = carContainer.meshes.filter(
+      (m) => typeof m.getTotalVertices === 'function' && m.getTotalVertices() > 0,
+    );
+    // Fallback for a degenerate container where nothing reports vertices: keep
+    // the old single-mesh behavior so we still render something drivable.
+    if (carParts.length === 0 && carContainer.meshes[0]) {
+      carParts.push(carContainer.meshes[0]);
+    }
+    // Plan-013 UAT: compute a per-load uniform scale from the union bounding box
+    // so every loaded GLB ends up ~TARGET_CAR_LENGTH long, regardless of Tripo's
+    // non-deterministic native scale. Read the union BB across all geometry
+    // meshes from the PRISTINE native layout — BEFORE any reparent/rotate/move —
+    // otherwise a part already shifted to the track position inflates the union
+    // extents and the scale collapses to the safety fallback (1.0). Skid-mark
+    // constants in skidMarks.ts are intentionally NOT scaled.
+    carScale = computeUniformScale(carContainer.meshes, TARGET_CAR_LENGTH);
+    // Align the GLB's local forward axis with the pivot's +Z (the direction
+    // FORWARD_IMPULSE pushes). Without this, the car drives backwards visually —
+    // Tripo + most vehicle GLBs face -Z in their local frame.
+    geometryYaw = CAR_GEOMETRY_YAW_OFFSET;
   }
-  // Plan-013 UAT: compute a per-load uniform scale from the union bounding box
-  // so every loaded GLB ends up ~TARGET_CAR_LENGTH long, regardless of Tripo's
-  // non-deterministic native scale. Read the union BB across all geometry
-  // meshes from the PRISTINE native layout — BEFORE any reparent/rotate/move —
-  // otherwise a part already shifted to the track position inflates the union
-  // extents and the scale collapses to the safety fallback (1.0). Skid-mark
-  // constants in skidMarks.ts are intentionally NOT scaled.
-  const carScale = computeUniformScale(carContainer.meshes, TARGET_CAR_LENGTH);
   // KTD-2: parent every part to a TransformNode we own and aggregate physics
   // on the pivot, not the geometry. This isolates the physics body's transform
   // from the GLB-internal hierarchy. Segmented parts share one vertex space
@@ -753,10 +848,7 @@ export async function createRacetrackScene(
   const carPivot = new TransformNode('car-pivot', scene);
   for (const part of carParts) {
     part.parent = carPivot;
-    // Align the GLB's local forward axis with the pivot's +Z (the direction
-    // FORWARD_IMPULSE pushes). Without this, the car drives backwards
-    // visually — Tripo + most vehicle GLBs face -Z in their local frame.
-    part.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
+    part.rotation = new Vector3(0, geometryYaw, 0);
     part.scaling = new Vector3(carScale, carScale, carScale);
     // Plan-028 U2 — every geometry part casts a shadow onto the road/grass.
     shadowGenerator.addShadowCaster(part);
@@ -1276,7 +1368,7 @@ export async function createRacetrackScene(
       ssaoPipeline?.dispose();
       skidMarks.dispose();
       tireSmoke.dispose();
-      carContainer.dispose();
+      carContainer?.dispose();
       scene.dispose();
       engine.dispose();
     },

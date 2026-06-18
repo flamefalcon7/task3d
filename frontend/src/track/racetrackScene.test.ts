@@ -55,6 +55,7 @@ const M = vi.hoisted(() => {
     physicsAggregateCtor: vi.fn(),
     meshBuilderCreateGround: vi.fn(),
     meshBuilderCreateBox: vi.fn(),
+    meshBuilderCreateCylinder: vi.fn(),
     meshBuilderExtrudeShape: vi.fn(),
     meshBuilderCreatePlane: vi.fn(),
     arcRotateCameraCtor: vi.fn(),
@@ -382,6 +383,10 @@ vi.mock('@babylonjs/core', () => {
     constructor(public r = 0, public g = 0, public b = 0) {
       M.color3Ctor(r, g, b);
     }
+    // SUT's default-car body color resolves via Color3.FromHexString(accent).
+    static FromHexString(_hex: string) {
+      return new Color3(1, 1, 0);
+    }
   }
   // Plan-028 U3 — PBRMaterial for the visible track surfaces. Settable
   // albedo/bump/metallic/roughness; instances captured so tests can assert the
@@ -427,6 +432,14 @@ vi.mock('@babylonjs/core', () => {
     },
     CreateBox: (...args: unknown[]) => {
       M.meshBuilderCreateBox(...args);
+      return {
+        material: null,
+        position: new M.Vec3Mock(),
+        rotation: new M.Vec3Mock(),
+      };
+    },
+    CreateCylinder: (...args: unknown[]) => {
+      M.meshBuilderCreateCylinder(...args);
       return {
         material: null,
         position: new M.Vec3Mock(),
@@ -570,6 +583,7 @@ beforeEach(() => {
   M.physicsAggregateCtor.mockClear();
   M.meshBuilderCreateGround.mockClear();
   M.meshBuilderCreateBox.mockClear();
+  M.meshBuilderCreateCylinder.mockClear();
   M.meshBuilderExtrudeShape.mockClear();
   M.meshBuilderCreatePlane.mockClear();
   M.arcRotateCameraCtor.mockClear();
@@ -750,6 +764,54 @@ describe('createRacetrackScene', () => {
     const calls = M.physicsAggregateCtor.mock.calls;
     const carOpts = calls[calls.length - 1]![2] as { mass: number };
     expect(carOpts.mass).toBeGreaterThan(0);
+  });
+
+  // Plan-2026-06-18-002 U2 — the always-available primitive default car. These
+  // assertions are deliberately SEPARATE from the GLB exact-count tests above:
+  // the default-car path adds car meshes only when useDefaultCar is set, so the
+  // GLB-path counts (25 boxes, 27 aggregates) are unaffected.
+  it('default car: builds without loading a GLB', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      useDefaultCar: true,
+      dev_skipIntro: true,
+    });
+    expect(M.loadAssetContainer).not.toHaveBeenCalled();
+    // Engine still constructed → the scene is live and drivable.
+    expect(M.engineCtor).toHaveBeenCalledTimes(1);
+  });
+
+  it('default car: assembles from box + cylinder primitives', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      useDefaultCar: true,
+      dev_skipIntro: true,
+    });
+    // 25 track boxes + 2 car boxes (chassis + cabin) = 27.
+    expect(M.meshBuilderCreateBox).toHaveBeenCalledTimes(27);
+    // Four wheels.
+    expect(M.meshBuilderCreateCylinder).toHaveBeenCalledTimes(4);
+  });
+
+  it('default car: drives via the SAME dynamic body + spawn as a GLB car', async () => {
+    await createRacetrackScene({
+      canvas: fakeCanvas(),
+      useDefaultCar: true,
+      dev_skipIntro: true,
+    });
+    // Same aggregate shape as the GLB path: 26 static + 1 dynamic car = 27.
+    expect(M.physicsAggregateCtor).toHaveBeenCalledTimes(27);
+    const calls = M.physicsAggregateCtor.mock.calls;
+    const carOpts = calls[calls.length - 1]![2] as { mass: number };
+    expect(carOpts.mass).toBeGreaterThan(0);
+    // Car spawns lifted to Y=1 like the GLB path (shared spawn block).
+    expect(M.state.lastTransformNode?.position.y).toBe(1);
+  });
+
+  it('throws when neither carGlbBytes nor useDefaultCar is provided', async () => {
+    await expect(
+      createRacetrackScene({ canvas: fakeCanvas(), dev_skipIntro: true }),
+    ).rejects.toThrow(/carGlbBytes/);
   });
 
   it('registers keyboard + per-frame observers for input and chase camera', async () => {

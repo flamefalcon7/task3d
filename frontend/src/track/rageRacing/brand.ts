@@ -37,6 +37,24 @@ export const RAGE_RACING = {
   studioCredit: 'by Deksat Studio',
 } as const;
 
+// --- Rage Racing game config (plan 2026-06-18-002) ---
+
+// The single Tusk3D collection Rage Racing imports cars from. Holding an
+// `NftToken` from this collection unlocks driving it in-game; everyone else
+// drives the default car. Kept OUT of `TESTNET` (sui/networkConfig) on purpose:
+// that object is asserted field-for-field against contracts/networks/testnet.json
+// by networkConfig.test.ts, so a frontend-only id there would break parity.
+export const BOUND_COLLECTION_ID =
+  '0xa1945554a7cb572ff9fdf48469bbaebcbf367e4a70c66fd5034550c1a4dd1242';
+
+// The always-available default car — built from Babylon primitives (no GLB, no
+// Walrus, so no testnet blob-expiry risk) and drivable with no wallet. This id
+// doubles as the synthetic `OwnedToken.tokenId` on /track and the personal-best
+// storage key, so it must be a stable string that can never collide with a real
+// 0x… object id.
+export const DEFAULT_CAR_TOKEN_ID = 'default-car';
+export const DEFAULT_CAR_NAME = 'Starter Car';
+
 // Truncate a chain / Walrus id for compact display (provenance caption, garage
 // tile ids). Shared by TrackPage + carCarousel so the ellipsis/guard logic has
 // one home. `!id` and the short-id fast path both return the input verbatim.
