@@ -20,6 +20,11 @@ export interface OwnedToken {
   // '' for chain-discovered tokens. Set ONLY by the /track ?blob= dev hatch so
   // the shared scene-build path can drive a raw standalone blob (see TrackPage).
   blobId: string;
+  // Epoch-ms of the token's last transaction (mint, or the buy that transferred
+  // it to the current owner). Drives newest-first ordering of "Your NFTs" on
+  // /market. Optional: the fullnode-confirmed just-bought token (parseOwnedNftToken
+  // in MarketPage) and test fixtures omit it; consumers treat undefined as newest.
+  acquiredAtMs?: number;
 }
 
 const OWNED_TOKENS_QUERY = /* GraphQL */ `
@@ -27,6 +32,11 @@ const OWNED_TOKENS_QUERY = /* GraphQL */ `
     objects(filter: { owner: $owner, type: $type }) {
       nodes {
         address
+        previousTransaction {
+          effects {
+            timestamp
+          }
+        }
         asMoveObject {
           contents {
             json
@@ -41,6 +51,11 @@ const TOKEN_BY_ID_QUERY = /* GraphQL */ `
   query TokenById($id: SuiAddress!) {
     object(address: $id) {
       address
+      previousTransaction {
+        effects {
+          timestamp
+        }
+      }
       asMoveObject {
         contents {
           json
@@ -52,6 +67,9 @@ const TOKEN_BY_ID_QUERY = /* GraphQL */ `
 
 interface GraphQLObjectNode {
   address?: string;
+  previousTransaction?: {
+    effects?: { timestamp?: string | null } | null;
+  } | null;
   asMoveObject?: {
     contents?: {
       json?: Record<string, unknown> | null;
@@ -80,6 +98,11 @@ function nodeToToken(node: GraphQLObjectNode): OwnedToken | null {
     | null
     | undefined;
   if (!tokenId || !json) return null;
+  // Sui GraphQL serializes the checkpoint timestamp as an ISO-8601 string;
+  // Date.parse → epoch ms. NaN (missing/unparseable) collapses to 0 so the
+  // token sorts oldest rather than poisoning the comparator.
+  const tsRaw = node.previousTransaction?.effects?.timestamp;
+  const parsed = tsRaw ? Date.parse(tsRaw) : NaN;
   return {
     tokenId,
     name: String(json.name ?? ''),
@@ -87,6 +110,7 @@ function nodeToToken(node: GraphQLObjectNode): OwnedToken | null {
     collectionId: String(json.collection_id ?? ''),
     baseModelId: String(json.base_model_id ?? ''),
     blobId: '',
+    acquiredAtMs: Number.isNaN(parsed) ? 0 : parsed,
   };
 }
 

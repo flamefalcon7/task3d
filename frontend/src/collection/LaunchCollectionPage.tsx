@@ -78,7 +78,6 @@ import {
   buttonPrimary,
   card,
   displayHeadline,
-  eyebrow,
   input as inputStyle,
   monoLabel,
   pagePaper,
@@ -1421,7 +1420,6 @@ export function LaunchCollectionPage() {
         <main style={mainStyle}>
           <TestWalletBanner error={signerLoadError} />
           <div style={headerStack}>
-            <span style={eyebrow}>— L2 / MINT</span>
             <h1 style={displayHeadline}>Launch a collection.</h1>
             <p style={{ ...monoLabel, color: tokens.color.muted, letterSpacing: '0.5px', textTransform: 'none' }}>
               Sign in to fork a base model into a collection.
@@ -1439,7 +1437,6 @@ export function LaunchCollectionPage() {
         <TestWalletBanner error={signerLoadError} />
         <MemoryPressureBanner recheckSignal={memoryRecheckSignal} />
         <div style={headerStack}>
-          <span style={eyebrow}>— L2 / MINT</span>
           <h1 style={displayHeadline}>Launch a collection.</h1>
         </div>
 

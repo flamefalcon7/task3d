@@ -1145,8 +1145,7 @@ export function CreateModelPage() {
       <div data-testid="create-page" style={pagePaper}>
         <main style={mainStyle}>
           <div style={headerStack}>
-            <span style={eyebrow}>— L1 / PUBLISH</span>
-            <h1 style={displayHeadline}>Make a model.</h1>
+            <h1 style={displayHeadline}>Carve a model.</h1>
             <p style={{ ...monoLabel, color: tokens.color.muted, marginTop: 8 }}>
               Sign in to publish a model
             </p>
@@ -1205,8 +1204,20 @@ export function CreateModelPage() {
     <div data-testid="create-page" style={pagePaper}>
       <main style={mainStyle}>
         <div style={headerStack}>
-          <span style={eyebrow}>— L1 / PUBLISH</span>
-          <h1 style={displayHeadline}>Make a model.</h1>
+          <h1 style={displayHeadline}>Carve a model.</h1>
+          <p
+            style={{
+              fontFamily: tokens.font.body,
+              fontSize: tokens.size.md,
+              lineHeight: 1.5,
+              color: tokens.color.muted,
+              margin: '4px 0 0',
+              maxWidth: 640,
+            }}
+          >
+            Generate one from a prompt or upload your own GLB, then publish it on-chain with the
+            license terms you set.
+          </p>
         </div>
 
         <span style={sectionLabel}>SOURCE</span>

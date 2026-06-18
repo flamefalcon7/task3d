@@ -12,7 +12,6 @@ import { useMemoryRecall } from '../memory/useMemoryRecall';
 import {
   buttonOutline,
   displayHeadline,
-  eyebrow,
   input as inputStyle,
   monoLabel,
   pagePaper,
@@ -70,15 +69,6 @@ const heroParagraph: CSSProperties = {
   lineHeight: 1.5,
   color: tokens.color.muted,
   margin: 0,
-};
-
-const layerPill: CSSProperties = {
-  fontFamily: tokens.font.mono,
-  fontSize: 11,
-  letterSpacing: '1px',
-  textTransform: 'uppercase',
-  color: tokens.color.accent,
-  fontWeight: 500,
 };
 
 const filterRow: CSSProperties = {
@@ -357,13 +347,11 @@ export function BrowsePage() {
     <div style={pagePaper} data-testid="browse-page">
       <main style={mainStyle}>
         <section style={heroStack}>
-          <span style={eyebrow}>— SUI OVERFLOW 2026 / WALRUS TRACK</span>
-          <h1 style={displayHeadline}>A model marketplace. On Sui. With composable IP.</h1>
+          <h1 style={displayHeadline}>Generate a 3D model. Own it. Let anyone build on it.</h1>
           <p style={heroParagraph}>
-            <span style={layerPill}>L1 PUBLISH</span> creator commits a 3D model to Walrus and sets license terms.{' '}
-            <span style={layerPill}>L2 MINT</span> someone forks it into a token collection, paying the derive fee.{' '}
-            <span style={layerPill}>L3 DRIVE</span> a buyer takes a token from the kiosk and drives it in-game,
-            with royalty enforced at the protocol layer.
+            A creator commits a 3D model to Walrus and sets its license terms. Someone forks
+            it into an NFT collection, paying the derive fee. A buyer takes an NFT from the
+            kiosk and uses it — with royalties enforced at the protocol layer.
           </p>
         </section>
 
