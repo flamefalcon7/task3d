@@ -1,5 +1,33 @@
 # Phase Progress
 
+## Last Updated: 2026-06-19 11:35 (**feat: /track redesign — Garage car-select + full-screen race + default car + segmented-GLB fix — shipped to main**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~2** · demo day (7/20–21): ~31 · winners (8/27): ~69
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **`/track` (Rage Racing) free-to-play redesign — merged to `main` (ff) and pushed** (`bdf6555`). Branch `feat/track-default-car-nft-unlock`, 6 commits from clean origin/main. Brainstorm → plan (`docs/plans/2026-06-18-002-feat-track-default-car-nft-unlock-plan.md`) → 6-reviewer code-review → execute → user GPU-verified.
+  - **Free-to-play flip**: `/track` no longer dead-ends on no-wallet/empty-garage. A **default car** is always drivable.
+  - **Default car = bundled local GLB** (`frontend/public/dev-glbs/pickup-truck.glb`, `DEFAULT_CAR_GLB_URL` in `rageRacing/brand.ts`) loaded through the **same proven path as NFT cars** — no Walrus dependency, no testnet blob-expiry risk. (An earlier Babylon-**primitive** default car was abandoned: it diverged from the GLB scene-build path in render-timing ways — PBR/IBL env-texture readiness, intro sequencing — that blanked trees/track and the post-countdown view; could not validate blind without a GPU. The bundled-GLB-on-the-proven-path approach fixed it.)
+  - **Garage pre-race select screen** (`frontend/src/track/GarageScreen.tsx`): two cards with auto-rotating live 3D previews (reuses `babylon/PreviewCanvas`) — Starter Car, and the bound NFT collection (locked + buy-collection CTA for non-owners; pickable owned-NFT list for owners). Pick → race.
+  - **Full-screen race**: canvas fills the viewport; masthead + the old in-game carousel removed (`carCarousel.tsx` deleted); HUD + provenance + retry + **"← Change car"** overlay. Override modes (`?model=`/`?blob=`) skip the Garage and race directly.
+  - **Segmented-GLB in-game fix**: the scene loader flattened each mesh onto the pivot and overwrote per-part rotation/scaling, **scattering multi-mesh (Tripo mesh_segmentation / D-077) cars**. Now reparent the GLB root nodes under a `car-model` wrapper and apply yaw + uniform scale **once** (mirrors PreviewCanvas) — parts keep relative transforms. `CAR_GEOMETRY_YAW_OFFSET` re-tuned **-π/2 → +π/2** (hierarchy-preserving load keeps the glTF conversion the old flatten discarded; both default + NFT cars were driving backwards at -π/2).
+  - **Selection by token identity** (not index) so an owned-tokens refetch (same id, new ref) never rebuilds the running scene; owned tokens filtered to the bound collection client-side.
+- **Verification**: tsc clean; full frontend suite **1262 passed / 2 skipped**. User browser-verified on real GPU: garage previews spin, NFT car assembled, both cars drive forward, full-screen + change-car work.
+
+### Next Concrete Step
+Verify the live deploy once Cloudflare Pages rebuilds `main` (`bdf6555`) → **tusk3d.store/track** — check the **rendered DOM in a browser, not curl** (CF root HTML can return a stale bundle ref). Walk the no-wallet (default car) + wallet (NFT car) arcs on prod.
+
+### Blockers / Open Questions
+- **Mainnet landmine (8/27)**: `BOUND_COLLECTION_ID` in `rageRacing/brand.ts` is the **testnet** collection id, overridable via `VITE_RAGE_RACING_COLLECTION_ID`. On the mainnet cutover (D-009) this env var **must** be set or every owner's car is filtered out (silently → default car only + dead buy-CTA).
+
+### Notes for Next Session
+- **Rendering can't be validated headless**: agent-browser has no GPU → Babylon shaders (env/IBL `rgbdDecode`, post-process) fail there, so 3D looks blank/broken regardless. Validate scene **graph** (mesh presence, camera) via eval, but **pixels need the user's real Chrome**. This cost several blind-change cycles this session — default to "reuse a proven render path" over novel 3D, and set the eyeball-iteration expectation up front.
+- The bound collection is `0xa1945554a7cb572ff9fdf48469bbaebcbf367e4a70c66fd5034550c1a4dd1242` (the user's launched collection).
+
 ## Last Updated: 2026-06-17 14:30 (**feat: Integration Ecosystem leaderboard at /integrate (plan-002, D-109) — built, tested, browser-verified**)
 
 ### Hackathon Tracker
