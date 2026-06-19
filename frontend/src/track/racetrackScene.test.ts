@@ -112,6 +112,14 @@ const M = vi.hoisted(() => {
         absolutePosition: InstanceType<typeof Vec3Mock>;
         getDirection: ReturnType<typeof vi.fn>;
       },
+      // The car-model wrapper (carries orientation + uniform scale; the GLB
+      // root nodes are reparented under it so segmented parts stay assembled).
+      lastCarModel: null as null | {
+        name: string;
+        rotation: InstanceType<typeof Vec3Mock>;
+        scaling: InstanceType<typeof Vec3Mock>;
+        parent: unknown;
+      },
       lastCarBody: null as null | {
         applyImpulse: ReturnType<typeof vi.fn>;
         setLinearDamping: ReturnType<typeof vi.fn>;
@@ -477,10 +485,16 @@ vi.mock('@babylonjs/core', () => {
   class TransformNode {
     position = new M.Vec3Mock();
     absolutePosition = new M.Vec3Mock();
+    rotation = new M.Vec3Mock();
+    scaling = new M.Vec3Mock();
+    parent: unknown = null;
     getDirection = vi.fn(() => new M.Vec3Mock(0, 0, 1));
     constructor(public name: string, _scene: unknown) {
       M.transformNodeCtor(name, _scene);
       M.state.lastTransformNode = this;
+      if (name === 'car-model') {
+        M.state.lastCarModel = this as unknown as typeof M.state.lastCarModel;
+      }
     }
   }
   const LoadAssetContainerAsync = (...args: unknown[]) => {
@@ -530,8 +544,11 @@ vi.mock('@babylonjs/core', () => {
       geometryMesh,
       geometryMesh2,
     ];
+    // rootNodes = the GLB top-level (the __root__ at meshes[0]); the scene
+    // reparents these (not each geometry mesh) to keep segmented parts assembled.
     const container = {
       meshes,
+      rootNodes: [meshes[0]],
       addAllToScene: vi.fn(),
       dispose: vi.fn(),
     };
@@ -592,6 +609,7 @@ beforeEach(() => {
   M.state.lastScene = null;
   M.state.lastCarContainer = null;
   M.state.lastTransformNode = null;
+  M.state.lastCarModel = null;
   M.state.lastCarBody = null;
   M.state.lastCamera = null;
   M.state.lastRenderPipeline = null;
@@ -1007,63 +1025,49 @@ describe('createRacetrackScene', () => {
     // Mock GLB returns a 2m cube for the geometry mesh. TARGET_CAR_LENGTH
     // is 2.8m → expected uniform scale is 1.4. The pre-fix code hardcoded
     // 1.728; this guards against regressing back to a fixed constant that
-    // makes Tripo cars ant-sized on the track.
+    // makes Tripo cars ant-sized on the track. The scale now lives on the
+    // car-model WRAPPER (applied once to the whole assembly), not per-part.
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
       dev_skipIntro: true,
     });
-    const geometryMesh = M.state.lastCarContainer!.meshes[1]! as unknown as {
-      scaling: { x: number; y: number; z: number };
-    };
-    expect(geometryMesh.scaling.x).toBeCloseTo(1.4, 6);
-    expect(geometryMesh.scaling.y).toBeCloseTo(1.4, 6);
-    expect(geometryMesh.scaling.z).toBeCloseTo(1.4, 6);
+    expect(M.state.lastCarModel!.scaling.x).toBeCloseTo(1.4, 6);
+    expect(M.state.lastCarModel!.scaling.y).toBeCloseTo(1.4, 6);
+    expect(M.state.lastCarModel!.scaling.z).toBeCloseTo(1.4, 6);
   });
 
-  it('U1/KTD-2 — picks the vertex-bearing mesh for physics, not __root__', async () => {
+  it('U1/KTD-2 — physics binds to car-pivot; the model wrapper carries scale under it', async () => {
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
     dev_skipIntro: true,
     });
-    // Mock GLB has meshes[0] (0 verts, root-like) + meshes[1] (1024 verts,
-    // geometry). The geometry mesh — not the root — must be parented to
-    // the pivot so the box collider wraps the geometry's bounds.
-    const rootMesh = M.state.lastCarContainer!.meshes[0]!;
-    const geometryMesh = M.state.lastCarContainer!.meshes[1]!;
-    expect(rootMesh.parent).toBeNull();
-    expect(geometryMesh.parent).toBe(M.state.lastTransformNode);
+    // car-model (wrapper) is parented under car-pivot (the dynamic body root).
+    // car-pivot is created LAST so it is lastTransformNode (physics binds to it).
+    expect(M.state.lastTransformNode!.name).toBe('car-pivot');
+    expect(M.state.lastCarModel!.parent).toBe(M.state.lastTransformNode);
   });
 
-  it('parents EVERY geometry part of a multi-mesh GLB to the pivot (segmented-truck fix)', async () => {
-    // Regression: a multi-mesh GLB (Tripo mesh_segmentation / D-077 uploads
-    // split a truck into chassis + wheels as separate meshes) used to render
-    // as a single wheel because only the first vertex-bearing mesh was
-    // parented to the car pivot; the rest stayed orphaned at the native
-    // origin. Both geometry meshes must now follow the car — parented to the
-    // pivot AND scaled — while the vertex-less __root__ is still skipped.
+  it('keeps a multi-mesh GLB assembled by transforming the wrapper, not each part (segmented fix)', async () => {
+    // Plan-2026-06-18-002 regression: a segmented GLB (Tripo mesh_segmentation /
+    // D-077 — chassis + wheels as separate meshes) used to SCATTER in-game
+    // because each part was reparented onto the pivot and had its rotation/
+    // scaling overwritten, dropping the GLB's internal node transforms. The fix
+    // reparents the GLB ROOT under the car-model wrapper (preserving every
+    // part's relative transform) and scales the wrapper once.
     await createRacetrackScene({
       canvas: fakeCanvas(),
       carGlbBytes: fakeGlb(),
       dev_skipIntro: true,
     });
     const rootMesh = M.state.lastCarContainer!.meshes[0]!;
-    const part1 = M.state.lastCarContainer!.meshes[1]! as unknown as {
-      parent: unknown;
-      scaling: { x: number; y: number; z: number };
-    };
-    const part2 = M.state.lastCarContainer!.meshes[2]! as unknown as {
-      parent: unknown;
-      scaling: { x: number; y: number; z: number };
-    };
-    expect(rootMesh.parent).toBeNull(); // __root__ stays unparented
-    expect(part1.parent).toBe(M.state.lastTransformNode);
-    expect(part2.parent).toBe(M.state.lastTransformNode);
-    // Every part shares the same union-BB-derived uniform scale (2m cube →
-    // TARGET_CAR_LENGTH 2.8 / 2 = 1.4) so the truck stays proportional.
-    expect(part1.scaling.x).toBeCloseTo(1.4, 6);
-    expect(part2.scaling.x).toBeCloseTo(1.4, 6);
+    // The GLB root is reparented under the wrapper (not flattened onto the pivot).
+    expect(rootMesh.parent).toBe(M.state.lastCarModel);
+    // The wrapper carries the single uniform scale for the whole assembly.
+    expect(M.state.lastCarModel!.scaling.x).toBeCloseTo(1.4, 6);
+    // Both geometry parts still register as shadow casters.
+    expect(M.shadowAddCaster).toHaveBeenCalledTimes(2);
   });
 
   it('U1/KTD-2 — physics aggregate binds to the car pivot (TransformNode), not a mesh', async () => {

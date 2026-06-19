@@ -233,9 +233,12 @@ const CHASE_ALPHA_LERP = 0.04;
 //   Math.PI  = GLB faces -Z (rotate 180°)
 //   Math.PI/2  = GLB faces +X (rotate 90° CCW)
 //  -Math.PI/2 = GLB faces -X (rotate 90° CW)
-// Currently -90° — Tripo outputs face -X locally; rotate CW so -X aligns
-// with the pivot's +Z drive direction.
-const CAR_GEOMETRY_YAW_OFFSET = -Math.PI / 2;
+// Currently +90° (Plan-2026-06-18-002). The hierarchy-preserving load now keeps
+// the GLB's own glTF→Babylon coordinate conversion (the old per-part flatten
+// discarded it), which shifted the effective forward axis 180°: at -90° both the
+// pickup-truck default car and segmented NFT cars drove BACKWARDS. +90° faces
+// them forward (+Z) again. One knob; re-eyeball if a new asset family differs.
+const CAR_GEOMETRY_YAW_OFFSET = Math.PI / 2;
 // Plan-013 UAT polish: Tripo GLBs return arbitrary native scale
 // (0.2m → 20m range observed). Normalize to a fixed in-world length so
 // every car looks proportional to the track regardless of source. 2.8m ≈
@@ -744,21 +747,32 @@ export async function createRacetrackScene(
   // extents and the scale collapses to the safety fallback (1.0). Skid-mark
   // constants in skidMarks.ts are intentionally NOT scaled.
   const carScale = computeUniformScale(carContainer.meshes, TARGET_CAR_LENGTH);
-  // KTD-2: parent every part to a TransformNode we own and aggregate physics
-  // on the pivot, not the geometry. This isolates the physics body's transform
-  // from the GLB-internal hierarchy. Segmented parts share one vertex space
-  // with identity node transforms, so applying the SAME yaw + scale to each
-  // keeps them aligned as a single truck. Applied BEFORE PhysicsAggregate so
-  // the BOX collider is sized from the scaled union bounds.
+  // KTD-2 — physics aggregates on a pivot we own, not the geometry. To keep
+  // MULTI-MESH (segmented) GLBs ASSEMBLED, we must NOT flatten each part onto
+  // the pivot: a segmented part's local transform is relative to the GLB's
+  // __root__, so reparenting parts individually AND overwriting their
+  // rotation/scaling drops the GLB's internal node transforms and scatters the
+  // wheels/chassis (Plan-2026-06-18-002 bug report). Instead reparent the loaded
+  // ROOT nodes under a single model wrapper and apply the yaw + uniform scale
+  // ONCE, on the wrapper — every part keeps its relative transform. This mirrors
+  // PreviewCanvas, which renders these same segmented GLBs correctly.
+  //
+  // Create the wrapper FIRST and the pivot LAST so physics + spawn bind to
+  // `car-pivot` (the dynamic body root); the wrapper holds orientation + scale.
+  const carModel = new TransformNode('car-model', scene);
   const carPivot = new TransformNode('car-pivot', scene);
+  carModel.parent = carPivot;
+  // Align the GLB's forward axis with the pivot's +Z (drive direction). Applied
+  // to the wrapper so the whole assembly turns together. Tunable in one place
+  // via CAR_GEOMETRY_YAW_OFFSET. Applied BEFORE PhysicsAggregate so the BOX
+  // collider is sized from the scaled, oriented bounds.
+  carModel.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
+  carModel.scaling = new Vector3(carScale, carScale, carScale);
+  for (const root of carContainer.rootNodes) {
+    root.parent = carModel;
+  }
+  // Plan-028 U2 — every geometry part casts a shadow onto the road/grass.
   for (const part of carParts) {
-    part.parent = carPivot;
-    // Align the GLB's local forward axis with the pivot's +Z (the direction
-    // FORWARD_IMPULSE pushes). Without this, the car drives backwards
-    // visually — Tripo + most vehicle GLBs face -Z in their local frame.
-    part.rotation = new Vector3(0, CAR_GEOMETRY_YAW_OFFSET, 0);
-    part.scaling = new Vector3(carScale, carScale, carScale);
-    // Plan-028 U2 — every geometry part casts a shadow onto the road/grass.
     shadowGenerator.addShadowCaster(part);
   }
   // U2: spawn on the start/finish line, facing the curve tangent so the

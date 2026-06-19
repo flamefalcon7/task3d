@@ -1,11 +1,10 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { useOwnedTokens, useTokenById, type OwnedToken } from './useOwnedTokens';
 import { glbUrlForToken } from '../walrus/aggregator';
-import { SignInButton } from '../auth/SignInButton';
-import { CarCarousel } from './carCarousel';
+import { GarageScreen } from './GarageScreen';
 import { createRacetrackScene } from './racetrackScene';
 import type { RacetrackSceneHandles } from './racetrackScene';
 import { initialLapState, waitingLapState, type LapState } from './lapState';
@@ -65,13 +64,29 @@ const pageHeader: CSSProperties = {
   marginBottom: 16,
 };
 
-const canvasShell: CSSProperties = {
-  position: 'relative',
-  width: '100%',
-  height: '68vh',
+// Plan-2026-06-18-002 — full-screen race stage. The car is chosen on the Garage
+// screen first; the race itself fills the viewport (no masthead, no carousel).
+const raceStage: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
   background: RAGE_RACING.color.surface,
   overflow: 'hidden',
-  border: `1.5px solid rgba(255,229,0,0.25)`,
+};
+
+// "← Change car" — top-left affordance back to the Garage.
+const changeCarBtn: CSSProperties = {
+  ...arcadeLabel,
+  position: 'absolute',
+  top: 16,
+  left: 24,
+  zIndex: 5,
+  background: 'rgba(0,0,0,0.45)',
+  border: '1px solid rgba(255,255,255,0.25)',
+  color: RAGE_RACING.color.ink,
+  padding: '6px 10px',
+  cursor: 'pointer',
+  textTransform: 'none',
+  letterSpacing: '0.5px',
 };
 
 const sceneOverlay: CSSProperties = {
@@ -92,7 +107,7 @@ const sceneOverlayCenter: CSSProperties = {
 // HUD — keep the literal "Lap:"/"Best:" prefixes readable (not uppercased).
 const hudLap: CSSProperties = {
   position: 'absolute',
-  top: 16,
+  top: 52, // below the "← Change car" affordance
   left: 24,
   fontFamily: RAGE_RACING.font.mono,
   color: RAGE_RACING.color.ink,
@@ -153,34 +168,6 @@ const emptySub: CSSProperties = {
   color: RAGE_RACING.color.inkDim,
   letterSpacing: '0.5px',
   textTransform: 'none',
-};
-
-// De-emphasised exit affordance for the connect / empty states. R8 keeps the
-// inward route OUT of the primary CTA, but a third-party game still needs an
-// escape hatch and a "where do I get a car" pointer — both kept secondary.
-const secondaryLink: CSSProperties = {
-  ...arcadeLabel,
-  color: RAGE_RACING.color.accent,
-  textTransform: 'none',
-  letterSpacing: '0.5px',
-  textDecoration: 'none',
-};
-
-// Constrain the (neutral, non-Tusk3D-branded) SignInButton so it reads as the
-// game's own connect affordance, not a stretched chrome element.
-const signInWrap: CSSProperties = {
-  maxWidth: 280,
-  width: '100%',
-};
-
-// Plan-2026-06-18-002 U4 — row holding the connect button + buy-collection CTA,
-// sitting between the carousel and the canvas (never over the gameplay).
-const ctaRow: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 16,
-  flexWrap: 'wrap',
-  padding: '4px 0 12px',
 };
 
 // Rage Racing masthead — wordmark + studio credit. Replaces the Tusk3D
@@ -277,6 +264,12 @@ export function TrackPage() {
   // who switched to their NFT must not snap back to the default car when the
   // list grows/reorders. null = "follow the first car" (the default car).
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  // Plan-2026-06-18-002 — two phases: pick a car on the Garage screen, then race
+  // full-screen. Override modes (?model=/?blob=) auto-drive a specific car (the
+  // race-on-mint demo arc), so they skip the Garage and start racing directly.
+  const [phase, setPhase] = useState<'garage' | 'racing'>(
+    isOverrideMode ? 'racing' : 'garage',
+  );
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
   // U4 — lap state mirrored from the scene's onLapStateChange callback.
@@ -305,8 +298,22 @@ export function TrackPage() {
     return i >= 0 ? i : 0;
   }, [tokensList, selectedTokenId]);
 
-  const handleSelect = useCallback(
-    (idx: number) => setSelectedTokenId(tokensList[idx]?.tokenId ?? null),
+  // Garage "Drive" — lock in the chosen car and go full-screen racing.
+  const handleDrive = useCallback((token: OwnedToken) => {
+    setSelectedTokenId(token.tokenId);
+    setPhase('racing');
+  }, []);
+
+  // "← Change car" — dispose the live race scene and return to the Garage.
+  const handleChangeCar = useCallback(() => {
+    sceneRef.current?.dispose();
+    sceneRef.current = null;
+    setPhase('garage');
+  }, []);
+
+  // Owned bound-collection NFTs (everything in the list except the default car).
+  const ownedNfts = useMemo(
+    () => tokensList.filter((t) => t.tokenId !== DEFAULT_CAR_TOKEN_ID),
     [tokensList],
   );
 
@@ -338,7 +345,9 @@ export function TrackPage() {
   // any scene that finished initialising AFTER cancellation fired, so we
   // never overwrite sceneRef with an orphaned engine.
   useEffect(() => {
-    if (!canvasRef.current || !selected) return;
+    // Only build the heavy race scene while racing — the Garage screen renders
+    // lightweight PreviewCanvas spinners instead, and its canvas isn't mounted.
+    if (phase !== 'racing' || !canvasRef.current || !selected) return;
     const canvas = canvasRef.current; // capture before any await
     let cancelled = false;
     const controller = new AbortController();
@@ -416,11 +425,11 @@ export function TrackPage() {
       cancelled = true;
       controller.abort();
     };
-    // Keyed on `selected?.tokenId`, NOT the object reference — see the reset
-    // effect above. A same-id owned-tokens refetch must NOT tear down + rebuild
-    // the running scene (re-fetch GLB, replay intro) for the car already loaded.
+    // Keyed on `selected?.tokenId` + `phase`, NOT the object reference — see the
+    // reset effect above. A same-id owned-tokens refetch must NOT tear down +
+    // rebuild the running scene; entering 'racing' builds it, leaving disposes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.tokenId]);
+  }, [selected?.tokenId, phase]);
 
   // U4 — on lap finish, write PB + populate result modal. Captures the
   // CURRENT pb (pre-update) so the modal shows delta vs the old best.
@@ -566,59 +575,51 @@ export function TrackPage() {
     );
   }
 
-  // R5 — show the conversion CTA whenever the player owns no NFT from the bound
-  // collection, covering BOTH the no-wallet visitor and the connected-but-
-  // non-owner. Suppressed while a connected wallet's query is still in flight so
-  // NFT tiles can fill in without flicker. Expressed as "no non-default car in
-  // the list" rather than `length === 1` so the intent survives future list shapes.
-  const hasNftCar = tokensList.some((t) => t.tokenId !== DEFAULT_CAR_TOKEN_ID);
-  const showBuyCta = !isOverrideMode && !tokensLoading && !hasNftCar;
   const isDefaultCarSelected = selected === defaultCarToken;
 
+  // Plan-2026-06-18-002 — Garage (pre-race car select). Skipped in override mode
+  // (phase starts 'racing'). The player picks a car here, then the race goes
+  // full-screen below.
+  if (phase === 'garage') {
+    return (
+      <GarageScreen
+        defaultCarToken={defaultCarToken}
+        nfts={ownedNfts}
+        hasWallet={!!account}
+        loading={ownedLoading}
+        collectionId={BOUND_COLLECTION_ID}
+        onDrive={handleDrive}
+      />
+    );
+  }
+
+  // Full-screen race. No masthead, no carousel — just the canvas + HUD +
+  // provenance + a "← Change car" affordance (hidden in override mode, which
+  // has no Garage to return to).
   return (
-    <div style={wellPage} data-testid="track-page">
-      <div style={wellMain}>
-        <RageRacingHeader />
-        <CarCarousel
-          tokens={tokensList}
-          selectedIdx={selectedIdx}
-          onSelect={handleSelect}
-        />
-        {/* Plan-2026-06-18-002 U4 — secondary affordances below the carousel,
-            distinct from the on-canvas provenance caption. No-wallet visitors
-            get a connect button; anyone without a bound-collection NFT gets the
-            buy-to-drive CTA. Both stay out of the way of the gameplay. */}
-        {(!account || showBuyCta) && (
-          <div style={ctaRow}>
-            {!isOverrideMode && !account && (
-              <div style={signInWrap} data-testid="track-connect">
-                <SignInButton />
-              </div>
-            )}
-            {showBuyCta && (
-              <Link
-                to={`/collection/${BOUND_COLLECTION_ID}`}
-                data-testid="track-buy-cta"
-                style={secondaryLink}
-              >
-                Own a car from this collection to drive it here →
-              </Link>
-            )}
+    <div style={raceStage} data-testid="track-page">
+      <canvas
+        ref={canvasRef}
+        data-testid="track-canvas"
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      />
+      {!isOverrideMode && (
+        <button
+          type="button"
+          style={changeCarBtn}
+          data-testid="track-change-car"
+          onClick={handleChangeCar}
+        >
+          ← Change car
+        </button>
+      )}
+      {sceneLoading && (
+        <div data-testid="track-scene-loading" style={sceneOverlay}>
+          <div style={sceneOverlayCenter}>
+            <p style={{ ...arcadeLabel, fontSize: 14, letterSpacing: '2px' }}>
+              — LOADING TRACK · BABYLON + HAVOK
+            </p>
           </div>
-        )}
-        <div style={canvasShell}>
-          <canvas
-            ref={canvasRef}
-            data-testid="track-canvas"
-            style={{ width: '100%', height: '100%', display: 'block' }}
-          />
-          {sceneLoading && (
-            <div data-testid="track-scene-loading" style={sceneOverlay}>
-              <div style={sceneOverlayCenter}>
-                <p style={{ ...arcadeLabel, fontSize: 14, letterSpacing: '2px' }}>
-                  — LOADING TRACK · BABYLON + HAVOK
-                </p>
-              </div>
             </div>
           )}
           {sceneError && !sceneLoading && (
@@ -684,21 +685,19 @@ export function TrackPage() {
               )}
             </>
           )}
-          {lastResult && (
-            <ResultOverlay
-              lapMs={lastResult.lapMs}
-              previousPbMs={lastResult.previousPbMs}
-              isNewPb={lastResult.isNewPb}
-              onRetry={handleRetry}
-            />
-          )}
-        </div>
-        <p style={driveHint}>
-          WASD or arrow keys to drive. Press{' '}
-          <kbd style={{ fontFamily: RAGE_RACING.font.mono, padding: '0 4px', border: '1px solid rgba(255,255,255,0.3)' }}>R</kbd>{' '}
-          to retry.
-        </p>
-      </div>
+      {lastResult && (
+        <ResultOverlay
+          lapMs={lastResult.lapMs}
+          previousPbMs={lastResult.previousPbMs}
+          isNewPb={lastResult.isNewPb}
+          onRetry={handleRetry}
+        />
+      )}
+      <p style={{ ...driveHint, position: 'absolute', bottom: 14, right: 24, marginTop: 0 }}>
+        WASD or arrow keys to drive · press{' '}
+        <kbd style={{ fontFamily: RAGE_RACING.font.mono, padding: '0 4px', border: '1px solid rgba(255,255,255,0.3)' }}>R</kbd>{' '}
+        to retry
+      </p>
     </div>
   );
 }
