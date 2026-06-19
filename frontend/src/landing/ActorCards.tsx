@@ -31,8 +31,8 @@ interface Actor {
 const ACTORS: readonly Actor[] = [
   {
     key: 'modelCreator',
-    name: 'modelCreator',
-    cost: 'SUI gas + Tripo fee',
+    name: 'Model Creator',
+    cost: 'gas + storage protocol fee + 3rd API fee',
     // plan-026 — honest Seal beat: gated (allow-list / restricted) bases are
     // Seal-encrypted; mitigation framing (pay-to-unlock), not "piracy-proof".
     ability: 'Publishes a base model to Walrus and sets its license terms — gated bases are Seal-encrypted, so forkers pay to unlock.',
@@ -41,7 +41,7 @@ const ACTORS: readonly Actor[] = [
   },
   {
     key: 'nftCreator',
-    name: 'nftCreator',
+    name: 'NFT Creator',
     cost: 'pay-to-derive + gas',
     ability: 'Forks a base into a variant collection — one signature launches the whole palette.',
     flavor: 'Riff on what already exists.',
@@ -49,7 +49,7 @@ const ACTORS: readonly Actor[] = [
   },
   {
     key: 'buyer',
-    name: 'buyer',
+    name: 'Buyer',
     cost: 'listing price + 5% royalty',
     ability: 'Buys and owns an on-chain token — the variant is yours, not rented.',
     flavor: 'Own the object, not a license.',
@@ -57,7 +57,7 @@ const ACTORS: readonly Actor[] = [
   },
   {
     key: 'gameDev',
-    name: 'gameDev',
+    name: 'Media Creator / Game Dev',
     cost: 'registration fee + gas',
     // Honest to shipped v1: register_integration writes an on-chain
     // attestation ({name, url}) that a game can verify — it is NOT an

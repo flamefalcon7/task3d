@@ -127,7 +127,18 @@
   padding-top: 8px;
 }
 
+/* Hover lights the route in the accent (tokens.color.accent #FF4500), gated
+   behind hover so the resting card stays zero-accent (D-044 / KD-6). */
 .provenance:hover {
+  color: #ff4500;
+  text-decoration: underline;
+}
+
+/* Hovering anywhere on the card highlights its provenance route — the whole
+   card reads as one clickable target, so the route lights up in the accent even
+   when the cursor is over the name/ability rather than the link text itself. */
+.card:hover .provenance {
+  color: #ff4500;
   text-decoration: underline;
 }
 

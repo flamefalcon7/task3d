@@ -66,6 +66,14 @@ export function Masthead({ issueNumber = buildIssueNumber }: MastheadProps = {})
       <span className={styles.edition} data-testid="masthead-edition">
         TESTNET EDITION
       </span>
+      {/* Top-right CTA — crosses from the marketing landing into the app shell
+          at /browse (the variant browser). Plain anchor (not a react-router
+          Link) so the Masthead stays renderable without a Router context — it
+          is unit-tested in isolation. Brutalist black-on-paper button that
+          inverts on hover; zero #FF4500 keeps the masthead accent-free (D-044). */}
+      <a className={styles.launch} href="/browse" data-testid="masthead-launch">
+        Launch App
+      </a>
     </header>
   );
 }

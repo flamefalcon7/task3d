@@ -64,7 +64,7 @@ export function LifecycleStrip(): JSX.Element {
           </li>
         ))}
       </ol>
-      <p className={styles.tagline}>One prompt. One model. Sixteen forks. Every game.</p>
+      <p className={styles.tagline}>One prompt. One model. Infinite forks. Any world.</p>
     </section>
   );
 }

@@ -28,10 +28,18 @@ describe('ActorCards', () => {
 
   it('each card surfaces all five MTG parts (AC-2)', () => {
     renderCards();
-    for (const key of ['modelCreator', 'nftCreator', 'buyer', 'gameDev']) {
+    // testid key (stable, camelCase) is decoupled from the displayed name
+    // (Title Case role label).
+    const actors = [
+      { key: 'modelCreator', name: 'Model Creator' },
+      { key: 'nftCreator', name: 'NFT Creator' },
+      { key: 'buyer', name: 'Buyer' },
+      { key: 'gameDev', name: 'Media Creator / Game Dev' },
+    ];
+    for (const { key, name } of actors) {
       const card = screen.getByTestId(`actor-card-${key}`);
-      // name (the actor key doubles as the displayed name by design)
-      expect(card.textContent).toContain(key);
+      // the displayed role label renders
+      expect(card.textContent).toContain(name);
       // cost line — non-empty text containing a cost token
       expect(card.textContent).toMatch(/gas|royalty|fee|price/i);
       // ability — the <p> is the ability element; assert IT ends in a period

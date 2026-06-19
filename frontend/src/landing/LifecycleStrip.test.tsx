@@ -58,7 +58,7 @@ describe('LifecycleStrip', () => {
 
   it('renders the Newsreader-italic tagline (AC-4)', () => {
     render(<LifecycleStrip />);
-    expect(screen.getByText('One prompt. One model. Sixteen forks. Every game.')).toBeTruthy();
+    expect(screen.getByText('One prompt. One model. Infinite forks. Any world.')).toBeTruthy();
   });
 
   it('renders the live typewriter in the PROMPT panel (D-092)', () => {
