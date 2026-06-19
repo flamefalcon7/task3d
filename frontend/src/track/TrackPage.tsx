@@ -204,8 +204,11 @@ export function TrackPage() {
   //                 rather than relying on owned-objects discovery.
   // ?blob= wins when both are present.
   const [searchParams] = useSearchParams();
-  const modelParam = searchParams.get('model');
-  const blobOverride = searchParams.get('blob');
+  // Coerce empty-string params (`?model=` / `?blob=`) to null so they read as
+  // ABSENT — otherwise an empty param flips isOverrideMode on and dead-ends the
+  // visitor in a "car not found" state instead of the free-to-play default car.
+  const modelParam = searchParams.get('model') || null;
+  const blobOverride = searchParams.get('blob') || null;
   const blobToken = useMemo<OwnedToken | null>(
     () =>
       blobOverride
@@ -312,12 +315,19 @@ export function TrackPage() {
   // React-side game state and re-read the PB for the new car.
   // Plan-006 U8 — also reset orbitDone so the new scene's intro plays from
   // the top (camera orbit + countdown overlay reset).
+  //
+  // Keyed on `selected?.tokenId`, NOT the object reference: useOwnedTokens
+  // re-mints token objects on every refetch (same id, new reference), so a
+  // reference-keyed dep would wipe lap state + replay the intro for the SAME
+  // car on any owned-tokens refresh. Identity is what changed the car, not the
+  // object pointer. Kept in lockstep with the scene-build effect below.
   useEffect(() => {
     setLapState(initialLapState());
     setLastResult(null);
     setOrbitDone(false);
     setPbState(selected ? getPb(selected.tokenId) : null);
-  }, [selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.tokenId]);
 
   // Build (and rebuild) the scene whenever the selected variant changes.
   // Each rebuild disposes the previous scene to avoid stacking engines.
@@ -335,7 +345,10 @@ export function TrackPage() {
     setSceneError(null);
     (async () => {
       try {
-        const isDefaultCar = selected.tokenId === DEFAULT_CAR_TOKEN_ID;
+        // Reference equality against the memoized synthetic token — NOT a
+        // tokenId string compare, which a crafted `?blob=&model=default-car`
+        // URL could spoof into skipping a real blob fetch.
+        const isDefaultCar = selected === defaultCarToken;
         // Plan-2026-06-18-002 U3 — the default car is built from primitives in
         // the scene, so it skips the Walrus fetch entirely (no blob, no 404/expiry
         // risk). NFT cars still resolve + fetch their GLB.
@@ -397,7 +410,11 @@ export function TrackPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [selected]);
+    // Keyed on `selected?.tokenId`, NOT the object reference — see the reset
+    // effect above. A same-id owned-tokens refetch must NOT tear down + rebuild
+    // the running scene (re-fetch GLB, replay intro) for the car already loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.tokenId]);
 
   // U4 — on lap finish, write PB + populate result modal. Captures the
   // CURRENT pb (pre-update) so the modal shows delta vs the old best.
@@ -543,13 +560,14 @@ export function TrackPage() {
     );
   }
 
-  // R5 — show the conversion CTA whenever the player has no NFT from the bound
-  // collection (list holds only the default car), covering BOTH the no-wallet
-  // visitor and the connected-but-non-owner. Suppressed while a connected
-  // wallet's query is still in flight so NFT tiles can fill in without flicker.
-  const showBuyCta =
-    !isOverrideMode && !tokensLoading && tokensList.length === 1;
-  const isDefaultCarSelected = selected?.tokenId === DEFAULT_CAR_TOKEN_ID;
+  // R5 — show the conversion CTA whenever the player owns no NFT from the bound
+  // collection, covering BOTH the no-wallet visitor and the connected-but-
+  // non-owner. Suppressed while a connected wallet's query is still in flight so
+  // NFT tiles can fill in without flicker. Expressed as "no non-default car in
+  // the list" rather than `length === 1` so the intent survives future list shapes.
+  const hasNftCar = tokensList.some((t) => t.tokenId !== DEFAULT_CAR_TOKEN_ID);
+  const showBuyCta = !isOverrideMode && !tokensLoading && !hasNftCar;
+  const isDefaultCarSelected = selected === defaultCarToken;
 
   return (
     <div style={wellPage} data-testid="track-page">
@@ -636,25 +654,26 @@ export function TrackPage() {
                   provenance, so it shows an identity-only caption (no fabricated
                   ids, no "connect" copy — the CTA carries the conversion prompt
                   for both no-wallet and connected-non-owner). */}
-              {selected && isDefaultCarSelected && (
+              {selected && (
                 <div data-testid="track-provenance" style={provenanceBox}>
-                  <span
-                    style={{ ...provenanceHead, color: RAGE_RACING.color.inkFaint }}
-                  >
-                    ◇ Default car · not an NFT
-                  </span>
-                </div>
-              )}
-              {selected && !isDefaultCarSelected && (
-                <div data-testid="track-provenance" style={provenanceBox}>
-                  <span style={provenanceHead}>◇ Imported asset · Sui + Walrus</span>
-                  <span style={provenanceSub}>
-                    {selected.collectionId
-                      ? `collection ${truncateId(selected.collectionId)} · `
-                      : ''}
-                    walrus {selected.blobId ? 'blob' : 'patch'}{' '}
-                    {truncateId(selected.blobId || selected.patchId || '—')}
-                  </span>
+                  {isDefaultCarSelected ? (
+                    <span
+                      style={{ ...provenanceHead, color: RAGE_RACING.color.inkFaint }}
+                    >
+                      ◇ Default car · not an NFT
+                    </span>
+                  ) : (
+                    <>
+                      <span style={provenanceHead}>◇ Imported asset · Sui + Walrus</span>
+                      <span style={provenanceSub}>
+                        {selected.collectionId
+                          ? `collection ${truncateId(selected.collectionId)} · `
+                          : ''}
+                        walrus {selected.blobId ? 'blob' : 'patch'}{' '}
+                        {truncateId(selected.blobId || selected.patchId || '—')}
+                      </span>
+                    </>
+                  )}
                 </div>
               )}
             </>

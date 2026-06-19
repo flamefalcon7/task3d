@@ -44,7 +44,14 @@ export const RAGE_RACING = {
 // drives the default car. Kept OUT of `TESTNET` (sui/networkConfig) on purpose:
 // that object is asserted field-for-field against contracts/networks/testnet.json
 // by networkConfig.test.ts, so a frontend-only id there would break parity.
+//
+// Network-overridable: the literal is the testnet collection (6/21 submission,
+// zero-config). The mainnet cutover (D-009, by 8/27) sets
+// VITE_RAGE_RACING_COLLECTION_ID — without that override every owned mainnet
+// NftToken's collection_id would fail this filter and players would be silently
+// stranded on the default car with a dead buy-CTA.
 export const BOUND_COLLECTION_ID =
+  import.meta.env.VITE_RAGE_RACING_COLLECTION_ID ??
   '0xa1945554a7cb572ff9fdf48469bbaebcbf367e4a70c66fd5034550c1a4dd1242';
 
 // The always-available default car — built from Babylon primitives (no GLB, no

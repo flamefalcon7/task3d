@@ -754,7 +754,97 @@ describe('TrackPage', () => {
     expect(screen.queryByTestId('countdown-overlay')).toBeNull();
   });
 
+  // Plan-2026-06-18-002 U3 — locks the identity-keyed scene effect: an
+  // owned-tokens refetch that re-mints token objects (same ids, new references)
+  // must NOT rebuild the running NFT scene. Guards against a regression back to
+  // a `[selected]` (object-reference) dependency.
+  it('U3 — refetching owned tokens (same id, new ref) does not rebuild the NFT scene', async () => {
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xA', name: 'Red' })],
+      loading: false,
+      error: null,
+    });
+    const { captured } = installLiveScene();
+    // Fresh element on each render call (NOT a reused reference, which React
+    // bailout-skips) so the component actually re-renders and re-reads the mock.
+    const ui = () => (
+      <MemoryRouter initialEntries={['/track']}>
+        <TrackPage />
+      </MemoryRouter>
+    );
+    const { rerender } = render(ui());
+    await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
+    // Select the NFT (tile-1) → scene rebuilds for it.
+    selectFirstNft();
+    await waitFor(() =>
+      expect(createSceneMock.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    const callsAfterSelect = createSceneMock.mock.calls.length;
+    // Owned-tokens refetch: a NEW array + NEW object, same tokenId.
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xA', name: 'Red' })],
+      loading: false,
+      error: null,
+    });
+    rerender(ui());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Same car (same tokenId) → no teardown/rebuild.
+    expect(createSceneMock.mock.calls.length).toBe(callsAfterSelect);
+  });
+
+  // Plan-2026-06-18-002 U3 — wallet connecting mid-session must keep the default
+  // car selected (selection by identity; no auto-select of the arriving NFT).
+  it('U3 — wallet connecting mid-session keeps the default car selected', () => {
+    useCurrentAccountMock.mockReturnValue(null);
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    // Fresh element per render call (a reused reference is bailout-skipped).
+    const ui = () => (
+      <MemoryRouter initialEntries={['/track']}>
+        <TrackPage />
+      </MemoryRouter>
+    );
+    const { rerender } = render(ui());
+    expect(
+      screen.getByTestId('carousel-tile-0').getAttribute('data-selected'),
+    ).toBe('true');
+    // Wallet connects and owns an NFT → the list grows.
+    useCurrentAccountMock.mockReturnValue({ address: '0xWALLET' });
+    useOwnedTokensMock.mockReturnValue({
+      tokens: [token({ objectId: '0xA' })],
+      loading: false,
+      error: null,
+    });
+    rerender(ui());
+    // Default car (tile-0) stays selected; NFT appended at tile-1, not auto-selected.
+    expect(
+      screen.getByTestId('carousel-tile-0').getAttribute('data-selected'),
+    ).toBe('true');
+    expect(screen.getByTestId('carousel-tile-1').getAttribute('data-selected')).toBe(
+      'false',
+    );
+  });
+
   // ─── U11: override modes (?model= single-drive, ?blob= dev hatch) ───
+
+  // Plan-2026-06-18-002 U4 — override modes keep their scoped full-page states
+  // (the loading/error/not-found gates the free-to-play flip removed elsewhere).
+  it('U11/override — ?model= loading shows the scoped loading state', () => {
+    useCurrentAccountMock.mockReturnValue(null);
+    useTokenByIdMock.mockReturnValue({ token: null, loading: true, error: null });
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    renderPage('/track?model=0xpending');
+    expect(screen.getByTestId('track-loading-variants')).toBeTruthy();
+  });
+
+  it('U11/override — ?model= resolving to no token shows the not-found state', () => {
+    useTokenByIdMock.mockReturnValue({ token: null, loading: false, error: null });
+    useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
+    renderPage('/track?model=0xghost');
+    expect(screen.getByTestId('track-empty')).toBeTruthy();
+  });
 
   it('U11 — ?model=<tokenId> drives that token via the by-quilt-patch-id GLB', async () => {
     // The single-drive path resolves through useTokenById, NOT the owned-tokens
