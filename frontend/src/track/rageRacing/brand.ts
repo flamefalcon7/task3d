@@ -54,13 +54,17 @@ export const BOUND_COLLECTION_ID =
   import.meta.env.VITE_RAGE_RACING_COLLECTION_ID ??
   '0xa1945554a7cb572ff9fdf48469bbaebcbf367e4a70c66fd5034550c1a4dd1242';
 
-// The always-available default car — built from Babylon primitives (no GLB, no
-// Walrus, so no testnet blob-expiry risk) and drivable with no wallet. This id
-// doubles as the synthetic `OwnedToken.tokenId` on /track and the personal-best
-// storage key, so it must be a stable string that can never collide with a real
-// 0x… object id.
+// The always-available default car — drivable with no wallet. It loads a
+// repo-bundled local GLB (below) through the SAME proven path the NFT cars use,
+// so it renders identically (env/IBL timing, parenting, physics, chase camera)
+// and carries no Walrus dependency (no testnet blob-expiry risk). This id doubles
+// as the synthetic `OwnedToken.tokenId` on /track and the personal-best storage
+// key, so it must be a stable string that can never collide with a real 0x… id.
 export const DEFAULT_CAR_TOKEN_ID = 'default-car';
 export const DEFAULT_CAR_NAME = 'Starter Car';
+// Repo-bundled GLB served from frontend/public. Local → fast, never expires, and
+// (being a real GLB fetch) follows the identical scene-build path as NFT cars.
+export const DEFAULT_CAR_GLB_URL = '/dev-glbs/pickup-truck.glb';
 
 // Truncate a chain / Walrus id for compact display (provenance caption, garage
 // tile ids). Shared by TrackPage + carCarousel so the ellipsis/guard logic has

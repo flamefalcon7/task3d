@@ -18,6 +18,7 @@ import {
   BOUND_COLLECTION_ID,
   DEFAULT_CAR_TOKEN_ID,
   DEFAULT_CAR_NAME,
+  DEFAULT_CAR_GLB_URL,
   arcadeLabel,
   arcadeTitle,
   studioCredit,
@@ -347,24 +348,30 @@ export function TrackPage() {
       try {
         // Reference equality against the memoized synthetic token — NOT a
         // tokenId string compare, which a crafted `?blob=&model=default-car`
-        // URL could spoof into skipping a real blob fetch.
+        // URL could spoof.
         const isDefaultCar = selected === defaultCarToken;
-        // Plan-2026-06-18-002 U3 — the default car is built from primitives in
-        // the scene, so it skips the Walrus fetch entirely (no blob, no 404/expiry
-        // risk). NFT cars still resolve + fetch their GLB.
-        let carGlbBytes: Uint8Array | undefined;
-        if (!isDefaultCar) {
-          const url = glbUrlForToken(selected);
-          // glbUrlForToken returns '' for a missing/malformed blob id (audit W-4).
-          // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
-          // which would slip past the !res.ok check and fail later as a confusing
-          // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
-          if (!url) throw new Error('This car has no loadable model.');
-          const res = await fetch(url, { signal: controller.signal });
-          if (!res.ok) throw new Error(`Walrus aggregator ${res.status}`);
-          carGlbBytes = new Uint8Array(await res.arrayBuffer());
-          if (cancelled) return;
+        // Plan-2026-06-18-002 — the default car loads a repo-bundled GLB through
+        // the SAME path NFT cars use (a real fetch), so the scene renders
+        // identically (env/IBL, parenting, physics, camera). NFT cars resolve
+        // their Walrus GLB url; the default car uses the local bundled url.
+        const url = isDefaultCar
+          ? DEFAULT_CAR_GLB_URL
+          : glbUrlForToken(selected);
+        // glbUrlForToken returns '' for a missing/malformed blob id (audit W-4).
+        // Guard before fetch: fetch('') resolves the app's own HTML with ok=true,
+        // which would slip past the !res.ok check and fail later as a confusing
+        // GLB parse error. Reachable via the ?blob= dev hatch + on-chain ids.
+        if (!url) throw new Error('This car has no loadable model.');
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+          throw new Error(
+            isDefaultCar
+              ? `Default car ${res.status}`
+              : `Walrus aggregator ${res.status}`,
+          );
         }
+        const carGlbBytes = new Uint8Array(await res.arrayBuffer());
+        if (cancelled) return;
         sceneRef.current?.dispose();
         sceneRef.current = null;
         // Plan-006 U8 — onIntroSkipRequested is wired through a mutable ref
@@ -377,7 +384,6 @@ export function TrackPage() {
         const handles = await createRacetrackScene({
           canvas,
           carGlbBytes,
-          useDefaultCar: isDefaultCar,
           onLapStateChange: setLapState,
           // Plan-006 U8 — show the countdown once the orbit completes.
           onOrbitComplete: () => setOrbitDone(true),

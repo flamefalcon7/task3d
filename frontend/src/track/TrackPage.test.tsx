@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import {
   BOUND_COLLECTION_ID,
   DEFAULT_CAR_TOKEN_ID,
+  DEFAULT_CAR_GLB_URL,
 } from './rageRacing/brand';
 
 // Phase 3 U6 + Plan-004 U4 + U11 — TrackPage shell tests. Mock everything
@@ -322,17 +323,20 @@ describe('TrackPage', () => {
     expect(screen.getByTestId('track-canvas')).toBeTruthy();
   });
 
-  // Plan-2026-06-18-002 U3 — the default car never triggers a Walrus fetch.
-  it('default car build skips the Walrus fetch entirely', async () => {
+  // Plan-2026-06-18-002 U3 — the default car loads the bundled LOCAL GLB (no
+  // Walrus aggregator), via the same proven scene-build path as NFT cars.
+  it('default car fetches the bundled local GLB, not a Walrus url', async () => {
     useOwnedTokensMock.mockReturnValue({ tokens: [], loading: false, error: null });
-    const fetchMock = vi.fn(() => new Promise(() => undefined));
-    vi.stubGlobal('fetch', fetchMock);
     const { captured } = installLiveScene();
-    // installLiveScene re-stubs fetch; re-assert after it to capture our spy.
-    vi.stubGlobal('fetch', fetchMock);
     renderPage();
     await waitFor(() => expect(captured.onLapStateChange).toBeDefined());
-    expect(fetchMock).not.toHaveBeenCalled();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledWith(
+      DEFAULT_CAR_GLB_URL,
+      expect.anything(),
+    );
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.every((u) => !u.includes('/v1/blobs/'))).toBe(true);
   });
 
   it('clicking a carousel tile updates the selected index', () => {
