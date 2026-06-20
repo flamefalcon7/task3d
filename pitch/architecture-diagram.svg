@@ -1,0 +1,108 @@
+<svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" font-family="'Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#0a0d14"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#6b7686"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="800" y="56" text-anchor="middle" fill="#ffffff" font-size="38" font-weight="700">Tusk3D — Architecture</text>
+  <text x="800" y="88" text-anchor="middle" fill="#7d8896" font-size="20">Composable 3D creator economy · Sui Overflow 2026 · Walrus track</text>
+
+  <!-- ===== CLIENTS ===== -->
+  <text x="80" y="150" fill="#5b6675" font-size="16" font-weight="700" letter-spacing="2">CLIENTS</text>
+  <g font-size="20" font-weight="600">
+    <rect x="80"  y="165" width="430" height="70" rx="10" fill="#16202e" stroke="#2b3a4d"/>
+    <text x="295" y="200" text-anchor="middle" fill="#e7edf3">Web app</text>
+    <text x="295" y="223" text-anchor="middle" fill="#8a96a4" font-size="15" font-weight="400">React + Babylon</text>
+
+    <rect x="585" y="165" width="430" height="70" rx="10" fill="#16202e" stroke="#2b3a4d"/>
+    <text x="800" y="200" text-anchor="middle" fill="#e7edf3">AI agent</text>
+    <text x="800" y="223" text-anchor="middle" fill="#8a96a4" font-size="15" font-weight="400">MCP client (Claude Code / Cursor)</text>
+
+    <rect x="1090" y="165" width="430" height="70" rx="10" fill="#16202e" stroke="#2b3a4d"/>
+    <text x="1305" y="200" text-anchor="middle" fill="#e7edf3">Sample racing game</text>
+    <text x="1305" y="223" text-anchor="middle" fill="#8a96a4" font-size="15" font-weight="400">/track · drive your NFT</text>
+  </g>
+
+  <!-- arrows clients -> backend -->
+  <line x1="295"  y1="235" x2="295"  y2="295" stroke="#6b7686" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="800"  y1="235" x2="800"  y2="295" stroke="#6b7686" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1305" y1="235" x2="1305" y2="295" stroke="#6b7686" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== BACKEND ===== -->
+  <text x="80" y="318" fill="#5b6675" font-size="16" font-weight="700" letter-spacing="2">TUSK3D BACKEND</text>
+  <rect x="80" y="330" width="1440" height="118" rx="12" fill="#11161f" stroke="#243140"/>
+  <g font-size="17" font-weight="600">
+    <rect x="100" y="350" width="262" height="80" rx="9" fill="#1a2433" stroke="#2f4256"/>
+    <text x="231" y="385" text-anchor="middle" fill="#e7edf3">Tripo dispatch</text>
+    <text x="231" y="408" text-anchor="middle" fill="#8a96a4" font-size="14" font-weight="400">3D generation</text>
+
+    <rect x="378" y="350" width="262" height="80" rx="9" fill="#1a2433" stroke="#2f4256"/>
+    <text x="509" y="385" text-anchor="middle" fill="#e7edf3">Gemini copilot</text>
+    <text x="509" y="408" text-anchor="middle" fill="#8a96a4" font-size="14" font-weight="400">prompt authoring</text>
+
+    <rect x="656" y="350" width="262" height="80" rx="9" fill="#1a2433" stroke="#2f4256"/>
+    <text x="787" y="385" text-anchor="middle" fill="#e7edf3">MemWal client</text>
+    <text x="787" y="408" text-anchor="middle" fill="#8a96a4" font-size="14" font-weight="400">semantic memory</text>
+
+    <rect x="934" y="350" width="262" height="80" rx="9" fill="#1a2433" stroke="#2f4256"/>
+    <text x="1065" y="385" text-anchor="middle" fill="#e7edf3">MCP server</text>
+    <text x="1065" y="408" text-anchor="middle" fill="#8a96a4" font-size="14" font-weight="400">7 agent tools</text>
+
+    <rect x="1212" y="350" width="288" height="80" rx="9" fill="#1a2433" stroke="#2f4256"/>
+    <text x="1356" y="385" text-anchor="middle" fill="#e7edf3">Seal / Walrus read</text>
+    <text x="1356" y="408" text-anchor="middle" fill="#8a96a4" font-size="14" font-weight="400">keys stay client-side</text>
+  </g>
+
+  <!-- arrows backend -> pillars -->
+  <line x1="430"  y1="448" x2="430"  y2="540" stroke="#6b7686" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1170" y1="448" x2="1170" y2="540" stroke="#6b7686" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== DECENTRALIZED LAYER ===== -->
+  <text x="80" y="528" fill="#5b6675" font-size="16" font-weight="700" letter-spacing="2">DECENTRALIZED · Sui + Walrus</text>
+
+  <!-- WALRUS pillar -->
+  <rect x="80" y="545" width="700" height="295" rx="14" fill="#0e2024" stroke="#1f7a8c"/>
+  <text x="110" y="588" fill="#33c4d6" font-size="26" font-weight="700">WALRUS</text>
+  <text x="110" y="614" fill="#7fb8c2" font-size="16">verifiable data + memory layer</text>
+  <g font-size="18" font-weight="600">
+    <rect x="110" y="636" width="640" height="56" rx="8" fill="#102b30" stroke="#1f6675"/>
+    <text x="130" y="671" fill="#dff3f6" text-anchor="start">Model GLB blobs</text>
+    <rect x="110" y="704" width="640" height="56" rx="8" fill="#102b30" stroke="#1f6675"/>
+    <text x="130" y="739" fill="#dff3f6" text-anchor="start">Seal-encrypted paid content</text>
+    <rect x="110" y="772" width="640" height="50" rx="8" fill="#102b30" stroke="#1f6675"/>
+    <text x="130" y="804" fill="#dff3f6" text-anchor="start">MemWal — creator prompt memory</text>
+  </g>
+
+  <!-- SUI pillar -->
+  <rect x="820" y="545" width="700" height="295" rx="14" fill="#16122a" stroke="#7a5cff"/>
+  <text x="850" y="588" fill="#a78bff" font-size="26" font-weight="700">SUI MOVE · model3d</text>
+  <text x="850" y="614" fill="#b3a6e6" font-size="16">on-chain rules · protocol-enforced</text>
+  <g font-size="17" font-weight="600">
+    <rect x="850" y="636" width="640" height="50" rx="8" fill="#1d1838" stroke="#5b45c2"/>
+    <text x="870" y="667" fill="#ece7ff" text-anchor="start">Model3D + AccessEntitlement (soulbound)</text>
+    <rect x="850" y="698" width="640" height="50" rx="8" fill="#1d1838" stroke="#5b45c2"/>
+    <text x="870" y="729" fill="#ece7ff" text-anchor="start">NftCollection + NftToken · LicenseTerms (immutable royalty)</text>
+    <rect x="850" y="760" width="310" height="62" rx="8" fill="#1d1838" stroke="#5b45c2"/>
+    <text x="1005" y="788" fill="#ece7ff" text-anchor="middle" font-size="15">Kiosk + TransferPolicy</text>
+    <text x="1005" y="808" fill="#9d90c9" text-anchor="middle" font-size="13" font-weight="400">secondary royalty</text>
+    <rect x="1180" y="760" width="310" height="62" rx="8" fill="#1d1838" stroke="#5b45c2"/>
+    <text x="1335" y="788" fill="#ece7ff" text-anchor="middle" font-size="15">IntegrationRegistered</text>
+    <text x="1335" y="808" fill="#9d90c9" text-anchor="middle" font-size="13" font-weight="400">game ↔ collection</text>
+  </g>
+
+  <!-- Seal bridge between pillars -->
+  <line x1="780" y1="690" x2="820" y2="690" stroke="#f4b740" stroke-width="2.5" stroke-dasharray="5 4"/>
+  <rect x="700" y="845" width="200" height="0" />
+  <g>
+    <rect x="690" y="500" width="220" height="34" rx="17" fill="#3a2e0a" stroke="#f4b740"/>
+    <text x="800" y="523" text-anchor="middle" fill="#f4b740" font-size="15" font-weight="700">🔒 Seal IBE — decryption gated by AccessEntitlement</text>
+  </g>
+</svg>

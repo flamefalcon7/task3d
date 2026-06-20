@@ -9,7 +9,7 @@ import { useTelemetryData } from './useTelemetryData';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
 
 // CDN swap point: when plan-018 ships, aggregator.ts updates WALRUS_AGGREGATOR
-// to cdn.tusk3d.space and this component picks it up automatically. Do NOT
+// to cdn.tusk3d.store and this component picks it up automatically. Do NOT
 // re-introduce a local URL constant — the canonical is in aggregator.ts.
 
 // Truncate a Walrus CID to "first4…last3" for display. Mirrors the visual
