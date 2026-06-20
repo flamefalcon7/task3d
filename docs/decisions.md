@@ -4488,6 +4488,24 @@ Default upload storage to **53 epochs** via a single `DEFAULT_STORAGE_EPOCHS` co
 
 ---
 
+## D-112: Collection display name recovered from minted token names (frontend stop-gap; on-chain `name` field deferred to mainnet)
+**Status**: Accepted
+**Date**: 2026-06-20 · **Phase**: Phase 5 (polish / demo)
+
+### Context — The on-chain `NftCollection` has **no `name` field** (D-110 notes this). At launch the creator's collection-name input (`LaunchCollectionPage` `collectionName`) is only baked into the minted `NftToken` names as `"<name> #<n>"`; it is never persisted on the collection object. So every collection-display surface fell back to deriving `"<base model> collection"` from the L1 `Model3D` — a collection the creator named "Neon drift" rendered as "sport car collection" on `/collection/:id`, the `/integrate` leaderboard, and the register picker. Surfaced by the user viewing a live collection detail page.
+
+### Decision — Frontend copy layer only, **no contract change**: a shared hook `useCollectionNames()` does **one** network-wide `NftToken` `objects(filter:{type})` scan (mirroring `useCollections.ts`), takes the first token seen per collection, strips the `" #<n>"` suffix, and exposes a `collectionId → name` map. The detail page, leaderboard (`buildLeaderboardRows`), and register picker prefer this name and fall back to the old base-model derivation when no token exists yet (freshly launched / token-less collection). Scan failure is non-fatal (empty map → fallback). The proper fix — a `name: String` field on `NftCollection` set in `launch_collection` — is **deferred to the mainnet milestone** (8/27) as it is a public contract change requiring redeploy + demo-content re-mint one day before the 6/21 submission. Tracked as OQ-036.
+
+### Rationale — Recovers the creator's intended name from data already on-chain with zero contract risk before the deadline; keeps all three surfaces consistent via one shared scan rather than N per-collection lookups.
+
+### Alternatives Considered — Add `name` to `NftCollection` now (rejected for 6/21: contract redeploy + re-mint risk; deferred to mainnet). Per-collection token query on the detail page only (rejected: leaves leaderboard/picker showing the base-model name → demo inconsistency). Accept the base-model label + reword copy (rejected: discards the creator's chosen name).
+
+### Consequences — ✅ `/collection/:id`, `/integrate`, and the register picker all show the creator-chosen name; the D-110 `detailUrl` click-through lands on a correctly-named page. ⚠️ Inherits the unpaginated network-wide `objects(filter)` scan (bounded to 20 pages / 1000 tokens here) — fine at testnet scale, must paginate before mainnet (same caveat as D-110). ⚠️ Relies on the `"<name> #<n>"` mint convention; a future mint path that breaks it silently regresses naming. 🔮 The mainnet `name`-field fix (OQ-036) makes this hook redundant — delete it then.
+
+### Related — D-110 (no-name-field note + detailUrl), D-109 (leaderboard), D-029/D-078 (L1→L2 model). OQ-036 (deferred contract fix). Files: `frontend/src/integration/useCollectionNames.ts` (+test), `frontend/src/integration/useIntegrationLeaderboard.ts`, `frontend/src/collection/CollectionDetailPage.tsx`.
+
+---
+
 # Reserved Decision Numbers
 
 D-112 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

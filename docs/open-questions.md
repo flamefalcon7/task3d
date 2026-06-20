@@ -605,3 +605,15 @@ The real source of truth for "is Copilot available" is the **backend** (`GOOGLE_
 **Possible fix**: have the frontend derive availability from the backend (a capabilities/preflight response — the `preflight` route already exists) and drop the build-time visibility flag, so backend config is the single source of truth.
 
 **Blocker level**: 🟢 Deferred (post-submission). For now `VITE_COPILOT_ENABLED=true` is safe because the backend key is configured (no drift).
+
+---
+
+## OQ-036: Give `NftCollection` an on-chain `name` field (the proper fix behind D-112's stop-gap)
+
+**Surfaced**: 2026-06-20 (user noticed `/collection/:id` showed "sport car collection" for a collection they named "Neon drift").
+
+The `NftCollection` Move struct has **no `name` field**. The creator's collection-name input at launch is only baked into minted `NftToken` names as `"<name> #<n>"`; it never lands on the collection object. D-112 ships a frontend stop-gap (`useCollectionNames()` scans tokens, strips the `#<n>` suffix, recovers the name) so all surfaces show the creator-chosen name — but this is fragile: it relies on the mint naming convention and fails for a freshly launched token-less collection (falls back to the base-model label).
+
+**Proper fix**: add `name: String` to `NftCollection`, set it in `launch_collection` / `launch_collection_with_tokens` from a new entry-fn arg, read it directly in `useCollections.ts` (`nodeToCollection`), and delete the `useCollectionNames` scan + its consumers' fallbacks. Public contract change → testnet redeploy + demo-content re-mint, so deferred past the 6/21 crunch.
+
+**Blocker level**: 🟢 Deferred to the **mainnet milestone (8/27)** — bundle with the next contract redeploy (D-009). The D-112 stop-gap covers the demo.

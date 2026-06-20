@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useCollectionById } from '../integration/useCollections';
+import { useCollectionNames } from '../integration/useCollectionNames';
 import { useModelIndex } from '../browse/useModelIndex';
 import {
   previewStillUrlsForSummary,
@@ -143,6 +144,9 @@ export function CollectionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { collection, loading, error } = useCollectionById(slug);
   const { models } = useModelIndex();
+  // Creator-chosen collection name recovered from minted token names. Absent for
+  // a freshly launched (token-less) collection → base-model fallback below.
+  const { names } = useCollectionNames();
 
   if (!slug) {
     return (
@@ -178,9 +182,13 @@ export function CollectionDetailPage() {
   }
 
   const baseModel = models.find((m) => m.objectId === collection.baseModelId);
-  const name = baseModel?.name
-    ? `${baseModel.name} collection`
-    : `Collection ${truncate(collection.collectionId)}`;
+  // Prefer the creator-chosen name; fall back to the base-model-derived label
+  // (token-less collection) then the truncated id.
+  const name =
+    names.get(collection.collectionId) ??
+    (baseModel?.name
+      ? `${baseModel.name} collection`
+      : `Collection ${truncate(collection.collectionId)}`);
   // plan-026 D-075 — encrypted L1 bases render their PUBLIC preview still
   // (turntable <img>), NEVER the ciphertext glbBlobId as a GLB. Mirrors
   // CollectionCard: thumbSourceForSummary picks glb vs still; no source →

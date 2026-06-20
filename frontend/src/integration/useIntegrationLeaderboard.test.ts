@@ -31,7 +31,7 @@ describe('buildLeaderboardRows', () => {
       [cid('b'), { count: 3, latestRegisteredAtMs: 100 }],
       // c absent → count 0
     ]);
-    const rows = buildLeaderboardRows(collections, [], counts);
+    const rows = buildLeaderboardRows(collections, [], counts, new Map());
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a'), cid('c')]);
     expect(rows.find((r) => r.collectionId === cid('c'))?.count).toBe(0);
   });
@@ -42,7 +42,7 @@ describe('buildLeaderboardRows', () => {
       [cid('a'), { count: 2, latestRegisteredAtMs: 1000 }],
       [cid('b'), { count: 2, latestRegisteredAtMs: 9000 }],
     ]);
-    const rows = buildLeaderboardRows(collections, [], counts);
+    const rows = buildLeaderboardRows(collections, [], counts, new Map());
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
   });
 
@@ -52,7 +52,7 @@ describe('buildLeaderboardRows', () => {
       coll(cid('b'), { baseModelId: cid('2') }),
     ];
     const models = [model(cid('1'), 'Older', '1000'), model(cid('2'), 'Newer', '5000')];
-    const rows = buildLeaderboardRows(collections, models, new Map());
+    const rows = buildLeaderboardRows(collections, models, new Map(), new Map());
     // both count 0 → newer base model (b) ranks first
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
   });
@@ -64,7 +64,7 @@ describe('buildLeaderboardRows', () => {
     ];
     const models = [model(cid('1'), 'Newer', '9000'), model(cid('2'), 'Older', '1000')];
     const counts = new Map([[cid('b'), { count: 1, latestRegisteredAtMs: 100 }]]);
-    const rows = buildLeaderboardRows(collections, models, counts);
+    const rows = buildLeaderboardRows(collections, models, counts, new Map());
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b'), cid('a')]);
   });
 
@@ -73,15 +73,28 @@ describe('buildLeaderboardRows', () => {
       coll(cid('a'), { integrationPolicy: 0 }),
       coll(cid('b'), { integrationPolicy: POLICY_PERMISSIONLESS }),
     ];
-    const rows = buildLeaderboardRows(collections, [], new Map());
+    const rows = buildLeaderboardRows(collections, [], new Map(), new Map());
     expect(rows.map((r) => r.collectionId)).toEqual([cid('b')]);
   });
 
   it('joins the base model name, falling back to a truncated id', () => {
     const collections = [coll(cid('a'), { baseModelId: cid('d') })];
-    const withName = buildLeaderboardRows(collections, [model(cid('d'), 'Tusk')], new Map());
+    const withName = buildLeaderboardRows(collections, [model(cid('d'), 'Tusk')], new Map(), new Map());
     expect(withName[0]!.name).toBe('Tusk');
-    const noName = buildLeaderboardRows(collections, [], new Map());
+    const noName = buildLeaderboardRows(collections, [], new Map(), new Map());
     expect(noName[0]!.name).toMatch(/^Collection 0x/);
+  });
+
+  it('prefers the creator-chosen name (token-derived) over the base model name', () => {
+    const collections = [coll(cid('a'), { baseModelId: cid('d') })];
+    const names = new Map([[cid('a'), 'Neon drift']]);
+    const rows = buildLeaderboardRows(collections, [model(cid('d'), 'sport car')], new Map(), names);
+    expect(rows[0]!.name).toBe('Neon drift');
+  });
+
+  it('falls back to the base model name when no token-derived name exists', () => {
+    const collections = [coll(cid('a'), { baseModelId: cid('d') })];
+    const rows = buildLeaderboardRows(collections, [model(cid('d'), 'sport car')], new Map(), new Map());
+    expect(rows[0]!.name).toBe('sport car');
   });
 });

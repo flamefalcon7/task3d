@@ -1,5 +1,23 @@
 # Phase Progress
 
+## Last Updated: 2026-06-20 11:45 (**fix(ui): recover creator-chosen collection name from token names (D-112) — built + browser-verified, awaiting commit**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~1** · demo day (7/20–21): ~30 · winners (8/27): ~68
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **Collection display name fix (D-112)** — user noticed `/collection/0xa194…1242` showed **"sport car collection"** for a collection they named **"Neon drift"**. Root cause: `NftCollection` has **no on-chain `name` field** (D-110); the launch name input only lands on minted `NftToken` names as `"<name> #<n>"`, so every surface fell back to deriving `"<base model> collection"` from the L1 `Model3D`.
+  - **Stop-gap (frontend copy layer, no contract change)**: new shared hook `frontend/src/integration/useCollectionNames.ts` — one bounded network-wide `NftToken objects(filter:{type})` scan → `collectionId→name` map (first token per collection, `" #<n>"` suffix stripped). Pure helpers `stripTokenSuffix` / `buildNameMap` unit-tested (+`useCollectionNames.test.ts`, 7 tests).
+  - **Consumers** prefer the token-derived name, fall back to base-model label when token-less: `CollectionDetailPage.tsx` (+page test for the creator-name path), `useIntegrationLeaderboard.ts` `buildLeaderboardRows` (now takes a `names` map; +2 tests; register picker inherits via `board.name`).
+  - **Verified**: `tsc` clean; `src/integration` + `src/collection` **194 tests pass**; agent-browser on live testnet data → `/collection/:id` and `/integrate` leaderboard both render **"Neon drift"**.
+  - **Known cosmetic**: pre-S163 collections (minted before the " variants" suffix removal, 6/17) now surface their real token name e.g. **"machine dog variants"** instead of the old base-model label "machine dog". Decision pending (user): leave as-is (re-mint near 7/20 cleans it) vs. also strip a trailing " variants". Leaning leave-as-is.
+  - **Proper fix deferred**: add `name: String` to `NftCollection` (contract change → redeploy + re-mint) → **OQ-036**, bundled with the mainnet cutover (8/27, D-009).
+
+---
+
 ## Last Updated: 2026-06-19 20:35 (**feat(mcp): `list_fork_collections` read tool (D-110) — built, reviewed, tested; staged, awaiting commit**)
 
 ### Hackathon Tracker

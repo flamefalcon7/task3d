@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Model3DSummary } from '@overflow2026/shared';
 import { useModelIndex } from '../browse/useModelIndex';
 import { useCollections, POLICY_PERMISSIONLESS, type NftCollectionSummary } from './useCollections';
+import { useCollectionNames } from './useCollectionNames';
 
 // plan-2026-06-17-002 U3 — Integration Ecosystem leaderboard data.
 //
@@ -54,9 +55,12 @@ export function buildLeaderboardRows(
   collections: NftCollectionSummary[],
   models: Model3DSummary[],
   counts: Map<string, CountEntry>,
+  names: Map<string, string>,
 ): LeaderboardRow[] {
-  // NftCollection has no on-chain name/publish time — join base_model_id →
-  // Model3D for both (one find per collection).
+  // NftCollection has no on-chain name/publish time. Prefer the creator-chosen
+  // name recovered from minted token names (useCollectionNames); fall back to
+  // the base-model-derived label when no token exists yet. Publish time still
+  // joins base_model_id → Model3D (one find per collection).
   return collections
     .filter((c) => c.integrationPolicy === POLICY_PERMISSIONLESS)
     .map((c) => {
@@ -64,7 +68,10 @@ export function buildLeaderboardRows(
       const model = models.find((m) => m.objectId === c.baseModelId);
       return {
         collectionId: c.collectionId,
-        name: model?.name ?? `Collection ${truncate(c.collectionId)}`,
+        name:
+          names.get(c.collectionId) ??
+          model?.name ??
+          `Collection ${truncate(c.collectionId)}`,
         count: entry?.count ?? 0,
         latestRegisteredAtMs: entry?.latestRegisteredAtMs ?? 0,
         publishTimeMs: Number(model?.createdAtMs ?? 0),
@@ -89,6 +96,7 @@ export interface UseIntegrationLeaderboardResult {
 export function useIntegrationLeaderboard(): UseIntegrationLeaderboardResult {
   const { collections, loading: collLoading, error: collError } = useCollections();
   const { models } = useModelIndex();
+  const { names } = useCollectionNames();
   const [counts, setCounts] = useState<Map<string, CountEntry>>(new Map());
   const [countsLoading, setCountsLoading] = useState(true);
 
@@ -123,8 +131,8 @@ export function useIntegrationLeaderboard(): UseIntegrationLeaderboardResult {
   }, []);
 
   const rows = useMemo(
-    () => buildLeaderboardRows(collections, models, counts),
-    [collections, models, counts],
+    () => buildLeaderboardRows(collections, models, counts, names),
+    [collections, models, counts, names],
   );
 
   return { rows, loading: collLoading || countsLoading, error: collError };

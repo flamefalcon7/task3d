@@ -15,6 +15,11 @@ vi.mock('../integration/useCollections', async (importOriginal) => {
 const useModelIndexMock = vi.fn();
 vi.mock('../browse/useModelIndex', () => ({ useModelIndex: () => useModelIndexMock() }));
 
+const useCollectionNamesMock = vi.fn();
+vi.mock('../integration/useCollectionNames', () => ({
+  useCollectionNames: () => useCollectionNamesMock(),
+}));
+
 vi.mock('../auth/SignInButton', () => ({ SignInButton: () => null }));
 
 // Babylon needs WebGL — jsdom doesn't have it. Stub PreviewCanvas.
@@ -49,6 +54,9 @@ beforeEach(() => {
   useCollectionByIdMock.mockReset();
   useModelIndexMock.mockReset();
   useModelIndexMock.mockReturnValue({ models: [{ objectId: '0xbase', name: 'Roadster' }], loading: false });
+  useCollectionNamesMock.mockReset();
+  // Default: no token-derived name → page falls back to the base-model label.
+  useCollectionNamesMock.mockReturnValue({ names: new Map(), loading: false, error: null });
   // Default: UsedBySection's fetch resolves to no integrations.
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
@@ -68,6 +76,17 @@ describe('CollectionDetailPage', () => {
     expect(screen.getByTestId('collection-name').textContent).toMatch(/Roadster collection/);
     expect(screen.getByTestId('collection-register-fee').textContent).toMatch(/0\.10 SUI/);
     expect(screen.getByTestId('usedby-section')).toBeTruthy();
+  });
+
+  it('prefers the creator-chosen name (token-derived) over the base-model label', () => {
+    useCollectionByIdMock.mockReturnValue({ collection: makeCollection(), loading: false, error: null });
+    useCollectionNamesMock.mockReturnValue({
+      names: new Map([['0xcoll', 'Neon drift']]),
+      loading: false,
+      error: null,
+    });
+    renderAt('0xcoll');
+    expect(screen.getByTestId('collection-name').textContent).toBe('Neon drift');
   });
 
   it('shows a copyable Model ID that writes the base model id to the clipboard', async () => {
