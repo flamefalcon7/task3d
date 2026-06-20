@@ -28,10 +28,10 @@ describe('buildPayForApiCallPtb', () => {
     expect(metadata.expectedEvents).toEqual([]);
   });
 
-  it('defaults to 0.4 SUI to the deployer treasury', () => {
-    // plan-013 bumped from 0.1 → 0.4 SUI in lockstep with the Tripo two-step
-    // flow (text_to_model → mesh_segmentation = ~4× credit cost).
-    expect(TRIPO_FEE_MIST).toBe(400_000_000n);
+  it('defaults to 20 SUI to the deployer treasury', () => {
+    // 0.1 → 0.4 (Tripo two-step ~4× credits) → 20 SUI testnet anti-abuse gate.
+    // MUST stay in lockstep with the backend TRIPO_FEE_MIST default.
+    expect(TRIPO_FEE_MIST).toBe(20_000_000_000n);
     expect(TRIPO_FEE_TREASURY).toBe(TESTNET.deployerAddress);
   });
 

@@ -22,15 +22,17 @@ const PKG = TESTNET.model3dPackageId;
 const SEAL_ID_REGISTRY_ID = TESTNET.sealIdRegistryId;
 
 /**
- * Default Tripo service-fee: 0.4 SUI (D-034, re-derived plan-013).
+ * Default Tripo service-fee: 20 SUI (D-034, re-derived plan-013).
  *
- * Previously 0.1 SUI when Tripo `text_to_model` was a single ~15-credit call.
- * Plan-013's two-step flow chains `text_to_model` → `mesh_segmentation`
- * (~60 credits total, 4× the cost), so the SUI fee is bumped 4× in lockstep
- * to keep the per-generation margin intact. Reversible via this single
- * constant if demo-day feedback warrants tuning.
+ * History: 0.1 SUI (single ~15-credit `text_to_model`) → 0.4 SUI (plan-013
+ * two-step `text_to_model` → `mesh_segmentation`, ~4× credits). Bumped again
+ * to 20 SUI as a testnet anti-abuse gate — well above credit cost, this is a
+ * deliberate spam wall, not a margin calc. The demo deployer is unaffected
+ * (operator self-pay bypass; see backend `TRIPO_FEE_OPERATOR`). Reversible via
+ * this single constant — but MUST stay in lockstep with the backend
+ * `TRIPO_FEE_MIST` default/env or paid generations get rejected (non-refundable).
  */
-export const TRIPO_FEE_MIST = 400_000_000n;
+export const TRIPO_FEE_MIST = 20_000_000_000n;
 
 /** Treasury that receives the Tripo service-fee (D-034: deployer for demo). */
 export const TRIPO_FEE_TREASURY = TESTNET.deployerAddress;
