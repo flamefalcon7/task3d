@@ -10,6 +10,7 @@ import {
 import { TESTNET } from '../sui/networkConfig';
 import { recoverFullSealId, decryptBaseGlb } from '../seal/forkerDecrypt';
 import { WALRUS_AGGREGATOR } from '../walrus/aggregator';
+import { fetchBytesWithStallTimeout } from '../walrus/fetchWithStallTimeout';
 
 // plan-026 U5 — encrypted ALLOW_LIST 3-step fork orchestration. Pure functions
 // with every network/SDK/wallet boundary injected, so unit tests drive the full
@@ -188,10 +189,14 @@ export interface DecryptEncryptedBaseArgs {
   maxAttempts?: number;
 }
 
+// Stall-timeout + bounded retry (plan: decrypt-hang fix). The old bare
+// `fetch(url)` had no timeout, so a wedged testnet aggregator read (curl shows
+// http_code=000 — connection opens, no bytes) left the decrypt promise pending
+// forever and the UI stuck on its 'decrypting' spinner. fetchBytesWithStallTimeout
+// aborts on a stall, retries the transient wedge, and throws a user-facing
+// message that the decrypt-failed UI surfaces.
 async function defaultFetchBytes(url: string): Promise<Uint8Array> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Walrus aggregator ${res.status} for the encrypted base`);
-  return new Uint8Array(await res.arrayBuffer());
+  return fetchBytesWithStallTimeout(url);
 }
 
 /**

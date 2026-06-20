@@ -174,11 +174,41 @@ export async function decryptBase(
  *
  * @returns the raw 32-byte AES key for decryptBase.
  */
+// Key-server dry-run timeout. The unwrap is size-independent (it only releases
+// the 32-byte AES key), so a fixed deadline is correct here — unlike the
+// ciphertext download. @mysten/seal's DecryptOptions has no signal/timeout, so
+// we race a timer: the underlying request isn't truly cancelled, but the promise
+// rejects and decryptKeyWithRetry's bounded retry takes over instead of the UI
+// hanging on an unresponsive testnet key server.
+// 15s × up to DECRYPT_KEY_MAX_ATTEMPTS retries (forkerDecrypt) ≈ 30s worst case
+// for the key unwrap — half of the ~75s combined decrypt budget (the ciphertext
+// fetch gets the other half).
+export const KEY_SERVER_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  // If the timeout wins the race, `p` (the un-cancellable key-server request)
+  // keeps running and may reject LATER. Promise.race attaches no handler to the
+  // loser, so that late rejection would surface as an unhandledrejection — keep
+  // it swallowed. (The winning path is unaffected; this catch is a no-op there.)
+  p.catch(() => {});
+  return Promise.race([p, timeout]).finally(() =>
+    clearTimeout(timer),
+  ) as Promise<T>;
+}
+
 export async function decryptKey(
   client: Pick<SealClient, 'decrypt'>,
   sealedKey: Uint8Array,
   sessionKey: Parameters<SealClient['decrypt']>[0]['sessionKey'],
   txBytes: Uint8Array,
 ): Promise<Uint8Array> {
-  return client.decrypt({ data: sealedKey, sessionKey, txBytes });
+  return withTimeout(
+    client.decrypt({ data: sealedKey, sessionKey, txBytes }),
+    KEY_SERVER_TIMEOUT_MS,
+    'Seal key server timed out — please retry.',
+  );
 }

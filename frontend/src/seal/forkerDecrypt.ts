@@ -23,7 +23,11 @@ import { decryptKey, decryptBase } from './envelope';
 // cut; tune against real testnet dry-run latency once the wallet-signed path
 // is exercised end-to-end. Kept here as named constants so the tuning has one
 // home rather than being scattered through the page.
-export const DECRYPT_KEY_MAX_ATTEMPTS = 4;
+// 2 attempts (1 retry) keeps the combined decrypt under the ~75s budget: with
+// KEY_SERVER_TIMEOUT_MS=15s a wedged key server costs ≈30s here, not 60-80s.
+// Still absorbs the common fresh-object dry-run race (one backoff+retry); a
+// persistent denial throws after both attempts rather than being retried away.
+export const DECRYPT_KEY_MAX_ATTEMPTS = 2;
 export const DECRYPT_KEY_BACKOFF_BASE_MS = 600;
 // Exponential-ish backoff: base * 2^(attempt-1), capped, so attempts land at
 // roughly 600 / 1200 / 2400 ms between the 4 tries (~4.2s total worst case).

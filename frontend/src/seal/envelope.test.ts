@@ -14,6 +14,7 @@ import {
   buildSealId,
   modelIdToBytes,
   AES_GCM_OVERHEAD_BYTES,
+  KEY_SERVER_TIMEOUT_MS,
 } from './envelope';
 import { SEAL_THRESHOLD } from './sealClient';
 
@@ -196,5 +197,40 @@ describe('Seal identity binding', () => {
     await encryptBase(client, PACKAGE, new Uint8Array([1]), MODEL_ID);
     await encryptBase(client, PACKAGE, new Uint8Array([1]), MODEL_ID);
     expect(encryptCalls[0]!.id).not.toBe(encryptCalls[1]!.id);
+  });
+});
+
+describe('decryptKey key-server timeout', () => {
+  it('rejects with the user-facing message when the key server never responds', async () => {
+    vi.useFakeTimers();
+    try {
+      // A key server that opens the request and never answers — the decrypt-hang
+      // failure mode. The Promise.race timer must convert it into a rejection so
+      // decryptKeyWithRetry can take over instead of the UI hanging forever.
+      const client = { decrypt: vi.fn(() => new Promise<Uint8Array>(() => {})) };
+      const p = decryptKey(
+        client,
+        new Uint8Array([1]),
+        {} as never,
+        new Uint8Array([2]),
+      );
+      const assertion = expect(p).rejects.toThrow(/key server timed out/i);
+      await vi.advanceTimersByTimeAsync(KEY_SERVER_TIMEOUT_MS + 10);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves normally (and clears the timer) when the key server is fast', async () => {
+    const aesKey = new Uint8Array(32).fill(7);
+    const client = { decrypt: vi.fn(async () => aesKey) };
+    const out = await decryptKey(
+      client,
+      new Uint8Array([1]),
+      {} as never,
+      new Uint8Array([2]),
+    );
+    expectBytesEqual(out, aesKey);
   });
 });
