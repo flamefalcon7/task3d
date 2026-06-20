@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { validateUrl } from '../integration/appMetadataValidation';
 import { POLICY_PERMISSIONLESS } from '../integration/useCollections';
+import { tokens, card, monoLabel } from '../ux/tokens';
 
 // plan-008 U14 — public "Used by" section for a collection detail page. Lists
 // the game integrations the backend indexer has validated for this collection
@@ -33,6 +35,55 @@ export interface UsedBySectionProps {
   collectionId: string;
   integrationPolicy: number;
 }
+
+// --- styles (D-044 tokens) ---
+
+const heading: CSSProperties = {
+  ...monoLabel,
+  fontSize: tokens.size.sm,
+  color: tokens.color.ink,
+  margin: '0 0 8px',
+};
+
+const hint: CSSProperties = {
+  ...monoLabel,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  fontSize: 12,
+  color: tokens.color.hint,
+};
+
+const errorText: CSSProperties = { ...hint, color: tokens.color.err };
+
+const item: CSSProperties = {
+  ...card,
+  padding: '10px 12px',
+  marginBottom: 8,
+};
+
+const itemName: CSSProperties = {
+  fontFamily: tokens.font.body,
+  fontWeight: tokens.weight.medium,
+  color: tokens.color.ink,
+};
+
+const itemUrl: CSSProperties = {
+  color: tokens.color.accent,
+  fontFamily: tokens.font.mono,
+  fontSize: 13,
+  wordBreak: 'break-all',
+};
+
+const itemUrlInert: CSSProperties = { ...itemUrl, color: tokens.color.hint };
+
+const itemMeta: CSSProperties = {
+  ...monoLabel,
+  textTransform: 'none',
+  letterSpacing: '0.5px',
+  fontSize: 11,
+  color: tokens.color.hint,
+  marginTop: 2,
+};
 
 export function UsedBySection({ collectionId, integrationPolicy }: UsedBySectionProps) {
   const open = integrationPolicy === POLICY_PERMISSIONLESS;
@@ -68,28 +119,28 @@ export function UsedBySection({ collectionId, integrationPolicy }: UsedBySection
 
   return (
     <section data-testid="usedby-section" style={{ marginTop: 32 }}>
-      <h2 style={{ fontSize: 16, marginBottom: 8 }}>Used by</h2>
+      <h2 style={heading}>Used by</h2>
 
       {!open && (
-        <p data-testid="usedby-restricted" style={{ color: '#888', fontSize: 13 }}>
+        <p data-testid="usedby-restricted" style={hint}>
           This collection is not accepting integrations.
         </p>
       )}
 
       {open && loading && (
-        <p data-testid="usedby-loading" style={{ color: '#888', fontSize: 13 }}>
+        <p data-testid="usedby-loading" style={hint}>
           Loading integrations…
         </p>
       )}
 
       {open && !loading && error && (
-        <p data-testid="usedby-error" style={{ color: 'salmon', fontSize: 13 }}>
+        <p data-testid="usedby-error" style={errorText}>
           Couldn’t load integrations: {error.message}
         </p>
       )}
 
       {open && !loading && !error && integrations && integrations.length === 0 && (
-        <p data-testid="usedby-empty" style={{ color: '#888', fontSize: 13 }}>
+        <p data-testid="usedby-empty" style={hint}>
           No integrations yet.
         </p>
       )}
@@ -102,16 +153,10 @@ export function UsedBySection({ collectionId, integrationPolicy }: UsedBySection
               <li
                 key={`${it.integrator}-${i}`}
                 data-testid={`usedby-item-${i}`}
-                style={{
-                  padding: '10px 12px',
-                  border: '1px solid #2a2d33',
-                  borderRadius: 8,
-                  background: '#1a1c20',
-                  marginBottom: 8,
-                }}
+                style={item}
               >
                 {/* name: text child only — never raw HTML (AE4) */}
-                <div data-testid={`usedby-name-${i}`} style={{ fontWeight: 600 }}>
+                <div data-testid={`usedby-name-${i}`} style={itemName}>
                   {it.name}
                 </div>
                 {/* url: link ONLY when it passes the https allowlist; else inert text */}
@@ -121,16 +166,16 @@ export function UsedBySection({ collectionId, integrationPolicy }: UsedBySection
                     href={it.url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    style={{ color: '#7aa2ff', fontSize: 13, wordBreak: 'break-all' }}
+                    style={itemUrl}
                   >
                     {it.url}
                   </a>
                 ) : (
-                  <span data-testid={`usedby-url-${i}`} style={{ color: '#888', fontSize: 13 }}>
+                  <span data-testid={`usedby-url-${i}`} style={itemUrlInert}>
                     {it.url}
                   </span>
                 )}
-                <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                <div style={itemMeta}>
                   by <code>{truncate(it.integrator)}</code>
                 </div>
               </li>
