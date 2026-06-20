@@ -1,5 +1,33 @@
 # Phase Progress
 
+## Last Updated: 2026-06-20 23:10 (**fix(seal): decrypt-hang fix — stall-timeout + bounded retry on Walrus read + key-server unwrap — shipped to main (746a75d)**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~1** · demo day (7/20–21): ~30 · winners (8/27): ~68
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **Seal decrypt-hang fix — shipped to `main` (`746a75d`), 100% frontend.** User reported: uploaded an encrypted model, then UI decrypt "hung for a long time with no response." Investigated live: the model (`0x5e7e…613c`) is clean — package id, `seal_version` (both v2), and creator gate all match. Root cause = the decrypt path's **ciphertext fetch had no timeout**: a wedged Walrus testnet aggregator (connection opens, no bytes — `curl` shows `http_code=000`) left the decrypt promise pending forever, UI stuck on the `'decrypting'` spinner. Confirmed by reproducing the `code=000` wedge on the exact quilt-patch URL (and it cleared on retry — intermittent).
+  - **(1) Stall-timeout + retry** — new `frontend/src/walrus/fetchWithStallTimeout.ts`: stall-based timeout (resets per stream chunk, so a healthy large-GLB download is never killed) + **per-attempt hard cap** (catches a trickle that never stalls — found by adversarial review, it had re-opened the hang) + bounded retry for transient wedges. Wired into `collection/encryptedFork.ts` `defaultFetchBytes`.
+  - **(2) Key-server timeout** — `seal/envelope.ts` `decryptKey` now races `client.decrypt` against a timeout (`@mysten/seal` `DecryptOptions` exposes no `signal`); `p.catch(()=>{})` guards the un-cancellable loser from an unhandled rejection. `decryptKeyWithRetry`'s bounded retry takes over.
+  - **(3) Error UI** — existing `decrypt-failed` state already surfaces `error.message` + Retry; both new throws carry user-facing messages, so no UI change needed.
+  - **Latency budget (user decision)**: combined worst case tuned to **~75s** (key `15s×2`, ciphertext `stall 18s×2`, trickle cap `45s`). `DECRYPT_KEY_MAX_ATTEMPTS` 4→2 — minor trade-off: fork-unlock "mint-then-decrypt" fresh-object race tolerance drops (still 1 retry).
+  - **Review**: 5-reviewer parallel pass (correctness, races, adversarial, testing, api-contract) — no Critical; the HIGH trickle finding was fixed before commit. **Verification**: 50 unit tests green (incl. trickle + mid-stream-stall regression tests), `tsc` 0, pre-wallet browser smoke OK, user local-verified decrypt works.
+  - **Follow-ups → OQ-037** (decryptKeyWithRetry should fail-fast on permanent denials) **/ OQ-038** (stall-timeout fetch should reject 0-length/truncated bodies).
+
+### Next Concrete Step
+- **Deploy frontend to CF Pages** so `tusk3d.store` carries the fix (commit is on `main` but prod still runs the old bundle). Deploy = manual `wrangler` via npx, CF token not in env → user-run. Backend + contracts untouched (no redeploy needed).
+
+### Blockers / Open Questions
+- Prod not yet redeployed (above). The real wedge+timeout behavior can only be exercised end-to-end with a wallet + an actual Walrus stall (agent-browser can't); covered by unit tests + user local check instead.
+
+### Notes for Next Session
+- Local dev needs BOTH servers: `pnpm --dir frontend dev` (5173) + `pnpm --dir backend dev` (3001). The 502 on Sign-in during this session was just the local backend not running (Vite proxies `/api` → 3001); fixed by starting it, no code involved.
+
+---
+
 ## Last Updated: 2026-06-20 11:45 (**fix(ui): recover creator-chosen collection name from token names (D-112) — built + browser-verified, awaiting commit**)
 
 ### Hackathon Tracker

@@ -617,3 +617,27 @@ The `NftCollection` Move struct has **no `name` field**. The creator's collectio
 **Proper fix**: add `name: String` to `NftCollection`, set it in `launch_collection` / `launch_collection_with_tokens` from a new entry-fn arg, read it directly in `useCollections.ts` (`nodeToCollection`), and delete the `useCollectionNames` scan + its consumers' fallbacks. Public contract change → testnet redeploy + demo-content re-mint, so deferred past the 6/21 crunch.
 
 **Blocker level**: 🟢 Deferred to the **mainnet milestone (8/27)** — bundle with the next contract redeploy (D-009). The D-112 stop-gap covers the demo.
+
+---
+
+## OQ-037: `decryptKeyWithRetry` retries a *permanent* key-server denial to the attempt cap instead of failing fast (low, post-submission)
+
+**Surfaced**: 2026-06-20 (5-reviewer code-review of the decrypt-hang fix — adversarial + correctness reviewers).
+
+`decryptKeyWithRetry` (`frontend/src/seal/forkerDecrypt.ts`) has no permanence classification: every error is retried up to `DECRYPT_KEY_MAX_ATTEMPTS`. The retry exists for the **transient** fresh-object dry-run race (a just-minted cap/entitlement not yet visible to the key servers → 503/not-found). But a **deterministic** denial — a wallet that holds no entitlement, so `seal_approve_entitlement` aborts — is the same code path, so it burns all attempts (now 2, with a backoff) before surfacing. Contrast the Walrus fetch path, which already has `isPermanent()` to short-circuit 4xx. Pre-existing behavior; the decrypt-hang fix only reduced the attempt count (4→2), it didn't add classification.
+
+**Possible fix**: classify a deterministic `seal_approve` MoveAbort / NoAccessError as permanent and break the loop immediately, mirroring `isPermanent()` in the Walrus path — only the fresh-object race (not-found/503) and timeouts should retry.
+
+**Blocker level**: 🟢 Deferred (post-submission). With attempts now at 2, the wasted time on a permanent denial is small; correctness is unaffected (it still throws).
+
+---
+
+## OQ-038: `fetchBytesWithStallTimeout` accepts a 0-length / truncated body as success → cryptic crypto error downstream (low, post-submission)
+
+**Surfaced**: 2026-06-20 (adversarial reviewer of the decrypt-hang fix).
+
+`fetchBytesWithStallTimeout` (`frontend/src/walrus/fetchWithStallTimeout.ts`) treats any `res.ok` response as success, including a 200 with an empty or truncated body (no `Content-Length` vs actual-bytes check). An empty ciphertext then fails late in `decryptBase` ("ciphertext too short to contain IV + GCM tag"); a non-empty truncation fails AES-GCM auth-tag verification. Either way the user sees a **crypto** error, not a **storage** error, and because it throws after the fetch retry budget (in `decryptBaseGlb`), a transient truncation is never retried.
+
+**Possible fix**: if `Content-Length` is present, assert `total === declared` after the read and throw a retryable error on mismatch; treat a 0-length 200 body as transient (retry) rather than a successful empty read — moving truncation detection into the retry layer.
+
+**Blocker level**: 🟢 Deferred (post-submission). The wedged-connection case (the actual reported bug) is fixed; truncation is a rarer, lower-impact failure mode.
