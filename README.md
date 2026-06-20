@@ -21,6 +21,10 @@ Most "NFT collection" products ship N variants of one base mesh (think BAYC trai
 
 ### Architecture (live on testnet)
 
+<p align="center">
+  <img src="pitch/architecture-diagram.svg" alt="Tusk3D architecture — L1 content (Model3D + AccessEntitlement) forks into L2 collections (NftCollection + NftToken) on Walrus + Sui, with Seal-encrypted bases" width="900">
+</p>
+
 ```
 L1  Model3D              Creator publishes a base GLB to Walrus + sets LicenseTerms
     + AccessEntitlement    (policy: permissionless | allow_list | restricted, access_fee,
@@ -102,6 +106,34 @@ The full loop runs across these routes (no `/forge` — L1 publish and L2 launch
 
 ---
 
+## Use it from an AI agent (MCP)
+
+The whole protocol is exposed as a [Model Context Protocol](https://modelcontextprotocol.io/) server (Streamable HTTP, protocol `2025-11-25`). Point any MCP client at it:
+
+```bash
+# Claude Code
+claude mcp add tusk3d https://api.tusk3d.store/mcp
+```
+
+Then ask in plain language. **Discovery / read tools are public — no auth, no payment:**
+
+- _"Search Tusk3D for low-poly race cars"_ → `search_models`
+- _"Show the price and license terms for model 0x…"_ → `get_model` / `get_license_terms` / `get_preview`
+- _"List the fork collections built on that base"_ → `list_fork_collections`
+
+**Buy + decrypt tools** (`build_purchase_tx`, `download_content`, and personal-scope `search_models`) need a one-time bearer token — _no payment, just a signature_:
+
+1. `POST /api/auth/challenge` → nonce
+2. Sign the nonce as a personal message with your agent's Sui keypair
+3. `POST /api/auth/verify` → JWT
+4. Reconnect passing the header, e.g. `claude mcp add tusk3d --header "Authorization: Bearer <jwt>" https://api.tusk3d.store/mcp`
+
+`build_purchase_tx` returns an **unsigned, dry-run-validated PTB** the agent signs itself; `download_content` returns only Seal decrypt material — the backend never holds a key. The agent's keypair must carry testnet SUI to pay an `access_fee`.
+
+Full machine-readable manifest: <https://api.tusk3d.store/llms.txt>
+
+---
+
 ## Run locally
 
 **Prerequisites**: Node 22 LTS (via [nvm](https://github.com/nvm-sh/nvm)) + pnpm + (for the contract) Sui CLI.
@@ -173,6 +205,6 @@ cd frontend && pnpm vitest run             # 111 test files (1248 cases)
 - **Package ID**: `0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1`
 - **Sui Scan**: https://suiscan.xyz/testnet/object/0xbf0affb8d02ab9133ebe308cef7e163a6ea0010f823123481720773ff32802d1
 - **Demo URL**: https://tusk3d.store
-- **Demo video** (≤ 5 min, YouTube): TBA — rundown + VO script at [`pitch/demo-video-rundown.md`](pitch/demo-video-rundown.md)
-- **Mainnet package ID** (target before 8/27 for 100% prize): TBA
-- **Contact**: TBA
+- **Demo video** (≤ 5 min, YouTube): https://www.youtube.com/watch?v=so_VItiy3fg
+- **Mainnet package ID**: TBA
+- **Contact**: talon.takashi@gmail.com
