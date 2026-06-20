@@ -283,3 +283,45 @@ export async function requireAgentSub(
   }
   return address;
 }
+
+/**
+ * Optional-identity variant for the PUBLIC discovery/read tools (D-111,
+ * supersedes the D-104 "no unauthenticated tool surface" rule for reads of
+ * public on-chain/Walrus data). Returns the verified address when a bearer is
+ * present, or `undefined` for an anonymous caller — discovery must not require
+ * a Sui keypair + signed challenge just to browse.
+ *
+ * Posture:
+ *  - No bearer (or no server JWT to verify with) → `undefined` (anonymous).
+ *    Abuse is still bounded by the route-level PER-IP limiter, which fires
+ *    pre-auth (route.ts), so ungating reads opens no new amplification hole.
+ *  - Bearer PRESENT but invalid/expired/malformed → still throws `auth_invalid`
+ *    (a misconfigured client must not be silently downgraded to anonymous).
+ *  - Bearer valid → per-ADDRESS rate limit applies, same as requireAgentSub.
+ */
+export async function optionalAgentSub(
+  extra: { authInfo?: AuthInfo },
+  deps: RequireAgentSubDeps,
+): Promise<string | undefined> {
+  const token = extra.authInfo?.token;
+  if (!token || !deps.jwt) return undefined;
+  let sub: string;
+  try {
+    const claims = await deps.jwt.verifySession(token);
+    sub = claims.sub;
+  } catch {
+    throw new McpToolError('auth_invalid', 'Invalid or expired session token');
+  }
+  if (!RAW_ADDRESS_RE.test(sub)) {
+    throw new McpToolError('auth_invalid', 'Token subject is not a valid address');
+  }
+  const address = normalizeSuiAddress(sub);
+  if (mcpRateLimited(address, Date.now(), deps.rateLimit)) {
+    const windowS = Math.ceil((deps.rateLimit?.windowMs ?? WINDOW_MS) / 1000);
+    throw new McpToolError(
+      'rate_limited',
+      `Too many MCP tool calls for this address; retry after ~${windowS}s when the window resets`,
+    );
+  }
+  return address;
+}

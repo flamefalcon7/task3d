@@ -22,8 +22,8 @@ export function renderLlmsTxt(origin: string): string {
 ## MCP
 
 - [MCP endpoint](${origin}/mcp): Streamable HTTP, protocol \`2025-11-25\`
-- Auth: ALL tools (read tools included) require \`Authorization: Bearer <jwt>\` minted by the Sui-keypair challenge flow at \`${origin}/api/auth\` (challenge → sign personal message → verify → JWT); no payment, just a signature
-- Tools: search_models, get_model, get_license_terms, get_preview, build_purchase_tx, download_content
+- Auth: discovery/read tools (search_models global scope, get_model, get_license_terms, get_preview, list_fork_collections) are PUBLIC — no auth, browse freely. Content + buy-path tools (download_content, build_purchase_tx, and search_models personal scope) require \`Authorization: Bearer <jwt>\` minted by the Sui-keypair challenge flow at \`${origin}/api/auth\` (challenge → sign personal message → verify → JWT); no payment, just a signature
+- Tools: search_models, get_model, get_license_terms, get_preview, list_fork_collections, build_purchase_tx, download_content
 
 ## Docs
 

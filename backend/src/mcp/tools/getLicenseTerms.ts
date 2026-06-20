@@ -7,7 +7,7 @@
 // JSON discipline) and policy-check before calling build_purchase_tx.
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { requireAgentSub } from '../auth.js';
+import { optionalAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { MODEL_ID_SHAPE, readModelSummary } from './getModel.js';
 import { AUTH_HINT, guarded, toolResult } from './common.js';
@@ -41,7 +41,7 @@ export function registerGetLicenseTerms(server: McpServer, deps: BuildMcpServerD
       outputSchema,
     },
     guarded(async ({ modelId }, extra) => {
-      await requireAgentSub(extra, { jwt: deps.jwt });
+      await optionalAgentSub(extra, { jwt: deps.jwt }); // public read (D-111)
       const summary = await readModelSummary(deps, modelId);
       // Exactly the five projection fields — no summary spread, so a future
       // Model3DSummary field can't leak into this contract by accident.

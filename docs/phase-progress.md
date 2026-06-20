@@ -1,5 +1,35 @@
 # Phase Progress
 
+## Last Updated: 2026-06-19 20:35 (**feat(mcp): `list_fork_collections` read tool (D-110) — built, reviewed, tested; staged, awaiting commit**)
+
+### Hackathon Tracker
+- Days to submission (6/21): **~2** · demo day (7/20–21): ~31 · winners (8/27): ~69
+
+### Current Phase
+Phase 5 — UX polish window.
+
+### Completed This Session
+- **New MCP tool `list_fork_collections` (D-110)** — closes the L2 gap in the agent surface: the MCP could find models (`search_models`→`get_model`) but couldn't list the `NftCollection`s forking one. Full ideate→brainstorm→plan→code-review→work pipeline on branch `feat/mcp-list-fork-collections` (off `main`). **Staged, not yet committed** (per project no-auto-commit rule).
+  - Brainstorm `docs/brainstorms/2026-06-19-mcp-list-fork-collections-requirements.md`; plan `docs/plans/2026-06-19-001-feat-mcp-list-fork-collections-plan.md` (3 units, 5-reviewer doc-review).
+  - **U1** `backend/src/mcp/tools/listForkCollections.ts` (+18 tests): reverse-lookup of `NftCollection.base_model_id == modelId` via Sui GraphQL `objects(filter:{type})` (mirrors `useCollections.ts`), `integrationCount` left-join (D-109 indexer), order count-desc→id. Auth hard-fail; GraphQL **fail-soft** `degraded`. Registered in `server.ts` (+`integrationIndexer`/`graphqlEndpoint`/`graphqlQuery` on `BuildMcpServerDeps`).
+  - **U2** `app.ts` threads the boot indexer into `/mcp` (was `{jwt}`-only). **U3** `list_fork_collections` added to `/llms.txt` (`llms.ts:26`) + test.
+  - **This is the backend's first GraphQL read** (D-110). Endpoint = new env-only `SUI_GRAPHQL_ENDPOINT` (commented template appended to `backend/.env.example`), `.sui.io` host-allowlisted, defaults testnet.
+  - **`detailUrl` click-through (post-review scenario refinement)**: `list_fork_collections`, `get_model`, `search_models` each now return a `detailUrl` deep-linking to the tusk3d web page (`/collection/:id`, `/model/:id`) so a human reading the agent's output clicks through to 3D preview / name / buy. Naming + preview are punted to the web page (collection has no on-chain name). Link base = new env-only `PUBLIC_WEB_ORIGIN` (default `https://tusk3d.store`, the SPA host — NOT the backend origin). Shared helpers in `mcp/tools/common.ts`.
+  - **Public discovery — auth split (D-111, amends D-104)**: discovery/read tools (`search_models` global, `get_model`, `get_license_terms`, `get_preview`, `list_fork_collections`) are now **no-auth** so an agent (or a demo) can find assets + collections with **zero wallet setup**. Only `download_content` (Seal/entitlement), `build_purchase_tx` (sender=sub), and `search_models` personal scope still require the bearer. New `optionalAgentSub` helper (anonymous OK; a present-but-invalid bearer still hard-fails). Abuse bounded by the existing pre-auth per-IP limiter. `/llms.txt` wording updated.
+- **9-reviewer ce-code-review** on the diff → applied real fixes: short-form `modelId` normalization (was a silent zero-result bug), non-array GraphQL `nodes` fail-soft hole (was a hard throw), collectionId dedup, `getLeaderboard()` throw-guard, `registerFee` `/^\d+$/` constraint, schema-description consistency, ADR D-110. Deferred (documented): pagination (D-009/mainnet), `get_collection` tool (follow-up), `COLLECTIONS_QUERY` → `shared/` (2 consumers only).
+- **Verification**: backend `tsc` clean; full suite **35 files / 424 tests pass** (+18 new).
+
+### Next Concrete Step
+On user go-ahead: commit the staged feature (11 files), then open a PR `feat/mcp-list-fork-collections` → main. No frontend/browser verification needed (backend-only). Live check post-merge: `tools/list` on prod `/mcp` shows `list_fork_collections`; a `tools/call` returns a known model's forks.
+
+### Blockers / Open Questions
+- **Mainnet (D-009)**: `SUI_GRAPHQL_ENDPOINT` is a NEW backend env var (frontend-only until now) — must be set on cutover or the tool silently keeps hitting testnet GraphQL (fail-softs to `degraded:[]`, masking it). Pagination must be added before mainnet scale.
+
+### Notes for Next Session
+- Deferred follow-ups worth capturing as a learning post-ship: unpaginated `objects(filter:{type})` (both this tool and `useCollections.ts`); a `get_collection` by-id MCP tool would give agents the single-collection read + pre-PTB fee TOCTOU guard the frontend's `fetchCollectionById` has.
+
+---
+
 ## Last Updated: 2026-06-19 11:35 (**feat: /track redesign — Garage car-select + full-screen race + default car + segmented-GLB fix — shipped to main**)
 
 ### Hackathon Tracker

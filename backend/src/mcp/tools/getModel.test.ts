@@ -67,6 +67,7 @@ const EXPECTED_SUMMARY = {
   policy: 1,
   isEncrypted: true,
   previewBlobIds: ['previewBlob1', 'previewBlob2'],
+  detailUrl: `https://tusk3d.store/model/${MODEL_ID}`,
 };
 
 type GetObjectResponse = unknown;
@@ -151,15 +152,14 @@ describe('get_model', () => {
     expect(errorText(result).startsWith('upstream_error:')).toBe(true);
   });
 
-  it('missing bearer → auth_required (chain never read)', async () => {
+  it('no bearer → anonymous read succeeds (public discovery, D-111)', async () => {
     const { client, calls } = fakeSui(() => modelResponse());
     const result = await callTool(baseDeps(client), 'get_model', { modelId: MODEL_ID }, null);
-    expect(result.isError).toBe(true);
-    expect(errorText(result).startsWith('auth_required:')).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(1); // chain IS read for anonymous callers
   });
 
-  it('invalid bearer → auth_invalid', async () => {
+  it('a PRESENT but invalid bearer → auth_invalid (not silently anonymous)', async () => {
     const { client } = fakeSui(() => modelResponse());
     const result = await callTool(baseDeps(client), 'get_model', { modelId: MODEL_ID }, 'garbage');
     expect(result.isError).toBe(true);

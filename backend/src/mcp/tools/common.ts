@@ -85,3 +85,24 @@ export function guarded<A extends unknown[], R>(fn: (...args: A) => Promise<R>):
     }
   };
 }
+
+// Web deep-link helpers (D-110): tools return a `detailUrl` so a human reading
+// an agent's output can click through to the tusk3d web detail page (3D
+// preview, name, collection, buy flow). The origin is the FRONTEND host
+// (tusk3d.store, D-105), NOT the request-derived backend origin — a backend
+// link would 404 (no SPA there). Resolved at call time per the server.ts DI
+// contract, never at module load; trailing slashes trimmed so `…store/` can't
+// yield `//model/…`.
+export const DEFAULT_WEB_ORIGIN = 'https://tusk3d.store';
+
+export function resolveWebOrigin(deps: { webOrigin?: string }): string {
+  return (deps.webOrigin ?? process.env.PUBLIC_WEB_ORIGIN ?? DEFAULT_WEB_ORIGIN).replace(/\/+$/, '');
+}
+
+export function modelDetailUrl(origin: string, modelId: string): string {
+  return `${origin}/model/${modelId}`;
+}
+
+export function collectionDetailUrl(origin: string, collectionId: string): string {
+  return `${origin}/collection/${collectionId}`;
+}

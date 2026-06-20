@@ -19,9 +19,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { jsonToSummary, type Model3DSummary } from '@overflow2026/shared';
-import { McpToolError, requireAgentSub } from '../auth.js';
+import { McpToolError, optionalAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps, McpSuiClient } from '../server.js';
-import { AUTH_HINT, MODEL_TYPE_SUFFIX, guarded, toolResult, withTimeout } from './common.js';
+import { AUTH_HINT, MODEL_TYPE_SUFFIX, guarded, modelDetailUrl, resolveWebOrigin, toolResult, withTimeout } from './common.js';
 
 // Same accepted shape as the auth layer: short-form ids are valid Sui
 // addresses. The SDK validates this BEFORE the handler runs (raw Zod shape →
@@ -53,6 +53,7 @@ export const MODEL_SUMMARY_SHAPE = {
   policy: z.number().describe('0 RESTRICTED · 1 ALLOW_LIST · 2 PERMISSIONLESS'),
   isEncrypted: z.boolean(),
   previewBlobIds: z.array(z.string()),
+  detailUrl: z.string().describe('Click-through to the tusk3d web detail page for this model (3D preview, license, buy flow)'),
 };
 
 /**
@@ -158,9 +159,9 @@ export function registerGetModel(server: McpServer, deps: BuildMcpServerDeps): v
       outputSchema: MODEL_SUMMARY_SHAPE,
     },
     guarded(async ({ modelId }, extra) => {
-      await requireAgentSub(extra, { jwt: deps.jwt });
+      await optionalAgentSub(extra, { jwt: deps.jwt }); // public read (D-111); a present bearer is still validated
       const summary = await readModelSummary(deps, modelId);
-      return toolResult(summary);
+      return toolResult({ ...summary, detailUrl: modelDetailUrl(resolveWebOrigin(deps), summary.objectId) });
     }),
   );
 }

@@ -119,6 +119,7 @@ describe('POST /mcp tools/list', () => {
       'get_license_terms',
       'get_model',
       'get_preview',
+      'list_fork_collections',
       'search_models',
     ]);
     // Agents need machine-readable output: every tool advertises an outputSchema.

@@ -18,7 +18,7 @@ describe('GET /llms.txt', () => {
     expect(body).toMatch(/^# Tusk3D\n/);
     expect(body).toMatch(/^> .*Sui-native/m);
     // MCP discovery: endpoint derived from the REQUEST origin (no hardcoded
-    // deploy hostname), protocol pin, and the six-tool surface.
+    // deploy hostname), protocol pin, and the full tool surface.
     expect(body).toContain('http://example.test/mcp');
     expect(body).toContain('2025-11-25');
     for (const tool of [
@@ -26,6 +26,7 @@ describe('GET /llms.txt', () => {
       'get_model',
       'get_license_terms',
       'get_preview',
+      'list_fork_collections',
       'build_purchase_tx',
       'download_content',
     ]) {
@@ -47,11 +48,13 @@ describe('GET /llms.txt', () => {
 // fix(review) AC-003 + R-005 — auth wording covers ALL tools; origin honors
 // forwarded headers behind a TLS-terminating proxy.
 describe('/llms.txt review fixes', () => {
-  it('states that ALL tools (read tools included) require the bearer', async () => {
+  it('states the public-read / authed-content auth split (D-111)', async () => {
     const app = buildApp({});
     const res = await app.request('http://localhost:8787/llms.txt');
     const body = await res.text();
-    expect(body).toContain('ALL tools (read tools included) require');
+    expect(body).toContain('are PUBLIC — no auth');
+    expect(body).toContain('download_content');
+    expect(body).toContain('require `Authorization: Bearer');
   });
 
   it('derives the origin from x-forwarded-proto/host when present', async () => {

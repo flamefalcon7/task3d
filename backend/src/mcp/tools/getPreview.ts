@@ -15,7 +15,7 @@
 // whose delivery is download_content's entitlement-gated job (U6).
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { requireAgentSub } from '../auth.js';
+import { optionalAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
 import { MODEL_ID_SHAPE, readModelSummary } from './getModel.js';
 import { AUTH_HINT, BLOB_ID_RE, guarded, toolResult } from './common.js';
@@ -49,7 +49,7 @@ export function registerGetPreview(server: McpServer, deps: BuildMcpServerDeps):
       outputSchema,
     },
     guarded(async ({ modelId }, extra) => {
-      await requireAgentSub(extra, { jwt: deps.jwt });
+      await optionalAgentSub(extra, { jwt: deps.jwt }); // public read (D-111)
       const summary = await readModelSummary(deps, modelId);
       const base = resolveAggregatorBase(deps);
       const previewUrls = (summary.previewBlobIds ?? [])

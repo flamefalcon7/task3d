@@ -4317,7 +4317,7 @@ The landing route (`/`) is granted a **bounded motion exception** for the scroll
 ---
 
 ## D-104: MCP agent interface — thin Streamable-HTTP MCP server on Hono, native-Sui payment rail, client-side Seal decrypt
-**Status**: Accepted
+**Status**: Accepted · **Amended by D-111** (the "no unauthenticated tool surface" rule: discovery/read tools are now public; only content + buy-path tools stay authed)
 **Date**: 2026-06-10 · **Phase**: Phase 4 — feature/UX polish
 
 ### Context — Walrus track wants agentic workflows over Walrus; Walrus Memory launched 2026-06-03 with MCP connectors. Tusk3D already enforces a full content economy on-chain (`LicenseTerms`, soulbound `AccessEntitlement`, hash-addressed Walrus) but only a browser app can reach it. We want AI agents as a **third user class** — discover, reason over licenses, buy, and use content — without changing the contract. Two pre-implementation risks were verified clear against the codebase (origin §6a): Seal decrypt is signer-agnostic (no browser dependency) and `purchase_access` has no frontend-only assumptions (all fee paths on-chain). x402 was rejected at brainstorm (our fees are already native Sui Move).
@@ -4450,6 +4450,44 @@ Default upload storage to **53 epochs** via a single `DEFAULT_STORAGE_EPOCHS` co
 
 ---
 
+## D-110: MCP `list_fork_collections` enumerates via Sui GraphQL (backend's first GraphQL read)
+**Status**: Accepted
+**Date**: 2026-06-19 · **Phase**: Phase 5 (polish / discovery)
+
+### Context — The MCP surface (D-104) could find models (`search_models` → `get_model`) but had no way to list the L2 `NftCollection`s forking a given `Model3D`. The existing MCP read tools all use fullnode JSON-RPC `getObject` BY-ID (D-043 — no indexer lag for a known object). "All forks of a model" is a by-**attribute** discovery (`NftCollection.base_model_id == modelId`) with no known id, which the read-layer learning (`docs/solutions/tooling-decisions/sui-read-layer-indexer-vs-fullnode-2026-05-23.md`) says must go through GraphQL or an indexer and accept lag — D-043's by-id rule does not apply.
+
+### Decision — Add a read-only MCP tool `list_fork_collections(modelId)` that enumerates `NftCollection` via Sui GraphQL `objects(filter:{type})` (mirroring the proven frontend `useCollections.ts` query), filters by `base_model_id`, and left-joins the integration leaderboard indexer (D-109) for an `integrationCount` ranking hint (absent indexer → 0, never a filter). This is the **backend's first GraphQL read**. The endpoint resolves at call time from a new (env-only) `SUI_GRAPHQL_ENDPOINT` knob, defaulting to testnet, and is `.sui.io`-host-allowlisted. Failure posture mirrors `search_models`: auth hard-fails, the GraphQL read is fail-soft (`degraded: true` + empty, never a throw).
+
+**Web click-through (`detailUrl`)**: `list_fork_collections`, `get_model`, and `search_models` each return a `detailUrl` deep-linking to the tusk3d web detail page (`/collection/:id` or `/model/:id`) — the agent discovers, the human clicks through to the rich page (3D preview, the collection's de-facto name via its tokens, the buy flow). The collection data model has **no name field** (the frontend disambiguates same-base collections by short id), so naming/preview is deliberately punted to the web page rather than embedded in the MCP output. The link base is the **frontend** origin via a new env-only `PUBLIC_WEB_ORIGIN` knob (default `https://tusk3d.store`) — NOT the request-derived backend origin, which would 404 (no SPA there).
+
+### Rationale — Least code + the query shape is already proven live (the `/integrate` leaderboard left-joins it). The `CollectionLaunched` event carries `base_model_id` but not royalty/fee/policy, so an event-index alternative would need event-poll **plus N per-collection by-id reads** — more code, identical lag.
+
+### Alternatives Considered — `CollectionLaunched` event index (rejected: more code, same lag; captured as the fallback if testnet GraphQL proves flaky). Augmenting `get_model` output inline (rejected: separate opt-in tool keeps single responsibility). L2 transaction path / token purchase (out of scope — discovery only).
+
+### Consequences — ✅ Agents can walk the L1→L2 fork graph end to end inside the protocol. ⚠️ Inherits the frontend's unpaginated `objects(filter)` (no `first:`/cursor) — fine at testnet scale, must add pagination before mainnet (D-009); testnet GraphQL schema-drift/empty risk is masked by fail-soft `degraded`. 🔮 `SUI_GRAPHQL_ENDPOINT` must be set on the mainnet cutover or the tool silently keeps hitting testnet.
+
+### Related — plan `docs/plans/2026-06-19-001-feat-mcp-list-fork-collections-plan.md`; brainstorm `docs/brainstorms/2026-06-19-mcp-list-fork-collections-requirements.md`; D-104 (MCP surface), D-043 (by-id fullnode rule), D-109 (leaderboard indexer), D-105 (tusk3d.store domain). Files: `backend/src/mcp/tools/listForkCollections.ts`, `backend/src/mcp/tools/searchModels.ts`, `backend/src/mcp/tools/getModel.ts`, `backend/src/mcp/tools/common.ts` (web-link helpers), `backend/src/mcp/server.ts`, `backend/src/app.ts`.
+
+---
+
+## D-111: MCP discovery/read tools are PUBLIC (no bearer) — amends D-104's "no unauthenticated tool surface"
+**Status**: Accepted · **Amends** D-104 (read-auth rule only; the rest of D-104 stands)
+**Date**: 2026-06-20 · **Phase**: Phase 5 (polish / demo)
+
+### Context — D-104 set "every MCP tool requires a bearer JWT" for uniformity. But minting one needs a Sui keypair + a signed challenge, which gates **pure discovery of public data** behind wallet setup — a real adoption barrier for AI agents and a friction point for a demo (the dev/evaluator would have to set up a wallet on camera just to browse). The genuine identity need is narrow: only entitlement-gated content and the buy path need to know *who* is calling.
+
+### Decision — Split the gate. **Public (no auth):** `search_models` (global scope), `get_model`, `get_license_terms`, `get_preview`, `list_fork_collections` — all read public on-chain/Walrus data. **Auth required:** `download_content` (Seal/entitlement gate — must match the JWT sub), `build_purchase_tx` (uses the sub as tx sender), and `search_models` **personal** scope (recalls the caller's own namespace). Implemented via a new `optionalAgentSub` helper: no bearer → anonymous; a bearer that IS present but invalid/expired still hard-fails `auth_invalid` (a misconfigured client is never silently downgraded).
+
+### Rationale — Discovery is the agent-native value; it must be frictionless. Abuse is still bounded: the `/mcp` route's **per-IP rate limiter fires pre-auth** (route.ts), so ungating reads opens no new amplification hole — anonymous reads are IP-limited, authed reads keep the per-address limit.
+
+### Alternatives Considered — Keep everything authed (rejected: defeats agent-native discovery + demo friction). Ungate `build_purchase_tx` too (rejected: it derives the tx sender from the JWT sub and is the buy intent — keep identity; it has an `agentAddress` param for keyless callers anyway).
+
+### Consequences — ✅ Any agent/MCP client can discover Tusk3D content with zero wallet setup; the demo is clean. ✅ `detailUrl` (D-110) + public reads = "find → click through to web" works unauthenticated. ⚠️ Anonymous reads rely on the per-IP limiter alone (no per-address attribution) — acceptable for public data. 🔮 If metered upstreams (MemWal recall) need per-caller accounting later, revisit with an API-key tier rather than re-gating with the wallet JWT.
+
+### Related — D-104 (MCP surface + original auth rule), D-110 (this tool family + detailUrl). Files: `backend/src/mcp/auth.ts` (`optionalAgentSub`), `backend/src/mcp/tools/{searchModels,getModel,getLicenseTerms,getPreview,listForkCollections}.ts`, `backend/src/routes/llms.ts`.
+
+---
+
 # Reserved Decision Numbers
 
-D-110 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.
+D-112 onwards: captured in real-time per `CLAUDE.md` Decision Capture protocol.

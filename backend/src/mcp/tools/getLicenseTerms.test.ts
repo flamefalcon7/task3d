@@ -77,13 +77,12 @@ describe('get_license_terms', () => {
     expect(errorText(result).startsWith('not_found:')).toBe(true);
   });
 
-  it('missing bearer → auth_required', async () => {
+  it('no bearer → anonymous read succeeds (public, D-111)', async () => {
     const result = await callTool(deps(), 'get_license_terms', { modelId: MODEL_ID }, null);
-    expect(result.isError).toBe(true);
-    expect(errorText(result).startsWith('auth_required:')).toBe(true);
+    expect(result.isError).toBeFalsy();
   });
 
-  it('invalid bearer → auth_invalid', async () => {
+  it('a PRESENT but invalid bearer → auth_invalid (not silently anonymous)', async () => {
     const result = await callTool(deps(), 'get_license_terms', { modelId: MODEL_ID }, 'garbage');
     expect(result.isError).toBe(true);
     expect(errorText(result).startsWith('auth_invalid:')).toBe(true);

@@ -63,8 +63,8 @@ describe('search_models — global scope (default)', () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toEqual({
       results: [
-        { modelId: MODEL_A, prompt: 'a low-poly fox', distance: 0.21, creator: CREATOR },
-        { modelId: MODEL_B, prompt: 'a sports car', distance: 0.35, creator: CREATOR },
+        { modelId: MODEL_A, detailUrl: `https://tusk3d.store/model/${MODEL_A}`, prompt: 'a low-poly fox', distance: 0.21, creator: CREATOR },
+        { modelId: MODEL_B, detailUrl: `https://tusk3d.store/model/${MODEL_B}`, prompt: 'a sports car', distance: 0.35, creator: CREATOR },
       ],
     });
     // Machine-readable text content mirrors structuredContent (agents on
@@ -102,7 +102,7 @@ describe('search_models — personal scope', () => {
 
     expect(calls[0]!.namespace).toBe(AGENT_SUB);
     expect(result.structuredContent).toEqual({
-      results: [{ modelId: MODEL_A, prompt: 'my crate', distance: 0.15 }],
+      results: [{ modelId: MODEL_A, detailUrl: `https://tusk3d.store/model/${MODEL_A}`, prompt: 'my crate', distance: 0.15 }],
     });
   });
 });
@@ -128,9 +128,22 @@ describe('search_models — degraded relayer (fail-soft)', () => {
 });
 
 describe('search_models — auth gate', () => {
-  it('missing bearer → auth_required isError (relayer never called)', async () => {
+  it('no bearer + global scope → anonymous discovery succeeds (D-111)', async () => {
     const { client, calls } = fakeMemwal([]);
     const result = await callTool({ jwt: stubJwt, memwal: client }, 'search_models', { query: 'q' }, null);
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(1); // GLOBAL namespace recalled anonymously
+    expect(calls[0]!.namespace).toBe(GLOBAL_NAMESPACE);
+  });
+
+  it('no bearer + personal scope → auth_required (personal needs identity)', async () => {
+    const { client, calls } = fakeMemwal([]);
+    const result = await callTool(
+      { jwt: stubJwt, memwal: client },
+      'search_models',
+      { query: 'q', scope: 'personal' },
+      null,
+    );
     expect(result.isError).toBe(true);
     expect(errorText(result).startsWith('auth_required:')).toBe(true);
     expect(calls).toHaveLength(0);

@@ -37,7 +37,10 @@ export function buildApp(deps: BuildAppDeps = {}) {
   // /mcp mounts BEFORE the global browser-origin CORS so its own /mcp-scoped
   // CORS (origin '*', MCP session/protocol headers) answers preflights —
   // Hono middleware registered after a route never runs for it (U2, D-104).
-  app.route('/mcp', buildMcpRoute({ jwt: deps.jwt }));
+  // list_fork_collections enriches with integrationCount; thread the live
+  // indexer through (boot-time singleton, no lazy default — plan-2026-06-19-001
+  // U2/KTD2). Undefined here just degrades the count to 0.
+  app.route('/mcp', buildMcpRoute({ jwt: deps.jwt, integrationIndexer: deps.integrationIndexer }));
   app.use('*', cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
   app.get('/', (c) => c.text('overflow2026 backend ok'));
   // /llms.txt — public MCP discovery manifest (U8, D-104). Plain GET; normal

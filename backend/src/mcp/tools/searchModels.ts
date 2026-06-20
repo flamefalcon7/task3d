@@ -23,9 +23,9 @@ import {
   RECALL_MAX_DISTANCE,
   isDenylistedCreator,
 } from '../../lib/memoryConfig.js';
-import { requireAgentSub } from '../auth.js';
+import { optionalAgentSub, requireAgentSub } from '../auth.js';
 import type { BuildMcpServerDeps } from '../server.js';
-import { AUTH_HINT, guarded, toolResult } from './common.js';
+import { AUTH_HINT, guarded, modelDetailUrl, resolveWebOrigin, toolResult } from './common.js';
 
 // Memory records are client-authored at /api/memory time — a hostile record's
 // `m` trailer is NOT guaranteed to be an object id. Gate it here so agents
@@ -45,7 +45,10 @@ const inputSchema = {
 const outputSchema = {
   results: z.array(
     z.object({
-      modelId: z.string().describe('Model3D object id — feed to get_model / get_license_terms'),
+      modelId: z.string().describe('Model3D object id — feed to get_model / get_license_terms / list_fork_collections'),
+      detailUrl: z
+        .string()
+        .describe('Click-through to the tusk3d web detail page for this model (3D preview, license, buy flow)'),
       prompt: z
         .string()
         .describe(
@@ -81,9 +84,18 @@ export function registerSearchModels(server: McpServer, deps: BuildMcpServerDeps
       outputSchema,
     },
     guarded(async ({ query, limit, scope }, extra) => {
-      const sub = await requireAgentSub(extra, { jwt: deps.jwt });
+      const webOrigin = resolveWebOrigin(deps);
       const effectiveScope = scope ?? 'global';
-      const namespace = effectiveScope === 'personal' ? sub : GLOBAL_NAMESPACE;
+      // personal scope recalls the CALLER's own namespace → needs identity;
+      // global scope is public discovery (D-111) → anonymous allowed (a present
+      // bearer is still validated by optionalAgentSub).
+      let namespace: string;
+      if (effectiveScope === 'personal') {
+        namespace = await requireAgentSub(extra, { jwt: deps.jwt });
+      } else {
+        await optionalAgentSub(extra, { jwt: deps.jwt });
+        namespace = GLOBAL_NAMESPACE;
+      }
       const n = limit ?? DEFAULT_LIMIT;
 
       // Live default resolved at call time per the server.ts DI contract.
@@ -119,6 +131,7 @@ export function registerSearchModels(server: McpServer, deps: BuildMcpServerDeps
               .slice(0, n)
               .map((r) => ({
                 modelId: r.ref!.m,
+                detailUrl: modelDetailUrl(webOrigin, r.ref!.m),
                 prompt: r.prompt,
                 distance: r.distance,
                 ...(r.ref!.c ? { creator: r.ref!.c } : {}),

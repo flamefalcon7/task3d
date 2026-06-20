@@ -14,12 +14,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Transaction } from '@mysten/sui/transactions';
 import type { JwtSigner } from '../lib/jwt.js';
 import type { MemwalClient } from '../lib/memwal-client.js';
+import type { IntegrationIndexer } from '../events/integrationIndexer.js';
 import { registerSearchModels } from './tools/searchModels.js';
 import { registerGetModel } from './tools/getModel.js';
 import { registerGetLicenseTerms } from './tools/getLicenseTerms.js';
 import { registerGetPreview } from './tools/getPreview.js';
 import { registerBuildPurchaseTx } from './tools/buildPurchaseTx.js';
 import { registerDownloadContent } from './tools/downloadContent.js';
+import { registerListForkCollections } from './tools/listForkCollections.js';
 
 export const MCP_SERVER_NAME = 'tusk3d';
 // Server implementation version surfaced in `InitializeResult.serverInfo`
@@ -72,6 +74,35 @@ export interface BuildMcpServerDeps {
    * received `Transaction` for sender/commands); live code omits it.
    */
   buildTxBytes?: (tx: Transaction, client: McpSuiClient) => Promise<Uint8Array>;
+  /**
+   * Integration leaderboard read for list_fork_collections (U1/KTD2). Boot-time
+   * singleton (server.ts) with NO env-backed lazy default — unlike suiClient /
+   * memwal it must be injected; when absent, `integrationCount` defaults to 0
+   * and never blocks results. Threaded through `buildMcpRoute` at app.ts.
+   */
+  integrationIndexer?: Pick<IntegrationIndexer, 'getLeaderboard'>;
+  /**
+   * GraphQL endpoint for list_fork_collections' NftCollection enumeration.
+   * Resolved at call time (`?? process.env.SUI_GRAPHQL_ENDPOINT ?? testnet`);
+   * host is `.sui.io`-allowlisted (SEC). New backend knob — not in the env yet.
+   */
+  graphqlEndpoint?: string;
+  /**
+   * Frontend origin for the `detailUrl` click-through links tools return (D-110).
+   * Resolved at call time (`?? process.env.PUBLIC_WEB_ORIGIN ?? tusk3d.store`).
+   * MUST be the SPA host, not the backend's — see common.ts resolveWebOrigin.
+   */
+  webOrigin?: string;
+  /**
+   * Test seam for the GraphQL transport. Default uses global `fetch`; tests
+   * inject a fake so the tool's mapping/filter/enrich logic runs without a
+   * network round-trip.
+   */
+  graphqlQuery?: (
+    endpoint: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 export function buildMcpServer(deps: BuildMcpServerDeps = {}): McpServer {
@@ -85,6 +116,7 @@ export function buildMcpServer(deps: BuildMcpServerDeps = {}): McpServer {
   registerGetModel(server, deps);
   registerGetLicenseTerms(server, deps);
   registerGetPreview(server, deps);
+  registerListForkCollections(server, deps);
 
   // v1 transaction-path tools (U5/U6). Still keyless: build_purchase_tx
   // returns an UNSIGNED dry-run-validated PTB the agent signs itself (R4/R6).
